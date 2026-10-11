@@ -328,6 +328,8 @@ const I18N = {
     upd_dev_warn: "Dev channel: test builds, may break. Not for production tunnels.",
     upd_dev_badge: "DEV",
     nav_settings: "Settings",
+    tls_custom_title: "Use your own certificate",
+    tls_custom_hint: "Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.",
     acc_title: "Panel access (port / login / address)",
     acc_hint: "Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.",
     acc_user: "Login username", acc_port: "HTTP port (1–65535)", acc_base: "Address path (after IP:port/…)",
@@ -748,6 +750,8 @@ const I18N = {
     upd_dev_warn: "کانال Dev: نسخه‌های آزمایشی که ممکن است خراب شوند. برای تونل‌های واقعی استفاده نکنید.",
     upd_dev_badge: "DEV",
     nav_settings: "تنظیمات",
+    tls_custom_title: "استفاده از گواهی خودتان",
+    tls_custom_hint: "گواهی + کلید را بچسبانید، هر دو فایل را آپلود کنید، یا مسیر فایل‌های روی سرور را بدهید. قبل از نصب اعتبارسنجی می‌شود؛ گواهی قبلی به‌عنوان بکاپ می‌ماند.",
     acc_title: "دسترسی پنل (پورت / ورود / آدرس)",
     acc_hint: "تغییر هر کدام فقط وب‌سرویس پنل را ری‌استارت می‌کند — تونل‌ها وصل می‌مانند. بعد از ذخیره، پنل را با آدرس جدید باز کنید.",
     acc_user: "نام کاربری ورود", acc_port: "پورت HTTP (۱ تا ۶۵۵۳۵)", acc_base: "مسیر آدرس (بعد از IP:port/…)",
@@ -4555,6 +4559,48 @@ $('tlsProxyConfBtn').onclick = async () => {
       box.style.display = 'block';
     }
   } catch(e) { toastErr('Proxy Config Failed', e.message); }
+};
+
+
+async function readFileAsText(f) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(f); }); }
+const _tlsCustomBtn = $('tlsCustomBtn');
+if (_tlsCustomBtn) _tlsCustomBtn.onclick = async () => {
+  const certTxt = ($('tlsCustomCert') ? $('tlsCustomCert').value : '').trim();
+  const keyTxt = ($('tlsCustomKey') ? $('tlsCustomKey').value : '').trim();
+  const certF = ($('tlsCustomCertFile') && $('tlsCustomCertFile').files[0]) || null;
+  const keyF = ($('tlsCustomKeyFile') && $('tlsCustomKeyFile').files[0]) || null;
+  const certP = ($('tlsCustomCertPath') ? $('tlsCustomCertPath').value : '').trim();
+  const keyP = ($('tlsCustomKeyPath') ? $('tlsCustomKeyPath').value : '').trim();
+  const modes = [certTxt && keyTxt ? 1 : 0, certF && keyF ? 1 : 0, certP && keyP ? 1 : 0].reduce((a, b) => a + b, 0);
+  if (modes !== 1) { toastWarn('one input method', 'Paste both PEM texts, or pick both files, or fill both server paths — exactly one way.'); return; }
+  if (!await entConfirm('Install custom certificate?', 'The pair is validated before install. HTTPS reloads in-process; tunnels keep running.', 'Install')) return;
+  const b = $('tlsCustomBtn'); b.disabled = true; b.textContent = 'Installing…';
+  try {
+    let r;
+    if (certF && keyF) {
+      const fd = new FormData();
+      fd.append('cert', certF, certF.name || 'server.crt');
+      fd.append('key', keyF, keyF.name || 'server.key');
+      const resp = await fetch(at('/api/tls/custom'), {
+        method: 'POST', body: fd,
+        headers: {'X-CSRF-Token': getCSRFToken() || ''},
+      });
+      if (resp.status === 401) { showLogin(); throw new Error('session expired'); }
+      r = await resp.json();
+      if (!resp.ok) {
+        const e = new Error(((r && r.error_code ? '[' + r.error_code + '] ' : '') + (r && (r.error || resp.statusText))) + ((r && r.hint) ? '\n\u21AA ' + r.hint : ''));
+        e.code = r && r.error_code; throw e;
+      }
+      if (r && r.csrf_token) setCSRFToken(r.csrf_token);
+    } else if (certP && keyP) {
+      r = await api('/api/tls/custom', { cert_path: certP, key_path: keyP });
+    } else {
+      r = await api('/api/tls/custom', { cert: certTxt, key: keyTxt });
+    }
+    toastOk('custom certificate installed', 'HTTPS: ' + (r.https_url || '') + (r.expiry ? ' · expires ' + r.expiry : ''));
+    tlsRefresh();
+  } catch(e) { toastErr('install failed', e.message); }
+  b.disabled = false; b.textContent = 'Install custom certificate';
 };
 
 $('tlsProxyCloseBtn').onclick = () => {

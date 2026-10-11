@@ -5849,6 +5849,47 @@ cli_panel_path() {
     echo ""
 }
 
+# panel_tls_custom: install the admin's own cert/key (files or server paths).
+# panel-tls-custom <cert> <key> — copies into /etc/gre-panel/tls, keeps .bak, restarts only gre-panel.
+panel_tls_custom() {
+    local CERT="${1:-}" KEY="${2:-}"
+    [[ -z "$CERT" ]] && read -p "Certificate file (PEM, .crt/.pem): " CERT
+    [[ -z "$KEY" ]] && read -p "Private key file (PEM, .key/.pem): " KEY
+    [[ -f "$CERT" ]] || { echo -e "${RED}[!] Certificate file not found: $CERT${NC}"; return 1; }
+    [[ -f "$KEY" ]] || { echo -e "${RED}[!] Key file not found: $KEY${NC}"; return 1; }
+    command -v python3 >/dev/null 2>&1 || { echo -e "${RED}[!] python3 is required (keypair check).${NC}"; return 1; }
+    python3 - "$CERT" "$KEY" <<'PYEOF' || return 1
+import ssl, sys
+try:
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(sys.argv[1], sys.argv[2])
+except Exception as e:
+    print("cert/key do not match: %s" % e, file=sys.stderr); sys.exit(1)
+PYEOF
+    mkdir -p /etc/gre-panel/tls
+    [[ -f /etc/gre-panel/tls/server.crt ]] && cp -f /etc/gre-panel/tls/server.crt /etc/gre-panel/tls/server.crt.bak
+    [[ -f /etc/gre-panel/tls/server.key ]] && cp -f /etc/gre-panel/tls/server.key /etc/gre-panel/tls/server.key.bak
+    [[ -f /etc/gre-panel/tls/meta.json ]] && cp -f /etc/gre-panel/tls/meta.json /etc/gre-panel/tls/meta.json.bak
+    cp -f "$CERT" /etc/gre-panel/tls/server.crt && cp -f "$KEY" /etc/gre-panel/tls/server.key || {
+        echo -e "${RED}[!] Copy failed — previous configuration kept intact.${NC}"
+        [[ -f /etc/gre-panel/tls/server.crt.bak ]] && mv -f /etc/gre-panel/tls/server.crt.bak /etc/gre-panel/tls/server.crt
+        [[ -f /etc/gre-panel/tls/server.key.bak ]] && mv -f /etc/gre-panel/tls/server.key.bak /etc/gre-panel/tls/server.key
+        return 1
+    }
+    chmod 600 /etc/gre-panel/tls/server.key
+    echo "{\"label\":\"custom cert\",\"issued_at\":\"$(date '+%F %T')\"}" > /etc/gre-panel/tls/meta.json
+    rm -f /etc/gre-panel/tls/*.bak
+    systemctl restart gre-panel 2>/dev/null || true
+    sleep 2
+    local PORT BASE TPORT
+    PORT=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); PORT=${PORT:-7777}
+    BASE=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
+    TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); TPORT=${TPORT:-7443}
+    echo -e "${GREEN}[✔️] Custom certificate installed: ${CYAN}https://<this-server-ip>:${TPORT}/${BASE}${NC}"
+    echo -e "${GREEN}    HTTP still works: ${CYAN}http://<this-server-ip>:${PORT}/${BASE}${NC}"
+    echo -e "${GREEN}    Tunnel infrastructure continues running without interruption.${NC}"
+}
+
 # Dedicated backup key for encrypted backups (CWE-256: decouples backup key from login password)
 ensure_backup_key() {
     mkdir -p /etc/gre-panel
@@ -7762,7 +7803,7 @@ Usage:
   hashem uninstall [--force]                   # full wipe: tunnel + panel + 'hashem' itself
   hashem add-peer --local-pub IP --remote-pub IP [--frp-port N] --token T --local-gre IP --peer-gre IP --ports "443, 2083" [--name LABEL] [--bundle hsh1_...]
   hashem remove-peer --id N [--force] | edit-peer --id N [--name L] [--remote-pub IP] [--carrier C] [--ports "..."] | edit-peer-ports --id N --ports "443, 2083" | peer-list | peer-token --id N
-  hashem logs | restart | panel-tls [domain] [email]   # (also: bash hashem.sh ...)
+  hashem logs | restart | panel-tls [domain] [email] | panel-tls-custom <cert> <key>   # (also: bash hashem.sh ...)
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
   hashem dial [status|auto|gre|public]         # foreign side: reach the Iran hub over GRE, its public IP, or auto (GRE if it works)
@@ -8189,6 +8230,7 @@ if [[ $# -gt 0 ]]; then
         doctor|test|diagnose) shift; cli_doctor "$@" ;;
         stress-test|test-load|stress) shift; cli_stress_test "$@" ;;
         panel-tls) shift; panel_tls_issue "$@" ;;
+        panel-tls-custom) shift; panel_tls_custom "$@" ;;
         panel-remove-domain|panel-tls-remove) panel_tls_remove ;;
         carrier) shift; cli_carrier "$@" ;;
         carrier-kernel-init) carrier_init_kernel ;;

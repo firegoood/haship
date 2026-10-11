@@ -2321,6 +2321,18 @@
             <button class="hashem-btn hashem-btn-secondary" id="tlsProxyConfBtn">Reverse Proxy Config</button>
           </div>
           <div class="qs-hint" id="tlsMsg">HTTPS serves on dedicated port 7443 alongside HTTP on port 7777.</div>
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
+            <b data-i18n="tls_custom_title">Use your own certificate</b>
+            <div class="qs-hint" data-i18n="tls_custom_hint">Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.</div>
+            <div class="fg"><label for="tlsCustomCert">Certificate (PEM)</label><textarea class="hashem-input" id="tlsCustomCert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" autocomplete="off" spellcheck="false"></textarea></div>
+            <div class="fg"><label for="tlsCustomKey">Private key (PEM)</label><textarea class="hashem-input" id="tlsCustomKey" rows="4" placeholder="-----BEGIN PRIVATE KEY-----" autocomplete="off" spellcheck="false"></textarea></div>
+            <div class="fg"><label for="tlsCustomCertFile">…or upload files</label><input type="file" id="tlsCustomCertFile" accept=".crt,.pem,.cert"> <input type="file" id="tlsCustomKeyFile" accept=".key,.pem"></div>
+            <div class="fg"><label for="tlsCustomCertPath">…or server paths</label><input class="hashem-input" id="tlsCustomCertPath" placeholder="/etc/ssl/my.crt" autocomplete="off" spellcheck="false"></div>
+            <div class="fg"><label for="tlsCustomKeyPath">Key path</label><input class="hashem-input" id="tlsCustomKeyPath" placeholder="/etc/ssl/my.key" autocomplete="off" spellcheck="false"></div>
+            <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="hashem-btn hashem-btn-primary" id="tlsCustomBtn">Install custom certificate</button>
+            </div>
+          </div>
           <div id="tlsProxyBox" style="display:none; margin-top:12px; padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <b>Reverse Proxy Configuration (Nginx & Caddy)</b>

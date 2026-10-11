@@ -304,6 +304,7 @@ func main() {
 	mux.HandleFunc("DELETE "+base+"/api/tls", requireAuth(requireCSRF(handleTLSRemove)))
 	mux.HandleFunc("POST "+base+"/api/tls/renew", requireAuth(requireCSRF(handleTLSRenew)))
 	mux.HandleFunc("POST "+base+"/api/tls/check", requireAuth(requireCSRF(handleTLSCheck)))
+	mux.HandleFunc("POST "+base+"/api/tls/custom", requireAuth(requireCSRF(handleTLSCustomPost)))
 	mux.HandleFunc("GET "+base+"/api/tls/proxy-config", requireAuth(handleReverseProxyConfig))
 	mux.HandleFunc("GET "+base+"/api/watchdog", requireAuth(handleWatchdogGet))
 	mux.HandleFunc("POST "+base+"/api/watchdog", requireAuth(requireCSRF(handleWatchdogPost)))
