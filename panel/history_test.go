@@ -145,3 +145,28 @@ func TestMetricsTokenRotateDisable(t *testing.T) {
 		t.Error("unknown action must fail")
 	}
 }
+
+func TestForgetMissingNeedsSustainedAbsence(t *testing.T) {
+	h := &histStore{links: map[string]*histRing{}}
+	t0 := time.Unix(1_700_000_000, 0)
+	h.recordSample("a", t0, stateHealthy, 1, nil, nil)
+	h.recordSample("b", t0, stateHealthy, 1, nil, nil)
+
+	h.forgetMissing(t0.Add(time.Minute), map[string]bool{"b": true}) // a missing once
+	if len(h.series("a", 0)) != 1 {
+		t.Fatal("one missed snapshot must not erase a link")
+	}
+	h.forgetMissing(t0.Add(5*time.Minute), map[string]bool{"a": true, "b": true}) // a is back: timer resets
+	h.forgetMissing(t0.Add(9*time.Minute), map[string]bool{"b": true})
+	h.forgetMissing(t0.Add(18*time.Minute), map[string]bool{"b": true}) // only 9 min since it vanished again
+	if len(h.series("a", 0)) != 1 {
+		t.Fatal("absence timer must restart when the link returns")
+	}
+	h.forgetMissing(t0.Add(20*time.Minute), map[string]bool{"b": true}) // 11 min
+	if len(h.series("a", 0)) != 0 {
+		t.Fatal("link absent for 10+ min must be forgotten")
+	}
+	if len(h.series("b", 0)) != 1 {
+		t.Fatal("present link must be kept")
+	}
+}

@@ -5415,9 +5415,24 @@ apply_panel_unit_limits() { # $1=unit file [$2="HIGH MAX"]
     for kv in "OOMScoreAdjust=-900" "Nice=-5" "CPUWeight=200" "Restart=always" \
               "RestartSec=3" "LimitNOFILE=1048576" "LimitNPROC=512000" \
               "TasksMax=4096" "MemoryHigh=${high}" "MemoryMax=${max}" \
-              "WatchdogSec=30" "NotifyAccess=main" "StartLimitIntervalSec=0"; do
+              "StartLimitIntervalSec=0"; do
         unit_set_directive "$f" "${kv%%=*}" "${kv#*=}"
     done
+    # WatchdogSec makes systemd KILL a service that does not send WATCHDOG=1.
+    # Only a panel binary that implements sd_notify may run under it; an older
+    # binary (script updated before the panel) would be killed every 30 s.
+    if panel_supports_watchdog; then
+        unit_set_directive "$f" "WatchdogSec" "30"
+        unit_set_directive "$f" "NotifyAccess" "main"
+    else
+        sed -i -E '/^(WatchdogSec|NotifyAccess)=/d' "$f"
+    fi
+}
+
+# panel_supports_watchdog [binary]: true when the panel binary speaks sd_notify.
+panel_supports_watchdog() {
+    local b="${1:-${PANEL_BIN:-/usr/local/bin/gre-panel}}"
+    [[ -f "$b" ]] && grep -qa 'NOTIFY_SOCKET' "$b"
 }
 
 # FRP units get a LOWER CPUWeight than the panel (C2.6): tunnels keep full

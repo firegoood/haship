@@ -17,10 +17,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -86,7 +88,7 @@ var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
 	// go build -ldflags "-X main.panelVersion=panel-rN"
-	panelVersion = "v0.1.3"
+	panelVersion = "v1.1.0"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -346,6 +348,8 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Printf("gre-panel listening on %s under /%s", addr, cfg.BasePath)
+	histStop := make(chan struct{})
+	startHistoryPersistence(histStop)
 	startSnapshotCollector(context.Background())
 	startSdWatchdog(context.Background())
 	go startHTTPSListener()
@@ -379,7 +383,20 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 	applyServerLimits(srv)
-	log.Fatal(srv.Serve(ln))
+	// systemd stop sends SIGTERM: flush history, then stop serving.
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigc
+		close(histStop)
+		time.Sleep(300 * time.Millisecond) // let the final history write finish
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }
 
 func serveAsset(name, ctype string) http.HandlerFunc {

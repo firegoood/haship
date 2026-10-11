@@ -42,3 +42,10 @@ Order is fixed; if a step turns out risky it is skipped and recorded under "Defe
 
 ## Deferred / notes
 (filled during execution)
+
+## Follow-up (v1.1.0)
+- [x] setup.go split by topic (verified identical declarations)
+- [x] gofmt whole tree + CI gate; lab tests in CI
+- [x] host alerts (disk/RAM/TLS cert), durable history, graceful shutdown
+- [x] fix: watchdog kill loop with older panel binaries
+- [ ] later: multi-hub dashboard, Peer Link push+rollback, version drift view, hashem doctor --fix

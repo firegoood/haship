@@ -58,9 +58,14 @@ func (r *histRing) ordered() []histPoint {
 }
 
 type histStore struct {
-	mu    sync.Mutex
-	links map[string]*histRing
+	mu     sync.Mutex
+	links  map[string]*histRing
+	absent map[string]time.Time // link -> first tick it was missing from the snapshot
 }
+
+// histForgetAfter: a link must be missing this long before its history is
+// dropped, so one snapshot that briefly misses a link cannot erase 24 h.
+const histForgetAfter = 10 * time.Minute
 
 var linkHist = &histStore{links: map[string]*histRing{}}
 
@@ -147,13 +152,31 @@ func historyOnSnapshot(s *HubSnapshot) {
 		alive[n] = true
 		linkHist.recordSample(n, now, l.HealthState, l.LatencyMs, l.Rx, l.Tx)
 	}
-	linkHist.mu.Lock() // drop links that no longer exist
-	for k := range linkHist.links {
-		if !alive[k] {
-			delete(linkHist.links, k)
+	linkHist.forgetMissing(now, alive)
+}
+
+// forgetMissing drops links that have been absent for histForgetAfter.
+func (h *histStore) forgetMissing(now time.Time, alive map[string]bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.absent == nil {
+		h.absent = map[string]time.Time{}
+	}
+	for k := range h.links {
+		if alive[k] {
+			delete(h.absent, k)
+			continue
+		}
+		first, seen := h.absent[k]
+		if !seen {
+			h.absent[k] = now
+			continue
+		}
+		if now.Sub(first) >= histForgetAfter {
+			delete(h.links, k)
+			delete(h.absent, k)
 		}
 	}
-	linkHist.mu.Unlock()
 }
 
 // GET /api/history?link=NAME&hours=1..24

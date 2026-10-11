@@ -139,8 +139,9 @@ func TestAlertsAPIKeepsMaskedWebhookAndRejectsBad(t *testing.T) {
 }
 
 func TestSnapshotHookSendsOnlyWhenEnabledAndChanged(t *testing.T) {
-	old, oldTrk := alertSend, alertTrk
-	defer func() { alertSend, alertTrk = old, oldTrk }()
+	old, oldTrk, oldHR := alertSend, alertTrk, alertHostReaders
+	defer func() { alertSend, alertTrk, alertHostReaders = old, oldTrk, oldHR }()
+	alertHostReaders = hostReaders{} // only tunnel links in this test
 	alertTrk = newAlertTracker()
 	sent := make(chan []alertEvent, 4)
 	alertSend = func(c alertConfig, ev []alertEvent) { sent <- ev }

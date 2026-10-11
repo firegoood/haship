@@ -130,6 +130,8 @@ var (
 	alertTrk    = newAlertTracker()
 	alertClient = &http.Client{Timeout: 10 * time.Second}
 	alertSend   = deliverAlerts
+	// alertHostReaders reads disk/RAM/cert; tests replace it for determinism.
+	alertHostReaders = liveHostReaders()
 )
 
 func alertText(e alertEvent) string {
@@ -235,7 +237,9 @@ func alertsOnSnapshot(s *HubSnapshot) {
 		}
 		links = append(links, linkSnap{Name: name, State: l.HealthState, Why: reasonsText(l.Reasons)})
 	}
-	if ev := alertTrk.observe(time.Now(), links, cfg); len(ev) > 0 {
+	now := time.Now()
+	links = append(links, hostResourceLinks(now, alertHostReaders, alertTrk.lastState)...)
+	if ev := alertTrk.observe(now, links, cfg); len(ev) > 0 {
 		go alertSend(cfg, ev)
 	}
 }
