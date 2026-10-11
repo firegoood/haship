@@ -27,6 +27,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/2fa/disable` | session + CSRF | `handle2FADisable` |
 | `POST` | `/api/2fa/enable` | session + CSRF | `handle2FAEnable` |
 | `POST` | `/api/2fa/setup` | session + CSRF | `handle2FASetup` |
+| `GET` | `/api/access` | session | `handleAccessGet` |
+| `POST` | `/api/access` | session + CSRF | `handleAccessPost` |
 | `POST` | `/api/action` | session + CSRF | `handleAction` |
 | `GET` | `/api/alerts` | session | `handleAlertsGet` |
 | `POST` | `/api/alerts` | session + CSRF | `handleAlertsPost` |
@@ -110,4 +112,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 86 routes.
+Total: 88 routes.

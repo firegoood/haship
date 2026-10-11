@@ -328,6 +328,10 @@ const I18N = {
     upd_dev_warn: "Dev channel: test builds, may break. Not for production tunnels.",
     upd_dev_badge: "DEV",
     nav_settings: "Settings",
+    acc_title: "Panel access (port / login / address)",
+    acc_hint: "Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.",
+    acc_user: "Login username", acc_port: "HTTP port (1–65535)", acc_base: "Address path (after IP:port/…)",
+    acc_pass: "Current password (confirm)", acc_save: "Save & restart panel",
     nav_terminal: "Terminal",
     sec_overview: "Overview",
     sec_tunnel: "Tunnel",
@@ -744,6 +748,10 @@ const I18N = {
     upd_dev_warn: "کانال Dev: نسخه‌های آزمایشی که ممکن است خراب شوند. برای تونل‌های واقعی استفاده نکنید.",
     upd_dev_badge: "DEV",
     nav_settings: "تنظیمات",
+    acc_title: "دسترسی پنل (پورت / ورود / آدرس)",
+    acc_hint: "تغییر هر کدام فقط وب‌سرویس پنل را ری‌استارت می‌کند — تونل‌ها وصل می‌مانند. بعد از ذخیره، پنل را با آدرس جدید باز کنید.",
+    acc_user: "نام کاربری ورود", acc_port: "پورت HTTP (۱ تا ۶۵۵۳۵)", acc_base: "مسیر آدرس (بعد از IP:port/…)",
+    acc_pass: "رمز فعلی (تأیید)", acc_save: "ذخیره و ری‌استارت پنل",
     nav_terminal: "ترمینال",
     sec_overview: "نمای کلی",
     sec_tunnel: "مدیریت تونل",
@@ -2927,7 +2935,7 @@ function doLogin() {
     try {
       await api('/api/login', {username: $('u').value, password: $('p').value, code: $('totpCode').value.trim()});
       $('p').value = ''; $('totpCode').value = ''; $('codeField').classList.add('hidden'); $('loginErr').textContent = '';
-      showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh();
+      showApp(); refresh(); loadSetupDefaults(); loadVersion(); accessRefresh(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh();
     } catch(e) {
       if (e.code === 'E-AUTH-09') { $('codeField').classList.remove('hidden'); $('totpCode').focus(); }
       $('loginErr').textContent = e.message;
@@ -3409,6 +3417,40 @@ $('alTest').onclick = async () => {
   try { await api('/api/alerts', {action: 'test'}); toastOk('test alert sent'); }
   catch(e) { toastErr('test alert failed', e.message); }
 };
+
+// ---- panel access settings (port / username / base path) ----
+async function accessRefresh() {
+  try {
+    const a = await api('/api/access');
+    if ($('accUser') && !$('accUser').value) $('accUser').value = a.username || '';
+    if ($('accPort') && !$('accPort').value) $('accPort').value = a.http_port || '';
+    if ($('accBase') && !$('accBase').value) $('accBase').value = a.base_path || '';
+    if ($('accCurrent')) $('accCurrent').innerHTML = 'Now: <b>' + esc(a.http_url || '') + '</b> · user <b>' + esc(a.username || '') + '</b>';
+  } catch(e) { /* leave placeholder text */ }
+}
+const _accSave = $('accSave');
+if (_accSave) _accSave.onclick = async () => {
+  const cur = ($('accPass') ? $('accPass').value : '').trim();
+  if (!cur) { toastWarn('current password required', 'Please enter your current password.'); return; }
+  const body = { current_password: cur };
+  const u = ($('accUser') ? $('accUser').value : '').trim();
+  const pt = ($('accPort') ? $('accPort').value : '').trim();
+  const bp = ($('accBase') ? $('accBase').value : '').trim();
+  if (u) body.username = u;
+  if (pt) body.port = parseInt(pt, 10);
+  if (bp) body.base_path = bp;
+  if (!body.username && !body.port && !body.base_path) { toastWarn('nothing to change', 'Edit the username, port, or path first.'); return; }
+  if (!await entConfirm('Save & restart panel?', 'Only the panel web service restarts — tunnels keep running. You will need to reopen the panel at the new address.', 'Save & restart')) return;
+  const b = $('accSave'); b.disabled = true; b.textContent = 'Saving…';
+  try {
+    const r = await api('/api/access', body);
+    if ($('accPass')) $('accPass').value = '';
+    toastOk('access saved — panel restarting', 'Reopen: ' + (r.http_url || ''));
+    setTimeout(() => { window.location.href = r.http_url || '/'; }, 4000);
+  } catch(e) { toastErr('save failed', e.message); }
+  b.disabled = false; b.textContent = tr('acc_save', 'Save & restart panel');
+};
+
 async function idleRefresh() { try { const r = await api('/api/session-settings'); $('idleMin').value = r.idle_minutes; } catch(e) {} }
 $('idleSave').onclick = async () => {
   try { await api('/api/session-settings', {idle_minutes: parseInt($('idleMin').value || '0', 10)}); toastOk('idle timeout saved'); }

@@ -188,4 +188,13 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-PERF-02` | 500 | cannot save performance settings | Disk write failed — check /etc/gre-panel permissions. |
 | `E-PERF-03` | 500 | cannot apply performance settings | Check FRP services and configuration. |
 
-Total: 102 codes.
+## E-ACCESS-xx — ACCESS
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-ACCESS-00` | — | access settings changed | Informational: panel port/username/path saved; gre-panel restarts, tunnels unaffected. |
+| `E-ACCESS-01` | 400 | bad access-settings request | Send current_password plus at least one of port, username, base_path. |
+| `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
+| `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
+
+Total: 106 codes.

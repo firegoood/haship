@@ -5777,9 +5777,70 @@ os.replace(p + ".tmp", p)
 os.chmod(p, 0o600)
 PYEOF
 
+
+# panel_cfg_set KEY VALUE — atomic JSON edit of /etc/gre-panel/panel.json (python3), 0600.
+panel_cfg_set() {
+    local KEY="$1" VAL="$2"
+    [[ -f /etc/gre-panel/panel.json ]] || { echo -e "${RED}[!] Panel is not installed (no /etc/gre-panel/panel.json).${NC}"; return 1; }
+    command -v python3 >/dev/null 2>&1 || { echo -e "${RED}[!] python3 is required.${NC}"; return 1; }
+    python3 - "$KEY" "$VAL" <<'PYEOF' || return 1
+import json, os, sys
+p = '/etc/gre-panel/panel.json'
+k, v = sys.argv[1], sys.argv[2]
+try:
+    d = json.load(open(p))
+except Exception as e:
+    print("cannot read panel.json: %s" % e, file=sys.stderr); sys.exit(1)
+if k == 'port':
+    try: v = int(v)
+    except ValueError: print("port must be a number", file=sys.stderr); sys.exit(1)
+d[k] = v
+tmp = p + ".tmp"
+json.dump(d, open(tmp, 'w'), indent=2)
+os.replace(tmp, p)
+os.chmod(p, 0o600)
+PYEOF
     chmod 600 /etc/gre-panel/panel.json 2>/dev/null || true
+}
+
+# cli_panel_port PORT — change panel HTTP port (1-65535, not 80/443, not a tunnel port), restart only gre-panel.
+cli_panel_port() {
+    check_root
+    local PORT="${1:-}"
+    [[ -z "$PORT" ]] && read -p "New panel HTTP port (1-65535, current kept if busy-check fails): " PORT
+    [[ "$PORT" =~ ^[0-9]+$ ]] && [[ "$PORT" -ge 1 && "$PORT" -le 65535 ]] || { echo -e "${RED}[!] Port must be 1-65535.${NC}"; return 1; }
+    [[ "$PORT" == "80" || "$PORT" == "443" ]] && { echo -e "${RED}[!] Ports 80/443 are reserved — use a reverse proxy or the HTTPS listener instead.${NC}"; return 1; }
+    local TPORT; TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*')
+    [[ -n "$TPORT" && "$PORT" == "$TPORT" ]] && { echo -e "${RED}[!] Port $PORT is already the panel HTTPS port.${NC}"; return 1; }
+    panel_cfg_set port "$PORT" || return 1
     systemctl restart gre-panel 2>/dev/null || true
-    PANEL_PASS="$PASS"
+    echo -e "${GREEN}[✔️] Panel HTTP port set to ${CYAN}${PORT}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    show_panel_url
+}
+
+# cli_panel_user USERNAME — change panel login username (3-64 chars), restart only gre-panel.
+cli_panel_user() {
+    check_root
+    local USER="${1:-}"
+    [[ -z "$USER" ]] && read -p "New panel username (3-64 chars, letters/digits/._-): " USER
+    [[ "$USER" =~ ^[A-Za-z0-9._-]{3,64}$ ]] || { echo -e "${RED}[!] Invalid username (3-64 chars: letters, digits, . _ -).${NC}"; return 1; }
+    panel_cfg_set username "$USER" || return 1
+    systemctl restart gre-panel 2>/dev/null || true
+    echo -e "${GREEN}[✔️] Panel username set to ${CYAN}${USER}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    show_panel_url
+}
+
+# cli_panel_path PATH — change panel URL base path (4-64 chars), restart only gre-panel.
+cli_panel_path() {
+    check_root
+    local BASE="${1:-}"
+    [[ -z "$BASE" ]] && read -p "New panel path (4-64 chars, letters/digits/_/-, e.g. my-panel-1): " BASE
+    [[ "$BASE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{2,62}[A-Za-z0-9]$ ]] || { echo -e "${RED}[!] Invalid path (4-64 chars, letters/digits/_/-, cannot start/end with -).${NC}"; return 1; }
+    panel_cfg_set base_path "$BASE" || return 1
+    systemctl restart gre-panel 2>/dev/null || true
+    echo -e "${GREEN}[✔️] Panel path set to ${CYAN}${BASE}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    show_panel_url
+}
     echo ""
     echo -e "${GREEN}[✔️] Web panel password successfully updated!${NC}"
     echo -e "${GREEN}Username:     ${CYAN}admin${NC}"
@@ -7697,6 +7758,7 @@ Usage:
   hashem setup-gre-backhaul-foreign --bundle gh1_... | --remote-pub IP --port P --token K [--transport tcpmux]
   hashem add-backhaul-peer      --remote-pub IP --port P --transport T --token K --ports "..." [--no-gre]
   hashem status | remove-tunnel [--force] | show-panel-url | reset-password [new_pass]
+  hashem panel-port <port> | panel-user <name> | panel-path <path>
   hashem uninstall [--force]                   # full wipe: tunnel + panel + 'hashem' itself
   hashem add-peer --local-pub IP --remote-pub IP [--frp-port N] --token T --local-gre IP --peer-gre IP --ports "443, 2083" [--name LABEL] [--bundle hsh1_...]
   hashem remove-peer --id N [--force] | edit-peer --id N [--name L] [--remote-pub IP] [--carrier C] [--ports "..."] | edit-peer-ports --id N --ports "443, 2083" | peer-list | peer-token --id N
@@ -8152,6 +8214,9 @@ if [[ $# -gt 0 ]]; then
         uninstall)
             if [[ "${2:-}" == "--force" ]]; then uninstall_all_force; else uninstall_all; fi ;;
         show-panel-url) show_panel_url ;;
+        panel-port) shift; cli_panel_port "${1:-}" ;;
+        panel-user) shift; cli_panel_user "${1:-}" ;;
+        panel-path) shift; cli_panel_path "${1:-}" ;;
         password|reset-password|reset-pass)
             shift
             if [[ -n "${1:-}" ]]; then
