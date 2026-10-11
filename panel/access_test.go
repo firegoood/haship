@@ -162,3 +162,23 @@ func TestValidUsername(t *testing.T) {
 		t.Error("ops-admin_1 must be accepted")
 	}
 }
+
+func TestAccessConcurrentReadsDoNotRace(t *testing.T) {
+	accessLab(t)
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 50; i++ {
+			rr := httptest.NewRecorder()
+			handleAccessGet(rr, httptest.NewRequest(http.MethodGet, "/x", nil))
+		}
+		close(done)
+	}()
+	for i := 0; i < 50; i++ {
+		_, _ = postAccess(t, `{"current_password":"Test-Pass-1234!","username":"raceuser"}`)
+		mu.Lock()
+		cfg.Username = "admin"
+		saveCfg()
+		mu.Unlock()
+	}
+	<-done
+}

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -105,15 +106,17 @@ func handleAccessPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mu.Lock()
-	okPass, _ := verifyPassword(cfg.PassHash, body.CurrentPassword)
+	storedHash, curUser := cfg.PassHash, cfg.Username
+	mu.Unlock()
+	okPass, _ := verifyPassword(storedHash, body.CurrentPassword)
 	if !okPass {
-		mu.Unlock()
 		recordLoginFailure(clientIP(r))
-		LogSecurityAudit("access_change_rejected", cfg.Username, clientIP(r), "incorrect current password")
+		LogSecurityAudit("access_change_rejected", curUser, clientIP(r), "incorrect current password")
 		writeAPIError(w, r, "E-ACCESS-02", "")
 		return
 	}
 
+	mu.Lock()
 	changed := []string{}
 	if body.Port != nil && *body.Port != cfg.Port {
 		p := *body.Port
@@ -165,18 +168,20 @@ func handleAccessPost(w http.ResponseWriter, r *http.Request) {
 	}
 	saveCfg()
 	newURL := tlsHTTPURL()
+	respPort, respBase, respUser := cfg.Port, cfg.BasePath, cfg.Username
+	changes := strings.Join(changed, ", ")
 	mu.Unlock()
 
-	LogSecurityAudit("access_changed", cfg.Username, clientIP(r), "changed "+joinStrings(changed, ", "))
-	recordError("E-ACCESS-00", r.Method+" "+r.URL.Path, "access settings changed: "+joinStrings(changed, ", "))
+	LogSecurityAudit("access_changed", respUser, clientIP(r), "changed "+changes)
+	recordError("E-ACCESS-00", r.Method+" "+r.URL.Path, "access settings changed: "+changes)
 
 	// Respond first (the UI redirects to newURL), then restart only gre-panel.
 	writeJSON(w, map[string]any{
 		"status":     "ok",
 		"http_url":   newURL,
-		"http_port":  cfg.Port,
-		"base_path":  cfg.BasePath,
-		"username":   cfg.Username,
+		"http_port":  respPort,
+		"base_path":  respBase,
+		"username":   respUser,
 		"restarting": true,
 		"message":    "Access settings saved. The panel restarts now — reopen it at the new address. Tunnels are unaffected.",
 	})
@@ -184,15 +189,4 @@ func handleAccessPost(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 		_ = accessRestarter()
 	}()
-}
-
-func joinStrings(a []string, sep string) string {
-	out := ""
-	for i, s := range a {
-		if i > 0 {
-			out += sep
-		}
-		out += s
-	}
-	return out
 }
