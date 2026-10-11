@@ -328,20 +328,20 @@ func detectPublicIP() string {
 // ---- POST /api/setup ----
 
 type setupRequest struct {
-	Role      string `json:"role"` // "iran" | "foreign" | "add-peer"
-	Engine    string `json:"engine,omitempty"` // "" | "frp" | "backhaul" | "gre-backhaul"
-	Transport string `json:"transport,omitempty"` // "tcpmux" (default), "tcp", "ws", "wss", "wsmux", "wssmux"
-	Name      string `json:"name"` // add-peer label
-	LocalPub  string `json:"local_public"`
-	RemotePub string `json:"remote_public"`
-	LocalGre  string `json:"local_gre"`
-	PeerGre   string `json:"peer_gre"`
-	FrpPort   int    `json:"frp_port"`
-	Token     string `json:"token"` // foreign/add-peer (manual or auto)
-	Ports         string `json:"ports"` // foreign/add-peer, e.g. "443, 2083, 8080"
-	Force         bool   `json:"force"`
-	Autogen        bool   `json:"autogen"` // add-peer: generate token server-side
-	ProxyProtocol  string `json:"proxy_protocol,omitempty"` // "off" | "v2" | "v1"
+	Role           string `json:"role"`                // "iran" | "foreign" | "add-peer"
+	Engine         string `json:"engine,omitempty"`    // "" | "frp" | "backhaul" | "gre-backhaul"
+	Transport      string `json:"transport,omitempty"` // "tcpmux" (default), "tcp", "ws", "wss", "wsmux", "wssmux"
+	Name           string `json:"name"`                // add-peer label
+	LocalPub       string `json:"local_public"`
+	RemotePub      string `json:"remote_public"`
+	LocalGre       string `json:"local_gre"`
+	PeerGre        string `json:"peer_gre"`
+	FrpPort        int    `json:"frp_port"`
+	Token          string `json:"token"` // foreign/add-peer (manual or auto)
+	Ports          string `json:"ports"` // foreign/add-peer, e.g. "443, 2083, 8080"
+	Force          bool   `json:"force"`
+	Autogen        bool   `json:"autogen"`                   // add-peer: generate token server-side
+	ProxyProtocol  string `json:"proxy_protocol,omitempty"`  // "off" | "v2" | "v1"
 	FRPTransport   string `json:"frp_transport,omitempty"`   // "tcp" | "kcp" | "quic" | "websocket" | "wss"
 	UseEncryption  bool   `json:"use_encryption,omitempty"`  // transport.useEncryption
 	UseCompression bool   `json:"use_compression,omitempty"` // transport.useCompression
@@ -853,9 +853,9 @@ func handlePeersPost(w http.ResponseWriter, r *http.Request) {
 // PATCH /api/peers — edit the configuration of an existing peer tunnel or main tunnel.
 // Body: { "id": N, "name": "...", "remote_pub": "...", "carrier": "...", "ports": [443, 2083] }
 // Strategy (graceful degradation):
-//   1. Try hashem.sh edit-peer --id N ... (or edit-peer-ports).
-//   2. Fallback to direct edit: update peers.json, adjust kernel GRE remote endpoint,
-//      persist systemd unit, apply carrier mode, rewrite TOML proxy blocks, reload service, and allow UFW.
+//  1. Try hashem.sh edit-peer --id N ... (or edit-peer-ports).
+//  2. Fallback to direct edit: update peers.json, adjust kernel GRE remote endpoint,
+//     persist systemd unit, apply carrier mode, rewrite TOML proxy blocks, reload service, and allow UFW.
 type peerPatchRequest struct {
 	ID             int       `json:"id"`
 	Name           string    `json:"name,omitempty"`
@@ -1667,8 +1667,6 @@ func testPing(ip string, timeoutSec int) bool {
 	return cmd.Run() == nil
 }
 
-
-
 // editMainTunnelPortsDirect updates configuration for the main tunnel (id 0)
 // across peers.json (if legacy peer 1 exists), /etc/frp/frpc.toml, /etc/frp/frps.toml,
 // and system firewall.
@@ -2025,8 +2023,8 @@ func randomFrpPort() int {
 // setupBundle is a parsed
 // hsh1_<IRAN_PUB>_<FRP_PORT>_<IRAN_GRE>_<FOREIGN_GRE>_<TOKEN>[_<PORTS>][_fou<P1>-<P2>]
 type setupBundle struct {
-	Engine     string   // "frp" | "backhaul" | "gre-backhaul"
-	Transport  string   // for backhaul: "tcpmux", "tcp", "ws", "wss", "wsmux", "wssmux"
+	Engine     string // "frp" | "backhaul" | "gre-backhaul"
+	Transport  string // for backhaul: "tcpmux", "tcp", "ws", "wss", "wsmux", "wssmux"
 	IranPub    string
 	FrpPort    int
 	IranGre    string

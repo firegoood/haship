@@ -117,25 +117,25 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d := map[string]any{
-		"online":         anyUp,
-		"health":         health,
-		"peer_count":     len(peers),
-		"peers":          peers,
-		"ping_ok":        st.PingOK,
-		"ping":           nilIfEmpty(st.PingMs),
-		"health_state":   strings.ToLower(health),
-		"icmp_filtered":  icmpFiltered,
-		"reasons":        reasons,
-		"latency_ms":     latMs,
-		"latency_kind":   latKind,
+		"online":          anyUp,
+		"health":          health,
+		"peer_count":      len(peers),
+		"peers":           peers,
+		"ping_ok":         st.PingOK,
+		"ping":            nilIfEmpty(st.PingMs),
+		"health_state":    strings.ToLower(health),
+		"icmp_filtered":   icmpFiltered,
+		"reasons":         reasons,
+		"latency_ms":      latMs,
+		"latency_kind":    latKind,
 		"snapshot_age_ms": snap.AgeMs(),
-		"snapshot_at":    nilIfEmpty(snapAt),
-		"role":           nilIfEmpty(st.Role),
-		"local_pub":      nilIfEmpty(snap.PublicIP),
-		"active_engine":  engine,
-		"active_carrier": carrierCfg.ActiveCarrier,
-		"auto_failover":  peerCfg.AutoPilotEnabled,
-		"last_error":     lastErr,
+		"snapshot_at":     nilIfEmpty(snapAt),
+		"role":            nilIfEmpty(st.Role),
+		"local_pub":       nilIfEmpty(snap.PublicIP),
+		"active_engine":   engine,
+		"active_carrier":  carrierCfg.ActiveCarrier,
+		"auto_failover":   peerCfg.AutoPilotEnabled,
+		"last_error":      lastErr,
 		"gre": map[string]any{
 			"exists": st.Gre.Exists,
 			"inner":  nilIfEmpty(st.Gre.Inner),
@@ -742,4 +742,3 @@ func trafficHistory(rng string) []trafficPoint {
 	out = append(out, in[len(in)-1])
 	return out
 }
-

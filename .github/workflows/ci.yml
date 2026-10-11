@@ -20,17 +20,9 @@ jobs:
           go-version-file: panel/go.mod
           check-latest: true
           cache-dependency-path: panel/go.sum
-      - name: gofmt (new/changed files must be formatted)
+      - name: gofmt (whole tree)
         run: |
-          # The tree still has legacy unformatted files; gate only on files
-          # touched by this push/PR so formatting debt can't grow.
-          base="${{ github.event.pull_request.base.sha || github.event.before }}"
-          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$base" 2>/dev/null; then
-            base="HEAD~1"
-          fi
-          files=$(git diff --name-only --diff-filter=AM "$base" HEAD -- 'panel/*.go' || true)
-          [ -z "$files" ] && exit 0
-          bad=$(gofmt -l $files)
+          bad=$(gofmt -l panel/)
           if [ -n "$bad" ]; then echo "gofmt needed:"; echo "$bad"; exit 1; fi
       - name: go vet
         run: cd panel && go vet ./...

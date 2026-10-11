@@ -92,21 +92,21 @@ func requireCSRF(next http.HandlerFunc) http.HandlerFunc {
 // ---- Password Strength Validation (NIST 800-63B Compliant) ----
 
 var commonWeakPasswords = map[string]struct{}{
-	"12345678":         {},
-	"123456789":        {},
-	"1234567890":       {},
-	"password":         {},
-	"password123":      {},
-	"password1234":     {},
-	"password12345":    {},
-	"admin123456":      {},
-	"admin12345678":    {},
-	"administrator":    {},
-	"qwerty123456":     {},
-	"hashempanel123":   {},
-	"grepanel123456":   {},
-	"rootroot1234":     {},
-	"welcome123456":    {},
+	"12345678":       {},
+	"123456789":      {},
+	"1234567890":     {},
+	"password":       {},
+	"password123":    {},
+	"password1234":   {},
+	"password12345":  {},
+	"admin123456":    {},
+	"admin12345678":  {},
+	"administrator":  {},
+	"qwerty123456":   {},
+	"hashempanel123": {},
+	"grepanel123456": {},
+	"rootroot1234":   {},
+	"welcome123456":  {},
 }
 
 // ValidatePasswordStrength enforces strong passwords (minimum 12 chars, upper, lower, digit, symbol).

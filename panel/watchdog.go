@@ -283,11 +283,11 @@ func handleWatchdogGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := watchdogStatusResponse{
-		Enabled:          c.Enabled,
-		Status:           status,
-		CheckResult:      checkResult,
-		LastCheck:        c.LastCheck,
-		ConsecFails:      c.ConsecFails,
+		Enabled:           c.Enabled,
+		Status:            status,
+		CheckResult:       checkResult,
+		LastCheck:         c.LastCheck,
+		ConsecFails:       c.ConsecFails,
 		FailThreshold:     c.FailThreshold,
 		AutoRestart:       c.AutoRestart,
 		RestartEveryHours: c.RestartEveryHours,
@@ -295,16 +295,16 @@ func handleWatchdogGet(w http.ResponseWriter, r *http.Request) {
 		LastRestartDate:   c.LastRestartDate,
 		NextRestartHuman:  formatRestartSchedule(c),
 		TGBotTokenMasked:  maskBotToken(c.TGBotToken),
-		TGChatID:         c.TGChatID,
-		TGRoute:          c.TGRoute,
-		TGTunnelPort:     c.TGTunnelPort,
-		ScheduleMode:     mode,
-		BackupEveryHours: c.BackupEveryHours,
-		BackupDailyAt:    c.BackupDailyAt,
-		ScheduleHuman:    formatSchedule(c),
-		Backups:          listBackups(),
-		TunnelPorts:      collectTunnelPorts(),
-		RecentEvents:     collectWatchdogEvents(),
+		TGChatID:          c.TGChatID,
+		TGRoute:           c.TGRoute,
+		TGTunnelPort:      c.TGTunnelPort,
+		ScheduleMode:      mode,
+		BackupEveryHours:  c.BackupEveryHours,
+		BackupDailyAt:     c.BackupDailyAt,
+		ScheduleHuman:     formatSchedule(c),
+		Backups:           listBackups(),
+		TunnelPorts:       collectTunnelPorts(),
+		RecentEvents:      collectWatchdogEvents(),
 	}
 
 	writeJSON(w, resp)

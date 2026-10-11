@@ -21,17 +21,17 @@ import (
 )
 
 type PeerConfig struct {
-	Role               string  `json:"role"`                // "master" (Iran) or "worker" (Kharej)
-	PeerSecret         string  `json:"peer_secret"`         // Shared secret token for inter-panel authentication
-	PeerURL            string  `json:"peer_url"`            // Public URL of peer, e.g. "http://5.6.7.8:8080"
-	InternalIP         string  `json:"internal_ip"`         // Tunnel internal IP, e.g. "10.10.10.1"
-	InternalPort       int     `json:"internal_port"`       // Panel port on internal IP (default 8080)
-	LastSync           string  `json:"last_sync"`           // Timestamp of last successful handshake/sync
+	Role               string  `json:"role"`          // "master" (Iran) or "worker" (Kharej)
+	PeerSecret         string  `json:"peer_secret"`   // Shared secret token for inter-panel authentication
+	PeerURL            string  `json:"peer_url"`      // Public URL of peer, e.g. "http://5.6.7.8:8080"
+	InternalIP         string  `json:"internal_ip"`   // Tunnel internal IP, e.g. "10.10.10.1"
+	InternalPort       int     `json:"internal_port"` // Panel port on internal IP (default 8080)
+	LastSync           string  `json:"last_sync"`     // Timestamp of last successful handshake/sync
 	IsConnected        bool    `json:"is_connected"`
 	LatencyMs          float64 `json:"latency_ms"`
 	AutoPilotEnabled   bool    `json:"autopilot_enabled"`
 	AutoPilotExplicit  bool    `json:"autopilot_explicit,omitempty"`
-	AutoPilotThreshold float64 `json:"autopilot_threshold"` // Packet loss percentage threshold (e.g. 20.0)
+	AutoPilotThreshold float64 `json:"autopilot_threshold"`       // Packet loss percentage threshold (e.g. 20.0)
 	TLSFingerprint     string  `json:"tls_fingerprint,omitempty"` // Pinned SHA-256 (hex) of the peer's leaf TLS cert (TOFU)
 }
 
@@ -317,16 +317,16 @@ func handlePeerStatus(w http.ResponseWriter, r *http.Request) {
 	st := currentLocal()
 
 	writeJSON(w, map[string]any{
-		"role":             c.Role,
-		"peer_url":         c.PeerURL,
-		"internal_ip":      c.InternalIP,
-		"is_connected":     c.IsConnected,
-		"latency_ms":       c.LatencyMs,
-		"last_sync":        c.LastSync,
-		"active_carrier":   carrierCfg.ActiveCarrier,
-		"tunnel_name":      st.Gre.Name,
-		"autopilot":        c.AutoPilotEnabled,
-		"threshold":        c.AutoPilotThreshold,
+		"role":           c.Role,
+		"peer_url":       c.PeerURL,
+		"internal_ip":    c.InternalIP,
+		"is_connected":   c.IsConnected,
+		"latency_ms":     c.LatencyMs,
+		"last_sync":      c.LastSync,
+		"active_carrier": carrierCfg.ActiveCarrier,
+		"tunnel_name":    st.Gre.Name,
+		"autopilot":      c.AutoPilotEnabled,
+		"threshold":      c.AutoPilotThreshold,
 	})
 }
 
