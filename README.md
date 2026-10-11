@@ -71,6 +71,9 @@ The model is a **hub and spokes**:
 - 🎯 **Carrier benchmark** and **diagnostics** (`hashem doctor`).
 - 💻 **In-browser terminal** — disabled by default, audited.
 - ⚙️ **Auto Pool** — frpc `poolCount` / frps `maxPoolCount` sized automatically from pool-full errors, load and RAM (on by default).
+- 🔔 **External alerts** — webhook and/or Telegram message only when a tunnel changes state (with a per-link minimum gap), set up in Settings.
+- 📈 **History and metrics** — 24 h per-link latency/state/throughput graph, and an optional Prometheus `/metrics` endpoint behind a bearer token (off by default).
+- 🧭 **Carrier advisor** — tells you when the active carrier keeps failing and which one to try; advice only, it never switches by itself. Also suggests free ports and SNI names.
 - 🔒 **Hardened panel** — SHA-256 password hashes, NIST 800-63B password policy, CSRF tokens, trusted-proxy handling, audit log. See [Security notes](#security-notes).
 
 ---
@@ -269,7 +272,14 @@ hashem uninstall      # full wipe
 - State-changing requests need a session-bound HMAC-SHA256 `X-CSRF-Token`; `X-Forwarded-For` is trusted only from `TRUSTED_PROXY_IPS`.
 - Updates are pinned to official GitHub domains and verified with SHA-256 from `checksums.txt`; the installer script is checked with `bash -n`.
 - The in-browser terminal is **disabled by default** and audited (10-minute idle and 30-minute absolute limits).
-- Security events are written to `/etc/gre-panel/security-audit.log`.
+- Security events and **every state-changing API call** (method, path, status; never the body) are written to `/etc/gre-panel/security-audit.log` (rotated at 2 MiB, newest entries via `GET /api/audit`).
+- Login lockout escalates for repeat offenders (15 min, doubling up to 24 h).
+- Optional **TOTP two-factor login** (Settings → Two-factor authentication) with 8 single-use recovery codes; off by default. Recovery if you lose the device: set `GRE_PANEL_PASSWORD` and remove `totp_enabled` from `panel.json`.
+- Optional **idle session timeout** (Settings), driven by real clicks/keys, not background refresh.
+- The terminal asks for your password (and 2FA code) every time it opens, uses a single-use 60 s ticket bound to your session and IP, and can be limited to an **IP allowlist**.
+- `install.sh` only accepts `hashem.sh` from GitHub itself, from two agreeing mirrors, or matching a pinned `HASHEM_SHA256`; otherwise it stops.
+- Logs shown in the panel mask tokens and passwords (Backhaul prints rejected tokens verbatim).
+- Backups include every panel config and Backhaul unit; restore refuses archives that reach outside the config directories and first saves a safety copy of the current state.
 
 ---
 

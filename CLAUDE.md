@@ -9,7 +9,8 @@ Hashem Panel: a hub-and-spoke tunnel manager. An Iran hub runs `frps` / Backhaul
 - `hashem.sh` — interactive menu and non-interactive CLI (`hashem setup-iran ...`). Owns setup, tuning, perf, watchdog and carrier logic.
 - `install.sh` — one-line installer that fetches release binaries.
 - `panel/` — Go module, flat `package main`. Each feature has its own file (`setup.go`, `perf.go`, `watchdog.go`, `carrier.go`, `fleet.go`, `peer.go`, `tlsproxy.go`, `update.go`, `dashboard.go`, ...) with a matching `*_test.go`. The UI is `index.html` plus `*.css` and the vendored xterm and fonts.
-- `tests/` — bash regression scripts (`test_*.sh`): backhaul schema, dial route, legacy units, WSS front.
+- `tests/` — bash regression scripts (`test_*.sh`): backhaul schema, dial route, legacy units, WSS front, watchdog/backup/install checks. `test_backhaul_e2e.sh` and `test_revpath_lab.sh` need netns/real binaries and are lab-only (CI skips them).
+- `panel/app.js` — the whole UI script (embedded and served with `index.html`); keep new UI code there, not inline.
 - `docs/` — deployment and FRP guides. Also `README.md`, `SECURITY.md`, `AUDIT_*.md`.
 - Runtime config lives in `/etc/gre-panel` (`watchdog.json`, `perf.json`, `carrier.json`, ...) and `/etc/frp`. Both are overridable with `GRE_PANEL_DIR`.
 
@@ -19,6 +20,7 @@ bash -n hashem.sh                      # syntax check (also hashem-backhaul.sh, 
 cd panel && /usr/local/go/bin/go vet ./... && /usr/local/go/bin/go build
 cd panel && /usr/local/go/bin/go test ./...
 for t in tests/test_*.sh; do bash "$t"; done
+cd panel && /usr/local/go/bin/go test -race ./...   # CI also runs this
 ```
 Run all of these before saying work is done. Report failures verbatim.
 
