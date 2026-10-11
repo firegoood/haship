@@ -88,7 +88,7 @@ var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
 	// go build -ldflags "-X main.panelVersion=panel-rN"
-	panelVersion = "v1.2.0"
+	panelVersion = "v1.3.0"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
