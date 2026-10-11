@@ -1207,6 +1207,14 @@
         </div>
 
         <!-- Tunnel Health: per-tunnel PASS / FAIL / UNREACHABLE (service + session + data) -->
+        <div class="tunnel-card" id="usageCard">
+          <div class="tc-header"><p class="tc-title" data-i18n="usage_title">Traffic usage (kept 7 days)</p>
+            <select class="hashem-input" id="usageRange" aria-label="Range" style="max-width:9rem">
+              <option value="1h">1 h</option><option value="6h">6 h</option><option value="24h">24 h</option><option value="7d" selected>7 days</option>
+            </select></div>
+          <p class="qs-hint" data-i18n="usage_hint">Saved on disk every minute, so it survives restarts, updates and reboots. Per foreign server, plus the hub total.</p>
+          <div id="usageBody"><p class="qs-hint">…</p></div>
+        </div>
         <div class="tunnel-card" id="tunnelHealthCard">
           <div class="tc-header">
             <p class="tc-title">Tunnel Health</p>

@@ -206,7 +206,7 @@ function goTab(name) {
   const dr = $('drawerNav');
   if (dr) dr.querySelectorAll('[data-tab]').forEach(markTab);
   if (name === 'perf') { loadPerf(); loadCarrier(); }
-  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); }
+  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); }
   if (name === 'watchdog') loadWatchdog();
   if (name === 'doctor') loadDoctor();
   if (name === 'benchmark') loadBenchmark();
@@ -309,6 +309,10 @@ const I18N = {
   en: {
     nav_dashboard: "Dashboard",
     nav_tunnel: "Tunnel",
+    usage_title: "Traffic usage (kept 7 days)",
+    usage_hint: "Saved on disk every minute, so it survives restarts, updates and reboots. Per foreign server, plus the hub total.",
+    usage_empty: "No traffic recorded yet. It appears here after the first minute of traffic.",
+    usage_total: "Hub total", usage_server: "Server", usage_in: "Received", usage_out: "Sent", usage_sum: "Total",
     nav_setup: "Setup",
     nav_logs: "Logs",
     nav_perf: "Performance",
@@ -721,6 +725,10 @@ const I18N = {
   fa: {
     nav_dashboard: "داشبورد",
     nav_tunnel: "تونل",
+    usage_title: "مصرف ترافیک (۷ روز نگهداری)",
+    usage_hint: "هر دقیقه روی دیسک ذخیره می‌شود؛ با ری‌استارت، آپدیت و ری‌بوت پاک نمی‌شود. به تفکیک هر سرور خارج و جمع کل هاب.",
+    usage_empty: "هنوز ترافیکی ثبت نشده. بعد از اولین دقیقه ترافیک اینجا نمایش داده می‌شود.",
+    usage_total: "جمع کل هاب", usage_server: "سرور", usage_in: "دریافتی", usage_out: "ارسالی", usage_sum: "مجموع",
     nav_setup: "راه‌اندازی (Setup)",
     nav_logs: "گزارش‌ها (Logs)",
     nav_perf: "عملکرد سیستم",
@@ -4745,6 +4753,54 @@ async function runTunnelHealthClick() {
 (function initTunnelHealthEvents() {
   const b = $('thRunBtn');
   if (b) b.addEventListener('click', runTunnelHealthClick);
+})();
+
+
+// ---- Traffic usage: per-peer bytes kept on disk for 7 days ----
+let usageTimer = null;
+function usageBars(days) {
+  if (!days || !days.length) return '';
+  const max = Math.max(1, ...days.map(d => d.rx + d.tx));
+  return '<div class="usage-bars" style="display:flex;gap:6px;align-items:flex-end;height:64px;margin:.5rem 0">' +
+    days.map(d => {
+      const h = Math.max(2, Math.round(((d.rx + d.tx) / max) * 60));
+      return '<div title="' + esc(d.day + ' — ↓ ' + fmtBytes(d.rx) + ' · ↑ ' + fmtBytes(d.tx)) + '" style="flex:1;min-width:10px;text-align:center">' +
+        '<div style="height:' + h + 'px;background:var(--accent,#4f8cff);border-radius:3px 3px 0 0"></div>' +
+        '<div class="qs-hint" style="font-size:.65rem">' + esc(d.day.slice(5)) + '</div></div>';
+    }).join('') + '</div>';
+}
+function renderUsage(d) {
+  const box = $('usageBody');
+  if (!box) return;
+  const links = (d && d.links) || [];
+  if (!links.length || links.every(l => !l.rx && !l.tx && !(l.days || []).length)) {
+    box.innerHTML = '<p class="qs-hint">' + esc(tr('usage_empty', 'No traffic recorded yet. It appears here after the first minute of traffic.')) + '</p>';
+    return;
+  }
+  const tot = links[0];
+  const rows = links.slice(1).map(l =>
+    '<tr><td>' + esc(l.name || l.key) + '</td><td class="mono">↓ ' + fmtBytes(l.rx) + '</td><td class="mono">↑ ' + fmtBytes(l.tx) +
+    '</td><td class="mono">' + fmtBytes(l.rx + l.tx) + '</td></tr>').join('');
+  box.innerHTML =
+    '<div class="det-row"><span class="det-k">' + esc(tr('usage_total', 'Hub total')) + '</span><span class="det-v mono">↓ ' + fmtBytes(tot.rx) +
+    ' · ↑ ' + fmtBytes(tot.tx) + ' · ' + fmtBytes(tot.rx + tot.tx) + '</span></div>' +
+    usageBars(tot.days) +
+    '<div class="table-wrap"><table class="hashem-table"><thead><tr><th>' + esc(tr('usage_server', 'Server')) + '</th><th>↓ ' + esc(tr('usage_in', 'Received')) +
+    '</th><th>↑ ' + esc(tr('usage_out', 'Sent')) + '</th><th>' + esc(tr('usage_sum', 'Total')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+async function loadUsage() {
+  try {
+    const r = ($('usageRange') || {}).value || '7d';
+    renderUsage(await api('/api/traffic/usage?range=' + encodeURIComponent(r)));
+  } catch (e) { reportErr('usage', e); }
+}
+(function initUsage() {
+  const sel = $('usageRange');
+  if (sel) sel.addEventListener('change', loadUsage);
+  if (!usageTimer) usageTimer = setInterval(() => {
+    const t = $('tab-tunnel');
+    if (t && !t.hidden && !document.hidden) loadUsage();
+  }, 60000);
 })();
 
 async function runDoctor() {

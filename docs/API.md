@@ -97,6 +97,7 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/tls/check` | session + CSRF | `handleTLSCheck` |
 | `GET` | `/api/tls/proxy-config` | session | `handleReverseProxyConfig` |
 | `POST` | `/api/tls/renew` | session + CSRF | `handleTLSRenew` |
+| `GET` | `/api/traffic/usage` | session | `handleUsageGet` |
 | `GET` | `/api/tunnel-health` | session | `handleTunnelHealthGet` |
 | `POST` | `/api/tunnel-health/run` | session + CSRF | `handleTunnelHealthRun` |
 | `POST` | `/api/update` | session + CSRF | `handleUpdate` |
@@ -109,4 +110,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 85 routes.
+Total: 86 routes.

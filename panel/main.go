@@ -88,7 +88,7 @@ var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
 	// go build -ldflags "-X main.panelVersion=panel-rN"
-	panelVersion = "v1.1.0"
+	panelVersion = "v1.2.0"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -275,6 +275,7 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/alerts", requireAuth(handleAlertsGet))
 	mux.HandleFunc("POST "+base+"/api/alerts", requireAuth(requireCSRF(handleAlertsPost)))
 	mux.HandleFunc("GET "+base+"/api/history", requireAuth(handleHistoryGet))
+	mux.HandleFunc("GET "+base+"/api/traffic/usage", requireAuth(handleUsageGet))
 	mux.HandleFunc("GET "+base+"/metrics", handleMetrics)
 	mux.HandleFunc("GET "+base+"/api/metrics-token", requireAuth(handleMetricsTokenGet))
 	mux.HandleFunc("POST "+base+"/api/metrics-token", requireAuth(requireCSRF(handleMetricsTokenPost)))
@@ -350,6 +351,7 @@ func main() {
 	log.Printf("gre-panel listening on %s under /%s", addr, cfg.BasePath)
 	histStop := make(chan struct{})
 	startHistoryPersistence(histStop)
+	startUsagePersistence(histStop)
 	startSnapshotCollector(context.Background())
 	startSdWatchdog(context.Background())
 	go startHTTPSListener()

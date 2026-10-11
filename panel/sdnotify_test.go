@@ -56,3 +56,11 @@ func TestSdWatchdogNoSocket(t *testing.T) {
 	defer cancel()
 	startSdWatchdog(ctx) // must return immediately, no goroutine, no error
 }
+
+// Children must never inherit NOTIFY_SOCKET: with NotifyAccess=main systemd
+// logs a warning for every command a child runs otherwise.
+func TestNotifySocketIsNotInherited(t *testing.T) {
+	if v := os.Getenv("NOTIFY_SOCKET"); v != "" {
+		t.Fatalf("NOTIFY_SOCKET must be removed from the environment at start, still %q", v)
+	}
+}
