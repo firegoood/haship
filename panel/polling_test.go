@@ -14,7 +14,11 @@ func TestIndexPollingPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(b)
+	js, err := os.ReadFile("app.js") // the UI script lives in app.js
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b) + "\n" + string(js)
 	for want, min := range map[string]int{
 		"function makePoller(fn, baseMs)":              1, // hidden-pause + backoff core
 		"Math.min(60000, baseMs * Math.pow(2, fails))": 1, // exponential backoff cap 60s

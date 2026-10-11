@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-//go:embed index.html fonts.css tokens.css base.css enterprise.css favicon.png xterm.js xterm-fit.js xterm-search.js xterm.css fonts/vazirmatn.woff2
+//go:embed index.html app.js fonts.css tokens.css base.css enterprise.css favicon.png xterm.js xterm-fit.js xterm-search.js xterm.css fonts/vazirmatn.woff2
 var panelFS embed.FS
 
 var configDir = "/etc/gre-panel"
@@ -242,6 +242,7 @@ func main() {
 	mux := http.NewServeMux()
 	panelMux = mux
 	mux.HandleFunc("GET "+base+"/", serveIndex)
+	mux.HandleFunc("GET "+base+"/app.js", serveAsset("app.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/tokens.css", serveAsset("tokens.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/fonts.css", serveAsset("fonts.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/fonts/vazirmatn.woff2", serveAsset("fonts/vazirmatn.woff2", "font/woff2"))
@@ -441,6 +442,7 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 	for _, f := range []string{"tokens.css", "base.css", "enterprise.css"} {
 		page = strings.ReplaceAll(page, `href="`+f+`"`, `href="`+f+`?v=`+panelVersion+`"`)
 	}
+	page = strings.ReplaceAll(page, `src="app.js"`, `src="app.js?v=`+panelVersion+`"`)
 	body := []byte(page)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && len(body) > 1024 {

@@ -35,7 +35,7 @@ Small commits, one concern each. No production servers are touched.
 - [x] 5.2 Free-port and SNI suggestion helper (/api/suggest), pure logic + tests
 
 ## Phase 6 - Maintainability
-- [ ] 6.1 Extract inline JS from index.html into `app.js` served statically (no behavior change)
+- [x] 6.1 UI script extracted from index.html (8.5k -> 2.5k lines) into app.js: embedded, served, cache-busted per build; smoke-tested on the real binary
 - [ ] 6.2 Docs: README/CLAUDE.md/CHANGELOG updates
 
 Order is fixed; if a step turns out risky it is skipped and recorded under "Deferred".
