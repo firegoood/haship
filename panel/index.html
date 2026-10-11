@@ -2201,6 +2201,14 @@
           <div id="passStrengthMeter" style="font-size:12px; margin-top:6px; margin-bottom:8px; color:var(--mu);"></div>
           <div><button class="hashem-btn hashem-btn-primary" id="savePass">Change password</button></div>
         </div>
+        <div class="tunnel-card" id="advisorCard">
+          <div class="tc-header"><p class="tc-title">Carrier advisor</p></div>
+          <div class="ent-help" id="advMsg">Collecting data…</div>
+          <div class="ent-help" id="advStats"></div>
+          <div class="ent-help">Advice only — the panel never switches the carrier by itself. Suggestions for a new port / SNI:</div>
+          <div class="ent-help" id="advSuggest"></div>
+          <div><button class="hashem-btn hashem-btn-secondary" id="advRefresh">Refresh</button></div>
+        </div>
         <div class="tunnel-card" id="historyCard">
           <div class="tc-header"><p class="tc-title">Link history (last hours)</p></div>
           <div class="fg"><label for="histLink">Link</label><select class="hashem-input" id="histLink"></select></div>
@@ -5431,7 +5439,7 @@ function doLogin() {
     try {
       await api('/api/login', {username: $('u').value, password: $('p').value, code: $('totpCode').value.trim()});
       $('p').value = ''; $('totpCode').value = ''; $('codeField').classList.add('hidden'); $('loginErr').textContent = '';
-      showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh();
+      showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh();
     } catch(e) {
       if (e.code === 'E-AUTH-09') { $('codeField').classList.remove('hidden'); $('totpCode').focus(); }
       $('loginErr').textContent = e.message;
@@ -5842,6 +5850,17 @@ function twofaRender() {
   $('twofaCancel').classList.toggle('hidden', twofa.step === 'idle');
   $('twofaBtn').textContent = twofa.step === 'setup' ? 'Confirm & enable' : twofa.step === 'disable' ? 'Disable 2FA' : (twofa.enabled ? 'Disable 2FA…' : 'Enable 2FA');
 }
+async function advisorRefresh() {
+  try {
+    const r = await api('/api/carrier/advice');
+    const a = (r.advice || [])[0] || {};
+    $('advMsg').textContent = (a.level === 'warn' ? '⚠ ' : a.level === 'ok' ? '✓ ' : 'ℹ ') + (a.message || '') + (a.suggest ? '  → consider: ' + a.suggest : '');
+    $('advStats').textContent = (r.stats || []).map(x => x.carrier + ': ' + x.up_pct + '% up (' + x.samples + ' samples)').join(' · ');
+    const [p, n] = await Promise.all([api('/api/suggest?kind=port&n=4'), api('/api/suggest?kind=sni&n=3')]);
+    $('advSuggest').textContent = 'free ports: ' + ((p.ports || []).join(', ') || 'none') + ' · SNI: ' + ((n.sni || []).join(', ') || 'none');
+  } catch(e) {}
+}
+$('advRefresh').onclick = advisorRefresh;
 async function metricsRefresh() {
   try { const r = await api('/api/metrics-token'); $('metricsState').firstChild && ($('metricsState').textContent = r.enabled ? 'Enabled. Scrape GET …/metrics with the bearer token (rotate to get a new one; the old one stops working).' : 'Disabled. Generate a token to enable GET …/metrics for your scraper (Authorization: Bearer <token>). The token is shown once.'); } catch(e) {}
 }
@@ -7334,7 +7353,7 @@ if ($('docIperfBtn')) $('docIperfBtn').onclick = toggleIperf;
 
 // boot: if already logged in, status works; else show login
 (async () => {
-  try { await api('/api/status'); showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); }
+  try { await api('/api/status'); showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh(); }
   catch(e) { showLogin(); }
 })();
 // light pollers: skip when the tab is in the background (background tabs

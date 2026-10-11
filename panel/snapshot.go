@@ -502,6 +502,7 @@ func snapshotTick() bool {
 	snapTicks.Add(1)
 	alertsOnSnapshot(snap)
 	historyOnSnapshot(snap)
+	carrierAdvisorOnSnapshot(snap)
 	return true
 }
 

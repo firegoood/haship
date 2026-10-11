@@ -30,9 +30,9 @@ Small commits, one concern each. No production servers are touched.
 - [x] 4.3 Backup covers backhaul/alerts/carrier/wss/autopool/peer_link/setup/tls + units; restore refuses archives escaping allowed dirs and saves a pre-restore safety backup (backup/restore CLI, schedule and panel UI already existed)
 
 ## Phase 5 - Anti-censorship
-- [ ] 5.1 Carrier advisor: from tunnel-health probes, recommend/rotate carrier (advisory by default,
+- [x] 5.1 Carrier advisor: per-carrier uptime stats, advice only (never auto-switches), /api/carrier/advice + Settings card
       never auto-switch; carrier stays manual per project rule)
-- [ ] 5.2 Port/SNI suggestion helper (pure function + tests)
+- [x] 5.2 Free-port and SNI suggestion helper (/api/suggest), pure logic + tests
 
 ## Phase 6 - Maintainability
 - [ ] 6.1 Extract inline JS from index.html into `app.js` served statically (no behavior change)

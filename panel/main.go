@@ -275,6 +275,8 @@ func main() {
 	mux.HandleFunc("GET "+base+"/metrics", handleMetrics)
 	mux.HandleFunc("GET "+base+"/api/metrics-token", requireAuth(handleMetricsTokenGet))
 	mux.HandleFunc("POST "+base+"/api/metrics-token", requireAuth(requireCSRF(handleMetricsTokenPost)))
+	mux.HandleFunc("GET "+base+"/api/carrier/advice", requireAuth(handleCarrierAdvice))
+	mux.HandleFunc("GET "+base+"/api/suggest", requireAuth(handleSuggest))
 	mux.HandleFunc("GET "+base+"/api/2fa", requireAuth(handle2FAStatus))
 	mux.HandleFunc("POST "+base+"/api/2fa/setup", requireAuth(requireCSRF(handle2FASetup)))
 	mux.HandleFunc("POST "+base+"/api/2fa/enable", requireAuth(requireCSRF(handle2FAEnable)))
