@@ -349,7 +349,9 @@ func TestValidTagRejectsURLTricks(t *testing.T) {
 }
 
 func TestLatestFallbackRejectsOddTag(t *testing.T) {
-	defer func(a func() ([]ghRelease, error), b func() (string, error)) { releasesFetcher, latestTagFetcher = a, b }(releasesFetcher, latestTagFetcher)
+	defer func(a func() ([]ghRelease, error), b func() (string, error)) {
+		releasesFetcher, latestTagFetcher = a, b
+	}(releasesFetcher, latestTagFetcher)
 	releasesFetcher = func() ([]ghRelease, error) { return nil, errors.New("api down") }
 	latestTagFetcher = func() (string, error) { return "x/../../../other/repo/releases/download/t", nil }
 	if tag, _ := latestReleaseTag(); tag != "" {

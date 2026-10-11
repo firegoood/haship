@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"   # weekly: catches upstream/kernel drift in the lab tests
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: panel/go.mod
+          check-latest: true
+          cache-dependency-path: panel/go.sum
+      - name: gofmt (whole tree)
+        run: |
+          bad=$(gofmt -l panel/)
+          if [ -n "$bad" ]; then echo "gofmt needed:"; echo "$bad"; exit 1; fi
+      - name: go vet
+        run: cd panel && go vet ./...
+      - name: go build
+        run: cd panel && go build ./...
+      - name: go test (race)
+        run: cd panel && go test -race -count=1 ./...
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n
+        run: |
+          for f in hashem.sh hashem-backhaul.sh install.sh; do bash -n "$f"; done
+      - name: hermetic shell tests
+        run: |
+          # the netns lab tests run in the separate `lab` job below.
+          fail=0
+          for t in tests/test_*.sh; do
+            case "$t" in *test_backhaul_e2e.sh|*test_revpath_lab.sh) continue;; esac
+            echo "== $t"
+            bash "$t" || fail=1
+          done
+          exit $fail
+
+  lab:
+    # Real Backhaul v0.7.2 hub/spoke and GRE reverse-path labs in private
+    # network namespaces (never touches the runner's interfaces or firewall).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned Backhaul v0.7.2 (sha256 verified)
+        run: |
+          mkdir -p /tmp/backhaul-rel && cd /tmp/backhaul-rel
+          curl -fsSL -o bh.tgz https://github.com/Musixal/Backhaul/releases/download/v0.7.2/backhaul_linux_amd64.tar.gz
+          echo "57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc  bh.tgz" | sha256sum -c -
+          tar xzf bh.tgz
+          ./backhaul -v
+      - name: Backhaul e2e (handshake, data, wrong token, kill -9 recovery)
+        run: sudo env "PATH=$PATH" bash tests/test_backhaul_e2e.sh
+      - name: Reverse-path lab (GRE + rp_filter/firewall faults)
+        run: sudo env "PATH=$PATH" bash tests/test_revpath_lab.sh

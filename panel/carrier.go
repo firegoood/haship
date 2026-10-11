@@ -410,4 +410,3 @@ func applyCarrierMode(t string) (string, error) {
 	out, err := runHashemCarrierCmd("set", t)
 	return string(out), err
 }
-

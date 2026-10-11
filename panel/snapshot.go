@@ -497,8 +497,12 @@ func snapshotTick() bool {
 		return false
 	}
 	defer snapBuilding.Store(false)
-	snapPtr.Store(buildSnapshot())
+	snap := buildSnapshot()
+	snapPtr.Store(snap)
 	snapTicks.Add(1)
+	alertsOnSnapshot(snap)
+	historyOnSnapshot(snap)
+	carrierAdvisorOnSnapshot(snap)
 	return true
 }
 

@@ -63,8 +63,8 @@ type BenchmarkAutoPilotRequest struct {
 }
 
 var (
-	benchmarkMu          sync.RWMutex
-	lastBenchmarkReport  *BenchmarkReport
+	benchmarkMu           sync.RWMutex
+	lastBenchmarkReport   *BenchmarkReport
 	autoPilotTriggerCount int
 	lastAutoPilotSwitch   string
 )

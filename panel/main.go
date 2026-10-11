@@ -5,9 +5,9 @@ package main
 // setup in setup.go, dashboard metrics in dashboard.go.
 
 import (
-	"context"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/rand"
 	"embed"
 	"encoding/json"
@@ -17,14 +17,16 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
-//go:embed index.html fonts.css tokens.css base.css enterprise.css favicon.png xterm.js xterm-fit.js xterm-search.js xterm.css fonts/vazirmatn.woff2
+//go:embed index.html app.js fonts.css tokens.css base.css enterprise.css favicon.png xterm.js xterm-fit.js xterm-search.js xterm.css fonts/vazirmatn.woff2
 var panelFS embed.FS
 
 var configDir = "/etc/gre-panel"
@@ -50,6 +52,8 @@ type panelConfig struct {
 	// TerminalEnabled gates the Phase 3 interactive terminal tab
 	// (feature flag, default off; user enables after testing).
 	TerminalEnabled bool `json:"terminal_enabled,omitempty"`
+	// TerminalAllowIPs limits who may open the shell (IPs/CIDRs; empty = any).
+	TerminalAllowIPs []string `json:"terminal_allow_ips,omitempty"`
 	// TLSPort is the HTTPS listener port (default 7443). HTTP stays on Port.
 	TLSPort int `json:"tls_port,omitempty"`
 	// DebugEnabled mounts /debug/pprof behind auth (also HASHEM_PPROF=1).
@@ -57,6 +61,17 @@ type panelConfig struct {
 	// RevPathAuto enables automatic application of reverse-path fixes
 	// (rate-limited; report-only when false, the default).
 	RevPathAuto bool `json:"revpath_auto,omitempty"`
+	// Optional TOTP 2FA (off by default). Secret and recovery hashes live in
+	// panel.json (0600) like the password hash.
+	// IdleTimeoutMin logs a session out after this many minutes without user
+	// activity (0 = off, the default).
+	IdleTimeoutMin int `json:"idle_timeout_min,omitempty"`
+	// MetricsToken enables GET /metrics (Prometheus) for scrapers using a
+	// bearer token; empty = endpoint disabled (404).
+	MetricsToken   string   `json:"metrics_token,omitempty"`
+	TOTPEnabled    bool     `json:"totp_enabled,omitempty"`
+	TOTPSecret     string   `json:"totp_secret,omitempty"`
+	RecoveryHashes []string `json:"recovery_hashes,omitempty"`
 }
 
 func termEnabled() bool { return cfg.TerminalEnabled }
@@ -73,7 +88,7 @@ var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
 	// go build -ldflags "-X main.panelVersion=panel-rN"
-	panelVersion = "v0.1.3"
+	panelVersion = "v1.1.0"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -229,6 +244,7 @@ func main() {
 	mux := http.NewServeMux()
 	panelMux = mux
 	mux.HandleFunc("GET "+base+"/", serveIndex)
+	mux.HandleFunc("GET "+base+"/app.js", serveAsset("app.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/tokens.css", serveAsset("tokens.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/fonts.css", serveAsset("fonts.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/fonts/vazirmatn.woff2", serveAsset("fonts/vazirmatn.woff2", "font/woff2"))
@@ -241,6 +257,9 @@ func main() {
 	mux.HandleFunc("GET "+base+"/xterm.css", serveAsset("xterm.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/api/term/ws", requireAuth(handleTermWS))
 	mux.HandleFunc("GET "+base+"/api/term/status", requireAuth(handleTermStatus))
+	mux.HandleFunc("POST "+base+"/api/term/ticket", requireAuth(requireCSRF(handleTermTicket)))
+	mux.HandleFunc("GET "+base+"/api/term/allowlist", requireAuth(handleTermAllowGet))
+	mux.HandleFunc("POST "+base+"/api/term/allowlist", requireAuth(requireCSRF(handleTermAllowPost)))
 	mux.HandleFunc("POST "+base+"/api/term/kill", requireAuth(requireCSRF(handleTermKill)))
 	mux.HandleFunc("POST "+base+"/api/term/enable", requireAuth(requireCSRF(handleTermEnable)))
 	mux.HandleFunc("GET "+base+"/api/health", handleHealth)
@@ -250,6 +269,21 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/logout", handleLogout)
 	mux.HandleFunc("GET "+base+"/api/logs", requireAuth(handleLogs))
 	mux.HandleFunc("GET "+base+"/api/errors", requireAuth(handleErrors))
+	mux.HandleFunc("GET "+base+"/api/audit", requireAuth(handleAuditGet))
+	mux.HandleFunc("GET "+base+"/api/session-settings", requireAuth(handleSessionSettingsGet))
+	mux.HandleFunc("POST "+base+"/api/session-settings", requireAuth(requireCSRF(handleSessionSettingsPost)))
+	mux.HandleFunc("GET "+base+"/api/alerts", requireAuth(handleAlertsGet))
+	mux.HandleFunc("POST "+base+"/api/alerts", requireAuth(requireCSRF(handleAlertsPost)))
+	mux.HandleFunc("GET "+base+"/api/history", requireAuth(handleHistoryGet))
+	mux.HandleFunc("GET "+base+"/metrics", handleMetrics)
+	mux.HandleFunc("GET "+base+"/api/metrics-token", requireAuth(handleMetricsTokenGet))
+	mux.HandleFunc("POST "+base+"/api/metrics-token", requireAuth(requireCSRF(handleMetricsTokenPost)))
+	mux.HandleFunc("GET "+base+"/api/carrier/advice", requireAuth(handleCarrierAdvice))
+	mux.HandleFunc("GET "+base+"/api/suggest", requireAuth(handleSuggest))
+	mux.HandleFunc("GET "+base+"/api/2fa", requireAuth(handle2FAStatus))
+	mux.HandleFunc("POST "+base+"/api/2fa/setup", requireAuth(requireCSRF(handle2FASetup)))
+	mux.HandleFunc("POST "+base+"/api/2fa/enable", requireAuth(requireCSRF(handle2FAEnable)))
+	mux.HandleFunc("POST "+base+"/api/2fa/disable", requireAuth(requireCSRF(handle2FADisable)))
 	mux.HandleFunc("POST "+base+"/api/action", requireAuth(requireCSRF(handleAction)))
 	mux.HandleFunc("POST "+base+"/api/password", requireAuth(requireCSRF(handlePassword)))
 	mux.HandleFunc("GET "+base+"/api/setup", requireAuth(handleSetupGet))
@@ -314,6 +348,8 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Printf("gre-panel listening on %s under /%s", addr, cfg.BasePath)
+	histStop := make(chan struct{})
+	startHistoryPersistence(histStop)
 	startSnapshotCollector(context.Background())
 	startSdWatchdog(context.Background())
 	go startHTTPSListener()
@@ -347,7 +383,20 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 	applyServerLimits(srv)
-	log.Fatal(srv.Serve(ln))
+	// systemd stop sends SIGTERM: flush history, then stop serving.
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigc
+		close(histStop)
+		time.Sleep(300 * time.Millisecond) // let the final history write finish
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }
 
 func serveAsset(name, ctype string) http.HandlerFunc {
@@ -410,6 +459,7 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 	for _, f := range []string{"tokens.css", "base.css", "enterprise.css"} {
 		page = strings.ReplaceAll(page, `href="`+f+`"`, `href="`+f+`?v=`+panelVersion+`"`)
 	}
+	page = strings.ReplaceAll(page, `src="app.js"`, `src="app.js?v=`+panelVersion+`"`)
 	body := []byte(page)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && len(body) > 1024 {

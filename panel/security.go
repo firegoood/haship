@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -84,28 +83,30 @@ func requireCSRF(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		next(w, r)
+		rec := &statusRecorder{ResponseWriter: w}
+		next(rec, r)
+		auditMutation(r, rec.status)
 	}
 }
 
 // ---- Password Strength Validation (NIST 800-63B Compliant) ----
 
 var commonWeakPasswords = map[string]struct{}{
-	"12345678":         {},
-	"123456789":        {},
-	"1234567890":       {},
-	"password":         {},
-	"password123":      {},
-	"password1234":     {},
-	"password12345":    {},
-	"admin123456":      {},
-	"admin12345678":    {},
-	"administrator":    {},
-	"qwerty123456":     {},
-	"hashempanel123":   {},
-	"grepanel123456":   {},
-	"rootroot1234":     {},
-	"welcome123456":    {},
+	"12345678":       {},
+	"123456789":      {},
+	"1234567890":     {},
+	"password":       {},
+	"password123":    {},
+	"password1234":   {},
+	"password12345":  {},
+	"admin123456":    {},
+	"admin12345678":  {},
+	"administrator":  {},
+	"qwerty123456":   {},
+	"hashempanel123": {},
+	"grepanel123456": {},
+	"rootroot1234":   {},
+	"welcome123456":  {},
 }
 
 // ValidatePasswordStrength enforces strong passwords (minimum 12 chars, upper, lower, digit, symbol).
@@ -290,7 +291,8 @@ func LogSecurityAudit(event, user, ip, details string) {
 
 	log.Printf("[AUDIT] %s", strings.TrimSpace(entry))
 
-	auditPath := filepath.Join(configDir, "security-audit.log")
+	auditPath := auditLogPath()
+	rotateAuditLocked(auditPath)
 	f, err := os.OpenFile(auditPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err == nil {
 		_, _ = f.WriteString(entry)

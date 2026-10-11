@@ -144,7 +144,6 @@ func isOfficialGitHubURL(u string) bool {
 		host == "gh.ddlc.top" || host == "fastly.jsdelivr.net"
 }
 
-
 // manifestFetcher is swapped in tests.
 var manifestFetcher = fetchChecksumManifest
 

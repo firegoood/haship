@@ -10,6 +10,7 @@ SRC=$(mktemp -d); trap 'rm -rf "$SRC"' EXIT
   echo 'RED= GREEN= CYAN= YELLOW='
   awk '/^panel_limits_for_ram\(\)/,/^}/' hashem.sh
   awk '/^unit_set_directive\(\)/,/^}/' hashem.sh
+  awk '/^panel_supports_watchdog\(\)/,/^}/' hashem.sh
   awk '/^apply_panel_unit_limits\(\)/,/^}/' hashem.sh
   awk '/^apply_frp_unit_weight\(\)/,/^}/' hashem.sh
 } > "$SRC/funcs.sh"
@@ -45,6 +46,9 @@ Environment=FOO=bar
 [Install]
 WantedBy=multi-user.target
 EOF
+# a panel binary that implements sd_notify (contains NOTIFY_SOCKET) may use the watchdog
+printf '\x7fELF...NOTIFY_SOCKET...' > "$SRC/new-panel"
+export PANEL_BIN="$SRC/new-panel"
 apply_panel_unit_limits "$U" "450M 550M"
 for kv in "OOMScoreAdjust=-900" "Nice=-5" "CPUWeight=200" "MemoryHigh=450M" \
           "MemoryMax=550M" "WatchdogSec=30" "NotifyAccess=main" "LimitNOFILE=1048576" \
@@ -61,6 +65,23 @@ check "idempotent" "$before" "$(md5sum < "$U")"
 apply_panel_unit_limits "$U" "280M 350M"
 check "re-tier high" "1" "$(grep -cE '^MemoryHigh=280M$' "$U")"
 check "re-tier max"  "1" "$(grep -cE '^MemoryMax=350M$' "$U")"
+
+# an OLD binary without sd_notify must NOT get WatchdogSec (systemd would kill it every 30 s),
+# and a unit that already has it must be cleaned up
+printf '\x7fELF...old panel without the heartbeat...' > "$SRC/old-panel"
+export PANEL_BIN="$SRC/old-panel"
+apply_panel_unit_limits "$U" "450M 550M"
+check "old binary: no WatchdogSec" "0" "$(grep -cE '^WatchdogSec=' "$U")"
+check "old binary: no NotifyAccess" "0" "$(grep -cE '^NotifyAccess=' "$U")"
+check "old binary: other limits kept" "1" "$(grep -cE '^MemoryMax=550M$' "$U")"
+grep -q "Environment=FOO=bar" "$U" || { echo "FAIL: user extra lost on old-binary path"; fail=1; }
+export PANEL_BIN="$SRC/missing-binary"
+apply_panel_unit_limits "$U" "450M 550M"
+check "missing binary: no WatchdogSec" "0" "$(grep -cE '^WatchdogSec=' "$U")"
+# upgrading the binary turns the watchdog back on
+export PANEL_BIN="$SRC/new-panel"
+apply_panel_unit_limits "$U" "450M 550M"
+check "new binary: WatchdogSec back" "1" "$(grep -cE '^WatchdogSec=30$' "$U")"
 
 # FRP weight
 F="$SRC/frps.service"

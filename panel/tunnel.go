@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -77,7 +78,7 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 		if _, err := exec.LookPath("journalctl"); err == nil {
 			out, err := exec.Command("journalctl", args...).CombinedOutput()
 			if err == nil && len(bytes.TrimSpace(out)) > 0 {
-				raw := string(out)
+				raw := redactLogSecrets(string(out))
 				writeJSON(w, map[string]any{"logs": raw, "lines": splitLogLines(raw), "svc": "stream", "findings": summarizeLogs(raw)})
 				return
 			}
@@ -109,7 +110,7 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	if _, err := exec.LookPath("journalctl"); err == nil {
 		out, err := exec.Command("journalctl", "-u", unit, "-n", strconv.Itoa(lines), "--no-pager").CombinedOutput()
 		if err == nil {
-			raw := string(out)
+			raw := redactLogSecrets(string(out))
 			writeJSON(w, map[string]any{"logs": raw, "lines": splitLogLines(raw), "svc": svc, "findings": summarizeLogs(raw)})
 			return
 		}
@@ -117,7 +118,7 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	// fallback: log files
 	for _, q := range []string{"/var/log/" + svc + ".log", "/root/" + svc + ".log"} {
 		if data, err := os.ReadFile(q); err == nil {
-			raw := string(data)
+			raw := redactLogSecrets(string(data))
 			writeJSON(w, map[string]any{"logs": raw, "lines": splitLogLines(raw), "svc": svc, "findings": summarizeLogs(raw)})
 			return
 		}
@@ -667,6 +668,21 @@ func localStatusFrom(v *hostView) tunnelStatus {
 		}
 	}
 	if st.Role == "" {
+		// per-peer Backhaul units (backhaul-server-N) created for extra peers
+		var per []string
+		for u, on := range v.active {
+			if on && strings.HasPrefix(u, "backhaul-server-") {
+				per = append(per, u)
+			}
+		}
+		if len(per) > 0 {
+			sort.Strings(per) // deterministic: lowest unit name wins
+			st.FrpUp = true
+			st.FrpSvc = per[0]
+			st.Role = "iran (backhaul)"
+		}
+	}
+	if st.Role == "" {
 		// fall back to config presence, but only for an engine that is
 		// actually installed; a stale config alone must not claim a role
 		for _, c := range staleConfigCandidates() {
@@ -702,45 +718,33 @@ func localStatusFrom(v *hostView) tunnelStatus {
 			}
 		}
 		if data, err := os.ReadFile(bhPath); err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				trimmed := strings.TrimSpace(line)
-				if strings.HasPrefix(trimmed, "transport") {
-					parts := strings.Split(trimmed, "=")
-					if len(parts) >= 2 {
-						st.Transport = strings.Trim(strings.TrimSpace(parts[1]), `"' `)
+			bc := parseBackhaulConf(string(data))
+			if bc.Transport != "" {
+				st.Transport = bc.Transport
+			}
+			if bc.RemoteAddr != "" {
+				if host, portStr, err := net.SplitHostPort(bc.RemoteAddr); err == nil {
+					st.RemotePub = host
+					st.Gre.PeerIP = host
+					if v, err := strconv.Atoi(portStr); err == nil {
+						st.BindPort = v
+						st.FrpPort = v
 					}
 				}
-				if strings.HasPrefix(trimmed, "remote_addr") {
-					parts := strings.SplitN(trimmed, "=", 2)
-					if len(parts) == 2 {
-						val := strings.Trim(strings.TrimSpace(parts[1]), `"' `)
-						host, portStr, err := net.SplitHostPort(val)
-						if err == nil {
-							st.RemotePub = host
-							st.Gre.PeerIP = host
-							if v, err := strconv.Atoi(portStr); err == nil {
-								st.BindPort = v
-								st.FrpPort = v
-							}
-						}
-					}
-				} else if strings.HasPrefix(trimmed, "bind_addr") {
-					parts := strings.Split(trimmed, ":")
-					if len(parts) >= 2 {
-						pStr := strings.Trim(parts[len(parts)-1], `" ')`)
-						if v, err := strconv.Atoi(pStr); err == nil {
-							st.BindPort = v
-							st.FrpPort = v
-						}
+			}
+			if bc.BindAddr != "" {
+				if _, portStr, err := net.SplitHostPort(bc.BindAddr); err == nil {
+					if v, err := strconv.Atoi(portStr); err == nil {
+						st.BindPort = v
+						st.FrpPort = v
 					}
 				}
-				if strings.HasPrefix(trimmed, `"`) {
-					pStr := strings.Trim(trimmed, `", `)
-					st.Proxies = append(st.Proxies, pStr)
-					basePart := strings.Split(strings.Split(pStr, "-")[0], "=")[0]
-					if v, err := strconv.Atoi(basePart); err == nil {
-						st.ProxyPorts = append(st.ProxyPorts, v)
-					}
+			}
+			for _, pStr := range bc.Ports {
+				st.Proxies = append(st.Proxies, pStr)
+				basePart := strings.Split(strings.Split(pStr, "-")[0], "=")[0]
+				if v, err := strconv.Atoi(basePart); err == nil {
+					st.ProxyPorts = append(st.ProxyPorts, v)
 				}
 			}
 		}
@@ -856,6 +860,39 @@ func grePeerInner(cidr string) string {
 	return fmt.Sprintf("%s.%s.%s.%d", parts[0], parts[1], parts[2], last)
 }
 
+// engineUnitDir is where systemd unit files for tunnel engines live (tests
+// point it at a throwaway dir).
+var engineUnitDir = "/etc/systemd/system"
+
+// preflightEngineSwitch verifies the target engine can actually run on this
+// host BEFORE any running service is stopped: binary installed and, for
+// Backhaul, the systemd unit written by hashem.sh present. A failed switch
+// must never take down the working tunnel.
+func preflightEngineSwitch(engine string, isIran bool) error {
+	switch engine {
+	case "frp":
+		bin := "frpc"
+		if isIran {
+			bin = "frps"
+		}
+		if !engineBinaryPresent(bin) {
+			return fmt.Errorf("%s binary not found (install it with `hashem` first); nothing was changed", bin)
+		}
+	case "backhaul", "gre-backhaul":
+		if !engineBinaryPresent("backhaul") {
+			return fmt.Errorf("backhaul binary not found (install it with `hashem` first); nothing was changed")
+		}
+		unit := "backhaul-client"
+		if isIran {
+			unit = "backhaul-server"
+		}
+		if _, err := os.Stat(filepath.Join(engineUnitDir, unit+".service")); err != nil {
+			return fmt.Errorf("systemd unit %s.service is missing (run the Backhaul setup in `hashem` first); nothing was changed", unit)
+		}
+	}
+	return nil
+}
+
 // switchTunnelEngine changes the active tunnel engine live without reinstalling from scratch.
 func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 	targetEngine = strings.ToLower(strings.TrimSpace(targetEngine))
@@ -969,6 +1006,10 @@ func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 		}
 	}
 
+	if err := preflightEngineSwitch(targetEngine, isIran); err != nil {
+		return "", err
+	}
+
 	var outMsg strings.Builder
 	outMsg.WriteString(fmt.Sprintf("Switching engine to %s (%s)...\n", targetEngine, targetTransport))
 
@@ -981,7 +1022,9 @@ func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 	switch targetEngine {
 	case "frp":
 		// Ensure GRE is active
-		_ = runSystemctl("restart", "gre-tunnel")
+		if err := runSystemctl("restart", "gre-tunnel"); err != nil {
+			return outMsg.String(), fmt.Errorf("systemctl restart %s failed: %w", "gre-tunnel", err)
+		}
 		if isIran {
 			// Write frps.toml
 			_, maxPool := effectivePoolValues()
@@ -993,10 +1036,13 @@ auth.token = %q
 transport.heartbeatTimeout = 90
 transport.maxPoolCount = %d
 `, port, token, tcpMuxTomlLines(), maxPool)
-			_ = os.MkdirAll(frpDir, 0755)
-			_ = os.WriteFile(filepath.Join(frpDir, "frps.toml"), []byte(frpsToml), 0644)
+			if err := writeEngineFile(frpDir, "frps.toml", frpsToml); err != nil {
+				return outMsg.String(), err
+			}
 			ensureFRPServiceUnits("frps")
-			_ = runSystemctl("restart", "frps")
+			if err := runSystemctl("restart", "frps"); err != nil {
+				return outMsg.String(), fmt.Errorf("systemctl restart %s failed: %w", "frps", err)
+			}
 			_ = runSystemctl("enable", "frps")
 			outMsg.WriteString("frps service configured and started with high-concurrency limits.\n")
 		} else {
@@ -1077,10 +1123,13 @@ localPort = %d
 remotePort = %d
 `, p, p, p, ppLine, encLine, compLine, p, p, p))
 			}
-			_ = os.MkdirAll(frpDir, 0755)
-			_ = os.WriteFile(filepath.Join(frpDir, "frpc.toml"), []byte(frpcBuf.String()), 0644)
+			if err := writeEngineFile(frpDir, "frpc.toml", frpcBuf.String()); err != nil {
+				return outMsg.String(), err
+			}
 			ensureFRPServiceUnits("frpc")
-			_ = runSystemctl("restart", "frpc")
+			if err := runSystemctl("restart", "frpc"); err != nil {
+				return outMsg.String(), fmt.Errorf("systemctl restart %s failed: %w", "frpc", err)
+			}
 			_ = runSystemctl("enable", "frpc")
 			outMsg.WriteString("frpc service configured and started with high-concurrency limits.\n")
 		}
@@ -1089,30 +1138,48 @@ remotePort = %d
 		// Standalone Backhaul (no GRE)
 		_ = runSystemctl("stop", "gre-tunnel")
 		if isIran {
-			_ = writeBackhaulServerConfig(filepath.Join(backhaulDir, "config.toml"), fmt.Sprintf("0.0.0.0:%d", port), targetTransport, token, rawPorts)
-			_ = runSystemctl("restart", "backhaul-server")
+			if err := writeBackhaulServerConfig(filepath.Join(backhaulDir, "config.toml"), fmt.Sprintf("0.0.0.0:%d", port), targetTransport, token, rawPorts); err != nil {
+				return outMsg.String(), fmt.Errorf("write backhaul config: %w", err)
+			}
+			if err := runSystemctl("restart", "backhaul-server"); err != nil {
+				return outMsg.String(), fmt.Errorf("systemctl restart %s failed: %w", "backhaul-server", err)
+			}
 			_ = runSystemctl("enable", "backhaul-server")
 			outMsg.WriteString("backhaul-server configured and started.\n")
 		} else {
 			remoteAddr := fmt.Sprintf("%s:%d", remotePub, port)
-			_ = writeBackhaulClientConfig(filepath.Join(backhaulDir, "client.toml"), remoteAddr, targetTransport, token)
-			_ = runSystemctl("restart", "backhaul-client")
+			if err := writeBackhaulClientConfig(filepath.Join(backhaulDir, "client.toml"), remoteAddr, targetTransport, token); err != nil {
+				return outMsg.String(), fmt.Errorf("write backhaul config: %w", err)
+			}
+			if err := runSystemctl("restart", "backhaul-client"); err != nil {
+				return outMsg.String(), fmt.Errorf("systemctl restart %s failed: %w", "backhaul-client", err)
+			}
 			_ = runSystemctl("enable", "backhaul-client")
 			outMsg.WriteString("backhaul-client configured and started.\n")
 		}
 
 	case "gre-backhaul":
 		// GRE + Backhaul
-		_ = runSystemctl("restart", "gre-tunnel")
+		if err := runSystemctl("restart", "gre-tunnel"); err != nil {
+			return outMsg.String(), fmt.Errorf("systemctl restart %s failed: %w", "gre-tunnel", err)
+		}
 		if isIran {
-			_ = writeBackhaulServerConfig(filepath.Join(backhaulDir, "config.toml"), fmt.Sprintf("0.0.0.0:%d", port), targetTransport, token, rawPorts)
-			_ = runSystemctl("restart", "backhaul-server")
+			if err := writeBackhaulServerConfig(filepath.Join(backhaulDir, "config.toml"), fmt.Sprintf("0.0.0.0:%d", port), targetTransport, token, rawPorts); err != nil {
+				return outMsg.String(), fmt.Errorf("write backhaul config: %w", err)
+			}
+			if err := runSystemctl("restart", "backhaul-server"); err != nil {
+				return outMsg.String(), fmt.Errorf("systemctl restart %s failed: %w", "backhaul-server", err)
+			}
 			_ = runSystemctl("enable", "backhaul-server")
 			outMsg.WriteString("backhaul-server (over GRE) configured and started.\n")
 		} else {
 			remoteAddr := fmt.Sprintf("%s:%d", peerGre, port)
-			_ = writeBackhaulClientConfig(filepath.Join(backhaulDir, "client.toml"), remoteAddr, targetTransport, token)
-			_ = runSystemctl("restart", "backhaul-client")
+			if err := writeBackhaulClientConfig(filepath.Join(backhaulDir, "client.toml"), remoteAddr, targetTransport, token); err != nil {
+				return outMsg.String(), fmt.Errorf("write backhaul config: %w", err)
+			}
+			if err := runSystemctl("restart", "backhaul-client"); err != nil {
+				return outMsg.String(), fmt.Errorf("systemctl restart %s failed: %w", "backhaul-client", err)
+			}
 			_ = runSystemctl("enable", "backhaul-client")
 			outMsg.WriteString("backhaul-client (over GRE) configured and started.\n")
 		}
@@ -1130,6 +1197,18 @@ remotePort = %d
 	go runTunnelHealthOnce()
 
 	return outMsg.String(), nil
+}
+
+// writeEngineFile writes an engine config (mode 0600: it contains the token)
+// and reports any failure instead of claiming success.
+func writeEngineFile(dir, name, content string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Join(dir, name), err)
+	}
+	return nil
 }
 
 // ensureFRPServiceUnits enforces high-concurrency systemd limits (LimitNOFILE, TasksMax, Restart=always)

@@ -28,18 +28,18 @@ type perfConfig struct {
 
 // autoPoolState mirrors the auto_pool.json that hashem.sh autopool_tick maintains.
 type autoPoolState struct {
-	Pool             int    `json:"pool"`
-	MaxPool          int    `json:"max_pool"`
-	AppliedPool      int    `json:"applied_pool"`
-	QuietTicks       int    `json:"quiet_ticks"`
-	LastTick         int64  `json:"last_tick"`
-	LastChange       int64  `json:"last_change"`
-	LastRestart      int64  `json:"last_restart"`
-	LastDecision     string `json:"last_decision"`
-	LastReason       string `json:"last_reason"`
-	ErrorsLastTick   int    `json:"errors_last_tick"`
-	ActiveConns      int    `json:"active_conns"`
-	FRPSRestartNeeded bool  `json:"frps_restart_needed"`
+	Pool              int    `json:"pool"`
+	MaxPool           int    `json:"max_pool"`
+	AppliedPool       int    `json:"applied_pool"`
+	QuietTicks        int    `json:"quiet_ticks"`
+	LastTick          int64  `json:"last_tick"`
+	LastChange        int64  `json:"last_change"`
+	LastRestart       int64  `json:"last_restart"`
+	LastDecision      string `json:"last_decision"`
+	LastReason        string `json:"last_reason"`
+	ErrorsLastTick    int    `json:"errors_last_tick"`
+	ActiveConns       int    `json:"active_conns"`
+	FRPSRestartNeeded bool   `json:"frps_restart_needed"`
 }
 
 type perfStatusResponse struct {

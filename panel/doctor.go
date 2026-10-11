@@ -18,21 +18,21 @@ import (
 )
 
 type doctorReport struct {
-	Timestamp       string          `json:"timestamp"`
-	Role            string          `json:"role"`
-	PeerGREIP       string          `json:"peer_gre_ip"`
-	TunnelName      string          `json:"tunnel_name"`
-	InterfaceUp     bool            `json:"interface_up"`
-	FRPUp           bool            `json:"frp_up"`
-	PingResult      pingSummary     `json:"ping_result"`
-	MTUResult       mtuSummary      `json:"mtu_result"`
-	KernelAudit     kernelAudit     `json:"kernel_audit"`
-	SpeedResult     speedSummary    `json:"speed_result"`
-	Score           int             `json:"score"`
-	Rating          string          `json:"rating"` // "excellent", "good", "warning", "critical"
-	Issues          []string        `json:"issues"`
-	Recommendations []string        `json:"recommendations"`
-	FixAvailable    bool            `json:"fix_available"`
+	Timestamp       string       `json:"timestamp"`
+	Role            string       `json:"role"`
+	PeerGREIP       string       `json:"peer_gre_ip"`
+	TunnelName      string       `json:"tunnel_name"`
+	InterfaceUp     bool         `json:"interface_up"`
+	FRPUp           bool         `json:"frp_up"`
+	PingResult      pingSummary  `json:"ping_result"`
+	MTUResult       mtuSummary   `json:"mtu_result"`
+	KernelAudit     kernelAudit  `json:"kernel_audit"`
+	SpeedResult     speedSummary `json:"speed_result"`
+	Score           int          `json:"score"`
+	Rating          string       `json:"rating"` // "excellent", "good", "warning", "critical"
+	Issues          []string     `json:"issues"`
+	Recommendations []string     `json:"recommendations"`
+	FixAvailable    bool         `json:"fix_available"`
 	// RevPath is the cached read-only reverse-path diagnosis (never probes here).
 	RevPath []revPathEntry `json:"revpath,omitempty"`
 }
@@ -149,15 +149,15 @@ func runFullDiagnostics() *doctorReport {
 	}
 
 	rep := &doctorReport{
-		Timestamp:   time.Now().UTC().Format(time.RFC3339),
-		Role:        st.Role,
-		PeerGREIP:   peerIP,
-		TunnelName:  "gre-tunnel",
-		InterfaceUp: st.Gre.Exists,
-		FRPUp:       st.FrpUp,
-		Score:       100,
-		Rating:      "excellent",
-		Issues:      []string{},
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		Role:            st.Role,
+		PeerGREIP:       peerIP,
+		TunnelName:      "gre-tunnel",
+		InterfaceUp:     st.Gre.Exists,
+		FRPUp:           st.FrpUp,
+		Score:           100,
+		Rating:          "excellent",
+		Issues:          []string{},
 		Recommendations: []string{},
 	}
 
@@ -188,6 +188,13 @@ func runFullDiagnostics() *doctorReport {
 	if st.FrpSvc == "frpc" && frpcLoginEOF() {
 		rep.Issues = append(rep.Issues, "frpc login fails with 'connect to server error: EOF'")
 		rep.Recommendations = append(rep.Recommendations, errCatalog["E-FRP-10"].Hint)
+	}
+
+	// 1c. Backhaul failure signatures in the unit's recent journal (hint only)
+	if issue, rec := backhaulDoctorIssue(st); issue != "" {
+		rep.Score -= 10
+		rep.Issues = append(rep.Issues, issue)
+		rep.Recommendations = append(rep.Recommendations, rec)
 	}
 
 	// 2. Kernel sysctl & MSS Clamping Audit (always audited)
@@ -677,4 +684,40 @@ func frpcLoginEOF() bool {
 		}
 	}
 	return false
+}
+
+// classifyBackhaulLog returns the E-BH-* code of the newest Backhaul outcome
+// in raw journal text, or "" when the last word was a healthy control channel
+// (an old failure followed by a successful handshake is a recovered tunnel).
+func classifyBackhaulLog(raw string) string {
+	lines := strings.Split(raw, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.ToLower(lines[i])
+		if strings.Contains(l, "control channel established successfully") ||
+			strings.Contains(l, "control channel successfully established") {
+			return ""
+		}
+		if code, _ := matchLogCode(lines[i]); strings.HasPrefix(code, "E-BH-") {
+			return code
+		}
+	}
+	return ""
+}
+
+// backhaulDoctorIssue reads the active Backhaul unit's recent journal
+// (read-only, bounded) and returns a doctor issue plus its recommendation.
+func backhaulDoctorIssue(st tunnelStatus) (issue, recommendation string) {
+	if !strings.HasPrefix(st.FrpSvc, "backhaul") {
+		return "", ""
+	}
+	out, err := runCmdTimeoutOut(5*time.Second, "journalctl", "-u", st.FrpSvc, "-n", "80", "--no-pager")
+	if err != nil {
+		return "", ""
+	}
+	code := classifyBackhaulLog(string(out))
+	if code == "" {
+		return "", ""
+	}
+	e := errCatalog[code]
+	return fmt.Sprintf("%s: %s (%s)", st.FrpSvc, e.Msg, code), e.Hint
 }

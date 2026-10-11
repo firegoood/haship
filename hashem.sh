@@ -5415,9 +5415,24 @@ apply_panel_unit_limits() { # $1=unit file [$2="HIGH MAX"]
     for kv in "OOMScoreAdjust=-900" "Nice=-5" "CPUWeight=200" "Restart=always" \
               "RestartSec=3" "LimitNOFILE=1048576" "LimitNPROC=512000" \
               "TasksMax=4096" "MemoryHigh=${high}" "MemoryMax=${max}" \
-              "WatchdogSec=30" "NotifyAccess=main" "StartLimitIntervalSec=0"; do
+              "StartLimitIntervalSec=0"; do
         unit_set_directive "$f" "${kv%%=*}" "${kv#*=}"
     done
+    # WatchdogSec makes systemd KILL a service that does not send WATCHDOG=1.
+    # Only a panel binary that implements sd_notify may run under it; an older
+    # binary (script updated before the panel) would be killed every 30 s.
+    if panel_supports_watchdog; then
+        unit_set_directive "$f" "WatchdogSec" "30"
+        unit_set_directive "$f" "NotifyAccess" "main"
+    else
+        sed -i -E '/^(WatchdogSec|NotifyAccess)=/d' "$f"
+    fi
+}
+
+# panel_supports_watchdog [binary]: true when the panel binary speaks sd_notify.
+panel_supports_watchdog() {
+    local b="${1:-${PANEL_BIN:-/usr/local/bin/gre-panel}}"
+    [[ -f "$b" ]] && grep -qa 'NOTIFY_SOCKET' "$b"
 }
 
 # FRP units get a LOWER CPUWeight than the panel (C2.6): tunnels keep full
@@ -5890,6 +5905,20 @@ except Exception:
     echo "$PEER"
 }
 
+# backhaul_session_ok <unit>: 0 unless the newest control-channel outcome in the
+# unit's journal is a failure. Backhaul restarts itself internally, so the unit
+# stays "active" across a dead session; the journal is the only signal.
+backhaul_session_ok() {
+    local unit="$1" line
+    while IFS= read -r line; do
+        case "${line,,}" in
+            *"control channel established successfully"*|*"control channel successfully established"*) return 0 ;;
+            *"failed to receive control channel response"*|*"invalid security token"*|*"failed to read from control channel"*|*"neither server nor client configuration"*) return 1 ;;
+        esac
+    done < <(journalctl -u "$unit" -n 80 --no-pager 2>/dev/null | tac)
+    return 0
+}
+
 watchdog_check() {
     init_watchdog_json
     local PEER_GRE
@@ -5909,7 +5938,21 @@ watchdog_check() {
 
     local FRP_NAME=""
     local FRP_OK=0
-    if [[ -f /etc/frp/frpc.toml ]] || systemctl list-unit-files 2>/dev/null | grep -q "^frpc\.service"; then
+    local BH_UNIT=""
+    if systemctl is-active --quiet backhaul-client 2>/dev/null; then
+        BH_UNIT="backhaul-client"
+    elif systemctl is-active --quiet backhaul-server 2>/dev/null; then
+        BH_UNIT="backhaul-server"
+    fi
+    if [[ -n "$BH_UNIT" ]] && ! systemctl is-active --quiet frpc 2>/dev/null && ! systemctl is-active --quiet frps 2>/dev/null; then
+        # Backhaul engine: unit state alone is not enough, check the session
+        FRP_NAME="$BH_UNIT"
+        if backhaul_session_ok "$BH_UNIT"; then
+            FRP_OK=1
+            # a healthy session proves the carrier works even if ICMP is filtered
+            [[ "$BH_UNIT" == "backhaul-client" ]] && GRE_OK=1
+        fi
+    elif [[ -f /etc/frp/frpc.toml ]] || systemctl list-unit-files 2>/dev/null | grep -q "^frpc\.service"; then
         FRP_NAME="frpc"
         systemctl is-active --quiet frpc 2>/dev/null && FRP_OK=1
     elif [[ -f /etc/frp/frps.toml ]] || systemctl list-unit-files 2>/dev/null | grep -q "^frps\.service"; then
@@ -5955,7 +5998,7 @@ except Exception:
     local DETAIL=""
     if [[ $GRE_OK -eq 1 && $FRP_OK -eq 1 ]]; then
         STATUS="up"
-        DETAIL="GRE ping OK ($PEER_GRE), FRP $FRP_NAME active"
+        DETAIL="GRE ping OK ($PEER_GRE), ${FRP_NAME:-FRP} active"
     else
         local ERR_PARTS=()
         if [[ $GRE_OK -ne 1 ]]; then
@@ -5966,7 +6009,7 @@ except Exception:
             fi
         fi
         if [[ $FRP_OK -ne 1 ]]; then
-            ERR_PARTS+=("FRP ${FRP_NAME:-service} inactive")
+            if [[ "$FRP_NAME" == backhaul-* ]]; then ERR_PARTS+=("Backhaul ${FRP_NAME} session down"); else ERR_PARTS+=("FRP ${FRP_NAME:-service} inactive"); fi
         fi
         DETAIL=$(IFS="; "; echo "${ERR_PARTS[*]}")
     fi
@@ -6059,7 +6102,7 @@ restart_all_lite() {
 
     # On foreign node (frpc client):
     local list=()
-    for u in /etc/systemd/system/gre-tunnel.service /etc/systemd/system/frpc.service; do
+    for u in /etc/systemd/system/gre-tunnel.service /etc/systemd/system/frpc.service /etc/systemd/system/backhaul-client.service; do
         [[ -f "$u" ]] || continue
         list+=("$(basename "$u")")
     done
@@ -6241,6 +6284,41 @@ except Exception:
     return 0
 }
 
+# backup_file_list: every config/unit worth restoring that exists on this host.
+# BK_ROOT (default empty) prefixes all paths so tests can use a throwaway tree.
+backup_file_list() {
+    local r="${BK_ROOT:-}" f
+    local -a pats=(
+        "$r"/etc/frp/*.toml
+        "$r"/etc/backhaul/*.toml
+        "$r"/etc/gre-panel/panel.json "$r"/etc/gre-panel/peers.json "$r"/etc/gre-panel/watchdog.json
+        "$r"/etc/gre-panel/perf.json "$r"/etc/gre-panel/backup.key
+        "$r"/etc/gre-panel/alerts.json "$r"/etc/gre-panel/carrier.json "$r"/etc/gre-panel/wss_carrier.json
+        "$r"/etc/gre-panel/auto_pool.json "$r"/etc/gre-panel/peer_link.json "$r"/etc/gre-panel/setup.json
+        "$r"/etc/gre-panel/rescue.json "$r"/etc/gre-panel/tls/*
+        "$r"/etc/systemd/system/gre-*.service "$r"/etc/systemd/system/frps*.service
+        "$r"/etc/systemd/system/frpc*.service "$r"/etc/systemd/system/backhaul-*.service
+    )
+    for f in "${pats[@]}"; do
+        [[ -f "$f" ]] && echo "$f"
+    done
+}
+
+# backup_listing_safe <listing-file>: 0 only if every entry stays inside the
+# directories a backup may contain (no absolute paths, no "..", no links out).
+backup_listing_safe() {
+    local line
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        case "$line" in
+            /*|*..*) return 1 ;;
+            etc/frp/*|etc/backhaul/*|etc/gre-panel/*|etc/systemd/system/*) ;;
+            *) return 1 ;;
+        esac
+    done < "$1"
+    return 0
+}
+
 backup_now() {
     local OUTDIR="$BACKUP_DIR"
     local KEEP=7
@@ -6270,13 +6348,7 @@ backup_now() {
     local OUT_FILE="${OUTDIR}/hashem-backup-${DATE_STR}.enc"
 
     local FILES=()
-    local f
-    for f in /etc/frp/*.toml /etc/gre-panel/panel.json /etc/gre-panel/peers.json /etc/gre-panel/watchdog.json \
-             /etc/gre-panel/perf.json /etc/gre-panel/backup.key \
-             /etc/systemd/system/gre-*.service /etc/systemd/system/frps*.service \
-             /etc/systemd/system/frpc*.service; do
-        [[ -f "$f" ]] && FILES+=("$f")
-    done
+    mapfile -t FILES < <(backup_file_list)
 
     if [[ ${#FILES[@]} -eq 0 ]]; then
         echo -e "${RED}[!] No configuration or unit files found to back up.${NC}" >&2
@@ -6349,11 +6421,21 @@ backup_restore() {
         return 1
     fi
 
+    if ! backup_listing_safe "$TMP_D/list.txt"; then
+        echo -e "${RED}[!] Archive contains paths outside the allowed config directories — refusing to restore.${NC}" >&2
+        return 1
+    fi
+
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo -e "${GREEN}[✔️] Archive verified OK. Files inside:${NC}"
         cat "$TMP_D/list.txt"
         return 0
     fi
+
+    echo -e "${CYAN}[*] Saving a safety backup of the current configuration first...${NC}"
+    backup_now --keep 5 "${BACKUP_DIR}/pre-restore" >/dev/null 2>&1 \
+        && echo -e "${GREEN}[✔️] Current state saved in ${BACKUP_DIR}/pre-restore (roll back with: hashem backup restore <file>).${NC}" \
+        || echo -e "${YELLOW}[!] Could not save a safety backup; continuing.${NC}"
 
     echo -e "${CYAN}[*] Restoring configuration files and systemd units...${NC}"
     tar -xzf "$TMP_D/backup.tar.gz" -C /

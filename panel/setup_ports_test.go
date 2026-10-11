@@ -233,4 +233,3 @@ func TestHandlePeersPatchFullUpdate(t *testing.T) {
 		t.Errorf("expected 409 E-PEER-02 for port clash, got status %d body %s", w3.Code, w3.Body.String())
 	}
 }
-
