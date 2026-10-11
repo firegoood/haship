@@ -40,6 +40,10 @@ jobs:
       - name: bash -n
         run: |
           for f in hashem.sh hashem-backhaul.sh install.sh; do bash -n "$f"; done
+      - name: generated docs are current
+        run: |
+          python3 tools/gen_docs.py
+          git diff --exit-code docs/API.md docs/ERROR_CODES.md
       - name: hermetic shell tests
         run: |
           # the netns lab tests run in the separate `lab` job below.

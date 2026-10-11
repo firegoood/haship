@@ -32,7 +32,7 @@ If you discover a security vulnerability in `hashem-panel`, please report it res
 ## Security Architecture & CWE Mitigations
 
 ### 1. Plaintext Password Storage (CWE-256)
-- **Mitigation**: Plaintext passwords are **never** stored on disk. Passwords are only stored as cryptographic SHA-256 hashes inside `/etc/gre-panel/panel.json`.
+- **Mitigation**: Plaintext passwords are **never** stored on disk. Passwords are only stored as salted argon2id hashes (legacy unsalted SHA-256 hashes are upgraded on next login) inside `/etc/gre-panel/panel.json`.
 - Legacy `panel.pass` files are automatically removed during startup migration.
 - Disaster recovery of admin credentials is provided exclusively via the ephemeral environment variable `GRE_PANEL_PASSWORD`.
 - Backup archives use an independent, cryptographically generated 32-byte key (`/etc/gre-panel/backup.key`, mode 0600) rather than user passwords.

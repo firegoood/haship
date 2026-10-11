@@ -36,7 +36,7 @@ Small commits, one concern each. No production servers are touched.
 
 ## Phase 6 - Maintainability
 - [x] 6.1 UI script extracted from index.html (8.5k -> 2.5k lines) into app.js: embedded, served, cache-busted per build; smoke-tested on the real binary
-- [x] 6.2 README, CLAUDE.md, CHANGELOG.md updated
+- [x] 6.2 README, DEVELOPMENT.md, CHANGELOG.md updated
 
 Order is fixed; if a step turns out risky it is skipped and recorded under "Deferred".
 

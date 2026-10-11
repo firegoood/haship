@@ -1,22 +1,24 @@
 <div align="center">
 
-# DNC MADE THIS
-
 # Hashem Panel 🇮🇷 ↔ 🌍
 
 **A hub-and-spoke tunnel manager: GRE Layer-3 + FRP / Backhaul reverse relay, with a web dashboard, health model, watchdog and safe updates.**
 
+*Keep the real servers hidden — expose foreign-server ports through the public IP of your Iran server.*
+
 🇬🇧 English | [🇮🇷 فارسی](README.fa.md)
 
 [![Latest Release](https://img.shields.io/github/release/pdnczone/hashem-panel?display_name=tag)](https://github.com/pdnczone/hashem-panel/releases/latest)
+[![CI](https://github.com/pdnczone/hashem-panel/actions/workflows/ci.yml/badge.svg)](https://github.com/pdnczone/hashem-panel/actions/workflows/ci.yml)
 [![Build Panel](https://github.com/pdnczone/hashem-panel/actions/workflows/build-panel.yml/badge.svg)](https://github.com/pdnczone/hashem-panel/actions/workflows/build-panel.yml)
 [![Security CI](https://github.com/pdnczone/hashem-panel/actions/workflows/security.yml/badge.svg)](https://github.com/pdnczone/hashem-panel/actions/workflows/security.yml)
-[![Platform](https://img.shields.io/badge/platform-linux%20amd64%20%7C%20arm64-blue)](https://github.com/pdnczone/hashem-panel)
+[![Go version](https://img.shields.io/github/go-mod/go-version/pdnczone/hashem-panel?filename=panel%2Fgo.mod)](panel/go.mod)
+[![Downloads](https://img.shields.io/github/downloads/pdnczone/hashem-panel/total)](https://github.com/pdnczone/hashem-panel/releases)
+[![Last commit](https://img.shields.io/github/last-commit/pdnczone/hashem-panel)](https://github.com/pdnczone/hashem-panel/commits/main)
+[![Platform](https://img.shields.io/badge/platform-linux%20amd64%20%7C%20arm64-blue)](#requirements)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-[🌐 Website](https://pdnczone.ir) · [✈️ Telegram](https://t.me/pdnczone) · [▶️ YouTube](https://youtube.com/@pdnczone)
-
-*Keep the real servers hidden — expose foreign-server ports through the public IP of your Iran server.*
+[🌐 Website](https://pdnczone.ir) · [✈️ Telegram](https://t.me/pdnczone) · [▶️ YouTube](https://youtube.com/@pdnczone) · *DNC MADE THIS*
 
 </div>
 
@@ -25,17 +27,24 @@
 ## Table of contents
 
 - [What is Hashem?](#what-is-hashem)
+- [Why Hashem?](#why-hashem)
 - [Features](#features)
 - [Architecture](#architecture)
+- [Requirements](#requirements)
 - [Quick install](#quick-install)
+- [Choosing an engine](#choosing-an-engine)
 - [Panel tour](#panel-tour)
 - [Tunnel types](#tunnel-types)
 - [Health model](#health-model)
 - [Automation](#automation)
 - [Updates, downgrade and channels](#updates-downgrade-and-channels)
 - [`hashem` CLI](#hashem-cli)
+- [Troubleshooting](#troubleshooting)
+- [Uninstall and your data](#uninstall-and-your-data)
+- [Known limitations](#known-limitations)
 - [Documentation map](#documentation-map)
 - [Security notes](#security-notes)
+- [Contributing](#contributing)
 - [License](#license)
 
 ---
@@ -55,10 +64,25 @@ The model is a **hub and spokes**:
 
 ---
 
+## Why Hashem?
+
+Plain `frp` or Backhaul give you a relay and a config file. Hashem wraps them with the parts you would otherwise build by hand:
+
+- **A Layer-3 link under the relay** (GRE, direct or over WSS), so the relay runs over a private inner address and can fall back to the public IP when GRE is blocked.
+- **Setup bundles** — one pasted string configures the foreign side. No hand-copied tokens, ports or IPs.
+- **One health model** — the same rule drives the dashboard banner, fleet cards and topology graph, and shows which leg is down.
+- **Operations built in** — watchdog, webhook/Telegram alerts only on state change, 24 h history, encrypted backups, `hashem doctor`.
+- **Updates you can undo** — stable/dev channels, SHA-256 verified downloads, config backup before every swap, automatic rollback after repeated crashes.
+- **A hardened panel** — argon2id passwords, CSRF, optional TOTP 2FA, audit log, terminal off by default.
+
+If you need one relay on one server pair and are happy editing TOML, plain frp or Backhaul is simpler. Hashem is for several links you want to watch and keep alive.
+
+---
+
 ## Features
 
 - 🚀 **One-line install** — prebuilt standalone Go binary from official GitHub releases.
-- 🧩 **Three tunnel engines** — `GRE+FRP`, `GRE+Backhaul`, and `Backhaul` standalone (no GRE).
+- 🧩 **Three tunnel engines** — `GRE+FRP`, `GRE+Backhaul`, and `Backhaul` standalone (no GRE). See [Choosing an engine](#choosing-an-engine).
 - 🛰️ **Two GRE carriers** — Direct GRE (IP protocol 47) and WSS (TLS WebSocket, port `8443` by default).
 - 🔌 **FRP transports** — `tcp`, `kcp`, `quic`, `websocket`, `wss`, with payload encryption, compression and PROXY Protocol v2. See the [FRP Transports Guide](docs/FRP_TUNNELS_GUIDE.md).
 - 📦 **Setup bundles** — one string carries keys, IPs, transport and ports: `hsh1_…` (FRP), `bh1_…` (Backhaul), `gh1_…` (GRE+Backhaul). Paste it on the foreign server and the form fills itself.
@@ -71,10 +95,11 @@ The model is a **hub and spokes**:
 - 🎯 **Carrier benchmark** and **diagnostics** (`hashem doctor`).
 - 💻 **In-browser terminal** — disabled by default, audited.
 - ⚙️ **Auto Pool** — frpc `poolCount` / frps `maxPoolCount` sized automatically from pool-full errors, load and RAM (on by default).
-- 🔔 **External alerts** — webhook and/or Telegram message only when a tunnel changes state (with a per-link minimum gap), set up in Settings.
+- 🔔 **External alerts** — webhook and/or Telegram message only when a tunnel changes state (with a per-link minimum gap), plus host alerts for disk, RAM and panel TLS-certificate expiry. Set up in Settings.
 - 📈 **History and metrics** — 24 h per-link latency/state/throughput graph, and an optional Prometheus `/metrics` endpoint behind a bearer token (off by default).
 - 🧭 **Carrier advisor** — tells you when the active carrier keeps failing and which one to try; advice only, it never switches by itself. Also suggests free ports and SNI names.
-- 🔒 **Hardened panel** — SHA-256 password hashes, NIST 800-63B password policy, CSRF tokens, trusted-proxy handling, audit log. See [Security notes](#security-notes).
+- 🔒 **Hardened panel** — argon2id password hashes, NIST 800-63B password policy, CSRF tokens, trusted-proxy handling, audit log. See [Security notes](#security-notes).
+- 📚 **Documented API** — every route and every error code is listed in [docs/API.md](docs/API.md) and [docs/ERROR_CODES.md](docs/ERROR_CODES.md), generated from the source.
 
 ---
 
@@ -122,6 +147,29 @@ sequenceDiagram
     Srv-->>User: reply travels back the same way
 ```
 
+An interactive version with the layers, data path, join flow, automation and defaults is in [`docs/hashem-architecture.html`](docs/hashem-architecture.html). GitHub shows HTML as source, so [open it rendered](https://htmlpreview.github.io/?https://github.com/pdnczone/hashem-panel/blob/main/docs/hashem-architecture.html) or download the file.
+
+---
+
+## Requirements
+
+- **OS:** Linux with **systemd**, `amd64` or `arm64`. Developed and tested on Ubuntu. The installer adds missing packages with `apt-get` (Debian/Ubuntu), with a `yum` fallback.
+- **Access:** root (`sudo`) on both servers.
+- **Tools:** `curl`, `tar`, `python3`, `iproute2` (`ip`, `ss`), `iptables`, `ping`. The installer adds any that are missing.
+- **Kernel:** the `ip_gre` module for the GRE engines (`modprobe ip_gre`). Backhaul standalone needs no GRE.
+- **Network** — open these between the two servers (and to users on the hub):
+
+  | Purpose | Port / protocol |
+  | --- | --- |
+  | Direct GRE carrier | IP protocol **47** (not TCP/UDP) |
+  | WSS carrier | TCP `8443` (default) |
+  | FRP / Backhaul control | the control port you choose; the `wss` front uses `control_port+2` |
+  | KCP / QUIC transports | UDP, on the ports shown in the panel |
+  | Panel | TCP `7777` (moves to the next free port if busy); HTTPS `7443` once a certificate is issued |
+  | Your services | the public ports you forward on the hub |
+
+- **GitHub reachability** from the servers (releases and `raw.githubusercontent.com`) for install and updates. From inside Iran this may need a working route; the installer tries mirrors for the script itself.
+
 ---
 
 ## Quick install
@@ -134,48 +182,60 @@ bash <(curl -fsSL https://raw.githubusercontent.com/pdnczone/hashem-panel/main/i
 
 1. **On the Iran server** — run the command and choose option `1`. Choose the engine, carrier and ports. The installer prints a **setup bundle** (for example `hsh1_…`). Copy it.
 2. **On the foreign server** — run the command and choose option `2`. Paste the bundle; the tunnel and services are configured automatically.
-3. **Open the panel** — the end of the install prints the secure panel URL (`http://<server-ip>:7777/<secret>`) and the first admin credentials. The password is not stored in plaintext; save it. Reset it any time with `hashem reset-password`, or CLI menu option `3 -> 2`.
+3. **Open the panel** — the end of the install prints the secure panel URL (`http://<server-ip>:7777/<secret>`) and the first admin credentials. The password is not stored in plaintext; save it. Reset it any time with `hashem reset-password`, or CLI menu option `3 -> 2`. Print the URL again with `hashem show-panel-url`.
 
 Adding more foreign servers: use the **Setup** tab in the panel or `hashem add-peer` / `hashem add-backhaul-peer` on the hub, then paste the new bundle on the new foreign server.
+
+**Read it first, or pin it.** To inspect the installer before running it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pdnczone/hashem-panel/main/install.sh -o install.sh
+less install.sh && bash install.sh
+```
+
+`install.sh` accepts `hashem.sh` only from GitHub itself, from two agreeing mirrors, or when it matches a hash you pin. Every release publishes a `checksums.txt`; pin the script like this:
+
+```bash
+HASHEM_SHA256=<sha256 of hashem.sh from the release checksums.txt> \
+  bash <(curl -fsSL https://raw.githubusercontent.com/pdnczone/hashem-panel/main/install.sh)
+```
+
+The panel binary comes from the active [update channel](#updates-downgrade-and-channels). To run an exact panel version, install first, then pick the tag in the **Update** tab (or `POST /api/update {"tag":"v1.1.0"}`).
+
+> ⚠️ **The panel speaks plain HTTP by default**, on a long random path. Before you expose it to the internet, put it behind TLS: `hashem panel-tls <domain> <email>` (needs port 80 reachable and the domain pointing at the server), or a reverse proxy — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+---
+
+## Choosing an engine
+
+| | GRE + FRP | GRE + Backhaul | Backhaul standalone |
+| --- | --- | --- | --- |
+| Setup bundle | `hsh1_` | `gh1_` | `bh1_` |
+| GRE interface | yes | yes | **no** |
+| Relay | frp | Backhaul | Backhaul |
+| Transports | tcp, kcp, quic, websocket, wss | Backhaul transports | Backhaul transports |
+| Dials the hub's public IP when GRE is dead | yes | yes | n/a |
+| Pick it when | you want the most features and tuning (Auto Pool, encryption, compression, PROXY v2) | you want Backhaul's relay on a private L3 link | GRE is blocked or unavailable and you only need a relay |
+
+Start with **GRE + FRP** and the **Direct GRE** carrier. If IP protocol 47 is dropped between your servers, try the **WSS** carrier, then Backhaul standalone. The Benchmark tab probes carriers for you. More detail: [docs/ENGINES.md](docs/ENGINES.md) and the [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md).
 
 ---
 
 ## Panel tour
 
-See the [documentation map](#documentation-map) for the available guides.
+The panel is one page with these tabs:
 
-### Dashboard — the overall state
-
-The top banner shows one big word (Healthy / Degraded / Down) and one line per tunnel. Below it are the KPIs and the Fleet Health card with the hub latency summary, the topology graph and per-server cards.
-<img src="docs/dashboard.jpg" width="100%" alt="Dashboard">
-
-### Tunnel — the main tunnel and its peers
-
-Manage the main tunnel and the foreign-server peer cards.
-<img src="docs/tunnel.png" width="100%" alt="Tunnel tab with peers">
-
-### Performance — tuning
-
-Auto Pool, encryption/compression and TCP multiplexing.
-<img src="docs/performance.jpg" width="100%" alt="Performance tab">
+- **Dashboard** — a banner with one big word (Healthy / Degraded / Down) and one line per tunnel; KPIs; the Fleet Health card with hub latency, the topology graph and per-server cards.
+- **Tunnel** — the main tunnel and the foreign-server peer cards: add, edit ports, restart, remove, per-tunnel PASS/FAIL checks, the dial-route card.
+- **Performance** — Auto Pool, encryption / compression, and TCP multiplexing.
+- **Diagnostics** — latency, jitter, MTU and speed tests; the same engine as `hashem doctor`.
+- **Setup** — pairing, bundles and peers.
+- **Watchdog** — monitoring, backups and alerts.
+- **Benchmark** — carrier probing and the optional auto-pilot.
+- **Update** — channels, install any tag, rollback state.
+- **Logs, Settings, Terminal** — redacted logs with error codes; password, 2FA, idle timeout, alerts, TLS, metrics token; the audited shell (off by default).
 
 **FRP TCP Multiplexing (`transport.tcpMux`) is OFF by default** (speed-first: tcpMux roughly halves throughput over GRE). New `frps`/`frpc` configs are written with `transport.tcpMux = false`. Turn it on only deliberately with `hashem perf tcpmux on` (or the Performance tab). The setting **must be identical on the Iran hub and every foreign spoke**; a mismatch makes `frpc` fail to log in with `connect to server error: EOF`, and `hashem status` / `hashem doctor` print a hint when they see it. Backhaul is unaffected.
-
-### Diagnostics — latency, jitter, MTU
-
-<img src="docs/diagnostics.jpg" width="100%" alt="Diagnostics tab">
-
-### Traffic charts
-
-<img src="docs/chart-premium.png" width="100%" alt="Traffic chart">
-
-### Other tabs
-
-- **Setup** — pairing, bundles and peers
-- **Watchdog** — monitoring and alerts
-- **Benchmark** — carrier probing
-- **Update** — channels, install any tag
-- **Logs, Settings, Terminal**
 
 ---
 
@@ -207,9 +267,9 @@ The dashboard's overall status uses the same function. The main tunnel counts as
 
 ## Automation
 
-- **Watchdog** — a systemd timer (`hashem-watchdog.timer`) runs `hashem watchdog tick` every minute. Control it with `hashem watchdog on|off|status|test|tick`. Telegram alerts are configured in the watchdog settings; `hashem tgsend "msg"` sends a manual message.
+- **Watchdog** — a systemd timer (`hashem-watchdog.timer`) runs `hashem watchdog tick` every minute. Control it with `hashem watchdog on|off|status|test|tick`. Telegram alerts are configured in the watchdog settings; `hashem tgsend "msg"` sends a manual message. `auto_restart` defaults to **off** (alert only).
 - **Dial route** — on foreign servers, `hashem dial [status|auto|gre|public]` chooses whether `frpc` / `backhaul-client` dials the hub over the GRE inner IP or the hub public IP. `auto` uses GRE if it answers (ping or TCP to the control port), otherwise public. The watchdog switches to public automatically when GRE is dead and the client is not connected. Foreign servers show a "Route to the Iran hub" card.
-- **Carrier failover** — `hashem carrier` manages and cycles carriers.
+- **Carrier failover** — `hashem carrier` manages and cycles carriers. Switching is manual; the advisor only suggests.
 - **Backups** — `hashem backup now|restore|schedule|status` (encrypted archives in `/var/backups/hashem`).
 - **Adaptive capacity** — multiplexing capacity adjusts to load and available RAM.
 
@@ -228,20 +288,22 @@ Install steps: validate tag → download the panel binary and `hashem.sh` of tha
 
 **Auto-rollback:** the new process counts its starts in `pending_update.json`. If it crashes 3 times before it is confirmed healthy (self health check 45 s after start), the old binary and `hashem.sh` are restored and the panel restarts.
 
-**Branches:** `main` is stable (a push that changes `panel/**` or `hashem*.sh` builds release `panel-r<run>`); `dev` is for testing (each push builds prerelease `dev-r<run>`, never offered on stable). Promote by a manual Pull Request `dev → main`. Hotfix: branch from `main`, PR to `main`, then merge `main` back into `dev`.
+**Branches:** `main` is stable (a push that changes `panel/**` or `hashem*.sh` builds release `panel-r<run>`); `dev` is for testing (each push builds prerelease `dev-r<run>`, never offered on stable). Promote by a manual Pull Request `dev → main`. Hotfix: branch from `main`, PR to `main`, then merge `main` back into `dev`. Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
 ## `hashem` CLI
 
-Everything works from SSH too (commands as in `hashem` usage):
+Everything works from SSH too (commands as in `hashem help`):
 
 ```bash
 hashem                # first run: auto-install; afterwards shows panel credentials
 hashem menu           # interactive management menu
 hashem status         # tunnel health, peers, service status
+hashem show-panel-url # print the panel URL again
 hashem reset-password # reset / auto-generate the admin password
 hashem password <p>   # set the panel password non-interactively
+hashem panel-tls <domain> <email>   # HTTPS for the panel (Let's Encrypt)
 hashem logs           # relay logs
 hashem optimize       # BBR / MTU / sysctl tuning
 hashem doctor         # latency, jitter, MTU and speed diagnostics
@@ -250,17 +312,78 @@ hashem dial status    # foreign side: route to the Iran hub
 hashem watchdog status
 hashem backup now     # encrypted backup (/var/backups/hashem)
 hashem perf autopool status  # Auto Pool: on|off|status|tick
+hashem perf tcpmux on|off    # must match on hub and spokes
 hashem free-ram       # free RAM
 hashem update         # update script and panel to the latest release
-hashem uninstall      # full wipe
+hashem update-channel [stable|dev]
+hashem uninstall      # full wipe (see "Uninstall and your data")
 ```
+
+`hashem help` prints the full list, including the non-interactive `setup-*` and `*-peer` commands.
+
+---
+
+## Troubleshooting
+
+Every failure in the panel carries a stable code (`E-FRP-10`, `E-GRE-02`, …). Look the code up in [docs/ERROR_CODES.md](docs/ERROR_CODES.md), or run `hashem doctor`. The most common cases:
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `frpc` logs `connect to server error: EOF` (`E-FRP-10`) | `tcpMux` differs between hub and spoke | `hashem perf tcpmux on` or `off` on **every** server so they match (default is off) |
+| `E-FRP-02` / `E-BH-01` authentication failed | token differs | re-copy the token from the Iran peer card or the bundle |
+| `E-FRP-04` cannot reach server | wrong IP/port, firewall, or `frps` down | check the control port is open on the hub; run `hashem dial status` on the spoke |
+| `E-GRE-02` GRE ping fails but traffic flows (**FRP only** badge) | ICMP or proto 47 filtered | expected when GRE is blocked; the dial route falls back to the public IP. Try the WSS carrier to get GRE back |
+| GRE never comes up | the provider drops IP protocol 47 | open proto 47 both ways, switch the carrier to WSS, or use Backhaul standalone |
+| Panel URL not reachable | port busy (the panel moves to the next free port) or a firewall | `hashem show-panel-url`; open that port |
+| Lost the admin password | — | `hashem reset-password` |
+| Locked out after failed logins (`E-AUTH-02`) | 5 failures → 15 min lock, doubling for repeat offenders up to 24 h | wait, or `systemctl restart gre-panel` (lockouts are kept in memory) |
+| `E-UPDATE-01` / `E-UPDATE-02` | GitHub not reachable from the server | retry later or fix the route; nothing was changed |
+| An update was rolled back | the new binary crashed 3 times | check `journalctl -u gre-panel`; the old version was restored automatically |
+| HTTPS certificate fails (`E-TLS-05`) | port 80 closed or the domain does not point here | open port 80, fix DNS, retry |
+
+More cases, with commands: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+---
+
+## Uninstall and your data
+
+```bash
+hashem backup now      # optional: encrypted archive in /var/backups/hashem
+hashem uninstall       # asks to confirm; "--force" skips the question
+```
+
+Uninstall is a **full wipe**. It removes:
+
+- all tunnel, relay, panel and watchdog systemd units, and the GRE interfaces;
+- the binaries `frps`, `frpc`, `backhaul`, `gre-panel`, `grepanel`, and the `hashem` command itself;
+- `/etc/frp`, `/etc/backhaul`, `/etc/gre-panel` (panel config, history and the **backup key**) and `/usr/local/gre-panel`;
+- Hashem logs, locks, cron entries, its iptables rules and its sysctl tuning.
+
+It does **not** remove `/var/backups/hashem`. But those archives are encrypted with `/etc/gre-panel/backup.key`, which the wipe deletes. **Copy `backup.key` somewhere safe before uninstalling** if you want to restore later.
+
+---
+
+## Known limitations
+
+- **GRE can be blocked.** Some providers drop IP protocol 47. The WSS carrier and Backhaul standalone exist for that case, but no carrier is guaranteed to pass every network.
+- **The panel is HTTP by default.** Use `hashem panel-tls` or a reverse proxy for anything public.
+- **One admin account** per panel; there are no roles.
+- **Linux + systemd only**, `amd64` and `arm64` builds.
+- **Peer limit** of 10 per hub by default (`GRE_MAX_PEERS`).
+- **Automatic actions are conservative on purpose:** watchdog `auto_restart` is off and the carrier is never switched automatically.
+- **Docs language:** the README and the FRP guide exist in Persian; the other guides are English.
+
+Ideas and bug reports are welcome — see [Contributing](#contributing).
 
 ---
 
 ## Documentation map
 
-- Guides — [Secure deployment](docs/DEPLOYMENT.md) · [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md) (Persian + English)
-- Policy — [SECURITY.md](SECURITY.md)
+- **Start here** — [Quick install](#quick-install) · [Choosing an engine](docs/ENGINES.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
+- **Guides** — [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md) (Persian + English) · [Secure deployment](docs/DEPLOYMENT.md)
+- **Reference** — [HTTP API](docs/API.md) · [Error codes](docs/ERROR_CODES.md) · [CHANGELOG](CHANGELOG.md) · [Architecture (interactive)](docs/hashem-architecture.html)
+- **Project** — [CONTRIBUTING](CONTRIBUTING.md) · [Development guide](docs/dev/DEVELOPMENT.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [SECURITY](SECURITY.md)
+- **Audits and plans** — [docs/audit/](docs/audit/) · [r24 improvement plan](docs/PLAN_IMPROVEMENTS_R24.md)
 
 ---
 
@@ -268,7 +391,7 @@ hashem uninstall      # full wipe
 
 - **Policy and disclosure:** [SECURITY.md](SECURITY.md).
 - **Production deployment** (Nginx / Caddy, TLS, firewall, `TRUSTED_PROXY_IPS`): [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-- Passwords are stored only as SHA-256 hashes in `/etc/gre-panel/panel.json`; the policy requires 12+ characters with upper, lower, number and symbol.
+- Passwords are stored only as salted **argon2id** hashes in `/etc/gre-panel/panel.json` (older unsalted SHA-256 hashes are upgraded on the next login). The policy requires 12+ characters with upper, lower, number and symbol.
 - State-changing requests need a session-bound HMAC-SHA256 `X-CSRF-Token`; `X-Forwarded-For` is trusted only from `TRUSTED_PROXY_IPS`.
 - Updates are pinned to official GitHub domains and verified with SHA-256 from `checksums.txt`; the installer script is checked with `bash -n`.
 - The in-browser terminal is **disabled by default** and audited (10-minute idle and 30-minute absolute limits).
@@ -283,6 +406,10 @@ hashem uninstall      # full wipe
 
 ---
 
+## Contributing
+
+Issues and Pull Requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first: branch from `dev`, run the tests, regenerate the API docs, open a PR. Use the issue forms for bugs and ideas; report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
 Licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. If you modify this software and run it as a network service, you must make your modifications available under the same license. See [LICENSE](LICENSE).
@@ -290,5 +417,3 @@ Licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. If you
 ## Community
 
 - 🌐 [pdnczone.ir](https://pdnczone.ir) · ✈️ [@pdnczone](https://t.me/pdnczone) · ▶️ [@pdnczone](https://youtube.com/@pdnczone)
-
-Issues and Pull Requests are welcome.

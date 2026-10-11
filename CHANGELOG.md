@@ -1,6 +1,18 @@
 # Changelog
 
-## v1.1.0 (plan r24 — docs/PLAN_IMPROVEMENTS_R24.md)
+Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
+Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
+
+## Unreleased
+
+### Documentation
+- Added `README.fa.md` (the language link in the README was broken), a Requirements section, an engine comparison, Troubleshooting, an Uninstall-and-your-data section and Known limitations.
+- New guides: `docs/ENGINES.md`, `docs/TROUBLESHOOTING.md`; generated references `docs/API.md` (every route, its auth) and `docs/ERROR_CODES.md` (every `E-…` code), produced by `tools/gen_docs.py`; CI fails if they drift from the code.
+- Added `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue forms and a pull request template.
+- README: removed the dashboard screenshots, kept the architecture diagrams; documented installing with a pinned `HASHEM_SHA256`; password storage now described correctly as argon2id (README and SECURITY.md said SHA-256).
+- Moved `AUDIT_REPORT.md` and `AUDIT_CHECKLIST.md` to `docs/audit/` and `CLAUDE.md` to `docs/dev/DEVELOPMENT.md`; the repository root now holds only the project files.
+
+## v1.1.0 (2026-10-11) — plan r24 (docs/PLAN_IMPROVEMENTS_R24.md)
 
 ### Correctness
 - Engine switch checks the binary and systemd unit **before** stopping anything, reports write/restart errors instead of "configured and started", and writes configs 0600.
@@ -33,3 +45,47 @@
 ### Maintenance
 - New `ci.yml` (vet, build, `go test -race`, gofmt on changed files, shell tests); fixed two data races found by `-race`.
 - UI script moved from `index.html` to `app.js`; `spoof_test.py` moved to `tools/`.
+
+## v1.0.0 (2026-10-10) — first stable-channel release
+
+### Added
+- FRP transports `tcp`, `kcp`, `quic`, `websocket`, `wss` with payload encryption, compression and PROXY Protocol v2; Persian UI with RTL layout; Fleet health and topology map.
+- Update channels `stable` / `dev`: pick, upgrade or downgrade to any of the last 20 releases; `hashem update-channel`.
+- Auto Pool: frpc `poolCount` / frps `maxPoolCount` sized from pool-full errors, load and RAM (on by default).
+- Reverse-path auto-fix engine (dry-run by default, snapshot / apply / re-probe / rollback), per-tunnel health checks (PASS / FAIL / UNREACHABLE), multi-signal link health (session > TCP > ICMP) with debounce.
+- Dial over the Iran hub's public IP when GRE is dead (`hashem dial`); hub-and-spoke topology view with the main tunnel as a plain spoke.
+- TCP multiplexing toggle in the Performance tab and `hashem perf tcpmux` (off by default); `/api/selfstats`, in-process load lab, RAM-scaled unit limits and sd_notify watchdog.
+- Connectivity Rescue: detect one-way TCP blocks and reverse the dial direction.
+
+### Security
+- Fail-closed SHA-256 verification of updates; CI publishes `checksums.txt` (M-01).
+- WSS carrier rejects browser origins, constant-time token compare (M-02).
+- argon2id password hashing with transparent upgrade of legacy hashes; random session ids (M-03).
+- Security headers, server timeouts, request body limit, peer TLS pinning (TOFU).
+
+### Fixed
+- Removed obsolete `hashem-monitor` / `hashem-webui` units that crash-looped on old installs (H-01).
+
+### Removed
+- Chaff, DPI Shield and the FOU carrier.
+
+## v0.71.0 and v0.7.2 (2026-10-07)
+
+- Release builds bundling FRP `0.71.0` and Backhaul `0.7.2` respectively; the only change between them is the release signature text.
+- Backhaul integration, live engine switcher, carrier switching made strictly manual, watchdog `auto_restart` default off.
+
+## v0.1.3 (2026-09-30)
+
+- Fixed the traffic chart reset; added a live speed KPI.
+
+## v0.1.2 (2026-09-30)
+
+- Fixed GRE routing instability when foreign servers share an IP; fixed bundle token parsing; peer limit raised to 10.
+
+## v0.1.1 (2026-09-29)
+
+- Performance overhaul: ping reduced from about 200 ms to 100 ms.
+
+## v0.1.0 (2026-09-29)
+
+- Simplified the installation flow; credentials are shown at the end of install.
