@@ -5312,7 +5312,7 @@ function rscBtn(id, key, cls, fn) {
 }
 function rscRender() {
   const s = _rsc || {}, card = $('rescueCard'), ban = $('rscBanner');
-  const active = !!s.role, show = active || s.suspected || _rscMode;
+  const active = !!s.role, show = true; // always visible: Iran hub must reach Join with code
   card.hidden = !show;
   // Banner: only on the tunnel-less detection state, and only outside the card's own tab flow.
   ban.hidden = !(s.suspected && !active);
