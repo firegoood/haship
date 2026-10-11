@@ -328,6 +328,14 @@ const I18N = {
     upd_dev_warn: "Dev channel: test builds, may break. Not for production tunnels.",
     upd_dev_badge: "DEV",
     nav_settings: "Settings",
+    tls_custom_title: "Use your own certificate",
+    tls_ip_title: "HTTPS on this server\'s IP (self-signed)",
+    tls_ip_hint: "No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.",
+    tls_custom_hint: "Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.",
+    acc_title: "Panel access (port / login / address)",
+    acc_hint: "Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.",
+    acc_user: "Login username", acc_port: "HTTP port (1–65535)", acc_base: "Address path (after IP:port/…)",
+    acc_pass: "Current password (confirm)", acc_save: "Save & restart panel",
     nav_terminal: "Terminal",
     sec_overview: "Overview",
     sec_tunnel: "Tunnel",
@@ -744,6 +752,14 @@ const I18N = {
     upd_dev_warn: "کانال Dev: نسخه‌های آزمایشی که ممکن است خراب شوند. برای تونل‌های واقعی استفاده نکنید.",
     upd_dev_badge: "DEV",
     nav_settings: "تنظیمات",
+    tls_custom_title: "استفاده از گواهی خودتان",
+    tls_ip_title: "HTTPS روی IP همین سرور (self-signed)",
+    tls_ip_hint: "دامنه لازم نیست. پنل خودش مرجع می‌سازد، برای IP گواهی ۸۲۵ روزه صادر می‌کند و HTTPS سرو می‌دهد. فایل CA را یک بار در مرورگر/سیستم نصب کنید تا هشدار ندهد. Regenerate فقط گواهی سرور را عوض می‌کند؛ CA معتبر می‌ماند.",
+    tls_custom_hint: "گواهی + کلید را بچسبانید، هر دو فایل را آپلود کنید، یا مسیر فایل‌های روی سرور را بدهید. قبل از نصب اعتبارسنجی می‌شود؛ گواهی قبلی به‌عنوان بکاپ می‌ماند.",
+    acc_title: "دسترسی پنل (پورت / ورود / آدرس)",
+    acc_hint: "تغییر هر کدام فقط وب‌سرویس پنل را ری‌استارت می‌کند — تونل‌ها وصل می‌مانند. بعد از ذخیره، پنل را با آدرس جدید باز کنید.",
+    acc_user: "نام کاربری ورود", acc_port: "پورت HTTP (۱ تا ۶۵۵۳۵)", acc_base: "مسیر آدرس (بعد از IP:port/…)",
+    acc_pass: "رمز فعلی (تأیید)", acc_save: "ذخیره و ری‌استارت پنل",
     nav_terminal: "ترمینال",
     sec_overview: "نمای کلی",
     sec_tunnel: "مدیریت تونل",
@@ -2927,7 +2943,7 @@ function doLogin() {
     try {
       await api('/api/login', {username: $('u').value, password: $('p').value, code: $('totpCode').value.trim()});
       $('p').value = ''; $('totpCode').value = ''; $('codeField').classList.add('hidden'); $('loginErr').textContent = '';
-      showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh();
+      showApp(); refresh(); loadSetupDefaults(); loadVersion(); accessRefresh(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh();
     } catch(e) {
       if (e.code === 'E-AUTH-09') { $('codeField').classList.remove('hidden'); $('totpCode').focus(); }
       $('loginErr').textContent = e.message;
@@ -3409,6 +3425,40 @@ $('alTest').onclick = async () => {
   try { await api('/api/alerts', {action: 'test'}); toastOk('test alert sent'); }
   catch(e) { toastErr('test alert failed', e.message); }
 };
+
+// ---- panel access settings (port / username / base path) ----
+async function accessRefresh() {
+  try {
+    const a = await api('/api/access');
+    if ($('accUser') && !$('accUser').value) $('accUser').value = a.username || '';
+    if ($('accPort') && !$('accPort').value) $('accPort').value = a.http_port || '';
+    if ($('accBase') && !$('accBase').value) $('accBase').value = a.base_path || '';
+    if ($('accCurrent')) $('accCurrent').innerHTML = 'Now: <b>' + esc(a.http_url || '') + '</b> · user <b>' + esc(a.username || '') + '</b>';
+  } catch(e) { /* leave placeholder text */ }
+}
+const _accSave = $('accSave');
+if (_accSave) _accSave.onclick = async () => {
+  const cur = ($('accPass') ? $('accPass').value : '').trim();
+  if (!cur) { toastWarn('current password required', 'Please enter your current password.'); return; }
+  const body = { current_password: cur };
+  const u = ($('accUser') ? $('accUser').value : '').trim();
+  const pt = ($('accPort') ? $('accPort').value : '').trim();
+  const bp = ($('accBase') ? $('accBase').value : '').trim();
+  if (u) body.username = u;
+  if (pt) body.port = parseInt(pt, 10);
+  if (bp) body.base_path = bp;
+  if (!body.username && !body.port && !body.base_path) { toastWarn('nothing to change', 'Edit the username, port, or path first.'); return; }
+  if (!await entConfirm('Save & restart panel?', 'Only the panel web service restarts — tunnels keep running. You will need to reopen the panel at the new address.', 'Save & restart')) return;
+  const b = $('accSave'); b.disabled = true; b.textContent = 'Saving…';
+  try {
+    const r = await api('/api/access', body);
+    if ($('accPass')) $('accPass').value = '';
+    toastOk('access saved — panel restarting', 'Reopen: ' + (r.http_url || ''));
+    setTimeout(() => { window.location.href = r.http_url || '/'; }, 4000);
+  } catch(e) { toastErr('save failed', e.message); }
+  b.disabled = false; b.textContent = tr('acc_save', 'Save & restart panel');
+};
+
 async function idleRefresh() { try { const r = await api('/api/session-settings'); $('idleMin').value = r.idle_minutes; } catch(e) {} }
 $('idleSave').onclick = async () => {
   try { await api('/api/session-settings', {idle_minutes: parseInt($('idleMin').value || '0', 10)}); toastOk('idle timeout saved'); }
@@ -4514,6 +4564,76 @@ $('tlsProxyConfBtn').onclick = async () => {
     }
   } catch(e) { toastErr('Proxy Config Failed', e.message); }
 };
+
+
+async function readFileAsText(f) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(f); }); }
+const _tlsCustomBtn = $('tlsCustomBtn');
+if (_tlsCustomBtn) _tlsCustomBtn.onclick = async () => {
+  const certTxt = ($('tlsCustomCert') ? $('tlsCustomCert').value : '').trim();
+  const keyTxt = ($('tlsCustomKey') ? $('tlsCustomKey').value : '').trim();
+  const certF = ($('tlsCustomCertFile') && $('tlsCustomCertFile').files[0]) || null;
+  const keyF = ($('tlsCustomKeyFile') && $('tlsCustomKeyFile').files[0]) || null;
+  const certP = ($('tlsCustomCertPath') ? $('tlsCustomCertPath').value : '').trim();
+  const keyP = ($('tlsCustomKeyPath') ? $('tlsCustomKeyPath').value : '').trim();
+  const modes = [certTxt && keyTxt ? 1 : 0, certF && keyF ? 1 : 0, certP && keyP ? 1 : 0].reduce((a, b) => a + b, 0);
+  if (modes !== 1) { toastWarn('one input method', 'Paste both PEM texts, or pick both files, or fill both server paths — exactly one way.'); return; }
+  if (!await entConfirm('Install custom certificate?', 'The pair is validated before install. HTTPS reloads in-process; tunnels keep running.', 'Install')) return;
+  const b = $('tlsCustomBtn'); b.disabled = true; b.textContent = 'Installing…';
+  try {
+    let r;
+    if (certF && keyF) {
+      const fd = new FormData();
+      fd.append('cert', certF, certF.name || 'server.crt');
+      fd.append('key', keyF, keyF.name || 'server.key');
+      const resp = await fetch(at('/api/tls/custom'), {
+        method: 'POST', body: fd,
+        headers: {'X-CSRF-Token': getCSRFToken() || ''},
+      });
+      if (resp.status === 401) { showLogin(); throw new Error('session expired'); }
+      r = await resp.json();
+      if (!resp.ok) {
+        const e = new Error(((r && r.error_code ? '[' + r.error_code + '] ' : '') + (r && (r.error || resp.statusText))) + ((r && r.hint) ? '\n\u21AA ' + r.hint : ''));
+        e.code = r && r.error_code; throw e;
+      }
+      if (r && r.csrf_token) setCSRFToken(r.csrf_token);
+    } else if (certP && keyP) {
+      r = await api('/api/tls/custom', { cert_path: certP, key_path: keyP });
+    } else {
+      r = await api('/api/tls/custom', { cert: certTxt, key: keyTxt });
+    }
+    toastOk('custom certificate installed', 'HTTPS: ' + (r.https_url || '') + (r.expiry ? ' · expires ' + r.expiry : ''));
+    tlsRefresh();
+  } catch(e) { toastErr('install failed', e.message); }
+  b.disabled = false; b.textContent = 'Install custom certificate';
+};
+
+
+const _tlsIPBtn = $('tlsIPBtn');
+if (_tlsIPBtn) _tlsIPBtn.onclick = async () => {
+  const ip = ($('tlsIP') ? $('tlsIP').value : '').trim();
+  if (!ip) { toastWarn('IP required', 'Enter this server\'s IP address first.'); return; }
+  if (!await entConfirm('Issue self-signed IP certificate?', 'HTTPS will serve on the IP with a certificate from the panel\'s own authority. Tunnels keep running.', 'Issue')) return;
+  const b = $('tlsIPBtn'); b.disabled = true; b.textContent = 'Issuing…';
+  try {
+    const r = await api('/api/tls/ip', { ip });
+    toastOk('IP certificate installed', 'HTTPS: ' + (r.https_url || '') + (r.expiry ? ' · expires ' + r.expiry : ''));
+    tlsRefresh();
+  } catch(e) { toastErr('issue failed', e.message); }
+  b.disabled = false; b.textContent = 'Issue IP certificate';
+};
+const _tlsIPRegenBtn = $('tlsIPRegenBtn');
+if (_tlsIPRegenBtn) _tlsIPRegenBtn.onclick = async () => {
+  if (!await entConfirm('Regenerate server certificate?', 'Only the server certificate rotates — the CA stays the same, so browsers keep trusting it.', 'Regenerate')) return;
+  const b = $('tlsIPRegenBtn'); b.disabled = true; b.textContent = 'Regenerating…';
+  try {
+    const r = await api('/api/tls/ip', { regenerate: true });
+    toastOk('certificate regenerated', 'HTTPS: ' + (r.https_url || ''));
+    tlsRefresh();
+  } catch(e) { toastErr('regenerate failed', e.message); }
+  b.disabled = false; b.textContent = 'Regenerate';
+};
+const _tlsCABtn = $('tlsCABtn');
+if (_tlsCABtn) _tlsCABtn.onclick = () => { window.open(at('/api/tls/ip/ca'), '_blank'); };
 
 $('tlsProxyCloseBtn').onclick = () => {
   const box = $('tlsProxyBox');

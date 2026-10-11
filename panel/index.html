@@ -2246,6 +2246,16 @@
             <button class="hashem-btn hashem-btn-secondary" id="alTest">Send test</button>
           </div>
         </div>
+        <div class="tunnel-card" id="accessCard">
+          <div class="tc-header"><p class="tc-title" data-i18n="acc_title">Panel access (port / login / address)</p></div>
+          <div class="ent-help" data-i18n="acc_hint">Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.</div>
+          <div class="fg"><label for="accUser" data-i18n="acc_user">Login username</label><input class="hashem-input" id="accUser" autocomplete="off" spellcheck="false" placeholder="admin"></div>
+          <div class="fg"><label for="accPort" data-i18n="acc_port">HTTP port (1–65535)</label><input class="hashem-input" id="accPort" type="number" min="1" max="65535" placeholder="7777"></div>
+          <div class="fg"><label for="accBase" data-i18n="acc_base">Address path (after IP:port/…)</label><input class="hashem-input" id="accBase" autocomplete="off" spellcheck="false" placeholder="a1b2c3d4e5f6"></div>
+          <div class="ent-help" id="accCurrent">—</div>
+          <div class="fg"><label for="accPass" data-i18n="acc_pass">Current password (confirm)</label><input class="hashem-input" id="accPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>
+          <div><button class="hashem-btn hashem-btn-primary" id="accSave" data-i18n="acc_save">Save & restart panel</button></div>
+        </div>
         <div class="tunnel-card" id="idleCard">
           <div class="tc-header"><p class="tc-title">Session idle timeout</p></div>
           <div class="ent-help">Sign out automatically after this many minutes without clicks or key presses. Background refresh does not count as activity. 0 = off.</div>
@@ -2311,6 +2321,28 @@
             <button class="hashem-btn hashem-btn-secondary" id="tlsProxyConfBtn">Reverse Proxy Config</button>
           </div>
           <div class="qs-hint" id="tlsMsg">HTTPS serves on dedicated port 7443 alongside HTTP on port 7777.</div>
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
+            <b data-i18n="tls_ip_title">HTTPS on this server's IP (self-signed)</b>
+            <div class="qs-hint" data-i18n="tls_ip_hint">No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.</div>
+            <div class="fg"><label for="tlsIP">Server IP</label><input class="hashem-input" id="tlsIP" placeholder="1.2.3.4" autocomplete="off" spellcheck="false"></div>
+            <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="hashem-btn hashem-btn-primary" id="tlsIPBtn">Issue IP certificate</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsIPRegenBtn">Regenerate</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (install once)</button>
+            </div>
+          </div>
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
+            <b data-i18n="tls_custom_title">Use your own certificate</b>
+            <div class="qs-hint" data-i18n="tls_custom_hint">Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.</div>
+            <div class="fg"><label for="tlsCustomCert">Certificate (PEM)</label><textarea class="hashem-input" id="tlsCustomCert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" autocomplete="off" spellcheck="false"></textarea></div>
+            <div class="fg"><label for="tlsCustomKey">Private key (PEM)</label><textarea class="hashem-input" id="tlsCustomKey" rows="4" placeholder="-----BEGIN PRIVATE KEY-----" autocomplete="off" spellcheck="false"></textarea></div>
+            <div class="fg"><label for="tlsCustomCertFile">…or upload files</label><input type="file" id="tlsCustomCertFile" accept=".crt,.pem,.cert"> <input type="file" id="tlsCustomKeyFile" accept=".key,.pem"></div>
+            <div class="fg"><label for="tlsCustomCertPath">…or server paths</label><input class="hashem-input" id="tlsCustomCertPath" placeholder="/etc/ssl/my.crt" autocomplete="off" spellcheck="false"></div>
+            <div class="fg"><label for="tlsCustomKeyPath">Key path</label><input class="hashem-input" id="tlsCustomKeyPath" placeholder="/etc/ssl/my.key" autocomplete="off" spellcheck="false"></div>
+            <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="hashem-btn hashem-btn-primary" id="tlsCustomBtn">Install custom certificate</button>
+            </div>
+          </div>
           <div id="tlsProxyBox" style="display:none; margin-top:12px; padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <b>Reverse Proxy Configuration (Nginx & Caddy)</b>
