@@ -329,6 +329,8 @@ const I18N = {
     upd_dev_badge: "DEV",
     nav_settings: "Settings",
     tls_custom_title: "Use your own certificate",
+    tls_ip_title: "HTTPS on this server\'s IP (self-signed)",
+    tls_ip_hint: "No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.",
     tls_custom_hint: "Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.",
     acc_title: "Panel access (port / login / address)",
     acc_hint: "Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.",
@@ -751,6 +753,8 @@ const I18N = {
     upd_dev_badge: "DEV",
     nav_settings: "تنظیمات",
     tls_custom_title: "استفاده از گواهی خودتان",
+    tls_ip_title: "HTTPS روی IP همین سرور (self-signed)",
+    tls_ip_hint: "دامنه لازم نیست. پنل خودش مرجع می‌سازد، برای IP گواهی ۸۲۵ روزه صادر می‌کند و HTTPS سرو می‌دهد. فایل CA را یک بار در مرورگر/سیستم نصب کنید تا هشدار ندهد. Regenerate فقط گواهی سرور را عوض می‌کند؛ CA معتبر می‌ماند.",
     tls_custom_hint: "گواهی + کلید را بچسبانید، هر دو فایل را آپلود کنید، یا مسیر فایل‌های روی سرور را بدهید. قبل از نصب اعتبارسنجی می‌شود؛ گواهی قبلی به‌عنوان بکاپ می‌ماند.",
     acc_title: "دسترسی پنل (پورت / ورود / آدرس)",
     acc_hint: "تغییر هر کدام فقط وب‌سرویس پنل را ری‌استارت می‌کند — تونل‌ها وصل می‌مانند. بعد از ذخیره، پنل را با آدرس جدید باز کنید.",
@@ -4602,6 +4606,34 @@ if (_tlsCustomBtn) _tlsCustomBtn.onclick = async () => {
   } catch(e) { toastErr('install failed', e.message); }
   b.disabled = false; b.textContent = 'Install custom certificate';
 };
+
+
+const _tlsIPBtn = $('tlsIPBtn');
+if (_tlsIPBtn) _tlsIPBtn.onclick = async () => {
+  const ip = ($('tlsIP') ? $('tlsIP').value : '').trim();
+  if (!ip) { toastWarn('IP required', 'Enter this server\'s IP address first.'); return; }
+  if (!await entConfirm('Issue self-signed IP certificate?', 'HTTPS will serve on the IP with a certificate from the panel\'s own authority. Tunnels keep running.', 'Issue')) return;
+  const b = $('tlsIPBtn'); b.disabled = true; b.textContent = 'Issuing…';
+  try {
+    const r = await api('/api/tls/ip', { ip });
+    toastOk('IP certificate installed', 'HTTPS: ' + (r.https_url || '') + (r.expiry ? ' · expires ' + r.expiry : ''));
+    tlsRefresh();
+  } catch(e) { toastErr('issue failed', e.message); }
+  b.disabled = false; b.textContent = 'Issue IP certificate';
+};
+const _tlsIPRegenBtn = $('tlsIPRegenBtn');
+if (_tlsIPRegenBtn) _tlsIPRegenBtn.onclick = async () => {
+  if (!await entConfirm('Regenerate server certificate?', 'Only the server certificate rotates — the CA stays the same, so browsers keep trusting it.', 'Regenerate')) return;
+  const b = $('tlsIPRegenBtn'); b.disabled = true; b.textContent = 'Regenerating…';
+  try {
+    const r = await api('/api/tls/ip', { regenerate: true });
+    toastOk('certificate regenerated', 'HTTPS: ' + (r.https_url || ''));
+    tlsRefresh();
+  } catch(e) { toastErr('regenerate failed', e.message); }
+  b.disabled = false; b.textContent = 'Regenerate';
+};
+const _tlsCABtn = $('tlsCABtn');
+if (_tlsCABtn) _tlsCABtn.onclick = () => { window.open(at('/api/tls/ip/ca'), '_blank'); };
 
 $('tlsProxyCloseBtn').onclick = () => {
   const box = $('tlsProxyBox');

@@ -2322,6 +2322,16 @@
           </div>
           <div class="qs-hint" id="tlsMsg">HTTPS serves on dedicated port 7443 alongside HTTP on port 7777.</div>
           <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
+            <b data-i18n="tls_ip_title">HTTPS on this server's IP (self-signed)</b>
+            <div class="qs-hint" data-i18n="tls_ip_hint">No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.</div>
+            <div class="fg"><label for="tlsIP">Server IP</label><input class="hashem-input" id="tlsIP" placeholder="1.2.3.4" autocomplete="off" spellcheck="false"></div>
+            <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="hashem-btn hashem-btn-primary" id="tlsIPBtn">Issue IP certificate</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsIPRegenBtn">Regenerate</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (install once)</button>
+            </div>
+          </div>
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
             <b data-i18n="tls_custom_title">Use your own certificate</b>
             <div class="qs-hint" data-i18n="tls_custom_hint">Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.</div>
             <div class="fg"><label for="tlsCustomCert">Certificate (PEM)</label><textarea class="hashem-input" id="tlsCustomCert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" autocomplete="off" spellcheck="false"></textarea></div>

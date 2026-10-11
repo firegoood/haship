@@ -5890,6 +5890,50 @@ PYEOF
     echo -e "${GREEN}    Tunnel infrastructure continues running without interruption.${NC}"
 }
 
+# panel_tls_ip: self-signed HTTPS on the server IP via a persistent local CA.
+# panel-tls-ip [IP] — CA kept 10y in /etc/gre-panel/tls, server cert 825d, restarts only gre-panel.
+panel_tls_ip() {
+    local IP="${1:-}"
+    if [[ -z "$IP" ]]; then
+        IP=$(ip route get 1.1.1.1 2>/dev/null | awk "/src/ {for (i=1; i<=NF; i++) if (\$i==\"src\") {print \$(i+1); exit}}")
+        [[ -z "$IP" ]] && read -p "Server IP for the certificate: " IP
+    fi
+    [[ "$IP" =~ ^[0-9a-fA-F.:]+$ ]] || { echo -e "${RED}[!] Not a valid IP: $IP${NC}"; return 1; }
+    command -v openssl >/dev/null 2>&1 || { echo -e "${RED}[!] openssl is required.${NC}"; return 1; }
+    mkdir -p /etc/gre-panel/tls
+    if [[ ! -f /etc/gre-panel/tls/hashem-ca.crt ]]; then
+        echo -e "${CYAN}[*] Creating local CA (10 years, install once in your browser/OS)...${NC}"
+        openssl req -x509 -newkey rsa:3072 -keyout /etc/gre-panel/tls/hashem-ca.key -out /etc/gre-panel/tls/hashem-ca.crt -days 3650 -nodes -subj "/O=Hashem Panel Local CA/CN=Hashem Panel Local CA" 2>/dev/null || return 1
+        chmod 600 /etc/gre-panel/tls/hashem-ca.key
+    fi
+    [[ -f /etc/gre-panel/tls/server.crt ]] && cp -f /etc/gre-panel/tls/server.crt /etc/gre-panel/tls/server.crt.bak
+    [[ -f /etc/gre-panel/tls/server.key ]] && cp -f /etc/gre-panel/tls/server.key /etc/gre-panel/tls/server.key.bak
+    [[ -f /etc/gre-panel/tls/meta.json ]] && cp -f /etc/gre-panel/tls/meta.json /etc/gre-panel/tls/meta.json.bak
+    local TMP; TMP=$(mktemp -d)
+    openssl req -newkey rsa:2048 -nodes -keyout "$TMP/server.key" -out "$TMP/server.csr" -subj "/O=Hashem Panel/CN=$IP" 2>/dev/null || { rm -rf "$TMP"; return 1; }
+    printf "subjectAltName=IP:%s\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n" "$IP" > "$TMP/ext.cnf"
+    openssl x509 -req -in "$TMP/server.csr" -CA /etc/gre-panel/tls/hashem-ca.crt -CAkey /etc/gre-panel/tls/hashem-ca.key -CAcreateserial -out "$TMP/server.crt" -days 825 -extfile "$TMP/ext.cnf" 2>/dev/null || {
+        echo -e "${RED}[!] Signing failed — previous configuration kept intact.${NC}"
+        rm -rf "$TMP"; return 1
+    }
+    cp -f "$TMP/server.crt" /etc/gre-panel/tls/server.crt && cp -f "$TMP/server.key" /etc/gre-panel/tls/server.key || {
+        echo -e "${RED}[!] Install failed — previous configuration kept intact.${NC}"
+        rm -rf "$TMP"; return 1
+    }
+    rm -rf "$TMP"
+    chmod 600 /etc/gre-panel/tls/server.key
+    echo "{\"domain\":\"$IP\",\"issuer\":\"Hashem Panel Local CA (self-signed)\",\"issued_at\":\"$(date '+%F %T')\"}" > /etc/gre-panel/tls/meta.json
+    rm -f /etc/gre-panel/tls/*.bak
+    systemctl restart gre-panel 2>/dev/null || true
+    sleep 2
+    local BASE TPORT
+    BASE=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
+    TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); TPORT=${TPORT:-7443}
+    echo -e "${GREEN}[✔️] Self-signed HTTPS ready: ${CYAN}https://${IP}:${TPORT}/${BASE}${NC}"
+    echo -e "${GREEN}    Install once to remove the browser warning: ${CYAN}/etc/gre-panel/tls/hashem-ca.crt${NC}"
+    echo -e "${GREEN}    Tunnel infrastructure continues running without interruption.${NC}"
+}
+
 # Dedicated backup key for encrypted backups (CWE-256: decouples backup key from login password)
 ensure_backup_key() {
     mkdir -p /etc/gre-panel
@@ -7803,7 +7847,7 @@ Usage:
   hashem uninstall [--force]                   # full wipe: tunnel + panel + 'hashem' itself
   hashem add-peer --local-pub IP --remote-pub IP [--frp-port N] --token T --local-gre IP --peer-gre IP --ports "443, 2083" [--name LABEL] [--bundle hsh1_...]
   hashem remove-peer --id N [--force] | edit-peer --id N [--name L] [--remote-pub IP] [--carrier C] [--ports "..."] | edit-peer-ports --id N --ports "443, 2083" | peer-list | peer-token --id N
-  hashem logs | restart | panel-tls [domain] [email] | panel-tls-custom <cert> <key>   # (also: bash hashem.sh ...)
+  hashem logs | restart | panel-tls [domain] [email] | panel-tls-custom <cert> <key> | panel-tls-ip [IP]   # (also: bash hashem.sh ...)
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
   hashem dial [status|auto|gre|public]         # foreign side: reach the Iran hub over GRE, its public IP, or auto (GRE if it works)
@@ -8231,6 +8275,7 @@ if [[ $# -gt 0 ]]; then
         stress-test|test-load|stress) shift; cli_stress_test "$@" ;;
         panel-tls) shift; panel_tls_issue "$@" ;;
         panel-tls-custom) shift; panel_tls_custom "$@" ;;
+        panel-tls-ip) shift; panel_tls_ip "${1:-}" ;;
         panel-remove-domain|panel-tls-remove) panel_tls_remove ;;
         carrier) shift; cli_carrier "$@" ;;
         carrier-kernel-init) carrier_init_kernel ;;
