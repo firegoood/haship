@@ -74,3 +74,12 @@ func TestAuditEndpointNewestFirstFilteredRedacted(t *testing.T) {
 		t.Errorf("filter wrong: %s", rr.Body.String())
 	}
 }
+
+func TestStatusRecorderUnwrapsForResponseController(t *testing.T) {
+	rr := httptest.NewRecorder()
+	rec := &statusRecorder{ResponseWriter: rr}
+	if rec.Unwrap() != http.ResponseWriter(rr) {
+		t.Fatal("Unwrap must expose the underlying writer")
+	}
+	rec.Flush() // must not panic on a flushable writer
+}
