@@ -3,6 +3,11 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
+## v1.3.3 — downgrade list covers every release
+
+### Changed
+- The **Install a specific version (downgrade)** picker (`GET /api/releases`) now lists every published release of the channel, not just the newest 20. The panel pages the GitHub API (100 per page, up to 1000 releases).
+
 ## v1.3.2 — downgrade to any of the last 20 releases
 
 ### Added
