@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -410,5 +411,19 @@ func TestHandleUpdateExplicitTagValidated(t *testing.T) {
 	handleUpdate(rr, httptest.NewRequest("POST", "/api/update", strings.NewReader(`{"tag":"v1.5.0"}`)))
 	if !strings.Contains(rr.Body.String(), "already latest") {
 		t.Errorf("same tag should no-op: %s", rr.Body.String())
+	}
+}
+
+func TestHandleReleasesNoCap(t *testing.T) {
+	withTmpConfig(t)
+	var rels []ghRelease
+	for i := 0; i < 45; i++ {
+		rels = append(rels, ghRelease{Tag: "v1.0." + strconv.Itoa(i)})
+	}
+	swapFetchers(t, canned(rels, nil), nil)
+	rec := httptest.NewRecorder()
+	handleReleases(rec, httptest.NewRequest("GET", "/api/releases", nil))
+	if n := strings.Count(rec.Body.String(), `"tag"`); n != 45 {
+		t.Fatalf("got %d releases, want all 45", n)
 	}
 }
