@@ -7200,11 +7200,16 @@ remove_legacy_units() {
 }
 
 update_all() {
+    local WANT_TAG="${1:-}"
+    if [[ -n "$WANT_TAG" ]]; then
+        update_tag_ok "$WANT_TAG" || { echo -e "${RED}[!] Bad tag: $WANT_TAG (want vX.Y.Z, dev-rN or panel-rN)${NC}"; return 1; }
+        echo -e "${YELLOW}[!] Installing ${WANT_TAG} even if older than running (downgrade).${NC}"
+    fi
     echo -e "${CYAN}[*] Updating Hashem (script + panel binary)...${NC}"
     TMP_U="$(mktemp -d)"
     trap 'rm -rf "$TMP_U"' RETURN
     # 1. fresh script from the channel's release (main only if the tag has no asset)
-    UPD_TAG=$(update_pick_tag)
+    UPD_TAG="${WANT_TAG:-$(update_pick_tag)}"
     echo -e "${CYAN}[*] Channel: $(update_get_channel)${UPD_TAG:+ (release ${UPD_TAG})}${NC}"
     if [[ -n "$UPD_TAG" ]]; then
         download_with_fallback "$TMP_U/hashem.sh" "https://github.com/pdnczone/hashem-panel/releases/download/${UPD_TAG}/hashem.sh" 30 || rm -f "$TMP_U/hashem.sh"
@@ -8261,7 +8266,7 @@ if [[ $# -gt 0 ]]; then
         watchdog) shift; cli_watchdog "$@" ;;
         backup) shift; cli_backup "$@" ;;
         tgsend) shift; watchdog_send "$1" ;;
-        update|update-all) update_all ;;
+        update|update-all) shift; update_all "$@" ;;
         update-channel) shift; cli_update_channel "$@" ;;
         cleanup-legacy) remove_legacy_units ;;
         peer-token)

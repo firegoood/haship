@@ -3,6 +3,13 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
+## v1.3.2 — downgrade to any of the last 20 releases
+
+### Added
+- **Install a specific version from the Update tab** (`Install a specific version (downgrade)` picker, backed by `GET /api/releases`): choose any of the last 20 releases of the active channel and install it, newer or older. Downgrades keep the same safety as updates (SHA256 `checksums.txt` verification, `panel.json` preserved, automatic rollback on failure).
+- `POST /api/update {"tag":"v1.1.0"}` now installs that exact release even if it is older than the running build; without a tag the behaviour is unchanged (newest of the channel).
+- CLI `hashem update [tag]` (e.g. `hashem update v1.1.0`, `hashem update panel-r140`): validates the tag, then runs the normal update flow pinned to it. Plain `hashem update` still follows the channel's newest.
+
 ## v1.3.1 — rescue card always visible
 
 ### Fixed

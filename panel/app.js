@@ -3274,6 +3274,7 @@ async function loadVersion() {
     const btn = $('updateBtn');
     if (v.update_available) { btn.disabled = false; btn.textContent = 'Update to ' + v.latest; }
     else { btn.disabled = true; btn.textContent = 'Check for updates'; }
+    loadRollback();
     $('updateMsg').textContent = v.update_available ? 'A newer release (' + v.latest + ') is ready. Press Update to install it here.' : 'You are on the latest release.';
   } catch(e) {
     const rows = $('verRowsUpd'); if (rows) rows.innerHTML = '<div class="warnbox">Version check failed: ' + esc(e.message) + '</div>';
@@ -3282,6 +3283,31 @@ async function loadVersion() {
     setTimeout(async () => { try { await api('/api/status'); loadVersion(); } catch(_){ /* panel still restarting: ignore */ } }, 5000);
   }
 }
+async function loadRollback() {
+  const sel = $('rbTag'), b = $('rbBtn'); if (!sel) return;
+  try {
+    const r = await api('/api/releases');
+    const cur = $('verCurrent') ? $('verCurrent').textContent : '';
+    sel.innerHTML = (r.releases || []).map(x => '<option value="' + esc(x.tag) + '">' + esc(x.tag) + (x.tag === cur ? ' (installed)' : '') + '</option>').join('') || '<option value="">No releases</option>';
+    b.disabled = !(r.releases || []).length;
+  } catch(e) { sel.innerHTML = '<option value="">' + esc(e.message) + '</option>'; b.disabled = true; }
+}
+$('rbBtn').onclick = async () => {
+  const tag = $('rbTag').value; if (!tag) return;
+  if (!await entConfirm('Install ' + tag + '?', 'Install ' + tag + ' now (can be older than the running version). The panel will restart; tunnels keep running. A failed install rolls back automatically.', 'Install')) return;
+  $('rbBtn').disabled = true;
+  try {
+    const r = await api('/api/update', {tag});
+    $('updateMsg').textContent = (r.detail || 'installed') + ' — refreshing…';
+    let n = 0;
+    const iv = setInterval(async () => {
+      n++;
+      try { const h = await (await fetch(at('/api/health'), {cache: 'no-store'})).json(); if (h && h.status === 'ok') { clearInterval(iv); location.reload(); } }
+      catch(_){ /* restarting */ }
+      if (n > 30) clearInterval(iv);
+    }, 2000);
+  } catch(e) { toastErr('install failed', e.message); $('rbBtn').disabled = false; }
+};
 $('updChannel').onchange = async () => {
   const sel = $('updChannel');
   try { await api('/api/update/channel', {channel: sel.value}); toastOk(tr('upd_channel', 'Update channel'), sel.value); }

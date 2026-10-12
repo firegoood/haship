@@ -391,3 +391,24 @@ func TestSaveUpdateChannelPerms(t *testing.T) {
 		t.Fatalf("temp files left behind: %v", left)
 	}
 }
+
+func TestHandleUpdateExplicitTagValidated(t *testing.T) {
+	old := panelVersion
+	defer func() { panelVersion = old }()
+	defer func(f func() ([]ghRelease, error)) { releasesFetcher = f }(releasesFetcher)
+	releasesFetcher = func() ([]ghRelease, error) { return []ghRelease{{Tag: "v9.9.9"}}, nil }
+	panelVersion = "v1.5.0"
+	for _, bad := range []string{"../x", "latest", "v1.0", "v1.0.0/../../o"} {
+		rr := httptest.NewRecorder()
+		handleUpdate(rr, httptest.NewRequest("POST", "/api/update", strings.NewReader(`{"tag":"`+bad+`"}`)))
+		if !strings.Contains(rr.Body.String(), "E-UPDATE-01") {
+			t.Errorf("tag %q not rejected: %s", bad, rr.Body.String())
+		}
+	}
+	// same tag as running = no-op, never reaches the download
+	rr := httptest.NewRecorder()
+	handleUpdate(rr, httptest.NewRequest("POST", "/api/update", strings.NewReader(`{"tag":"v1.5.0"}`)))
+	if !strings.Contains(rr.Body.String(), "already latest") {
+		t.Errorf("same tag should no-op: %s", rr.Body.String())
+	}
+}
