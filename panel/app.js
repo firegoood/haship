@@ -6253,6 +6253,38 @@ async function sshfwdToggleClick() {
   }
 }
 
+async function sshfwdApplyClick() {
+  const d = _sshfwdData || {};
+  const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
+  if (!isLicensed) {
+    openBagherLicModal();
+    toastErr('لایسنس لازم است', 'استفاده از موتور باقر نیازمند فعال‌سازی لایسنس پرمیوم است.');
+    return;
+  }
+  const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
+  const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() || 'root' : 'root';
+  const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '', 10) || 22;
+  const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
+  const mode = 'bagher';
+  const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
+  const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
+  if (!remote_host) {
+    toastErr('IP سرور خارج لازم است', 'لطفاً آدرس IP سرور خارج را وارد کنید.');
+    return;
+  }
+  if (!ports) {
+    toastErr('پورت‌های فوروارد لازم است', 'لطفاً حداقل یک پورت برای عبور از تانل مشخص کنید (مثال: 443, 8443).');
+    return;
+  }
+  try {
+    await api('/api/sshfwd', { action: 'apply', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
+    toastOk('پورت‌ها با موفقیت اعمال شدند', 'باندل جدید تولید شد؛ لطفاً آن را کپی کرده و در پنل سرور خارج اعمال نمایید.');
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('خطا در اعمال پورت‌ها', err.message || err);
+  }
+}
+
 async function sshfwdClearDnatClick() {
   try {
     await api('/api/sshfwd', { action: 'clear_dnat' });
@@ -6320,6 +6352,7 @@ async function bagherApplyBundleClick() {
 (function initSSHFwdEvents() {
   function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
   on('sshfwdToggleBtn', 'click', sshfwdToggleClick);
+  on('sshfwdApplyBtn', 'click', sshfwdApplyClick);
   on('sshfwdClearDnatBtn', 'click', sshfwdClearDnatClick);
   on('sshfwdSyncPeerBtn', 'click', sshfwdSyncPeerClick);
   on('sshfwdCopyAuthBtn', 'click', sshfwdCopyAuthClick);
