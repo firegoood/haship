@@ -8318,6 +8318,92 @@ EOF
     esac
 }
 
+cli_license() {
+    local SUB="${1:-status}"
+    local CONF_DIR="/etc/gre-panel"
+    local LIC_FILE="${CONF_DIR}/license.key"
+
+    local RAW_ID=""
+    if [[ -f /etc/machine-id ]]; then
+        RAW_ID=$(tr -d '[:space:]' < /etc/machine-id)
+    elif [[ -f /var/lib/dbus/machine-id ]]; then
+        RAW_ID=$(tr -d '[:space:]' < /var/lib/dbus/machine-id)
+    fi
+    local M_HASH=""
+    if [[ -n "$RAW_ID" ]]; then
+        M_HASH=$(printf "hashem-lic-v1:%s" "$RAW_ID" | sha256sum | awk '{print substr($1,1,32)}')
+    fi
+
+    case "$SUB" in
+        status)
+            echo -e "${CYAN}=== Hashem License Status ===${NC}"
+            echo -e "Hardware Fingerprint: ${YELLOW}${M_HASH:-UNKNOWN}${NC}"
+            if [[ -f "$LIC_FILE" && -s "$LIC_FILE" ]]; then
+                echo -e "License Key File:     ${GREEN}${LIC_FILE} (Present)${NC}"
+                local JSON_OUT
+                JSON_OUT=$(curl -sk -m 2 http://127.0.0.1:7777/api/license 2>/dev/null || true)
+                if [[ -n "$JSON_OUT" ]] && command -v jq >/dev/null 2>&1; then
+                    local VALID=$(echo "$JSON_OUT" | jq -r '.is_valid // false')
+                    local CUST=$(echo "$JSON_OUT" | jq -r '.customer // "N/A"')
+                    local EXP=$(echo "$JSON_OUT" | jq -r '.expires_human // "N/A"')
+                    local REM=$(echo "$JSON_OUT" | jq -r '.days_remaining // "N/A"')
+                    local FEAT=$(echo "$JSON_OUT" | jq -r '.features // [] | join(", ")')
+                    if [[ "$VALID" == "true" ]]; then
+                        echo -e "Status:               ${GREEN}ACTIVE (PREMIUM)${NC}"
+                        echo -e "Customer:             ${GREEN}${CUST}${NC}"
+                        echo -e "Expires:              ${GREEN}${EXP} (${REM} days left)${NC}"
+                        echo -e "Features:             ${GREEN}${FEAT}${NC}"
+                    else
+                        local ERR=$(echo "$JSON_OUT" | jq -r '.error // "Invalid/Expired"')
+                        echo -e "Status:               ${RED}INVALID (${ERR})${NC}"
+                    fi
+                else
+                    echo -e "Status:               ${YELLOW}Installed (Check Web UI or restart panel)${NC}"
+                fi
+            else
+                echo -e "Status:               ${YELLOW}FREE EDITION (No license installed)${NC}"
+                echo -e "To activate:          ${CYAN}hashem license activate <KEY>${NC}"
+            fi
+            ;;
+        machine-id|id|fingerprint)
+            echo -e "Machine ID:   ${RAW_ID}"
+            echo -e "Machine Hash: ${M_HASH}"
+            ;;
+        activate)
+            shift
+            local KEY="${1:-}"
+            if [[ -z "$KEY" ]]; then
+                echo -e "${RED}[!] Error: Please provide license key string.${NC}"
+                echo -e "Usage: hashem license activate <KEY>"
+                return 1
+            fi
+            mkdir -p "$CONF_DIR"
+            echo -n "$KEY" > "$LIC_FILE"
+            chmod 600 "$LIC_FILE"
+            echo -e "${GREEN}[✔️] License key written to ${LIC_FILE}.${NC}"
+            if systemctl is-active --quiet gre-panel.service 2>/dev/null; then
+                systemctl restart gre-panel.service 2>/dev/null || true
+                echo -e "${GREEN}[✔️] Restarted gre-panel to apply license.${NC}"
+            fi
+            cli_license status
+            ;;
+        deactivate|remove)
+            if [[ -f "$LIC_FILE" ]]; then
+                rm -f "$LIC_FILE"
+                echo -e "${GREEN}[✔️] License removed. Reverted to Free edition.${NC}"
+                if systemctl is-active --quiet gre-panel.service 2>/dev/null; then
+                    systemctl restart gre-panel.service 2>/dev/null || true
+                fi
+            else
+                echo -e "${YELLOW}[*] No license key installed.${NC}"
+            fi
+            ;;
+        *)
+            echo "Usage: hashem license [status|machine-id|activate <KEY>|deactivate]"
+            ;;
+    esac
+}
+
 if [[ $# -gt 0 ]]; then
     case "$1" in
         -h|--help|help) usage_cli; exit 0 ;;
@@ -8369,6 +8455,7 @@ if [[ $# -gt 0 ]]; then
         panel-remove-domain|panel-tls-remove) panel_tls_remove ;;
         carrier) shift; cli_carrier "$@" ;;
         ssh-fwd|sshfwd) shift; cli_sshfwd "$@" ;;
+        license|lic) shift; cli_license "$@" ;;
         carrier-kernel-init) carrier_init_kernel ;;
         dial) shift; cli_dial "$@" ;;
         dial-select) dial_reselect >/dev/null 2>&1; exit 0 ;;

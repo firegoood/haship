@@ -407,6 +407,8 @@ func getSSHFwdStatus() map[string]any {
 		"bind_addr":         cfg.BindAddr,
 		"frp_bind_port":     cfg.FRPBindPort,
 		"pool_count":        cfg.PoolCount,
+		"licensed_frp_ssh":  HasFeature("frp_ssh"),
+		"machine_hash":      getMachineHash(),
 		"port_status":       portStatus,
 		"dnat_conflict":     dnatActive,
 		"last_error":        cfg.LastError,
@@ -482,6 +484,11 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 
 		if cfg.RemoteHost == "" {
 			writeAPIError(w, r, "E-SSHFWD-01", "remote_host is required")
+			return
+		}
+
+		if cfg.Mode == "frp_ssh" && !HasFeature("frp_ssh") {
+			writeAPIError(w, r, "E-LIC-01", "FRP over SSH requires a valid Premium license (Machine: "+getMachineHash()+")")
 			return
 		}
 

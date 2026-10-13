@@ -6034,6 +6034,10 @@ function renderSSHFwd() {
   const isFRP = (modeEl ? modeEl.value : (d.mode || 'frp_ssh')) !== 'direct';
   if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';
   if ($('sshfwdForeignBox')) $('sshfwdForeignBox').style.display = isFRP ? 'block' : 'none';
+  if ($('sshfwdLicBanner')) {
+    const isLicensed = !!d.licensed_frp_ssh;
+    $('sshfwdLicBanner').classList.toggle('hidden', !isFRP || isLicensed);
+  }
 
   const foreignCmd = $('sshfwdForeignCmd');
   if (foreignCmd) foreignCmd.value = d.foreign_setup_cmd || '';
@@ -6136,5 +6140,124 @@ function sshfwdCopyForeignClick() {
     const isFRP = $('sshfwdMode') && $('sshfwdMode').value !== 'direct';
     if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';
     if ($('sshfwdForeignBox')) $('sshfwdForeignBox').style.display = isFRP ? 'block' : 'none';
+    if ($('sshfwdLicBanner')) {
+      const isLicensed = _sshfwdData && _sshfwdData.licensed_frp_ssh;
+      $('sshfwdLicBanner').classList.toggle('hidden', !isFRP || isLicensed);
+    }
   });
+})();
+
+/* --- License & Premium Feature Management --- */
+let _licenseData = null;
+
+async function loadLicense() {
+  try {
+    const d = await api('/api/license');
+    _licenseData = d;
+    renderLicense(d);
+  } catch (err) {
+    console.warn('Failed loading license:', err);
+  }
+}
+
+function renderLicense(d) {
+  if (!d) return;
+  if ($('licMachineHash')) $('licMachineHash').value = d.machine_hash || '';
+
+  const badge = $('licBadge');
+  const details = $('licActiveDetails');
+  const deactBtn = $('licDeactivateBtn');
+
+  if (d.is_valid) {
+    if (badge) {
+      badge.textContent = 'PREMIUM (Active)';
+      badge.style.background = '#10b981';
+      badge.style.color = '#fff';
+    }
+    if (details) details.classList.remove('hidden');
+    if (deactBtn) deactBtn.classList.remove('hidden');
+
+    if ($('licCustomerRow')) $('licCustomerRow').textContent = 'Customer: ' + (d.customer || '-');
+    if ($('licExpiresRow')) {
+      const expStr = d.expires_human || '-';
+      const daysStr = d.days_remaining >= 0 ? ` (${d.days_remaining} days left)` : ' (Lifetime)';
+      $('licExpiresRow').textContent = 'Expires: ' + expStr + daysStr;
+    }
+    if ($('licFeaturesRow')) {
+      $('licFeaturesRow').textContent = 'Unlocked Features: ' + (d.features && d.features.length ? d.features.join(', ') : 'All');
+    }
+    if ($('sshfwdLicBanner')) $('sshfwdLicBanner').classList.add('hidden');
+  } else {
+    if (badge) {
+      badge.textContent = 'FREE EDITION';
+      badge.style.background = 'rgba(255,255,255,0.1)';
+      badge.style.color = '';
+    }
+    if (details) details.classList.add('hidden');
+    if (deactBtn) deactBtn.classList.add('hidden');
+    if ($('sshfwdLicBanner') && $('sshfwdMode') && $('sshfwdMode').value === 'frp_ssh') {
+      $('sshfwdLicBanner').classList.remove('hidden');
+    }
+  }
+}
+
+async function activateLicenseClick() {
+  const keyEl = $('licKeyInput');
+  const key = keyEl ? keyEl.value.trim() : '';
+  if (!key) {
+    toastErr('Missing Key', 'Paste a valid license key string first.');
+    return;
+  }
+  try {
+    const res = await api('/api/license', { key });
+    toastOk('License Activated', 'Premium features unlocked for ' + (res.customer || 'this server') + '!');
+    if (keyEl) keyEl.value = '';
+    await loadLicense();
+    if (typeof loadSSHFwd === 'function') await loadSSHFwd();
+  } catch (err) {
+    toastErr('Activation Failed', err.message || String(err));
+  }
+}
+
+async function deactivateLicenseClick() {
+  if (!confirm('Deactivate and remove current license? Premium features will lock.')) return;
+  try {
+    await api('/api/license', { key: '' });
+    toastOk('License Removed', 'Reverted to Free edition.');
+    await loadLicense();
+    if (typeof loadSSHFwd === 'function') await loadSSHFwd();
+  } catch (err) {
+    toastErr('Failed', String(err));
+  }
+}
+
+function copyMachineHashClick() {
+  const el = $('licMachineHash');
+  if (el && el.value) {
+    navigator.clipboard.writeText(el.value).then(() => {
+      toastOk('Copied', 'Hardware machine hash copied to clipboard.');
+    }).catch(err => {
+      toastErr('Copy failed', String(err));
+    });
+  }
+}
+
+(function initLicenseEvents() {
+  function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
+  on('licActivateBtn', 'click', activateLicenseClick);
+  on('licDeactivateBtn', 'click', deactivateLicenseClick);
+  on('licCopyMachineBtn', 'click', copyMachineHashClick);
+
+  // Load license when settings tab clicked or initial page load
+  const origTabSwitch = window.switchTab;
+  if (typeof origTabSwitch === 'function') {
+    window.switchTab = function(name) {
+      origTabSwitch(name);
+      if (name === 'settings') loadLicense();
+    };
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    loadLicense();
+  });
+  setTimeout(loadLicense, 500);
 })();

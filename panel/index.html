@@ -1278,10 +1278,11 @@
             <div class="tc-box">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Carrier Engine Mode</label>
               <select id="sshfwdMode" class="hashem-input" style="width:100%;">
-                <option value="frp_ssh">FRP over SSH (Low Latency &amp; High Speed — 25 Pool)</option>
-                <option value="direct">Direct SSH Forward (Pure TCP tunnel)</option>
+                <option value="frp_ssh">FRP over SSH (Low Latency &amp; High Speed — 25 Pool) [PRO]</option>
+                <option value="direct">Direct SSH Forward (Pure TCP tunnel) [Free]</option>
               </select>
               <div class="u-hint-12 u-mt-4">FRP-over-SSH pre-warms connection pools to cut handshake latency by ~110ms.</div>
+              <div class="u-hint-12 u-mt-4 hidden" id="sshfwdLicBanner" style="color:#f59e0b; font-weight:600;">⚠ Requires active Premium License. (Direct SSH is free).</div>
             </div>
             <div class="tc-box">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Remote Host (Foreign IP)</label>
@@ -2277,6 +2278,34 @@
         </div>
       </section>
       <section id="tab-settings" role="tabpanel" hidden>
+        <div class="tunnel-card" id="licenseCard">
+          <div class="tc-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <p class="tc-title">License &amp; Premium Features</p>
+            <span id="licBadge" class="badge" style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; font-size:12px; font-weight:600;">FREE EDITION</span>
+          </div>
+          <div class="fg">
+            <label for="licMachineHash">Server Hardware Fingerprint (Machine Hash)</label>
+            <div style="display:flex; gap:8px;">
+              <input class="hashem-input" id="licMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%;" placeholder="Calculating…">
+              <button class="hashem-btn" id="licCopyMachineBtn" style="white-space:nowrap;">Copy</button>
+            </div>
+            <div class="ent-help">Provide this fingerprint to your provider to issue or renew a hardware-locked license.</div>
+          </div>
+          <div id="licActiveDetails" class="hidden" style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); padding:10px; border-radius:6px; margin-bottom:12px;">
+            <div style="font-size:13px; font-weight:600; color:#10b981; margin-bottom:4px;">Active Premium License</div>
+            <div style="font-size:12px;" id="licCustomerRow">Customer: -</div>
+            <div style="font-size:12px;" id="licExpiresRow">Expires: -</div>
+            <div style="font-size:12px;" id="licFeaturesRow">Unlocked Features: -</div>
+          </div>
+          <div class="fg">
+            <label for="licKeyInput">License Key</label>
+            <textarea class="hashem-input" id="licKeyInput" rows="3" placeholder="Paste your license token here (payload.signature)…" style="font-family:monospace; font-size:12px; resize:none;"></textarea>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="hashem-btn hashem-btn-primary" id="licActivateBtn">Activate License</button>
+            <button class="hashem-btn hashem-btn-secondary hidden" id="licDeactivateBtn">Deactivate</button>
+          </div>
+        </div>
         <div class="tunnel-card">
           <div class="tc-header"><p class="tc-title">Settings</p></div>
           <div class="fg"><label for="curPass">Current panel password</label><input class="hashem-input" id="curPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>

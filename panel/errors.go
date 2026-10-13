@@ -85,6 +85,12 @@ var errCatalog = map[string]errInfo{
 	"E-UPDATE-06": {500, "cannot sync hashem.sh installer script", "Panel binary updated, but installer script download failed — check internet or DNS."},
 	"E-UPDATE-07": {502, "checksum verification failed", "Downloaded binary or script failed SHA256 checksum check."},
 	"E-UPDATE-08": {400, "invalid update channel", "Channel must be stable or dev."},
+	// license & premium
+	"E-LIC-01":    {403, "premium license required for this feature", "Activate a valid Premium license key in Settings to unlock this feature."},
+	"E-LIC-02":    {400, "invalid license key format", "Check that the complete license string was pasted without extra spaces or line breaks."},
+	"E-LIC-03":    {400, "license key signature invalid", "This license token has been tampered with or issued by an unrecognized authority."},
+	"E-LIC-04":    {400, "license key expired", "This license has expired. Contact your provider for renewal."},
+	"E-LIC-05":    {400, "license machine id mismatch", "This license is bound to a different server. Machine hash does not match."},
 	// log diagnostics (annotation only, also reused by status hints)
 	"E-GRE-01":     {0, "GRE interface missing / down", "Tunnel setup did not create it, or it was deleted — reinstall that peer."},
 	"E-GRE-02":     {0, "GRE ping failed (100% loss / unreachable)", "Peers cannot reach each other: firewall, wrong public IP, or GRE blocked."},
