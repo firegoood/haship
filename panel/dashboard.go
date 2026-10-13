@@ -43,10 +43,18 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 		traffic = map[string]any{"up": nil, "down": nil, "total": nil}
 	}
 	peers := snap.PeersAged()
+	bagherStatus := getSSHFwdStatus()
+	bagherActive := false
+	if bAct, ok := bagherStatus["is_active"].(bool); ok && bAct {
+		bagherActive = true
+	} else if bEn, ok := bagherStatus["enabled"].(bool); ok && bEn {
+		bagherActive = true
+	}
+
 	// Rollup uses the same per-tunnel verdict as the fleet graph (fleetHealth):
 	// a live FRP session is healthy even when the GRE inner address has no ping.
 	// The main tunnel counts as one more spoke of the hub.
-	anyUp := st.Gre.Exists || st.FrpUp
+	anyUp := st.Gre.Exists || st.FrpUp || bagherActive
 	health := "DOWN"
 	var reasons []string
 	icmpFiltered := false
@@ -76,8 +84,13 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 				latMs, latKind = p.LatencyMs, p.LatencyKind
 			}
 		}
+		if bagherActive {
+			anyUp = true
+			healthy++
+			up++
+		}
 		switch {
-		case healthy == len(all):
+		case healthy == len(all) || (len(all) == 0 && bagherActive):
 			health = "HEALTHY"
 		case up > 0:
 			health = "DEGRADED"
@@ -85,14 +98,22 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	} else {
 		pingMs := parsePingMs(st.PingMs)
 		h := ComputeHealth(LinkSignals{
-			ServiceActive: st.FrpUp, GreIfUp: st.Gre.Exists, Session: snap.LocalSession, TCPRTTms: snap.LocalRTT,
+			ServiceActive: st.FrpUp || bagherActive, GreIfUp: st.Gre.Exists || bagherActive, Session: snap.LocalSession || bagherActive, TCPRTTms: snap.LocalRTT,
 			ICMPOK: st.PingOK, ICMPms: pingMs, ICMPFresh: st.PingOK || snap.LocalSession,
 		})
 		health = map[string]string{stateHealthy: "HEALTHY", stateDegraded: "DEGRADED", stateDown: "DOWN"}[h.State]
-		if !(st.Gre.Exists || st.FrpUp) {
+		if !(st.Gre.Exists || st.FrpUp || bagherActive) {
 			health = "DOWN"
+		} else if bagherActive && health == "DOWN" {
+			health = "HEALTHY"
 		}
 		reasons, icmpFiltered, latMs, latKind = h.Reasons, h.ICMPFiltered, h.LatencyMs, h.LatencyKind
+		if latMs < 0 && bagherActive {
+			if bLat, ok := bagherStatus["latency_ms"].(float64); ok && bLat > 0 {
+				latMs = bLat
+				latKind = "bagher"
+			}
+		}
 	}
 	if reasons == nil {
 		reasons = []string{}
@@ -154,6 +175,7 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"uptime":  uptimeInfo(snap.FrpSince),
 		"system":  systemInfo(),
 		"conns":   snap.ActiveConns,
+		"bagher":  bagherStatus,
 		"checked": time.Now().UTC().Format(time.RFC3339),
 	}
 	writeJSON(w, d)

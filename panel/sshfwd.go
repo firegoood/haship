@@ -537,13 +537,27 @@ func getBagherLiveMetrics(cfg SSHFwdConfig) BagherLiveMetrics {
 		return BagherLiveMetrics{Connected: false, StatusText: "inactive", RxFormatted: "0 B", TxFormatted: "0 B", TotalFormatted: "0 B"}
 	}
 
-	// Measure local TCP RTT to FRPBindPort
-	t0 := time.Now()
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.FRPBindPort), 400*time.Millisecond)
+	// Measure TCP RTT (prefer remote host if reachable, fallback to local bind port)
 	var lat float64
-	if err == nil {
-		lat = float64(time.Since(t0).Microseconds()) / 1000.0
-		_ = conn.Close()
+	if cfg.RemoteHost != "" {
+		remoteSSHPort := cfg.RemoteSSHPort
+		if remoteSSHPort <= 0 {
+			remoteSSHPort = 22
+		}
+		tRemote := time.Now()
+		rConn, rErr := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", cfg.RemoteHost, remoteSSHPort), 600*time.Millisecond)
+		if rErr == nil {
+			lat = float64(time.Since(tRemote).Microseconds()) / 1000.0
+			_ = rConn.Close()
+		}
+	}
+	if lat <= 0 {
+		t0 := time.Now()
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.FRPBindPort), 400*time.Millisecond)
+		if err == nil {
+			lat = float64(time.Since(t0).Microseconds()) / 1000.0
+			_ = conn.Close()
+		}
 	}
 
 	// Query frps dashboard at 127.0.0.1:(FRPBindPort+1)/api/serverinfo

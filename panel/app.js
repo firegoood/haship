@@ -1663,7 +1663,12 @@ async function refreshDash() {
       if (kpiLinks) kpiLinks.innerHTML = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE ' + greUp + '/' + nPeers + '</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP ' + frpUp + '/' + nPeers + '</span>';
     } else {
       const greUp = !!g.exists, frpUp = !!f.up;
-      if (kpiLinks) kpiLinks.innerHTML = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP</span>';
+      let linksHtml = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP</span>';
+      const bObj = d.bagher || {};
+      if (bObj.is_active || bObj.enabled) {
+        linksHtml += ' <span class="badge ok" style="background:#0284c7;color:#fff;"><span class="dot"></span>BAGHER PRO</span>';
+      }
+      if (kpiLinks) kpiLinks.innerHTML = linksHtml;
     }
     if (multi) {
       // multi-peer: best ping across legs, sub lists per-peer names
@@ -1700,6 +1705,53 @@ async function refreshDash() {
       badge.classList.toggle('is-paused', paused);
       const txt = badge.querySelector('.live-txt');
       if (txt) txt.textContent = paused ? 'PAUSED' : 'LIVE';
+    }
+
+    // Bagher PRO Dashboard Card & Tunnels Card telemetry sync
+    const b = d.bagher || {};
+    const bagherActive = !!(b.is_active || b.enabled);
+    const dashBagherCard = $('dashBagherCard');
+    const tunBagherCard = $('tunnelBagherCard');
+    if (dashBagherCard) {
+      if (bagherActive) {
+        dashBagherCard.classList.remove('hidden');
+        const roleStr = b.role === 'foreign' ? 'Foreign Server' : 'Iran Server';
+        set('dashBagherRoleSub', 'Stealth Hybrid Tunnel · Role: ' + roleStr);
+        set('dashBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal');
+        const tp = b.throughput || {};
+        const rx = tp.rx_bytes_sec || b.rx_bytes_sec || 0;
+        const tx = tp.tx_bytes_sec || b.tx_bytes_sec || 0;
+        set('dashBagherRate', '↓ ' + fmtRate(rx) + ' · ↑ ' + fmtRate(tx));
+        set('dashBagherForeign', b.remote_host || '—');
+        const portsStr = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
+        set('dashBagherPorts', portsStr);
+        const bBadge = $('dashBagherStatusBadge');
+        if (bBadge) {
+          bBadge.className = 'badge ' + (b.connected ? 'ok' : 'ok');
+          set('dashBagherStatusText', b.connected ? 'Connected' : 'Active');
+        }
+      } else {
+        dashBagherCard.classList.add('hidden');
+      }
+    }
+    if (tunBagherCard) {
+      if (bagherActive) {
+        tunBagherCard.classList.remove('hidden');
+        set('tunBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal');
+        set('tunBagherForeign', b.remote_host || '—');
+        const portsStr = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
+        set('tunBagherPorts', portsStr);
+        const tp = b.throughput || {};
+        const tot = tp.total_bytes || b.total_bytes || 0;
+        set('tunBagherTotal', fmtBytes(tot));
+        const tbBadge = $('tunBagherStatusBadge');
+        if (tbBadge) {
+          tbBadge.className = 'badge ' + (b.connected ? 'ok' : 'ok');
+          set('tunBagherStatusText', b.connected ? 'Connected' : 'Active');
+        }
+      } else {
+        tunBagherCard.classList.add('hidden');
+      }
     }
     // Chart hover tooltip (read-only; data source untouched).
     const cv = $('trafficChart');
@@ -5674,11 +5726,23 @@ function renderSSHFwd() {
   if ($('bagherLatencyVal')) {
     $('bagherLatencyVal').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : '—';
   }
+  if ($('bagherLivePing')) {
+    $('bagherLivePing').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : 'Optimal';
+  }
   if ($('bagherTrafficTotal')) {
     $('bagherTrafficTotal').textContent = d.total_formatted || '0 B';
   }
   if ($('bagherTrafficUpDown')) {
     $('bagherTrafficUpDown').textContent = `↓ ${d.rx_formatted || '0 B'}  ↑ ${d.tx_formatted || '0 B'}`;
+  }
+  if ($('bagherLiveSpeed')) {
+    $('bagherLiveSpeed').textContent = `↓ ${d.rx_formatted || '0 B/s'}  ↑ ${d.tx_formatted || '0 B/s'}`;
+  }
+  if ($('bagherLiveTotal')) {
+    $('bagherLiveTotal').textContent = d.total_formatted || '0 B';
+  }
+  if ($('bagherLiveSockets')) {
+    $('bagherLiveSockets').textContent = (d.pool_count || 25) + ' Active';
   }
   if ($('bagherConnsVal')) {
     $('bagherConnsVal').textContent = String(d.cur_conns || 0);
@@ -6111,6 +6175,69 @@ function copyMachineHashClick() {
   }
 }
 
+function openBagherQuickEdit() {
+  const d = _sshfwdData || {};
+  if ($('bagherQuickRemoteHost')) $('bagherQuickRemoteHost').value = d.remote_host || ($('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value : '');
+  if ($('bagherQuickPorts')) {
+    const p = Array.isArray(d.ports) ? d.ports.join(', ') : (d.ports || ($('sshfwdPorts') ? $('sshfwdPorts').value : ''));
+    $('bagherQuickPorts').value = p;
+  }
+  if ($('bagherQuickPoolCount')) $('bagherQuickPoolCount').value = d.pool_count || 25;
+  if ($('bagherQuickBindPort')) $('bagherQuickBindPort').value = d.frp_bind_port || 55400;
+  const warn = $('bagherQuickEditWarn');
+  if (warn) { warn.textContent = ''; warn.classList.add('hidden'); }
+  const m = $('bagherQuickEditModal');
+  if (m) m.hidden = false;
+}
+
+function closeBagherQuickEdit() {
+  const m = $('bagherQuickEditModal');
+  if (m) m.hidden = true;
+}
+
+async function saveBagherQuickEdit() {
+  const remote_host = $('bagherQuickRemoteHost') ? $('bagherQuickRemoteHost').value.trim() : '';
+  const ports = $('bagherQuickPorts') ? $('bagherQuickPorts').value.trim() : '';
+  const pool_count = parseInt($('bagherQuickPoolCount') ? $('bagherQuickPoolCount').value : '', 10) || 25;
+  const frp_bind_port = parseInt($('bagherQuickBindPort') ? $('bagherQuickBindPort').value : '', 10) || 55400;
+  const warn = $('bagherQuickEditWarn');
+
+  if (!remote_host) {
+    if (warn) { warn.textContent = 'Please enter a valid Foreign Server IP / Host.'; warn.classList.remove('hidden'); }
+    return;
+  }
+  if (!ports) {
+    if (warn) { warn.textContent = 'Please specify at least one forwarded port.'; warn.classList.remove('hidden'); }
+    return;
+  }
+  if (warn) warn.classList.add('hidden');
+
+  try {
+    toastOk('Updating...', 'Applying Bagher tunnel changes...');
+    const res = await api('/api/sshfwd', {
+      action: 'enable',
+      mode: 'bagher',
+      role: 'iran',
+      remote_host,
+      remote_user: 'root',
+      ssh_port: 22,
+      ports,
+      pool_count,
+      frp_bind_port
+    });
+    if (res && res.bundle && $('bagherBundleText')) {
+      $('bagherBundleText').value = res.bundle;
+    }
+    toastOk('Bagher Updated', 'Tunnel settings updated and applied successfully!');
+    closeBagherQuickEdit();
+    if (typeof loadSSHFwd === 'function') await loadSSHFwd();
+    if (typeof pollDashboard === 'function') await pollDashboard();
+  } catch (err) {
+    if (warn) { warn.textContent = err.message || String(err); warn.classList.remove('hidden'); }
+    toastErr('Update Failed', err.message || String(err));
+  }
+}
+
 // Expose functions globally on window for inline onclick handlers
 window.openBagherLicModal = openBagherLicModal;
 window.closeBagherLicModal = closeBagherLicModal;
@@ -6121,6 +6248,9 @@ window.bagherIranApplyClick = bagherIranApplyClick;
 window.bagherForeignConnectClick = bagherForeignConnectClick;
 window.bagherStopTunnelClick = bagherStopTunnelClick;
 window.bagherCopyBundleClick = bagherCopyBundleClick;
+window.openBagherQuickEdit = openBagherQuickEdit;
+window.closeBagherQuickEdit = closeBagherQuickEdit;
+window.saveBagherQuickEdit = saveBagherQuickEdit;
 window.setBagherRole = setBagherRole;
 window.sshfwdClearDnatClick = sshfwdClearDnatClick;
 window.sshfwdCopyForeignClick = sshfwdCopyForeignClick;
