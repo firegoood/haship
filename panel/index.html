@@ -762,6 +762,8 @@
   }
 
   /* RTL / Persian (Farsi) Layout Overrides */
+  /* Letter-spacing breaks Arabic-script joining; uppercase is meaningless there. */
+  html[dir="rtl"] *, html[dir="rtl"] *::before, html[dir="rtl"] *::after { letter-spacing:0 !important; text-transform:none !important; }
   html[dir="rtl"] {
     direction: rtl;
     text-align: right;
