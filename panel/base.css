@@ -116,7 +116,7 @@ button, a, input, select, textarea, [role="button"], [role="menuitem"] {
 
 /* Utility classes for layout, spacing and typography */
 .u-foot-sub { letter-spacing: .14em; font-size: 12px; opacity: .75; }
-.u-ml-auto { margin-left: auto; }
+.u-ml-auto { margin-inline-start: auto; }
 .u-flex-1 { flex: 1; }
 .u-mt-2 { margin-top: 2px; }
 .u-mt-3 { margin-top: 3px; }
@@ -143,7 +143,7 @@ button, a, input, select, textarea, [role="button"], [role="menuitem"] {
 .u-flex-col-gap14 { display: flex; flex-direction: column; gap: 14px; }
 .u-cursor-pointer { cursor: pointer; }
 .u-accent-ac { accent-color: var(--ac); }
-.u-hint-accent { border-left: 3px solid var(--ac); padding-left: 10px; }
+.u-hint-accent { border-inline-start: 3px solid var(--ac); padding-inline-start: 10px; }
 .u-checkbox-ac { margin-top: 3px; accent-color: var(--ac); width: 16px; height: 16px; flex: none; }
 .u-color-tx { color: var(--tx); }
 .u-color-tx2 { color: var(--tx2); }
