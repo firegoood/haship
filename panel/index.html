@@ -1036,9 +1036,6 @@
       <div><h1>Hashem</h1><div class="sub" id="roleLine">—</div></div>
       <div class="acts">
         <button type="button" class="hashem-btn hashem-btn-secondary pal-btn" id="palBtn" aria-haspopup="dialog" aria-label="Search and commands" data-i18n-aria="pal_open"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span class="pal-txt" data-i18n="pal_search">Search</span><kbd id="palKbd">Ctrl K</kbd></button>
-        <button class="hashem-btn hashem-btn-ghost lang-btn" id="langToggleBtn" title="تغییر زبان / Switch Language" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 12px;border:1px solid var(--ln);border-radius:8px">
-          <span id="langFlag">🇮🇷</span> <span id="langTxt">فارسی</span>
-        </button>
         <button class="hashem-btn hashem-btn-secondary" id="refreshBtn">Refresh</button>
       </div>
     </header>
@@ -1047,7 +1044,6 @@
     <div class="drawer-head"><span class="brand-name">Hashem</span><button class="drawer-x" id="drawerX" aria-label="Close" data-i18n-aria="aria_close">×</button></div>
     <nav class="drawer-nav" id="drawerNav" role="tablist" aria-orientation="vertical" aria-label="Main navigation" data-i18n-aria="aria_main_nav"></nav>
     <div class="drawer-foot">
-      <button class="hashem-btn hashem-btn-secondary u-fs-12" id="langToggleBtnM">🇮🇷 فارسی</button>
       <button class="hashem-btn hashem-btn-secondary u-flex-1" id="themeBtnM" >Theme</button>
       <button class="hashem-btn hashem-btn-ghost" id="logoutBtnM">Logout</button>
     </div>
@@ -1259,12 +1255,12 @@
         <!-- Locked Banner (shown when un-licensed and modal is closed) -->
         <div id="bagherLockedBanner" class="hidden" style="text-align:center; padding:60px 20px; background:linear-gradient(180deg, rgba(15,23,42,0.85) 0%, rgba(10,15,28,0.95) 100%); border:1px solid rgba(56,189,248,0.22); border-radius:12px; margin-bottom:20px;">
           <div style="font-size:42px; margin-bottom:14px;">🔒</div>
-          <h3 style="font-size:18px; font-weight:700; color:#38bdf8; margin-bottom:8px;">موتور باقر نیازمند لایسنس پرمیوم است</h3>
+          <h3 style="font-size:18px; font-weight:700; color:#38bdf8; margin-bottom:8px;">Bagher Engine Requires a Premium License</h3>
           <p style="font-size:13px; color:#94a3b8; max-width:500px; margin:0 auto 20px auto; line-height:1.6;">
-            تنظیمات و تانل هیبرید استتار Bagher Engine منحصراً در نسخه پرمیوم ارائه می‌شود. برای بازگشایی دسترسی، کلید لایسنس خود را وارد نمایید.
+            Stealth obfuscation and multiplexed SSH key pool tunneling is exclusively provided in the Premium edition. Enter your license key to unlock.
           </p>
           <button class="hashem-btn hashem-btn-primary" id="bagherOpenLicModalBtn" style="background:#0284c7; border-color:#0284c7; padding:8px 24px; font-size:14px; font-weight:600;">
-            🔑 فعال‌سازی لایسنس موتور باقر
+            🔑 Activate Bagher License
           </button>
         </div>
 
@@ -1274,33 +1270,33 @@
               <div class="u-flex-center-gap10">
                 <span class="tc-title" style="font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px;">
                   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                  Bagher Engine [PRO] (موتور باقر - تانل هیبرید استتار)
+                  Bagher Engine [PRO] (Stealth Hybrid Tunnel)
                 </span>
                 <span class="badge" id="sshfwdStatusBadge">Checking...</span>
               </div>
               <div class="qs-hint u-mt-4" id="sshfwdSubTxt">Encrypted stealth multiplexed tunnel via SSH key pool directly to Foreign inbound ports</div>
             </div>
             <div class="qs-actions">
-              <span class="badge" id="bagherActiveRoleBadge" style="font-size:12px; font-weight:600; padding:6px 12px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">نقش: سرور ایران</span>
+              <span class="badge" id="bagherActiveRoleBadge" style="font-size:12px; font-weight:600; padding:6px 12px; background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">Role: Iran Server</span>
             </div>
           </div>
 
           <!-- Role Selector (Identical to gre-frp Quick Setup) -->
           <div class="tc-box" style="background:rgba(255,255,255,0.02); border:1px solid rgba(56,189,248,0.2); padding:16px; border-radius:10px; margin-bottom:16px;">
             <label class="qs-label" style="font-size:14px; font-weight:700; color:#e2e8f0; margin-bottom:10px; display:block;">
-              مرحله ۱: این سرور چه نقشی دارد؟ (Which server am I on right now?)
+              Step 1: Which role does this server have?
             </label>
             <div class="qs-seg" role="group" aria-label="Bagher Server Role">
               <button type="button" id="bagherRoleIran" aria-pressed="true" style="font-weight:700; padding:10px 20px; font-size:13px;">
-                🇮🇷 سرور ایران — ورودی ترافیک کاربران (Iran)
+                🇮🇷 Iran Server — User Inbound Traffic
               </button>
               <button type="button" id="bagherRoleForeign" aria-pressed="false" style="font-weight:700; padding:10px 20px; font-size:13px;">
-                🌍 سرور خارج — اجرای سرویس و فیلترشکن (Foreign)
+                🌍 Foreign Server — Exit Node &amp; Services
               </button>
             </div>
             <input type="hidden" id="bagherRoleInput" value="iran">
             <div class="qs-hint" id="bagherRoleHint" style="margin-top:8px; line-height:1.5;">
-              سرور ایران ورودی ترافیک کاربران است، پورت‌ها را گوش می‌دهد و با تانل استتار به خارج متصل می‌کند.
+              Iran server receives inbound user traffic, listens on forwarded ports, and securely multiplexes to the Foreign server.
             </div>
           </div>
 
@@ -1308,33 +1304,33 @@
           <div id="bagherIranWrap">
             <div class="tc-box" style="background:rgba(255,255,255,0.02); border:1px solid rgba(56,189,248,0.18); padding:16px; border-radius:10px; margin-bottom:16px;">
               <h4 style="font-size:14px; font-weight:700; color:#38bdf8; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
-                ⚙️ مرحله ۲: مشخصات سرور خارج و پورت‌های ترافیک (Iran Setup)
+                ⚙️ Step 2: Foreign Server Endpoint &amp; Forwarded Ports (Iran Setup)
               </h4>
               <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:14px; margin-bottom:14px;">
                 <div>
-                  <label class="u-lbl-dim">آدرس IP سرور خارج (Foreign Server IP) <span style="color:#ef4444;">*</span></label>
-                  <input type="text" id="sshfwdRemoteHost" class="hashem-input" placeholder="مثال: 91.107.174.173" style="width:100%;">
-                  <div class="u-hint-11">آدرس IP پابلیک سرور خارجی که به آن متصل می‌شوید.</div>
+                  <label class="u-lbl-dim">Foreign Server Public IP <span style="color:#ef4444;">*</span></label>
+                  <input type="text" id="sshfwdRemoteHost" class="hashem-input" placeholder="e.g. 91.107.174.173" style="width:100%;">
+                  <div class="u-hint-11">Public IP address of the remote Foreign server you are connecting to.</div>
                 </div>
                 <div>
-                  <label class="u-lbl-dim">پورت‌های فوروارد (Forwarded Ports) <span style="color:#ef4444;">*</span></label>
-                  <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="مثال: 443, 8443, 2083" style="width:100%;">
-                  <div class="u-hint-11">پورت‌هایی که در سرور ایران باز می‌شوند و ترافیک به سرور خارج منتقل می‌شود.</div>
+                  <label class="u-lbl-dim">Forwarded Ports <span style="color:#ef4444;">*</span></label>
+                  <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="e.g. 443, 8443, 2083" style="width:100%;">
+                  <div class="u-hint-11">Ports opened on Iran server that forward incoming user traffic to the Foreign server.</div>
                 </div>
               </div>
 
               <!-- Advanced Iran Settings -->
               <details style="margin-bottom:14px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:8px 12px;">
                 <summary style="cursor:pointer; font-size:12px; font-weight:600; color:#94a3b8; user-select:none;">
-                  ⚙️ تنظیمات پیشرفته (پورت SSH، سوکت‌های استخر و FRP)
+                  ⚙️ Advanced Settings (SSH Port, Pool Sockets, FRP)
                 </summary>
                 <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:10px;">
                   <div>
-                    <label class="u-lbl-dim">پورت SSH سرور خارج</label>
+                    <label class="u-lbl-dim">Foreign SSH Port</label>
                     <input type="number" id="sshfwdRemotePort" class="hashem-input" value="22" placeholder="22" style="width:100%;">
                   </div>
                   <div>
-                    <label class="u-lbl-dim">نام کاربری SSH سرور خارج</label>
+                    <label class="u-lbl-dim">Foreign SSH Username</label>
                     <input type="text" id="sshfwdRemoteUser" class="hashem-input" value="root" style="width:100%;">
                   </div>
                   <div>
@@ -1342,7 +1338,7 @@
                     <input type="number" id="sshfwdFRPPort" class="hashem-input" value="55400" style="width:100%;">
                   </div>
                   <div>
-                    <label class="u-lbl-dim">تعداد کانکشن‌های استخر (Pool Count)</label>
+                    <label class="u-lbl-dim">Connection Pool Size</label>
                     <input type="number" id="sshfwdPoolCount" class="hashem-input" value="25" style="width:100%;">
                   </div>
                 </div>
@@ -1350,13 +1346,13 @@
 
               <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                 <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn" style="padding:10px 24px; font-size:14px; font-weight:700; background:#0284c7; border-color:#0284c7;">
-                  🚀 راه‌اندازی در سرور ایران و صدور باندل
+                  🚀 Initialize Iran Server &amp; Issue Bundle
                 </button>
                 <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherIranStopBtn" style="padding:10px 20px; font-size:13px; font-weight:600;">
-                  🛑 توقف تانل ایران
+                  🛑 Stop Iran Tunnel
                 </button>
                 <button type="button" class="hashem-btn" id="sshfwdClearDnatBtn" style="padding:10px 16px; font-size:12px;">
-                  پاکسازی تداخل DNAT
+                  Clear DNAT Conflicts
                 </button>
               </div>
             </div>
@@ -1365,16 +1361,16 @@
             <div class="tc-box" id="bagherIranBundleCard" style="background:rgba(56,189,248,0.06); border:1px solid rgba(56,189,248,0.22); padding:16px; border-radius:10px; margin-bottom:16px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
                 <span style="font-weight:700; font-size:15px; color:#38bdf8; display:flex; align-items:center; gap:8px;">
-                  📦 مرحله ۳: باندل اتصال تولیدشده (کپی کنید و در سرور خارج پیست نمایید)
+                  📦 Step 3: Generated Connection Bundle (Copy &amp; Paste into Foreign Server)
                 </span>
                 <button type="button" class="hashem-btn" id="bagherCopyBundleBtn" style="padding:7px 20px; font-size:13px; font-weight:700; background:#0284c7; color:#fff; border-color:#0284c7;">
-                  📋 کپی باندل (Copy Bundle)
+                  📋 Copy Bundle
                 </button>
               </div>
               <div class="u-hint-12" style="margin-bottom:8px; line-height:1.5;">
-                این کد اختصاصی شامل کلید رمزنگاری، IP ایران و پورت‌های درخواستی شماست. آن را کپی کرده و در پنل وب سرور خارج، با انتخاب نقش «سرور خارج» پیست نمایید:
+                This bundle contains encrypted keys, Iran public IP, and requested ports. Copy it and paste into your Foreign server web panel under the "Foreign Server" role:
               </div>
-              <textarea id="bagherBundleText" class="hashem-input" rows="4" readonly placeholder="پس از پر کردن فیلدها و زدن دکمه «راه‌اندازی در سرور ایران و صدور باندل»، باندل اختصاصی در این کادر قرار می‌گیرد..." style="width:100%; min-height:95px; font-family:monospace; font-size:12px; line-height:1.45; background:rgba(0,0,0,0.55); resize:vertical; color:#38bdf8; word-break:break-all; padding:10px; border-radius:6px;"></textarea>
+              <textarea id="bagherBundleText" class="hashem-input" rows="4" readonly placeholder="Fill in the fields above and click 'Initialize Iran Server &amp; Issue Bundle' to generate the connection bundle here..." style="width:100%; min-height:95px; font-family:monospace; font-size:12px; line-height:1.45; background:rgba(0,0,0,0.55); resize:vertical; color:#38bdf8; word-break:break-all; padding:10px; border-radius:6px;"></textarea>
             </div>
           </div>
 
@@ -1383,21 +1379,21 @@
             <div class="tc-box" style="background:linear-gradient(180deg, rgba(16,185,129,0.08) 0%, rgba(15,23,42,0.4) 100%); border:1px solid rgba(16,185,129,0.25); padding:18px; border-radius:10px; margin-bottom:16px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
                 <span style="font-weight:700; font-size:15px; color:#34d399; display:flex; align-items:center; gap:8px;">
-                  📥 مرحله ۲: پیست باندل سرور ایران و اتصال خودکار
+                  📥 Step 2: Paste Iran Connection Bundle &amp; Auto Connect
                 </span>
-                <span class="badge ok" style="font-size:11px;">اتصال ۱-کلیک بدون نیاز به ترمینال</span>
+                <span class="badge ok" style="font-size:11px;">1-Click Auto Connection</span>
               </div>
               <div class="u-hint-12" style="margin-bottom:10px; line-height:1.5;">
-                رشته باندل تولیدشده در سرور ایران (کد شروع‌شونده با <code style="color:#38bdf8;">BAGHER:</code>) را در کادر زیر قرار دهید و دکمه اتصال را بزنید:
+                Paste the connection bundle string generated on the Iran server (starting with <code style="color:#38bdf8;">BAGHER:</code>) and click Connect:
               </div>
               <div style="display:flex; flex-direction:column; gap:12px;">
-                <textarea id="bagherPasteBundleInput" class="hashem-input" rows="4" placeholder="BAGHER:eyJ2IjoxLCJyb2xlIjoiZm9yZWlnbiIsInBvcnRzIjpbNDQzLDg0NDNd..." style="width:100%; min-height:90px; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.5); resize:vertical; padding:10px; border-radius:6px; color:#34d399; word-break:break-all;"></textarea>
+                <textarea id="bagherPasteBundleInput" class="hashem-input" rows="4" placeholder="BAGHER:eyJ2Ij...NDNd..." style="width:100%; min-height:90px; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.5); resize:vertical; padding:10px; border-radius:6px; color:#34d399; word-break:break-all;"></textarea>
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                   <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn" style="padding:10px 26px; font-weight:700; font-size:14px; background:#059669; border-color:#059669;">
-                    ⚡ اتصال به ایران و فعال‌سازی تانل در سرور خارج
+                    ⚡ Connect to Iran &amp; Start Foreign Tunnel
                   </button>
                   <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn" style="padding:10px 20px; font-size:13px; font-weight:600;">
-                    🛑 توقف تانل خارج
+                    🛑 Stop Foreign Tunnel
                   </button>
                 </div>
               </div>
@@ -1406,18 +1402,18 @@
             <!-- Manual Terminal Fallback Details -->
             <details style="margin-bottom:16px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 14px;">
               <summary style="cursor:pointer; font-size:13px; font-weight:600; color:#94a3b8; user-select:none;">
-                🛠️ روش راه‌اندازی دستی در خط فرمان خارج (برای سرورهای بدون پنل وب)
+                🛠️ Manual Terminal Command (For Headless Remote Servers)
               </summary>
               <div style="margin-top:12px;">
-                <div class="u-hint-12" style="margin-bottom:6px;">دستور Bash یک‌خطی جهت اجرا در ترمینال سرور خارج:</div>
+                <div class="u-hint-12" style="margin-bottom:6px;">One-line Bash command to execute on headless Foreign server:</div>
                 <div style="position:relative; margin-bottom:12px;">
                   <textarea id="sshfwdForeignCmd" class="hashem-input" rows="3" readonly style="width:100%; font-family:monospace; font-size:11px; background:rgba(0,0,0,0.6);"></textarea>
-                  <button type="button" class="hashem-btn" id="sshfwdCopyForeignBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">کپی</button>
+                  <button type="button" class="hashem-btn" id="sshfwdCopyForeignBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
                 </div>
-                <div class="u-hint-12" style="margin-bottom:6px;">خط احراز هویت authorized_keys در سرور خارج:</div>
+                <div class="u-hint-12" style="margin-bottom:6px;">Foreign server authorized_keys configuration line:</div>
                 <div style="position:relative;">
                   <textarea id="sshfwdAuthLine" class="hashem-input" rows="2" readonly style="width:100%; font-family:monospace; font-size:11px; background:rgba(0,0,0,0.6);"></textarea>
-                  <button type="button" class="hashem-btn" id="sshfwdCopyAuthBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">کپی</button>
+                  <button type="button" class="hashem-btn" id="sshfwdCopyAuthBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
                 </div>
               </div>
             </details>
@@ -1426,26 +1422,26 @@
           <!-- Live Health & Traffic Monitoring (Common for both roles) -->
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:6px;">
             <div class="tc-box" style="background:rgba(255,255,255,0.03); border:1px solid rgba(56,189,248,0.15); padding:12px 14px; border-radius:8px;">
-              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:6px; font-weight:600;">وضعیت اتصال تانل</div>
+              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:6px; font-weight:600;">Tunnel Status</div>
               <div style="display:flex; align-items:center; gap:8px;">
-                <span class="badge" id="bagherConnBadge">بررسی...</span>
+                <span class="badge" id="bagherConnBadge">Checking...</span>
               </div>
-              <div id="bagherRoleTxt" style="font-size:11px; color:#94a3b8; margin-top:4px;">نقش: سرور ایران</div>
+              <div id="bagherRoleTxt" style="font-size:11px; color:#94a3b8; margin-top:4px;">Role: Iran Server</div>
             </div>
             <div class="tc-box" style="background:rgba(255,255,255,0.03); border:1px solid rgba(56,189,248,0.15); padding:12px 14px; border-radius:8px;">
-              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">تاخیر رفت و برگشت (RTT)</div>
+              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">Round-Trip Latency (RTT)</div>
               <div style="font-size:18px; font-weight:700; color:#38bdf8;" id="bagherLatencyVal">—</div>
-              <div style="font-size:11px; color:#94a3b8; margin-top:2px;">پینگ لحظه‌ای سشن استتار</div>
+              <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Real-time stealth session ping</div>
             </div>
             <div class="tc-box" style="background:rgba(255,255,255,0.03); border:1px solid rgba(56,189,248,0.15); padding:12px 14px; border-radius:8px;">
-              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">مصرف دیتا (Data Usage)</div>
+              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">Data Usage</div>
               <div style="font-size:18px; font-weight:700; color:#10b981;" id="bagherTrafficTotal">0 B</div>
               <div style="font-size:11px; color:#94a3b8; margin-top:2px;" id="bagherTrafficUpDown">↓ 0 B  ↑ 0 B</div>
             </div>
             <div class="tc-box" style="background:rgba(255,255,255,0.03); border:1px solid rgba(56,189,248,0.15); padding:12px 14px; border-radius:8px;">
-              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">سوکت‌های فعال (Pool)</div>
+              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">Active Sockets (Pool)</div>
               <div style="font-size:18px; font-weight:700; color:#f59e0b;" id="bagherConnsVal">0</div>
-              <div style="font-size:11px; color:#94a3b8; margin-top:2px;">اتصالات همگام آماده انتقال</div>
+              <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Synchronized multiplexed tunnels</div>
             </div>
           </div>
         </div>
@@ -1494,11 +1490,11 @@
                   <div class="fg" id="wrapTransport">
                     <label for="sTransport" data-i18n="setup_transport">Transport Protocol</label>
                     <select class="hashem-input" id="sTransport">
-                      <option value="tcp" selected>TCP Multiplexed (Default / استاندارد)</option>
-                      <option value="kcp">KCP ARQ UDP (Anti-Loss / ضد پکت‌لاس)</option>
-                      <option value="quic">QUIC UDP Stream (High-Speed / پرسرعت)</option>
-                      <option value="websocket">WebSocket (HTTP Upgrade / عبور اختلال)</option>
-                      <option value="wss">WSS TLS (Obfuscated / پوشش امنیتی کامل)</option>
+                      <option value="tcp" selected>TCP Multiplexed (Default)</option>
+                      <option value="kcp">KCP ARQ UDP (Anti-Loss)</option>
+                      <option value="quic">QUIC UDP Stream (High-Speed)</option>
+                      <option value="websocket">WebSocket (HTTP Upgrade)</option>
+                      <option value="wss">WSS TLS (Obfuscated)</option>
                     </select>
                   </div>
                   <div class="fg hidden" id="wrapIranPorts">
@@ -1596,11 +1592,11 @@
                   <div class="fg u-col-span-2" id="wrapPeerTransport">
                     <label for="pTransport" data-i18n="setup_transport">Transport Protocol</label>
                     <select class="hashem-input" id="pTransport">
-                      <option value="tcp" selected>TCP Multiplexed (Default / استاندارد)</option>
-                      <option value="kcp">KCP ARQ UDP (Anti-Loss / ضد پکت‌لاس)</option>
-                      <option value="quic">QUIC UDP Stream (High-Speed / پرسرعت)</option>
-                      <option value="websocket">WebSocket (HTTP Upgrade / عبور اختلال)</option>
-                      <option value="wss">WSS TLS (Obfuscated / پوشش امنیتی کامل)</option>
+                      <option value="tcp" selected>TCP Multiplexed (Default)</option>
+                      <option value="kcp">KCP ARQ UDP (Anti-Loss)</option>
+                      <option value="quic">QUIC UDP Stream (High-Speed)</option>
+                      <option value="websocket">WebSocket (HTTP Upgrade)</option>
+                      <option value="wss">WSS TLS (Obfuscated)</option>
                     </select>
                   </div>
                   <div class="fg"><label for="pRemotePub">Foreign public IP</label><input class="hashem-input" id="pRemotePub" inputmode="decimal" placeholder="e.g. 203.0.113.10"></div>
@@ -2748,35 +2744,35 @@
     <div class="ent-modal-h" style="border-bottom:1px solid rgba(56,189,248,0.2);">
       <b id="bagherLicModalTitle" style="display:flex; align-items:center; gap:8px; color:#38bdf8; font-size:15px;">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        فعال‌سازی لایسنس موتور باقر [Bagher Engine PRO]
+        Activate Bagher Engine [PRO] License
       </b>
       <button class="ent-x" id="bagherLicModalClose" aria-label="Close">&#xD7;</button>
     </div>
     <div class="ent-modal-b" style="gap:14px; padding:18px;">
       <p class="u-m-0" style="font-size:13px; line-height:1.6; color:var(--text, #cbd5e1);">
-        بخش <b>Bagher Engine</b> یک قابلیت کاملاً اختصاصی (پرمیوم) است. برای مشاهده و استفاده از تنظیمات تانل هیبرید استتار، باید لایسنس معتبر فعال شود.
+        <b>Bagher Engine</b> is a premium feature. To configure stealth hybrid tunnels, an active license key is required.
       </p>
       <div class="fg">
         <label for="bagherLicMachineHash" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
-          هش سخت‌افزاری سرور (Machine Hash):
+          Server Machine Hash:
         </label>
         <div style="display:flex; gap:8px;">
-          <input class="hashem-input" id="bagherLicMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:#38bdf8; background:rgba(0,0,0,0.4);" placeholder="در حال بررسی...">
-          <button type="button" class="hashem-btn" id="bagherLicCopyMachineBtn" style="white-space:nowrap; padding:6px 14px;">📋 کپی هش</button>
+          <input class="hashem-input" id="bagherLicMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:#38bdf8; background:rgba(0,0,0,0.4);" placeholder="Checking...">
+          <button type="button" class="hashem-btn" id="bagherLicCopyMachineBtn" style="white-space:nowrap; padding:6px 14px;">📋 Copy Hash</button>
         </div>
-        <div class="u-hint-12 u-mt-4">این هش را جهت دریافت یا تمدید لایسنس اختصاصی ارائه دهید.</div>
+        <div class="u-hint-12 u-mt-4">Provide this machine hash to obtain or renew your license.</div>
       </div>
       <div class="fg">
         <label for="bagherLicKeyInput" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
-          کلید لایسنس پرمیوم (License Key):
+          Premium License Key:
         </label>
-        <textarea class="hashem-input" id="bagherLicKeyInput" rows="4" placeholder="کلید لایسنس دریافت شده را اینجا Paste کنید..." style="font-family:monospace; font-size:12px; width:100%; resize:vertical; padding:8px; line-height:1.4;"></textarea>
+        <textarea class="hashem-input" id="bagherLicKeyInput" rows="4" placeholder="Paste your license key here..." style="font-family:monospace; font-size:12px; width:100%; resize:vertical; padding:8px; line-height:1.4;"></textarea>
       </div>
     </div>
     <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:12px 18px;">
-      <button type="button" class="hashem-btn hashem-btn-ghost" id="bagherLicCancelBtn">بازگشت به داشبورد</button>
+      <button type="button" class="hashem-btn hashem-btn-ghost" id="bagherLicCancelBtn">Back to Dashboard</button>
       <button type="button" class="hashem-btn hashem-btn-primary" id="bagherLicSubmitBtn" style="background:#0284c7; border-color:#0284c7; padding:7px 22px; font-weight:600;">
-        ⚡ فعال‌سازی و بازگشایی
+        ⚡ Activate License
       </button>
     </div>
   </div>

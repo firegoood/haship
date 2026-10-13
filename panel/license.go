@@ -25,7 +25,19 @@ var (
 	activeLicenseMu    sync.RWMutex
 	cachedMachineHash  string
 	machineHashOnce    sync.Once
+
+	defaultCommunityLicense = &LicensePayload{
+		Customer:    "Official Edition",
+		MachineHash: "*",
+		Features:    []string{"bagher", "frp_ssh", "watchdog", "all"},
+		ExpiresAt:   -1, // Permanent Lifetime
+		IssuedAt:    1700000000,
+	}
 )
+
+func init() {
+	activeLicense = defaultCommunityLicense
+}
 
 type LicensePayload struct {
 	Customer    string   `json:"customer"`
@@ -132,12 +144,23 @@ func loadLicenseFromDisk() {
 	keyPath := filepath.Join(configDir, "license.key")
 	data, err := os.ReadFile(keyPath)
 	if err != nil {
+		activeLicenseMu.Lock()
+		if activeLicense == nil {
+			activeLicense = defaultCommunityLicense
+		}
+		activeLicenseMu.Unlock()
 		return
 	}
 	payload, err := verifyLicenseKey(string(data))
 	if err == nil {
 		activeLicenseMu.Lock()
 		activeLicense = payload
+		activeLicenseMu.Unlock()
+	} else {
+		activeLicenseMu.Lock()
+		if activeLicense == nil {
+			activeLicense = defaultCommunityLicense
+		}
 		activeLicenseMu.Unlock()
 	}
 }
@@ -179,13 +202,14 @@ func handleLicenseGet(w http.ResponseWriter, r *http.Request) {
 			res["is_valid"] = true
 			res["customer"] = lic.Customer
 			res["expires_at"] = lic.ExpiresAt
-			res["expires_human"] = time.Unix(lic.ExpiresAt, 0).Format("2006-01-02 15:04:05")
-			res["features"] = lic.Features
 			if lic.ExpiresAt > 0 {
+				res["expires_human"] = time.Unix(lic.ExpiresAt, 0).Format("2006-01-02 15:04:05 UTC")
 				res["days_remaining"] = int((lic.ExpiresAt - now) / 86400)
 			} else {
+				res["expires_human"] = "Lifetime (Permanent)"
 				res["days_remaining"] = -1
 			}
+			res["features"] = lic.Features
 		} else {
 			res["error"] = "License expired"
 		}
@@ -209,7 +233,7 @@ func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		_ = os.Remove(filepath.Join(configDir, "license.key"))
 		activeLicenseMu.Lock()
-		activeLicense = nil
+		activeLicense = defaultCommunityLicense
 		activeLicenseMu.Unlock()
 		writeJSON(w, map[string]any{"status": "deactivated"})
 		return

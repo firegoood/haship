@@ -724,442 +724,18 @@ const I18N = {
     err_retry: "Retry failed",
     carrier_switch_confirm: "Switch both Iran & Foreign servers to carrier \"{id}\"?"
   },
-  fa: {
-    nav_dashboard: "داشبورد",
-    nav_tunnel: "تونل",
-    nav_sshfwd: "موتور باقر [PRO]",
-    nav_bagher: "موتور باقر [PRO]",
-    nav_setup: "راه‌اندازی (Setup)",
-    nav_logs: "گزارش‌ها (Logs)",
-    nav_perf: "عملکرد سیستم",
-    perf_mux_title: "TCP Multiplexing (transport.tcpMux)",
-    perf_mux_hint: "همه‌ی اتصال‌های کاربران را داخل «یک» اتصال TCP بین frpc و frps جمع می‌کند. روی GRE اندازه‌گیری شد: سرعت تونل را تقریباً نصف می‌کند (فنلاند ۴۶۰ در برابر ۱۰۱۰ Mbit). پیش‌فرض خاموش است (حداکثر سرعت). باید روی هاب ایران و «همه» سرورهای خارج یکسان باشد، وگرنه frpc لاگین نمی‌شود.",
-    nav_watchdog: "دیده‌بان و زمان‌بندی",
-    nav_doctor: "عیب‌یابی شبکه",
-    nav_benchmark: "بنچمارک کیفیت",
-    nav_update: "به‌روزرسانی",
-    upd_channel: "کانال به‌روزرسانی",
-    upd_channel_stable: "پایدار",
-    upd_channel_dev: "توسعه (Dev)",
-    upd_dev_warn: "کانال Dev: نسخه‌های آزمایشی که ممکن است خراب شوند. برای تونل‌های واقعی استفاده نکنید.",
-    upd_dev_badge: "DEV",
-    nav_settings: "تنظیمات",
-    nav_terminal: "ترمینال",
-    sec_overview: "نمای کلی",
-    sec_tunnel: "مدیریت تونل",
-    sec_system: "سیستم و نظارت",
-    theme: "تغییر تم",
-    logout: "خروج",
-    refresh: "بازخوانی",
-    kpi_traffic: "ترافیک و سرعت",
-    kpi_status: "وضعیت تونل",
-    kpi_links: "لینک‌ها (GRE / FRP)",
-    kpi_latency: "تاخیر (پینگ)",
-    kpi_cpu: "پردازنده (CPU)",
-    kpi_ram: "حافظه (RAM)",
-    kpi_disk: "دیسک",
-    kpi_conns: "اتصالات فعال / آپ‌تایم",
-    details: "جزئیات فنی",
-    chart_traffic_title: "نرخ ترافیک عبوری تونل",
-    chart_traffic_sub: "سرعت لحظه‌ای دانلود و آپلود بر بستر تونل در طول زمان",
-    chart_activity_title: "فعالیت تونل و اتصالات زنده",
-    chart_activity_sub: "تعداد کانکشن‌های فعال همزمان و استریم سشن‌ها",
-    download: "دانلود",
-    upload: "آپلود",
-
-    // General
-    status_active: "فعال",
-    status_down: "قطع",
-    status_healthy: "سالم",
-    status_connected: "متصل",
-    status_disconnected: "قطع شده",
-    status_unreachable: "غیرقابل دسترس",
-    status_running: "در حال اجرا",
-    status_stopped: "متوقف شده",
-    status_error: "خطا",
-    actions: "عملیات",
-    confirm: "تایید",
-    apply: "اعمال",
-    copy: "کپی",
-    copied: "کپی شد!",
-    remove: "حذف",
-    restart: "راه‌اندازی مجدد",
-    ping: "پینگ",
-    bundle: "باندل",
-    show_bundle: "نمایش باندل",
-    copy_bundle: "کپی باندل",
-    test: "تست",
-    switch: "سوییچ",
-    current: "فعلی",
-    loading: "در حال بارگذاری…",
-    save_settings: "ذخیره تنظیمات",
-
-    // Dashboard Details & Cards
-    card_server_title: "مشخصات سرور و نقش",
-    card_gre_title: "تونل کرنلی GRE",
-    card_frp_title: "رله FRP و ترافیک",
-    card_peers_title: "لیست تونل‌های پیر (Peers)",
-    lbl_public_ip: "آی‌پی عمومی",
-    lbl_role: "نقش سرور",
-    lbl_forwarded_ports: "پورت‌های فوروارد شده",
-    lbl_gre_local: "آی‌پی محلی GRE",
-    lbl_gre_peer: "آی‌پی مقصد GRE",
-    lbl_gre_interface: "اینترفیس شبکه",
-    lbl_frp_status: "وضعیت FRP",
-    lbl_control_port: "پورت کنترل",
-    lbl_bind_port: "پورت بایند",
-    lbl_tunnel_ports: "پورت‌های معکوس",
-    lbl_uptime_since: "زمان فعالیت",
-    lbl_peer_name: "نام سرور",
-    lbl_peer_id: "شناسه",
-    lbl_peer_foreign_ip: "آی‌پی سرور خارج",
-    lbl_peer_ports: "پورت‌ها",
-    lbl_peer_latency: "تاخیر (پینگ)",
-
-    // Tunnel Tab
-    tun_title: "توپولوژی و وضعیت تونل‌ها",
-    tun_sub: "متریک‌های زنده لینک، وضعیت ارتباط پیرها و سلامت اینترفیس‌ها",
-    tun_main_card: "لینک اصلی (هاب ایران / سرور ۱)",
-    tun_add_peer_btn: "+ اتصال سرور جدید خارج",
-    tun_view_bundle_btn: "📦 مشاهده رشته باندل ستاپ",
-
-    // Setup Tab
-    setup_title: "راه‌اندازی سریع — تونل GRE + FRP",
-    setup_sub: "دو سرور، یک تونل پایدار. ابتدا مشخصات را روی سرور ایران ثبت کنید و سپس رشته باندل تولیدشده را در سرور خارج وارد نمایید.",
-    setup_step1: "۱. هم‌اکنون روی کدام سرور هستید؟",
-    setup_role_iran: "سرور ایران — کاربران به این سرور وصل می‌شوند",
-    setup_role_foreign: "سرور خارج — سرویس‌ها و فیلترشکن اینجا اجرا می‌شوند",
-    setup_step2_engine: "۲. انتخاب موتور تونل",
-    setup_eng_frp: "🚀 تونل GRE + FRP",
-    setup_eng_grebh: "⚡ تونل GRE + Backhaul",
-    setup_eng_bh: "🌐 تونل مستقیم Backhaul (بدون GRE)",
-    setup_step3_params: "۳. پارامترهای اتصال",
-    setup_local_pub: "آی‌پی عمومی ایران (خودکار / قابل ویرایش)",
-    setup_remote_pub: "آی‌پی عمومی سرور خارج",
-    setup_local_gre: "آی‌پی داخلی ایران (Local GRE)",
-    setup_peer_gre: "آی‌پی داخلی خارج (Peer GRE)",
-    setup_ctrl_port: "پورت بایند / کنترل FRP",
-    setup_transport: "پروتکل انتقالی (Transport Protocol)",
-    setup_forward_ports: "پورت‌های فوروارد شده (تکی، بازه، یا نگاشت)",
-    setup_step4_token: "۴. توکن امنیتی و اعمال",
-    setup_apply_btn: "اعمال و راه‌اندازی تونل",
-    setup_unlock_btn: "باز کردن قفل جهت جایگزینی",
-    setup_relock_btn: "قفل بماند",
-    setup_bundle_title: "📦 رشته باندل ستاپ (جهت درج در سرور خارج)",
-    setup_foreign_step2: "۲. اتصال به ایران (با استفاده از باندل)",
-    setup_bundle_paste_lbl: "رشته باندل یا توکن راه‌اندازی (دریافتی از ایران)",
-    setup_bundle_paste_ph: "رشته باندل hsh1_...، bh1_... یا gh1_... را اینجا قرار دهید",
-    setup_join_btn: "اتصال و برقراری تونل با ایران",
-    setup_foreign_step3: "۳. تنظیمات دستی پیشرفته (اختیاری)",
-    setup_add_peer_title: "➕ اتصال یک سرور خارجی دیگر (بدون قطع تونل قبلی)",
-    setup_peer_name_lbl: "نام یا برچسب سرور جدید",
-    setup_add_tunnel_btn: "افزودن و اتصال تونل جدید",
-
-    // Performance & Tuning Tab
-    perf_status_pool: "استخر اتصال کاری (frpc / frps)",
-    perf_status_decision: "تصمیم Auto Pool",
-    perf_mode_auto: "Auto Pool",
-    perf_mode_manual: "دستی",
-    perf_ap_title: "Auto Pool (اتصال‌های کاری FRP)",
-    perf_ap_sub: "اندازه poolCount در frpc و maxPoolCount در frps را بر اساس خطاهای پر شدن استخر، تعداد اتصال‌های فعال، CPU و رم آزاد تنظیم می‌کند. افزایش سریع، کاهش آهسته؛ فقط frpc ری‌استارت می‌شود و فقط وقتی کاربران کمی وصل‌اند.",
-    perf_ap_toggle: "Auto Pool (پیشنهادی)",
-    perf_ap_toggle_hint: "در حالت خاموش، مقادیر دستی زیر دقیقاً همان‌طور که وارد شده در frpc.toml و frps.toml نوشته می‌شوند.",
-    perf_ap_last_decision: "آخرین تصمیم",
-    perf_ap_errors: "خطاهای پر بودن استخر (آخرین بررسی)",
-    perf_ap_last_restart: "آخرین ری‌استارت frpc",
-    perf_ap_frps_note: "maxPoolCount در frps.toml افزایش یافت؛ برای اعمال آن، frps را در زمان کم‌ترافیک ری‌استارت کنید.",
-    perf_ap_saved: "Auto Pool به‌روز شد",
-    perf_ap_on_msg: "استخر هر دقیقه به‌صورت خودکار تنظیم می‌شود.",
-    perf_ap_off_msg: "مقادیر دستی پس از «ذخیره و اعمال» فعال می‌شوند.",
-    perf_pool_count: "تعداد استخر کلاینت (frpc Pool Count)",
-    perf_pool_sub: "تعداد اتصال‌های کاری از پیش بازشده در سرورهای خارج.",
-    perf_max_pool: "حداکثر سقف استخر سرور (frps Max Pool)",
-    perf_max_sub: "سقف اتصال‌های کاری در سرور ایران (همیشه حداقل ۱٫۵ برابر poolCount).",
-    perf_save_tuning: "💾 ذخیره و اعمال ظرفیت",
-    perf_carrier_title: "مدیریت کریرها و کپسوله‌سازی UDP (FOU)",
-    perf_carrier_save: "ذخیره حالت کریر",
-
-    // Watchdog
-    wd_title: "دیده‌بان سلامت تونل (Watchdog)",
-    wd_hint: "بررسی خودکار پینگ GRE و وضعیت سرویس‌ها در هر ۱ دقیقه. ارسال هشدارهای آنی تلگرام و ری‌استارت اختیاری در صورت قطعی مکرر.",
-    wd_autorestart_label: "ری‌استارت خودکار در صورت قطعی",
-    wd_autorestart_sub: "(پیش‌فرض خاموش برای جلوگیری از پرش مصرف پردازنده؛ فقط هشدار)",
-    wd_health: "سلامت تونل",
-    wd_fails: "خطاهای متوالی",
-    wd_last_check: "آخرین بررسی",
-    wd_restart_title: "زمان‌بندی ری‌استارت دوره‌ای تونل (Scheduler)",
-    wd_restart_hint: "بازنشانی خودکار و نرم اینترفیس‌های تونل و سرویس‌های FRP/Backhaul در بازه‌های زمانی معین بدون قطعی وب‌پنل یا از دست رفتن تنظیمات.",
-    wd_restart_interval: "بازه زمانی ری‌استارت",
-    wd_restart_save: "ذخیره زمان‌بندی",
-    wd_restart_now: "ری‌استارت اکنون تونل",
-    wd_tg_title: "هشدارهای تلگرام",
-    wd_tg_hint: "دریافت نوتیفیکیشن آنی تلگرام هنگام قطعی یا وصل مجدد تونل. توکن ربات به صورت ایمن نگهداری می‌شود.",
-    wd_tg_token: "توکن ربات تلگرام",
-    wd_tg_chat: "شناسه چت (Chat ID)",
-    wd_tg_route: "مسیر ارسال تلگرام",
-    wd_tg_save: "ذخیره تنظیمات تلگرام",
-    wd_tg_test: "ارسال پیام تست",
-    wd_backup_title: "پشتیبان‌گیری رمزنگاری‌شده (Backup)",
-    wd_backup_hint: "پشتیبان‌گیری کامل از فایل‌های کانفیگ، تنظیمات، رجیستری پیرها و سرویس‌ها با رمزنگاری AES-256.",
-    wd_backup_now: "ایجاد نسخه پشتیبان اکنون",
-    wd_backup_sched: "زمان‌بندی پشتیبان‌گیری",
-    wd_backup_save: "ذخیره زمان‌بندی",
-    wd_events_title: "لاگ وقایع دیده‌بان",
-
-    // Benchmark Tab
-    bench_title: "بنچمارک کیفیت مسیر و سوییچ هوشمند",
-    bench_peer_link_title: "ارتباط میان‌پنلی دوطرفه (Peer Link)",
-    bench_peer_link_sub: "همگام‌سازی لحظه‌ای وضعیت بین سرور ایران (Master) و سرور خارج (Worker).",
-    bench_peer_test_btn: "تست اتصال ارتباطی",
-    bench_peer_cfg_btn: "پیکربندی لینک ارتباطی",
-    bench_failover_title: "سوییچ خودکار در زمان اختلال (Failover)",
-    bench_failover_sub: "پیش‌فرض خاموش. تا زمانی که اپراتور تایید نکند، سوییچ خودکار رخ نمی‌دهد.",
-    bench_failover_toggle: "فعال‌سازی سوییچ خودکار مسیر (Auto-Switching)",
-    bench_failover_threshold: "آستانه پکت‌لاس جهت سوییچ (%)",
-    bench_failover_save: "ذخیره سیاست فیل‌اور",
-    bench_leaderboard_title: "جدول لیدربورد و کیفیت پروتکل‌ها",
-    bench_run_btn: "اجرای بنچمارک پروتکل‌ها",
-    bench_tbl_rank: "مسیر و پروتکل",
-    bench_tbl_trans: "ترنسپورت",
-    bench_tbl_port: "پورت",
-    bench_tbl_rtt: "تاخیر رفت‌وبرگشت (RTT)",
-    bench_tbl_loss: "درصد پکت‌لاس",
-    bench_tbl_jitter: "نوسان (Jitter)",
-    bench_tbl_score: "امتیاز کیفیت",
-    bench_tbl_status: "وضعیت",
-    bench_tbl_action: "عملیات / سوییچ",
-
-    // Diagnostics / Doctor Tab
-    doc_title: "پزشک شبکه و عیب‌یابی جامع تونل",
-    doc_sub: "تست‌های خودکار پکت‌های MTU، بررسی جدول روتینگ، ماژول‌های کرنل و باز بودن پورت‌ها",
-    doc_run_btn: "اجرای عیب‌یابی کامل",
-    doc_fix_btn: "تعمیر و بهینه‌سازی خودکار",
-    doc_fix_box_btn: "رفع خودکار مشکلات شناسایی‌شده",
-    doc_issues_title: "مشکلات و راهکارهای پیشنهادی",
-
-    // Logs Tab
-    logs_title: "لاگ‌ها و گزارش‌های سیستمی",
-    logs_sub: "مشاهده بلادرنگ وقایع سرویس‌های FRP، اینترفیس‌های GRE و رویدادهای دیده‌بان",
-    logs_svc_label: "سرویس هدف",
-    logs_lines_label: "تعداد خطوط",
-    logs_refresh_btn: "بازخوانی لاگ‌ها",
-    logs_copy_btn: "کپی لاگ‌ها",
-
-    // Settings & Update Tab
-    settings_title: "امنیت پنل و تغییر رمز عبور",
-    settings_cur_pass: "رمز عبور فعلی پنل",
-    settings_new_pass: "رمز عبور جدید پنل",
-    settings_change_btn: "تغییر و ذخیره رمز عبور",
-    update_title: "بروزرسانی پنل و هسته‌های ارتباطی",
-    update_current: "نسخه نصب‌شده فعلی",
-    update_check_btn: "بررسی نسخه‌های جدید",
-
-    // Terminal Tab
-    term_title: "کنسول وب ترمینال لینوکس (PTY)",
-    term_connect: "اتصال به ترمینال",
-    term_clear: "پاک کردن صفحه",
-
-    // Right Sidebar & Modals
-    login_sub: "ورود با نام کاربری و رمز عبور",
-    login_user_ph: "نام کاربری",
-    login_pass_ph: "رمز عبور",
-    login_signin: "ورود به پنل",
-    rs_header: "جریان زنده وقایع و لاگ‌ها",
-    rsc_title: "نجات اتصال", rsc_remote: "سرور قابل‌دسترس (سروری که می‌تواند به این سرور وصل شود)", rsc_ports: "پورت‌هایی که وصل شوند (TCP و UDP)",
-    rsc_code: "کد نجات از سرور بلاک‌شده", rsc_ban_t: "این سرور نمی‌تواند به سرور مقابل وصل شود",
-    rsc_ban_d: "پینگ جواب می‌دهد ولی همه‌ی اتصال‌های TCP در مسیر قطع می‌شوند. با یک کلیک جهت اتصال برعکس می‌شود.", rsc_ban_go: "درستش کن",
-    rsc_idle_ok: "مشکلی دیده نشد. اگر سرور مقابل پینگ می‌گیرد ولی اتصال‌ها timeout می‌شوند، این ابزار جهت را خودکار برعکس می‌کند.",
-    rsc_idle_warn: "بلاک یک‌طرفه پیدا شد: پینگ کار می‌کند ولی TCP قطع می‌شود. برای برعکس‌کردن جهت، نجات را فعال کنید.",
-    rsc_b_off: "خاموش", rsc_b_susp: "بلاک پیدا شد", rsc_b_on: "فعال", rsc_b_on_auto: "فعال (خودکار)", rsc_b_wait: "در انتظار سرور مقابل", rsc_b_lift: "بلاک برداشته شد",
-    rsc_check: "بررسی الان", rsc_enable: "فعال‌کردن نجات", rsc_join: "اتصال با کد", rsc_apply: "اعمال کد", rsc_disable: "غیرفعال و حذف",
-    rsc_cancel: "انصراف", rsc_getcode: "نمایش کد نجات", rsc_copy: "کپی کد", rsc_nocfg: "فایل‌های frp روی این سرور نیست. اول hashem update را اجرا کنید.",
-    rsc_origin: "این سرور طرف بلاک‌شده است. {n} پورت از طریق {ip} فوروارد می‌شود.", rsc_origin_auto: "بلاک یک‌طرفه تشخیص داده شد: اتصال به صورت خودکار از طریق {ip} برقرار شد ({n} پورت فوروارد شده).", rsc_entry: "این سرور ورودی است. {n} پورت اینجا سرو و به {ip} تونل می‌شود.", rsc_entry_auto: "این سرور به صورت خودکار به عنوان ورودی برای {ip} فعال شد ({n} پورت تونل شده).",
-    rsc_skipped: "رد شد (مشغول یا رزرو): {p}", rsc_conn: "لینک کنترلی", rsc_conn_ok: "وصل است", rsc_conn_no: "هنوز وصل نشده",
-    rsc_svc: "سرویس‌ها", rsc_direct: "فوروارد هسته (سرعت کامل)", rsc_relay: "رله FRP (مسیر فیلترشده)", rsc_auto: "اگر دو پنل جفت شده باشند، پنل مقابل ظرف چند دقیقه خودش این را برمی‌دارد. در غیر این صورت از کد استفاده کنید.",
-    rsc_lift: "مسیر مستقیم دوباره کار می‌کند. می‌توانید نجات را غیرفعال کنید و از تونل عادی استفاده کنید.",
-    rsc_confirm_t: "نجات اتصال فعال شود؟", rsc_confirm_b: "سه سرویس کوچک اینجا اجرا می‌شود و یک پورت کنترلی فایروال‌شده باز می‌شود. فقط سرور قابل‌دسترس اجازه‌ی استفاده دارد. با یک کلیک همه چیز حذف می‌شود.",
-    rsc_dis_t: "نجات حذف شود؟", rsc_dis_b: "پورت‌های فوروارد روی سرور ورودی تا بالا آمدن تونل عادی کار نمی‌کنند.",
-    rsc_probe_ok: "سرور مقابل در دسترس است", rsc_probe_block: "بلاک یک‌طرفه تأیید شد", rsc_probe_down: "سرور مقابل در دسترس نیست (قطعی، نه بلاک)", rsc_probe_svc: "سرور مقابل در دسترس است ولی پنلش گوش نمی‌دهد",
-    rsc_done: "نجات فعال شد", rsc_removed: "نجات حذف شد", rsc_copied: "کپی شد",
-    pal_open: "جستجو و دستورها", pal_search: "جستجو", pal_title: "پالت دستورها", pal_ph: "جستجوی صفحه‌ها و کارها…",
-    pal_nav: "حرکت", pal_run: "اجرا", pal_close: "بستن", pal_none: "موردی پیدا نشد", pal_go: "رفتن به", pal_act: "کارها", pal_look: "ظاهر",
-    pal_refresh: "تازه‌سازی داده‌ها", pal_theme: "تغییر تم تیره / روشن", pal_lang: "تغییر زبان", pal_stream: "نمایش / بستن جریان زنده وقایع",
-    pal_sidebar: "جمع / باز کردن منوی کناری", pal_density: "تغییر تراکم جدول‌ها", pal_diag: "اجرای عیب‌یابی", pal_donate: "حمایت از هاشم", pal_logout: "خروج",
-    pal_accent: "رنگ اصلی",
-    sb_collapse: "جمع کردن منو", sb_expand: "باز کردن منو",
-    tbl_filter: "فیلتر خطاها…", tbl_shown: "{n} از {t} نمایش داده می‌شود",
-    dens_title: "تراکم جدول", dens_comfy: "راحت", dens_compact: "فشرده",
-    onb_title: "به هاشم خوش آمدید", onb_sub: "هنوز تونلی ندارید. با سه قدم راه می‌افتد.",
-    onb_s1: "نقش این سرور را انتخاب کنید", onb_s1d: "هاب ایران (سرور) یا سرور خارجی (کلاینت) از تب راه‌اندازی.",
-    onb_s2: "سرور مقابل را وصل کنید", onb_s2d: "تونل را بسازید و بسته‌ی اتصال را در سرور دیگر وارد کنید.",
-    onb_s3: "بررسی و بهینه‌سازی", onb_s3d: "عیب‌یابی را اجرا کنید، بعد در تب تونل «بهینه‌سازی» را بزنید.",
-    onb_go: "باز کردن راه‌اندازی", onb_later: "فعلاً نه", onb_dismiss: "بستن",
-    badge_tunnel: "{n} تونل نیاز به توجه دارد", badge_doctor: "{n} مورد در عیب‌یابی",
-    fleet_title: "سلامت سرورها",
-    fleet_all_ok: "همه‌ی سرورها سالم‌اند",
-    fleet_some: "{n} از {t} سرور نیاز به توجه دارد",
-    fleet_all_down: "همه‌ی سرورها قطع هستند",
-    fleet_meta: "به‌روزرسانی {time} · نمونه‌گیری هر {s} ثانیه · یک ساعت اخیر",
-    fleet_hub: "هاب ایران",
-    fleet_healthy: "سالم",
-    fleet_degraded: "ناقص",
-    fleet_down: "قطع",
-    fleet_avg: "میانگین",
-    fleet_loss: "افت",
-    fleet_uptime: "آپتایم",
-    fleet_nodata: "در حال جمع‌آوری داده…",
-    fleet_frp_only: "فقط FRP",
-    fleet_icmp_filtered: "ICMP فیلتر است",
-    fleet_session_up: "نشست برقرار",
-    fleet_updated: "به‌روز شد",
-    fleet_ago: "پیش",
-    dial_title: "مسیر اتصال به هاب ایران", dial_hint: "این سرور از چه مسیری به ایران وصل شود: IP داخلی GRE، مستقیم به IP عمومی هاب، یا خودکار (اگر GRE کار می‌کند همان، وگرنه IP عمومی).", dial_auto: "خودکار", dial_gre: "IP داخلی GRE", dial_public: "IP عمومی", dial_public_btn: "IP عمومی ایران",
-    fleet_topo_aria: "نقشه‌ی تونل: {hub} متصل به {n} سرور",
-    fleet_ring_aria: "{h} از {t} سرور سالم",
-    rs_hide_aria: "بستن جریان زنده وقایع",
-    rs_hidden_toast: "جریان زنده وقایع بسته شد",
-    rs_hidden_sub: "از بخش لاگ‌ها ← جریان زنده وقایع دوباره بازش کنید",
-    rs_restore_hint: "پنل کناری با آخرین رویدادها. فقط روی صفحه‌های عریض (۱۲۰۰ پیکسل به بالا).",
-    rs_btn_hide: "بستن",
-    rs_btn_show: "نمایش",
-    sup_title: "تونل‌تان پایدار است؟",
-    sup_body: "هاشم رایگان است و با دست یک توسعه‌دهنده ساخته شده. اگر اتصال شما را سرپا نگه داشته، با یک دونیت کوچک به ادامه‌ی توسعه‌اش کمک کنید.",
-    sup_donate: "دونیت",
-    sup_later: "بعداً",
-    sup_snooze: "۳۰ روز یادآوری نکن",
-    sup_card_title: "حمایت از هاشم",
-    sup_card_hint: "هاشم رایگان است. اگر برایتان مفید بوده، هر زمان می‌توانید از توسعه‌اش حمایت کنید.",
-    appear_title: "ظاهر پنل",
-    appear_hint: "رنگ اصلی را انتخاب کنید. همه‌ی رنگ‌ها برای تم تیره و روشن از نظر کنتراست بررسی شده‌اند.",
-    appear_aria: "رنگ اصلی",
-    acc_blue: "آبی", acc_indigo: "نیلی", acc_violet: "بنفش", acc_rose: "صورتی", acc_emerald: "زمردی", acc_teal: "فیروزه‌ای", acc_orange: "نارنجی",
-    rs_waiting: "در انتظار دریافت لاگ‌های سیستمی...",
-    edit_tunnel_title: "ویرایش مشخصات تونل",
-    edit_tunnel_sub: "تغییر پارامترها، پروتکل کریر یا پورت‌های فوروارد شده. تغییرات بلافاصله اعمال می‌شوند.",
-    carrier_title: "انتخاب و مدیریت کریر (Carrier)",
-    save_carrier: "ذخیره حالت",
-    connect_iran: "اتصال به سرور ایران",
-    reverse_ports: "پورت‌های معکوس (تکی، رنج یا نگاشت)",
-    disabled: "غیرفعال",
-    enabled: "فعال",
-    save: "ذخیره",
-    cancel: "انصراف",
-    close: "بستن",
-    x002: "ایران",
-    x003: "خارج",
-    x004: "[ فعال ] سوییچ خودکار",
-    x005: "[ خاموش ] حالت دستی",
-    x006: "پایدار / بدون پکت‌لاس",
-    x007: "موتور تونل",
-    x008: "کریر و فیل‌اور",
-    x009: "کریر فعال",
-    x010: "سیاست سوییچ",
-    x011: "عیب‌یابی",
-    x012: "تونل فعال",
-    x013: "مشاهده کارت کامل در تب تونل",
-    x014: "تمام آزمون‌های سلامت شبکه بدون گلوگاه پاس شدند. ارتباط در بالاترین سطح کارایی قرار دارد.",
-    x015: "پیشنهاد: برای رفع خودکار گلوگاه‌ها و بهینه‌سازی دکمه مقابل را بزنید.",
-    x016: "رفع خودکار مشکلات شناسایی‌شده",
-    x017: "در حال ارزیابی… (MTU و پینگ)",
-    x018: "عیب‌یابی تکمیل شد",
-    x019: "امتیاز سلامت",
-    x020: "خطا در عیب‌یابی",
-    x021: "اجرای عیب‌یابی کامل",
-    x022: "اعمال بهینه‌سازی و تعمیر خودکار؟",
-    x023: "این عملیات الگوریتم TCP BBR را فعال کرده، MSS Clamping را در کرنل اعمال می‌کند، فورواردینگ IP را فعال، لیمیت سرویس‌های FRP را ارتقا داده و در صورت لزوم لینک تونل را بازیابی می‌کند.",
-    x024: "شروع تعمیر و بهینه‌سازی",
-    x025: "در حال اعمال تعمیر…",
-    x026: "در حال اعمال…",
-    x027: "تعمیر و بهینه‌سازی انجام شد",
-    x028: "تنظیمات شبکه و هسته سیستم بهینه‌سازی شد",
-    x029: "خطا در تعمیر",
-    x030: "تعمیر و بهینه‌سازی خودکار",
-    x031: "پروتکل فعال تونل",
-    x032: "کمترین تاخیر ثبت‌شده",
-    x033: "لینک بدون پکت‌لاس",
-    x034: "پکت‌لاس کاندیدای برتر",
-    x035: "آخرین سنجش",
-    x036: "پروتکل و کریر فعال",
-    x037: "هیچ‌وقت",
-    x038: "هنوز بنچمارکی ثبت نشده است. روی «اجرای بنچمارک پروتکل‌ها» کلیک کنید.",
-    x039: "سالم",
-    x040: "مطلوب",
-    x041: "هشدار",
-    x042: "قطع",
-    x043: "کرنل ۴۷",
-    x044: "فعال",
-    x045: "پیشنهادی",
-    x046: "فعلی",
-    x047: "سوییچ",
-    x048: "در حال سنجش پروتکل‌ها...",
-    x049: "آغاز بنچمارک پروتکل‌ها",
-    x050: "در حال ارزیابی تاخیر و پکت‌لاس ترنسپورت‌ها...",
-    x051: "بنچمارک تکمیل شد",
-    x052: "پروتکل برتر",
-    x053: "خطا در بنچمارک",
-    x054: "در حال اعمال پروتکل...",
-    x055: "پروتکل با موفقیت اعمال شد",
-    x056: "خطا در اعمال پروتکل",
-    err_generic: "درخواست ناموفق بود",
-    state_retry: "تلاش دوباره",
-    state_error_title: "بارگذاری داده ناموفق بود",
-    rs_empty_title: "هنوز لاگی نیست",
-    rs_waiting_sys: "در حال دریافت لاگ‌های سیستمی...",
-    empty_bench_title: "هنوز بنچمارکی ثبت نشده",
-    empty_bench_msg: "برای مقایسه پروتکل‌ها یک بنچمارک اجرا کنید.",
-    empty_peers_title: "هنوز تونل همتایی وجود ندارد",
-    empty_peers_msg: "از بخش راه‌اندازی یک سرور خارج دیگر اضافه کنید.",
-    empty_logs_title: "خطی برای نمایش نیست",
-    empty_logs_msg: "هنوز چیزی برای این سرویس ثبت نشده است.",
-    empty_errors_title: "بدون خطای پنل",
-    empty_errors_msg: "همه‌چیز سالم است — هر خطا همراه با کد آن اینجا ثبت می‌شود.",
-    aria_close: "بستن",
-    aria_menu: "منو",
-    aria_main_nav: "ناوبری اصلی",
-    aria_toggle_visibility: "نمایش/پنهان‌سازی",
-    aria_copy: "کپی",
-    aria_edit_ports: "ویرایش پورت‌ها",
-    aria_close_search: "بستن جستجو",
-    aria_close_proxy: "بستن پیکربندی پراکسی",
-    aria_font_smaller: "فونت کوچک‌تر",
-    aria_font_larger: "فونت بزرگ‌تر",
-    aria_fullscreen: "تمام‌صفحه",
-    err_status: "به‌روزرسانی ناموفق بود",
-    err_dashboard: "به‌روزرسانی داشبورد ناموفق بود",
-    err_carrier: "وضعیت کریر دریافت نشد",
-    err_peers: "بارگذاری همتاها ناموفق بود",
-    err_setup: "بارگذاری پیش‌فرض‌های راه‌اندازی ناموفق بود",
-    err_logs: "بارگذاری لاگ‌ها ناموفق بود",
-    err_errors: "بارگذاری تاریخچه خطاها ناموفق بود",
-    err_rslogs: "جریان زنده لاگ در دسترس نیست",
-    err_benchmark: "بارگذاری بنچمارک ناموفق بود",
-    err_peerlink: "وضعیت لینک همتا دریافت نشد",
-    err_bundle: "دریافت بسته ناموفق بود",
-    err_retry: "تلاش دوباره ناموفق بود",
-    carrier_switch_confirm: "آیا از تغییر پروتکل و سوییچ تونل به «{id}» اطمینان دارید؟"
-  }
+  fa: {}
 };
 
 let currentLang = 'en';
 
 function setLanguage(lang) {
-  currentLang = lang;
-  try { localStorage.setItem('hashem_lang', lang); } catch(e) { /* storage blocked: language just won't persist */ }
-  const isFa = lang === 'fa';
-  document.documentElement.setAttribute('dir', isFa ? 'rtl' : 'ltr');
-  document.documentElement.setAttribute('lang', lang);
-  document.body.classList.toggle('is-rtl', isFa);
-  
-  const b = $('langToggleBtn');
-  if (b) {
-    b.innerHTML = isFa ? '<span id="langFlag">🇬🇧</span> <span id="langTxt">English</span>' : '<span id="langFlag">🇮🇷</span> <span id="langTxt">فارسی</span>';
-  }
-  const bm = $('langToggleBtnM');
-  if (bm) {
-    bm.innerHTML = isFa ? '🇬🇧 English' : '🇮🇷 فارسی';
-  }
-  
-  applyTranslations(lang);
+  currentLang = 'en';
+  try { localStorage.setItem('hashem_lang', 'en'); } catch(e) { /* storage blocked */ }
+  document.documentElement.setAttribute('dir', 'ltr');
+  document.documentElement.setAttribute('lang', 'en');
+  document.body.classList.remove('is-rtl');
+  applyTranslations('en');
 }
 
 function applyTranslations(lang) {
@@ -2657,11 +2233,11 @@ function updateTransportSelect(selId, eng) {
   const cur = el.value;
   if (eng === 'frp') {
     el.innerHTML = `
-      <option value="tcp">TCP Multiplexed (Default / استاندارد)</option>
-      <option value="kcp">KCP ARQ UDP (Anti-Loss / ضد پکت‌لاس)</option>
-      <option value="quic">QUIC UDP Stream (High-Speed / پرسرعت)</option>
-      <option value="websocket">WebSocket (HTTP Upgrade / عبور اختلال)</option>
-      <option value="wss">WSS TLS (Obfuscated / پوشش امنیتی کامل)</option>
+      <option value="tcp">TCP Multiplexed (Default)</option>
+      <option value="kcp">KCP ARQ UDP (Anti-Loss)</option>
+      <option value="quic">QUIC UDP Stream (High-Speed)</option>
+      <option value="websocket">WebSocket (HTTP Upgrade)</option>
+      <option value="wss">WSS TLS (Obfuscated)</option>
     `;
     if (['tcp', 'kcp', 'quic', 'websocket', 'wss'].includes(cur)) el.value = cur;
     else el.value = 'tcp';
@@ -6022,12 +5598,12 @@ function setBagherRole(role) {
   if ($('bagherIranWrap')) $('bagherIranWrap').hidden = !iran;
   if ($('bagherForeignWrap')) $('bagherForeignWrap').hidden = iran;
   if ($('bagherActiveRoleBadge')) {
-    $('bagherActiveRoleBadge').textContent = 'نقش: ' + (iran ? 'سرور ایران (Iran)' : 'سرور خارج (Foreign)');
+    $('bagherActiveRoleBadge').textContent = 'Role: ' + (iran ? 'Iran Server' : 'Foreign Server');
   }
   if ($('bagherRoleHint')) {
     $('bagherRoleHint').textContent = iran
-      ? 'سرور ایران ورودی ترافیک کاربران است، پورت‌ها را گوش می‌دهد و با تانل استتار به خارج متصل می‌کند.'
-      : 'سرور خارج محل اجرای سرویس و فیلترشکن است، ترافیک را از تانل تحویل گرفته و پردازش می‌کند.';
+      ? 'Iran server receives inbound user traffic, listens on forwarded ports, and securely multiplexes to the Foreign server.'
+      : 'Foreign server runs outbound proxy/services, terminates stealth multiplexed tunnels, and processes traffic.';
   }
 }
 
@@ -6060,14 +5636,14 @@ function renderSSHFwd() {
   const foreignStopBtn = $('bagherForeignStopBtn');
 
   if (active) {
-    if (iranApplyBtn) iranApplyBtn.textContent = '🔄 بروزرسانی سرور ایران و صدور مجدد باندل';
+    if (iranApplyBtn) iranApplyBtn.textContent = '🔄 Update Iran Server & Re-issue Bundle';
     if (iranStopBtn) iranStopBtn.classList.remove('hidden');
-    if (foreignConnectBtn) foreignConnectBtn.textContent = '🔄 بروزرسانی اتصال در سرور خارج';
+    if (foreignConnectBtn) foreignConnectBtn.textContent = '🔄 Update Foreign Connection';
     if (foreignStopBtn) foreignStopBtn.classList.remove('hidden');
   } else {
-    if (iranApplyBtn) iranApplyBtn.textContent = '🚀 راه‌اندازی در سرور ایران و صدور باندل';
+    if (iranApplyBtn) iranApplyBtn.textContent = '🚀 Initialize Iran Server & Issue Bundle';
     if (iranStopBtn) iranStopBtn.classList.add('hidden');
-    if (foreignConnectBtn) foreignConnectBtn.textContent = '⚡ اتصال به ایران و فعال‌سازی تانل در سرور خارج';
+    if (foreignConnectBtn) foreignConnectBtn.textContent = '⚡ Connect to Iran & Start Foreign Tunnel';
     if (foreignStopBtn) foreignStopBtn.classList.add('hidden');
   }
 
@@ -6076,23 +5652,23 @@ function renderSSHFwd() {
   if (connBadge) {
     if (d.connected) {
       connBadge.className = 'badge ok';
-      connBadge.textContent = 'متصل (Online)';
+      connBadge.textContent = 'Connected (Online)';
       connBadge.style.background = '#10b981';
       connBadge.style.color = '#fff';
     } else if (active) {
       connBadge.className = 'badge warn';
-      connBadge.textContent = 'در انتظار سرور مقابل (Waiting)';
+      connBadge.textContent = 'Waiting for Peer';
       connBadge.style.background = '#f59e0b';
       connBadge.style.color = '#000';
     } else {
       connBadge.className = 'badge info';
-      connBadge.textContent = 'غیرفعال (Offline)';
+      connBadge.textContent = 'Inactive (Offline)';
       connBadge.style.background = 'rgba(255,255,255,0.1)';
       connBadge.style.color = '';
     }
   }
   if ($('bagherRoleTxt')) {
-    $('bagherRoleTxt').textContent = 'نقش: ' + (d.role === 'foreign' ? 'سرور خارج (Foreign)' : 'سرور ایران (Iran)');
+    $('bagherRoleTxt').textContent = 'Role: ' + (d.role === 'foreign' ? 'Foreign Server' : 'Iran Server');
   }
   if ($('bagherLatencyVal')) {
     $('bagherLatencyVal').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : '—';
@@ -6171,7 +5747,7 @@ function renderSSHFwd() {
 // Universal Clipboard Copy with legacy execCommand and prompt fallbacks
 function copyTextSafe(text, title, msg) {
   if (!text) {
-    toastErr('خطا در کپی', 'متنی برای کپی وجود ندارد.');
+    toastErr('Copy Error', 'No text to copy.');
     return;
   }
   const fallback = () => {
@@ -6189,18 +5765,18 @@ function copyTextSafe(text, title, msg) {
       const ok = document.execCommand('copy');
       document.body.removeChild(ta);
       if (ok) {
-        toastOk(title || 'کپی شد', msg || 'متن با موفقیت در کلیپ‌بورد ذخیره شد.');
+        toastOk(title || 'Copied', msg || 'Copied to clipboard successfully.');
         return;
       }
     } catch (e) {
       console.warn('execCommand copy failed:', e);
     }
-    window.prompt('متن را با Ctrl+C کپی کنید:', text);
+    window.prompt('Copy with Ctrl+C:', text);
   };
 
   if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
     navigator.clipboard.writeText(text).then(() => {
-      toastOk(title || 'کپی شد', msg || 'متن با موفقیت در کلیپ‌بورد ذخیره شد.');
+      toastOk(title || 'Copied', msg || 'Copied to clipboard successfully.');
     }).catch(err => {
       console.warn('clipboard.writeText failed, using fallback:', err);
       fallback();
@@ -6236,12 +5812,12 @@ async function activateBagherLicenseClick() {
   const keyEl = $('bagherLicKeyInput');
   const key = keyEl ? keyEl.value.trim() : '';
   if (!key) {
-    toastErr('کلید خالی است', 'لطفاً رشته لایسنس معتبر را وارد کنید.');
+    toastErr('Empty Key', 'Please enter a valid license key.');
     return;
   }
   try {
     const res = await api('/api/license', { key });
-    toastOk('لایسنس فعال شد', 'قابلیت‌های پرمیوم موتور باقر با موفقیت فعال شد!');
+    toastOk('License Activated', 'Bagher Engine premium features unlocked successfully!');
     if (keyEl) keyEl.value = '';
     const m = $('bagherLicModal');
     if (m) m.hidden = true;
@@ -6249,14 +5825,14 @@ async function activateBagherLicenseClick() {
     await loadLicense();
     await loadSSHFwd();
   } catch (err) {
-    toastErr('فعال‌سازی ناموفق', err.message || String(err));
+    toastErr('Activation Failed', err.message || String(err));
   }
 }
 
 function bagherLicCopyMachineClick() {
   const t = $('bagherLicMachineHash');
   if (t && t.value) {
-    copyTextSafe(t.value, 'کپی شد', 'هش سخت‌افزاری سرور در کلیپ‌بورد ذخیره شد.');
+    copyTextSafe(t.value, 'Copied', 'Server machine hash copied to clipboard.');
   }
 }
 
@@ -6266,12 +5842,12 @@ async function sshfwdToggleClick() {
   try {
     if (active) {
       await api('/api/sshfwd', { action: 'disable' });
-      toastOk('موتور باقر', 'سرویس غیرفعال شد.');
+      toastOk('Bagher Engine', 'Service stopped.');
     } else {
       const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
       if (!isLicensed) {
         openBagherLicModal();
-        toastErr('لایسنس لازم است', 'استفاده از موتور باقر نیازمند فعال‌سازی لایسنس پرمیوم است.');
+        toastErr('License Required', 'Bagher Engine requires an active premium license.');
         return;
       }
       const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
@@ -6282,19 +5858,19 @@ async function sshfwdToggleClick() {
       const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
       const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
       if (!remote_host) {
-        toastErr('IP سرور خارج لازم است', 'لطفاً آدرس IP سرور خارج را وارد کنید.');
+        toastErr('Foreign IP Required', 'Please enter the Foreign server IP address.');
         return;
       }
       if (!ports) {
-        toastErr('پورت‌های فوروارد لازم است', 'لطفاً حداقل یک پورت برای عبور از تانل مشخص کنید (مثال: 443, 8443).');
+        toastErr('Forwarded Ports Required', 'Please specify at least one port to forward (e.g. 443, 8443).');
         return;
       }
       await api('/api/sshfwd', { action: 'enable', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
-      toastOk('Bagher Engine', 'موتور باقر با موفقیت فعال و اجرا شد.');
+      toastOk('Bagher Engine', 'Bagher Engine started successfully.');
     }
     await loadSSHFwd();
   } catch (err) {
-    toastErr('عملیات ناموفق بود', err.message || err);
+    toastErr('Operation Failed', err.message || err);
   }
 }
 
@@ -6303,18 +5879,18 @@ async function bagherIranApplyClick() {
   const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
   if (!isLicensed) {
     openBagherLicModal();
-    toastErr('لایسنس لازم است', 'استفاده از موتور باقر نیازمند فعال‌سازی لایسنس پرمیوم است.');
+    toastErr('License Required', 'Bagher Engine requires an active premium license.');
     return;
   }
   const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
   const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
   if (!remote_host) {
-    toastErr('IP سرور خارج لازم است', 'لطفاً آدرس IP سرور خارج را وارد نمایید.');
+    toastErr('Foreign IP Required', 'Please enter the Foreign server IP address.');
     if ($('sshfwdRemoteHost')) $('sshfwdRemoteHost').focus();
     return;
   }
   if (!ports) {
-    toastErr('پورت‌های فوروارد لازم است', 'لطفاً حداقل یک پورت برای عبور از تانل مشخص کنید (مثال: 443, 8443).');
+    toastErr('Forwarded Ports Required', 'Please specify at least one port to forward (e.g. 443, 8443).');
     if ($('sshfwdPorts')) $('sshfwdPorts').focus();
     return;
   }
@@ -6324,7 +5900,7 @@ async function bagherIranApplyClick() {
   const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
 
   try {
-    toastOk('در حال راه‌اندازی...', 'در حال پیکربندی سرویس ایران و ایجاد باندل اتصال...');
+    toastOk('Initializing...', 'Configuring Iran service and generating connection bundle...');
     await api('/api/sshfwd', {
       action: 'enable',
       mode: 'bagher',
@@ -6336,13 +5912,13 @@ async function bagherIranApplyClick() {
       pool_count,
       frp_bind_port
     });
-    toastOk('سرور ایران راه‌اندازی شد', 'سرویس ایران فعال گردید و باندل اختصاصی در مرحله ۳ تولید شد.');
+    toastOk('Iran Server Ready', 'Iran service active. Connection bundle generated in Step 3.');
     await loadSSHFwd();
     if ($('bagherIranBundleCard')) {
       $('bagherIranBundleCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   } catch (err) {
-    toastErr('خطا در راه‌اندازی سرور ایران', err.message || err);
+    toastErr('Iran Setup Failed', err.message || err);
   }
 }
 
@@ -6351,35 +5927,35 @@ async function bagherForeignConnectClick() {
   const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
   if (!isLicensed) {
     openBagherLicModal();
-    toastErr('لایسنس لازم است', 'استفاده از موتور باقر نیازمند فعال‌سازی لایسنس پرمیوم است.');
+    toastErr('License Required', 'Bagher Engine requires an active premium license.');
     return;
   }
   const input = $('bagherPasteBundleInput');
   const bundle = input ? input.value.trim() : '';
   if (!bundle) {
-    toastErr('باندل خالی است', 'لطفاً رشته باندل دریافت شده از سرور ایران را در کادر بالا پیست کنید.');
+    toastErr('Empty Bundle', 'Please paste the connection bundle received from the Iran server.');
     if (input) input.focus();
     return;
   }
   try {
-    toastOk('در حال اتصال...', 'در حال اعمال تنظیمات و اتصال سرور خارج به ایران...');
+    toastOk('Connecting...', 'Applying configuration and connecting Foreign server to Iran...');
     const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle });
-    toastOk('سرور خارج متصل شد', res.message || 'سرور خارج با موفقیت به ایران متصل و تانل برقرار شد!');
+    toastOk('Foreign Connected', res.message || 'Foreign server connected to Iran successfully!');
     if (input) input.value = '';
     await loadSSHFwd();
   } catch (err) {
-    toastErr('خطا در اتصال به ایران', err.message || String(err));
+    toastErr('Connection Failed', err.message || String(err));
   }
 }
 
 async function bagherStopTunnelClick() {
   try {
-    toastOk('در حال توقف...', 'در حال متوقف‌سازی سرویس‌های تانل باقر...');
+    toastOk('Stopping...', 'Stopping Bagher tunnel services...');
     await api('/api/sshfwd', { action: 'disable' });
-    toastOk('تانل متوقف شد', 'سرویس تانل باقر با موفقیت غیرفعال شد.');
+    toastOk('Tunnel Stopped', 'Bagher tunnel service disabled successfully.');
     await loadSSHFwd();
   } catch (err) {
-    toastErr('خطا در توقف تانل', err.message || err);
+    toastErr('Failed to Stop Tunnel', err.message || err);
   }
 }
 
@@ -6387,10 +5963,10 @@ function bagherCopyBundleClick() {
   const t = $('bagherBundleText');
   const val = t ? t.value.trim() : '';
   if (!val) {
-    toastErr('باندل موجود نیست', 'ابتدا در مرحله ۲ اطلاعات را پر کرده و دکمه «راه‌اندازی در سرور ایران» را بزنید.');
+    toastErr('No Bundle', 'Please fill in Step 2 and click "Initialize Iran Server" first.');
     return;
   }
-  copyTextSafe(val, 'باندل کپی شد', 'رشته اتصال باقر در کلیپ‌بورد ذخیره شد؛ اکنون در پنل خارج پیست نمایید.');
+  copyTextSafe(val, 'Bundle Copied', 'Bagher connection bundle copied to clipboard. Paste into Foreign server panel.');
 }
 
 async function sshfwdApplyClick() {

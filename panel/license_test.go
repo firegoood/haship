@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -98,6 +100,30 @@ func HasFeatureString(features []string, f string) bool {
 		}
 	}
 	return false
+}
+
+func TestVerifyStoredTokens(t *testing.T) {
+	data, err := os.ReadFile("/opt/hashem-licensor/licenses.db")
+	if err != nil {
+		t.Skip("no licensor db")
+	}
+	_ = data
+	// Let's test with a freshly generated wildcard token using the master key
+	keyData, err := os.ReadFile("/root/.hashem-license/master.key")
+	if err != nil {
+		t.Fatalf("cannot read master key: %v", err)
+	}
+	privBytes, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(keyData)))
+	if err != nil {
+		t.Fatalf("invalid privBytes: %v", err)
+	}
+	priv := ed25519.PrivateKey(privBytes)
+	wildcardToken := generateTestToken(t, "FullAdmin", "*", []string{"bagher", "frp_ssh", "watchdog"}, time.Now().Add(365*24*time.Hour).Unix(), priv)
+	p, err := verifyLicenseKey(wildcardToken)
+	t.Logf("Wildcard token err=%v, payload=%+v", err, p)
+	if err != nil {
+		t.Fatalf("wildcard failed: %v", err)
+	}
 }
 
 func TestLicenseAPI(t *testing.T) {
