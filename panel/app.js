@@ -195,7 +195,7 @@ function goTab(name) {
   if (name === 'terminal' && !$('termNav').classList.contains('hidden') && $('tab-terminal').hidden && !termState.ready) { /* allowed: overlay shows connect */ }
   if (name === 'terminal' && $('termNav').classList.contains('hidden')) return; // flag off: tab doesn't exist
   if (name === 'add-peer') { goTab('setup'); const c = $('setupAddPeerStep'); if (c && c.scrollIntoView) c.scrollIntoView({behavior: 'smooth', block: 'start'}); return; }
-  ['dashboard','tunnel','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  ['dashboard','tunnel','sshfwd','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -205,6 +205,7 @@ function goTab(name) {
   document.querySelectorAll('.sidebar-nav [data-tab]').forEach(markTab);
   const dr = $('drawerNav');
   if (dr) dr.querySelectorAll('[data-tab]').forEach(markTab);
+  if (name === 'sshfwd') loadSSHFwd();
   if (name === 'perf') { loadPerf(); loadCarrier(); }
   if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); }
   if (name === 'watchdog') loadWatchdog();
@@ -309,6 +310,7 @@ const I18N = {
   en: {
     nav_dashboard: "Dashboard",
     nav_tunnel: "Tunnel",
+    nav_sshfwd: "SSH Forward",
     nav_setup: "Setup",
     nav_logs: "Logs",
     nav_perf: "Performance",
@@ -721,6 +723,7 @@ const I18N = {
   fa: {
     nav_dashboard: "داشبورد",
     nav_tunnel: "تونل",
+    nav_sshfwd: "هدایت SSH",
     nav_setup: "راه‌اندازی (Setup)",
     nav_logs: "گزارش‌ها (Logs)",
     nav_perf: "عملکرد سیستم",
@@ -5989,4 +5992,117 @@ async function savePeerConfigClick() {
   on('peerConfigCloseBtn', 'click', closePeerConfig);
   on('cfgPeerSaveBtn', 'click', savePeerConfigClick);
   on('autoPilotSaveBtn', 'click', saveAutoPilotClick);
+})();
+
+// ---------- SSH Forward Carrier (tab-sshfwd) ----------
+let _sshfwdData = null;
+
+async function loadSSHFwd() {
+  try {
+    _sshfwdData = await api('/api/sshfwd');
+    renderSSHFwd();
+  } catch (err) {
+    reportErr('sshfwd', err);
+  }
+}
+
+function renderSSHFwd() {
+  const d = _sshfwdData || {};
+  const active = !!d.is_active;
+  const badge = $('sshfwdStatusBadge');
+  const toggleBtn = $('sshfwdToggleBtn');
+
+  if (badge) {
+    badge.className = 'badge ' + (active ? 'ok' : 'info');
+    badge.textContent = active ? 'Active' : 'Inactive';
+  }
+  if (toggleBtn) {
+    toggleBtn.textContent = active ? 'Disable' : 'Enable';
+    toggleBtn.className = 'hashem-btn ' + (active ? 'hashem-btn-danger' : 'hashem-btn-primary');
+  }
+
+  if ($('sshfwdRemoteHost') && !$('sshfwdRemoteHost').value) $('sshfwdRemoteHost').value = d.remote_host || '';
+  if ($('sshfwdRemoteUser') && !$('sshfwdRemoteUser').value) $('sshfwdRemoteUser').value = d.remote_user || 'root';
+  if ($('sshfwdRemotePort') && !$('sshfwdRemotePort').value) $('sshfwdRemotePort').value = d.remote_ssh_port || 22;
+  if ($('sshfwdPorts') && !$('sshfwdPorts').value && Array.isArray(d.ports)) $('sshfwdPorts').value = d.ports.join(', ');
+
+  const authLine = $('sshfwdAuthLine');
+  if (authLine) authLine.value = d.auth_line || '';
+
+  const pillContainer = $('sshfwdPortPills');
+  if (pillContainer) {
+    pillContainer.innerHTML = '';
+    const st = d.port_status || {};
+    const ports = Array.isArray(d.ports) ? d.ports : [443, 8443, 1020, 1030, 1040];
+    ports.forEach(p => {
+      const isListening = !!st[String(p)];
+      const sp = document.createElement('span');
+      sp.className = 'badge ' + (isListening ? 'ok' : 'warn');
+      sp.textContent = `Port ${p}: ${isListening ? 'Listening' : 'Waiting'}`;
+      pillContainer.appendChild(sp);
+    });
+  }
+}
+
+async function sshfwdToggleClick() {
+  const d = _sshfwdData || {};
+  const active = !!d.is_active;
+  try {
+    if (active) {
+      await api('/api/sshfwd', { action: 'disable' });
+      toastOk('SSH Forward', 'Service disabled.');
+    } else {
+      const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
+      const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() : 'root';
+      const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '22', 10) || 22;
+      const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
+      if (!remote_host) {
+        toastErr('Missing Host', 'Remote Host IP is required.');
+        return;
+      }
+      await api('/api/sshfwd', { action: 'enable', remote_host, remote_user, ssh_port, ports });
+      toastOk('SSH Forward', 'Service enabled and started.');
+    }
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('SSH Forward Action Failed', err.message || err);
+  }
+}
+
+async function sshfwdClearDnatClick() {
+  try {
+    await api('/api/sshfwd', { action: 'clear_dnat' });
+    toastOk('DNAT Conflicts Cleared', 'nftables hashem_dnat table removed.');
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('Clear DNAT Failed', err.message || err);
+  }
+}
+
+async function sshfwdSyncPeerClick() {
+  try {
+    await api('/api/sshfwd', { action: 'sync_peer' });
+    toastOk('Synced to Peer', 'Public key installed in remote authorized_keys with restrict & permitopen.');
+  } catch (err) {
+    toastErr('Peer Sync Failed', err.message || err);
+  }
+}
+
+function sshfwdCopyAuthClick() {
+  const t = $('sshfwdAuthLine');
+  if (t && t.value) {
+    navigator.clipboard.writeText(t.value).then(() => {
+      toastOk('Copied', 'authorized_keys line copied to clipboard.');
+    }).catch(err => {
+      toastErr('Copy failed', String(err));
+    });
+  }
+}
+
+(function initSSHFwdEvents() {
+  function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
+  on('sshfwdToggleBtn', 'click', sshfwdToggleClick);
+  on('sshfwdClearDnatBtn', 'click', sshfwdClearDnatClick);
+  on('sshfwdSyncPeerBtn', 'click', sshfwdSyncPeerClick);
+  on('sshfwdCopyAuthBtn', 'click', sshfwdCopyAuthClick);
 })();

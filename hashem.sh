@@ -7309,9 +7309,10 @@ menu_tunnel() {
         echo "  7) Tunnel Health Status & GRE Ping Test"
         echo "  8) Restart All Tunnel Services"
         echo "  9) Teardown All Tunnels (Panel remains active)"
+        echo "  10) SSH Forward Carrier (Port forwarding via SSH tunnel)"
         echo "  0) Back to Main Menu"
         echo ""
-        read -p "Select an option [0-9]: " T_OPT
+        read -p "Select an option [0-10]: " T_OPT
         case "$T_OPT" in
             1)
                 echo "Select tunnel protocol for Iran:"
@@ -7367,10 +7368,42 @@ menu_tunnel() {
             7) check_status; pause_prompt ;;
             8) restart_all; pause_prompt ;;
             9) remove_tunnel; pause_prompt ;;
+            10) menu_sshfwd; pause_prompt ;;
             0) return 0 ;;
             *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
         esac
     done
+}
+
+menu_sshfwd() {
+    clear
+    show_banner
+    echo -e "${CYAN}--- SSH FORWARD CARRIER ---${NC}"
+    cli_sshfwd status
+    echo ""
+    echo "  1) Enable SSH Forward Carrier"
+    echo "  2) Disable SSH Forward Carrier"
+    echo "  3) Generate Key & Show Foreign authorized_keys Line"
+    echo "  4) Clear Conflicting DNAT Rules"
+    echo "  0) Back"
+    echo ""
+    read -p "Select an option [0-4]: " SF_OPT
+    case "$SF_OPT" in
+        1)
+            local R_IP R_PORTS R_PORT
+            read -p "Enter Remote Host (Foreign IP): " R_IP
+            read -p "Enter Remote SSH Port [22]: " R_PORT
+            R_PORT=${R_PORT:-22}
+            read -p "Enter Ports to forward [443, 8443, 1020, 1030, 1040]: " R_PORTS
+            R_PORTS=${R_PORTS:-"443, 8443, 1020, 1030, 1040"}
+            cli_sshfwd enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS"
+            ;;
+        2) cli_sshfwd disable ;;
+        3) cli_sshfwd gen-key ;;
+        4) cli_sshfwd clear-dnat ;;
+        0) return 0 ;;
+        *) echo -e "${RED}[!] Invalid option.${NC}" ;;
+    esac
 }
 
 menu_panel() {
@@ -7703,6 +7736,7 @@ Usage:
   hashem logs | restart | panel-tls [domain] [email]   # (also: bash hashem.sh ...)
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
+  hashem ssh-fwd [status|enable|disable|gen-key|clear-dnat] # SSH port forward carrier
   hashem dial [status|auto|gre|public]         # foreign side: reach the Iran hub over GRE, its public IP, or auto (GRE if it works)
   hashem perf status|enc on|off|comp on|off|tcpmux on|off|autopool on|off|status|tick|pool|apply
   hashem watchdog on|off|status|test|tick      # tunnel watchdog monitoring & alerts
@@ -8079,6 +8113,112 @@ cli_carrier() {
     esac
 }
 
+cli_sshfwd() {
+    local SUB="${1:-status}"
+    case "$SUB" in
+        status)
+            echo -e "${CYAN}=== Hashem SSH Forward Carrier Status ===${NC}"
+            local SVC_ACT="inactive"
+            systemctl is-active hashem-ssh-fwd.service >/dev/null 2>&1 && SVC_ACT="${GREEN}active (running)${NC}" || SVC_ACT="${YELLOW}inactive${NC}"
+            echo -e "Service: $SVC_ACT"
+            if [ -f /etc/gre-panel/sshfwd.json ]; then
+                echo "Config: /etc/gre-panel/sshfwd.json"
+                cat /etc/gre-panel/sshfwd.json | grep -E "remote_host|ports|enabled" || true
+            fi
+            echo -e "\nListening Ports:"
+            for p in 443 8443 1020 1030 1040; do
+                if ss -tlnp 2>/dev/null | grep -q ":$p "; then
+                    echo -e "  Port $p: ${GREEN}Listening${NC}"
+                else
+                    echo -e "  Port $p: ${RED}Not Listening${NC}"
+                fi
+            done
+            if nft list table inet hashem_dnat >/dev/null 2>&1; then
+                echo -e "${RED}[!] Conflict: table inet hashem_dnat is active. Run 'hashem ssh-fwd clear-dnat'${NC}"
+            fi
+            ;;
+        enable)
+            shift
+            local REMOTE_HOST="" PORTS="443, 8443, 1020, 1030, 1040" SSH_PORT="22" USER="root"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --remote-host|--remote-pub|-r) REMOTE_HOST="$2"; shift 2 ;;
+                    --ports|-p) PORTS="$2"; shift 2 ;;
+                    --ssh-port) SSH_PORT="$2"; shift 2 ;;
+                    --user|-u) USER="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            if [[ -z "$REMOTE_HOST" ]]; then
+                echo -e "${RED}[!] --remote-host <IP> is required.${NC}"
+                return 1
+            fi
+            echo -e "${CYAN}[*] Clearing conflicting DNAT...${NC}"
+            systemctl disable --now hashem-rescue-dnat.service >/dev/null 2>&1 || true
+            nft delete table inet hashem_dnat >/dev/null 2>&1 || true
+            echo -e "${CYAN}[*] Ensuring SSH keypair...${NC}"
+            mkdir -p /root/.ssh
+            if [[ ! -f /root/.ssh/hashem-fwd ]]; then
+                ssh-keygen -t ed25519 -N "" -f /root/.ssh/hashem-fwd -C "hashem-ssh-carrier" >/dev/null 2>&1
+            fi
+            local PUBKEY=$(cat /root/.ssh/hashem-fwd.pub)
+            local FWD_ARGS=""
+            IFS=',' read -ra PORT_ARR <<< "$PORTS"
+            for p in "${PORT_ARR[@]}"; do
+                p=$(echo "$p" | tr -d ' ')
+                [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L 0.0.0.0:$p:127.0.0.1:$p"
+            done
+            cat <<EOF > /etc/systemd/system/hashem-ssh-fwd.service
+[Unit]
+Description=Hashem SSH Forward Carrier (port forwarding via SSH tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -i /root/.ssh/hashem-fwd -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -p ${SSH_PORT} ${FWD_ARGS} ${USER}@${REMOTE_HOST}
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload
+            systemctl enable --now hashem-ssh-fwd.service
+            echo -e "${GREEN}[✔] SSH Forward carrier service started and enabled.${NC}"
+            echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
+            local PERMITS=""
+            for p in "${PORT_ARR[@]}"; do
+                p=$(echo "$p" | tr -d ' ')
+                [[ -n "$p" ]] && PERMITS="${PERMITS}permitopen=\"127.0.0.1:$p\","
+            done
+            PERMITS=\${PERMITS%,}
+            echo -e "restrict,port-forwarding,\${PERMITS} \${PUBKEY}\n"
+            ;;
+        disable)
+            systemctl disable --now hashem-ssh-fwd.service >/dev/null 2>&1 || true
+            echo -e "${YELLOW}[*] SSH Forward service disabled.${NC}"
+            ;;
+        gen-key)
+            mkdir -p /root/.ssh
+            if [[ ! -f /root/.ssh/hashem-fwd ]]; then
+                ssh-keygen -t ed25519 -N "" -f /root/.ssh/hashem-fwd -C "hashem-ssh-carrier" >/dev/null 2>&1
+            fi
+            echo -e "${GREEN}Public Key (/root/.ssh/hashem-fwd.pub):${NC}"
+            cat /root/.ssh/hashem-fwd.pub
+            ;;
+        clear-dnat)
+            systemctl disable --now hashem-rescue-dnat.service >/dev/null 2>&1 || true
+            nft delete table inet hashem_dnat >/dev/null 2>&1 || true
+            echo -e "${GREEN}[✔] hashem_dnat cleared from nftables.${NC}"
+            ;;
+        *)
+            echo "Usage: hashem ssh-fwd [status|enable --remote-host IP [--ports \"...\"]|disable|gen-key|clear-dnat]"
+            return 1
+            ;;
+    esac
+}
+
 if [[ $# -gt 0 ]]; then
     case "$1" in
         -h|--help|help) usage_cli; exit 0 ;;
@@ -8129,6 +8269,7 @@ if [[ $# -gt 0 ]]; then
         panel-tls) shift; panel_tls_issue "$@" ;;
         panel-remove-domain|panel-tls-remove) panel_tls_remove ;;
         carrier) shift; cli_carrier "$@" ;;
+        ssh-fwd|sshfwd) shift; cli_sshfwd "$@" ;;
         carrier-kernel-init) carrier_init_kernel ;;
         dial) shift; cli_dial "$@" ;;
         dial-select) dial_reselect >/dev/null 2>&1; exit 0 ;;

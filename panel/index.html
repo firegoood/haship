@@ -1013,6 +1013,7 @@
       <button role="tab" aria-selected="true" aria-controls="tab-dashboard" tabindex="0" class="nav-item on" data-tab="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span data-i18n="nav_dashboard">Dashboard</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_tunnel">Tunnel</div>
       <button role="tab" aria-selected="false" aria-controls="tab-tunnel" tabindex="-1" class="nav-item" data-tab="tunnel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg><span data-i18n="nav_tunnel">Tunnel</span><span class="nav-badge hidden u-ml-auto" aria-hidden="false"></span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-sshfwd" tabindex="-1" class="nav-item" data-tab="sshfwd" id="sshfwdNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span data-i18n="nav_sshfwd">SSH Forward</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-setup" tabindex="-1" class="nav-item" data-tab="setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span data-i18n="nav_setup">Setup</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" class="nav-item" data-tab="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span data-i18n="nav_logs">Logs</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_system">System</div>
@@ -1251,6 +1252,64 @@
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn" style="padding:6px 18px">Switch Tunnel Engine Now</button>
             <span class="u-hint-12" id="liveEngineStatusTxt"></span>
+          </div>
+        </div>
+      </section>
+      <section id="tab-sshfwd" role="tabpanel" hidden>
+        <div class="tunnel-card" style="border:1px solid rgba(56,189,248,0.22); background:linear-gradient(180deg, rgba(15,23,42,0.85) 0%, rgba(10,15,28,0.95) 100%);">
+          <div class="tc-header" style="border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:14px; margin-bottom:16px;">
+            <div>
+              <div class="u-flex-center-gap10">
+                <span class="tc-title" style="font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px;">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  SSH Forward Carrier
+                </span>
+                <span class="badge" id="sshfwdStatusBadge">Checking...</span>
+              </div>
+              <div class="qs-hint u-mt-4" id="sshfwdSubTxt">Encrypted TCP forward via isolated SSH key directly to Foreign inbound ports</div>
+            </div>
+            <div class="qs-actions">
+              <button class="hashem-btn hashem-btn-primary" id="sshfwdToggleBtn">Enable</button>
+              <button class="hashem-btn" id="sshfwdClearDnatBtn">Clear DNAT Conflicts</button>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:16px;">
+            <div class="tc-box">
+              <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Remote Host (Foreign IP)</label>
+              <input type="text" id="sshfwdRemoteHost" class="hashem-input" placeholder="e.g. 91.107.174.173" style="width:100%;">
+            </div>
+            <div class="tc-box">
+              <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">SSH Port &amp; User</label>
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="sshfwdRemoteUser" class="hashem-input" placeholder="root" value="root" style="width:40%;">
+                <input type="number" id="sshfwdRemotePort" class="hashem-input" placeholder="22" value="22" style="width:60%;">
+              </div>
+            </div>
+            <div class="tc-box" style="grid-column: 1 / -1;">
+              <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Forwarded Ports (Local -&gt; Foreign 127.0.0.1)</label>
+              <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="443, 8443, 1020, 1030, 1040" style="width:100%;">
+              <div class="u-hint-12 u-mt-4">Traffic hitting these ports on Iran will be safely tunneled to 127.0.0.1 on the Foreign host.</div>
+            </div>
+          </div>
+
+          <div class="tc-box u-mt-12" style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); padding:12px; border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-weight:600; font-size:13px;">Foreign authorized_keys Entry (restrict + permitopen)</span>
+              <div style="display:flex; gap:8px;">
+                <button class="hashem-btn" id="sshfwdCopyAuthBtn" style="padding:4px 10px; font-size:12px;">Copy Line</button>
+                <button class="hashem-btn" id="sshfwdSyncPeerBtn" style="padding:4px 10px; font-size:12px;">Auto-Sync to Peer</button>
+              </div>
+            </div>
+            <textarea id="sshfwdAuthLine" class="hashem-input" rows="3" readonly style="width:100%; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.4); resize:none;"></textarea>
+            <div class="u-hint-12 u-mt-4">Paste this line into <code>~/.ssh/authorized_keys</code> on your Foreign server, or click Auto-Sync if Peer Link is configured.</div>
+          </div>
+
+          <div class="u-mt-16">
+            <h4 style="font-size:14px; font-weight:600; margin-bottom:8px;">Active Port Status (Local Listeners)</h4>
+            <div id="sshfwdPortPills" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <span class="badge info">Loading status...</span>
+            </div>
           </div>
         </div>
       </section>

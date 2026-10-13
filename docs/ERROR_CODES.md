@@ -188,4 +188,15 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-PERF-02` | 500 | cannot save performance settings | Disk write failed — check /etc/gre-panel permissions. |
 | `E-PERF-03` | 500 | cannot apply performance settings | Check FRP services and configuration. |
 
-Total: 102 codes.
+## E-SSHFWD-xx — SSHFWD
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-SSHFWD-01` | 400 | invalid ssh-forward request | Check required fields (remote host, ports). |
+| `E-SSHFWD-02` | 400 | invalid port list | Provide valid TCP ports between 1 and 65535. |
+| `E-SSHFWD-03` | 500 | failed generating ssh key | Ensure ssh-keygen is installed and permissions are valid. |
+| `E-SSHFWD-04` | 500 | failed starting ssh forward service | Check host journalctl and remote sshd authorized_keys. |
+| `E-SSHFWD-05` | 409 | peer not configured or unreachable | Configure peer link or install public key manually on remote host. |
+| `E-SSHFWD-06` | 500 | failed installing authorized_keys on remote | Ensure remote user authorized_keys is writable. |
+
+Total: 108 codes.

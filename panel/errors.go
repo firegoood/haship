@@ -112,6 +112,13 @@ var errCatalog = map[string]errInfo{
 	"E-RESCUE-05":  {400, "cannot apply rescue code", "Paste the full code generated on the blocked server."},
 	"E-RESCUE-06":  {409, "rescue is not active on this server", "Enable rescue on the blocked server first."},
 	"E-RESCUE-07":  {403, "rescue offer denied", "Only the server named when rescue was enabled may fetch the offer."},
+	// ssh forward carrier (Phase 4)
+	"E-SSHFWD-01":  {400, "invalid ssh-forward request", "Check required fields (remote host, ports)."},
+	"E-SSHFWD-02":  {400, "invalid port list", "Provide valid TCP ports between 1 and 65535."},
+	"E-SSHFWD-03":  {500, "failed generating ssh key", "Ensure ssh-keygen is installed and permissions are valid."},
+	"E-SSHFWD-04":  {500, "failed starting ssh forward service", "Check host journalctl and remote sshd authorized_keys."},
+	"E-SSHFWD-05":  {409, "peer not configured or unreachable", "Configure peer link or install public key manually on remote host."},
+	"E-SSHFWD-06":  {500, "failed installing authorized_keys on remote", "Ensure remote user authorized_keys is writable."},
 	// terminal (Phase 3)
 	"E-TERM-00": {0, "terminal command audit", "Informational: redacted command line from the terminal session."},
 	"E-TERM-01": {500, "cannot start shell", "bash/sh missing or PTY unavailable on this host."},

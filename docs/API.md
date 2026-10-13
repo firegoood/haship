@@ -62,6 +62,7 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/peer/rescue-ack` | rescue peer | `handlePeerRescueAck` |
 | `GET` | `/api/peer/rescue-offer` | rescue peer | `handlePeerRescueOffer` |
 | `POST` | `/api/peer/revpath-probe` | peer secret (or session) | `handlePeerRevPathProbe` |
+| `POST` | `/api/peer/sshfwd-install-key` | peer secret (or session) | `handlePeerSSHFwdInstallKey` |
 | `GET` | `/api/peer/status` | peer secret (or session) | `handlePeerStatus` |
 | `GET` | `/api/peers` | session | `handlePeersGet` |
 | `PATCH` | `/api/peers` | session + CSRF | `handlePeersPatch` |
@@ -80,6 +81,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/session-settings` | session + CSRF | `handleSessionSettingsPost` |
 | `GET` | `/api/setup` | session | `handleSetupGet` |
 | `POST` | `/api/setup` | session + CSRF | `handleSetupPost` |
+| `GET` | `/api/sshfwd` | session | `handleSSHFwdGet` |
+| `POST` | `/api/sshfwd` | session + CSRF | `handleSSHFwdPost` |
 | `GET` | `/api/status` | session | `handleStatus` |
 | `GET` | `/api/suggest` | session | `handleSuggest` |
 | `GET` | `/api/support` | session | `handleSupport` |
@@ -109,4 +112,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 85 routes.
+Total: 88 routes.
