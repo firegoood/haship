@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSSHFwdFormatAuthorizedKeyLine(t *testing.T) {
@@ -117,6 +118,24 @@ func TestSSHFwdLicenseGating(t *testing.T) {
 		activeLicenseMu.Unlock()
 	}()
 
+	// Test get_bundle gating via API
+	bodyBundle := `{"action":"get_bundle"}`
+	reqBundle := httptest.NewRequest("POST", "/api/ssh-fwd", strings.NewReader(bodyBundle))
+	recBundle := httptest.NewRecorder()
+	handleSSHFwdPost(recBundle, reqBundle)
+	if recBundle.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403 Forbidden for un-licensed get_bundle, got %d", recBundle.Code)
+	}
+
+	// Test apply_bundle gating via API
+	bodyApply := `{"action":"apply_bundle","bundle":"BAGHER:123"}`
+	reqApply := httptest.NewRequest("POST", "/api/ssh-fwd", strings.NewReader(bodyApply))
+	recApply := httptest.NewRecorder()
+	handleSSHFwdPost(recApply, reqApply)
+	if recApply.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403 Forbidden for un-licensed apply_bundle, got %d", recApply.Code)
+	}
+
 	// Test Bagher mode gating via API
 	body := `{"action":"enable","mode":"bagher","remote_host":"1.2.3.4"}`
 	req := httptest.NewRequest("POST", "/api/ssh-fwd", strings.NewReader(body))
@@ -205,6 +224,21 @@ func TestBagherFormatByteSize(t *testing.T) {
 }
 
 func TestBagherAPIEndpoints(t *testing.T) {
+	activeLicenseMu.Lock()
+	oldLic := activeLicense
+	activeLicense = &LicensePayload{
+		Customer:    "test",
+		MachineHash: getMachineHash(),
+		Features:    []string{"bagher", "frp_ssh"},
+		ExpiresAt:   time.Now().Add(24 * time.Hour).Unix(),
+	}
+	activeLicenseMu.Unlock()
+	defer func() {
+		activeLicenseMu.Lock()
+		activeLicense = oldLic
+		activeLicenseMu.Unlock()
+	}()
+
 	// Test get_bundle
 	body := `{"action":"get_bundle"}`
 	req := httptest.NewRequest("POST", "/api/sshfwd", strings.NewReader(body))

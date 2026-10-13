@@ -205,7 +205,10 @@ function goTab(name) {
   document.querySelectorAll('.sidebar-nav [data-tab]').forEach(markTab);
   const dr = $('drawerNav');
   if (dr) dr.querySelectorAll('[data-tab]').forEach(markTab);
-  if (name === 'sshfwd') loadSSHFwd();
+  if (name === 'sshfwd') {
+    _bagherModalDismissed = false;
+    loadSSHFwd();
+  }
   if (name === 'perf') { loadPerf(); loadCarrier(); }
   if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); }
   if (name === 'watchdog') loadWatchdog();
@@ -6062,23 +6065,16 @@ function renderSSHFwd() {
     $('bagherBundleText').value = d.bundle || '';
   }
 
-  if ($('sshfwdRemoteHost') && !$('sshfwdRemoteHost').value) $('sshfwdRemoteHost').value = d.remote_host || '';
-  if ($('sshfwdRemoteUser') && !$('sshfwdRemoteUser').value) $('sshfwdRemoteUser').value = d.remote_user || 'root';
-  if ($('sshfwdRemotePort') && !$('sshfwdRemotePort').value) $('sshfwdRemotePort').value = d.remote_ssh_port || 22;
-  if ($('sshfwdPorts') && !$('sshfwdPorts').value && Array.isArray(d.ports)) $('sshfwdPorts').value = d.ports.join(', ');
+  // Inputs: do not force default values; keep empty placeholders unless saved
+  if ($('sshfwdRemoteHost') && !$('sshfwdRemoteHost').value && d.remote_host) $('sshfwdRemoteHost').value = d.remote_host;
+  if ($('sshfwdRemoteUser') && !$('sshfwdRemoteUser').value && d.remote_user) $('sshfwdRemoteUser').value = d.remote_user;
+  if ($('sshfwdRemotePort') && !$('sshfwdRemotePort').value && d.remote_ssh_port > 0) $('sshfwdRemotePort').value = d.remote_ssh_port;
+  if ($('sshfwdPorts') && !$('sshfwdPorts').value && Array.isArray(d.ports) && d.ports.length > 0) $('sshfwdPorts').value = d.ports.join(', ');
 
   const modeEl = $('sshfwdMode');
-  if (modeEl && d.mode) modeEl.value = d.mode;
-  if ($('sshfwdPoolCount') && d.pool_count) $('sshfwdPoolCount').value = d.pool_count;
-  if ($('sshfwdFRPPort') && d.frp_bind_port) $('sshfwdFRPPort').value = d.frp_bind_port;
-
-  const isFRP = (modeEl ? modeEl.value : (d.mode || 'bagher')) !== 'direct';
-  if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';
-  if ($('sshfwdForeignBox')) $('sshfwdForeignBox').style.display = isFRP ? 'block' : 'none';
-  if ($('sshfwdLicBanner')) {
-    const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
-    $('sshfwdLicBanner').classList.toggle('hidden', !isFRP || isLicensed);
-  }
+  if (modeEl) modeEl.value = 'bagher';
+  if ($('sshfwdPoolCount') && !$('sshfwdPoolCount').value && d.pool_count > 0) $('sshfwdPoolCount').value = d.pool_count;
+  if ($('sshfwdFRPPort') && !$('sshfwdFRPPort').value && d.frp_bind_port > 0) $('sshfwdFRPPort').value = d.frp_bind_port;
 
   const foreignCmd = $('sshfwdForeignCmd');
   if (foreignCmd) foreignCmd.value = d.foreign_setup_cmd || '';
@@ -6086,18 +6082,136 @@ function renderSSHFwd() {
   const authLine = $('sshfwdAuthLine');
   if (authLine) authLine.value = d.auth_line || '';
 
-  const pillContainer = $('sshfwdPortPills');
-  if (pillContainer) {
-    pillContainer.innerHTML = '';
-    const st = d.port_status || {};
-    const ports = Array.isArray(d.ports) ? d.ports : [443, 8443, 1020, 1030, 1040];
-    ports.forEach(p => {
-      const isListening = !!st[String(p)];
-      const sp = document.createElement('span');
-      sp.className = 'badge ' + (isListening ? 'ok' : 'warn');
-      sp.textContent = `Port ${p}: ${isListening ? 'Listening' : 'Waiting'}`;
-      pillContainer.appendChild(sp);
+  // Bagher Premium License Gate & UI blur/lock
+  const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
+  const bagherContainer = $('bagherCardContainer');
+  const bagherLockedBanner = $('bagherLockedBanner');
+  const bagherModal = $('bagherLicModal');
+  const bagherMachineHash = $('bagherLicMachineHash');
+
+  if (bagherMachineHash && d.machine_hash) {
+    bagherMachineHash.value = d.machine_hash;
+  }
+
+  if (!isLicensed) {
+    if (bagherContainer) {
+      bagherContainer.style.filter = 'blur(10px)';
+      bagherContainer.style.pointerEvents = 'none';
+      bagherContainer.style.opacity = '0.2';
+      bagherContainer.style.userSelect = 'none';
+    }
+    if (bagherLockedBanner) {
+      bagherLockedBanner.classList.remove('hidden');
+    }
+    if (state && state.tab === 'sshfwd' && bagherModal && bagherModal.hidden && !_bagherModalDismissed) {
+      bagherModal.hidden = false;
+    }
+  } else {
+    _bagherModalDismissed = false;
+    if (bagherContainer) {
+      bagherContainer.style.filter = '';
+      bagherContainer.style.pointerEvents = '';
+      bagherContainer.style.opacity = '';
+      bagherContainer.style.userSelect = '';
+    }
+    if (bagherLockedBanner) {
+      bagherLockedBanner.classList.add('hidden');
+    }
+    if (bagherModal) {
+      bagherModal.hidden = true;
+    }
+  }
+}
+
+// Universal Clipboard Copy with legacy execCommand and prompt fallbacks
+function copyTextSafe(text, title, msg) {
+  if (!text) {
+    toastErr('خطا در کپی', 'متنی برای کپی وجود ندارد.');
+    return;
+  }
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      ta.setAttribute('readonly', '');
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, 999999);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        toastOk(title || 'کپی شد', msg || 'متن با موفقیت در کلیپ‌بورد ذخیره شد.');
+        return;
+      }
+    } catch (e) {
+      console.warn('execCommand copy failed:', e);
+    }
+    window.prompt('متن را با Ctrl+C کپی کنید:', text);
+  };
+
+  if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    navigator.clipboard.writeText(text).then(() => {
+      toastOk(title || 'کپی شد', msg || 'متن با موفقیت در کلیپ‌بورد ذخیره شد.');
+    }).catch(err => {
+      console.warn('clipboard.writeText failed, using fallback:', err);
+      fallback();
     });
+  } else {
+    fallback();
+  }
+}
+
+let _bagherModalDismissed = false;
+
+function openBagherLicModal() {
+  _bagherModalDismissed = false;
+  const m = $('bagherLicModal');
+  if (m) m.hidden = false;
+  if (_sshfwdData && _sshfwdData.machine_hash && $('bagherLicMachineHash')) {
+    $('bagherLicMachineHash').value = _sshfwdData.machine_hash;
+  }
+}
+
+function closeBagherLicModal() {
+  _bagherModalDismissed = true;
+  const m = $('bagherLicModal');
+  if (m) m.hidden = true;
+}
+
+function cancelBagherLicModal() {
+  closeBagherLicModal();
+  goTab('dashboard');
+}
+
+async function activateBagherLicenseClick() {
+  const keyEl = $('bagherLicKeyInput');
+  const key = keyEl ? keyEl.value.trim() : '';
+  if (!key) {
+    toastErr('کلید خالی است', 'لطفاً رشته لایسنس معتبر را وارد کنید.');
+    return;
+  }
+  try {
+    const res = await api('/api/license', { key });
+    toastOk('لایسنس فعال شد', 'قابلیت‌های پرمیوم موتور باقر با موفقیت فعال شد!');
+    if (keyEl) keyEl.value = '';
+    const m = $('bagherLicModal');
+    if (m) m.hidden = true;
+    _bagherModalDismissed = false;
+    await loadLicense();
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('فعال‌سازی ناموفق', err.message || String(err));
+  }
+}
+
+function bagherLicCopyMachineClick() {
+  const t = $('bagherLicMachineHash');
+  if (t && t.value) {
+    copyTextSafe(t.value, 'کپی شد', 'هش سخت‌افزاری سرور در کلیپ‌بورد ذخیره شد.');
   }
 }
 
@@ -6107,25 +6221,35 @@ async function sshfwdToggleClick() {
   try {
     if (active) {
       await api('/api/sshfwd', { action: 'disable' });
-      toastOk('SSH Forward', 'Service disabled.');
+      toastOk('موتور باقر', 'سرویس غیرفعال شد.');
     } else {
+      const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
+      if (!isLicensed) {
+        openBagherLicModal();
+        toastErr('لایسنس لازم است', 'استفاده از موتور باقر نیازمند فعال‌سازی لایسنس پرمیوم است.');
+        return;
+      }
       const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
-      const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() : 'root';
-      const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '22', 10) || 22;
+      const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() || 'root' : 'root';
+      const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '', 10) || 22;
       const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
-      const mode = $('sshfwdMode') ? $('sshfwdMode').value : 'bagher';
-      const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '25', 10) || 25;
-      const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '55400', 10) || 55400;
+      const mode = 'bagher';
+      const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
+      const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
       if (!remote_host) {
-        toastErr('Missing Host', 'Remote Host IP is required.');
+        toastErr('IP سرور خارج لازم است', 'لطفاً آدرس IP سرور خارج را وارد کنید.');
+        return;
+      }
+      if (!ports) {
+        toastErr('پورت‌های فوروارد لازم است', 'لطفاً حداقل یک پورت برای عبور از تانل مشخص کنید (مثال: 443, 8443).');
         return;
       }
       await api('/api/sshfwd', { action: 'enable', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
-      toastOk('Bagher Engine', 'Service enabled and started.');
+      toastOk('Bagher Engine', 'موتور باقر با موفقیت فعال و اجرا شد.');
     }
     await loadSSHFwd();
   } catch (err) {
-    toastErr('SSH Forward Action Failed', err.message || err);
+    toastErr('عملیات ناموفق بود', err.message || err);
   }
 }
 
@@ -6151,37 +6275,32 @@ async function sshfwdSyncPeerClick() {
 function sshfwdCopyAuthClick() {
   const t = $('sshfwdAuthLine');
   if (t && t.value) {
-    navigator.clipboard.writeText(t.value).then(() => {
-      toastOk('Copied', 'authorized_keys line copied to clipboard.');
-    }).catch(err => {
-      toastErr('Copy failed', String(err));
-    });
+    copyTextSafe(t.value, 'کپی شد', 'کلید مجاز سرور خارج در کلیپ‌بورد کپی شد.');
   }
 }
 
 function sshfwdCopyForeignClick() {
   const t = $('sshfwdForeignCmd');
   if (t && t.value) {
-    navigator.clipboard.writeText(t.value).then(() => {
-      toastOk('Copied', 'Foreign setup command copied to clipboard.');
-    }).catch(err => {
-      toastErr('Copy failed', String(err));
-    });
+    copyTextSafe(t.value, 'کپی شد', 'دستور راه‌اندازی سرور خارج در کلیپ‌بورد کپی شد.');
   }
 }
 
 function bagherCopyBundleClick() {
   const t = $('bagherBundleText');
   if (t && t.value) {
-    navigator.clipboard.writeText(t.value).then(() => {
-      toastOk('باندل کپی شد', 'رشته اتصال باقر در کلیپ‌بورد ذخیره شد.');
-    }).catch(err => {
-      toastErr('خطا در کپی', String(err));
-    });
+    copyTextSafe(t.value, 'باندل کپی شد', 'رشته اتصال باقر در کلیپ‌بورد ذخیره شد.');
   }
 }
 
 async function bagherApplyBundleClick() {
+  const d = _sshfwdData || {};
+  const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
+  if (!isLicensed) {
+    openBagherLicModal();
+    toastErr('لایسنس لازم است', 'استفاده از موتور باقر نیازمند فعال‌سازی لایسنس پرمیوم است.');
+    return;
+  }
   const input = $('bagherPasteBundleInput');
   const bundle = input ? input.value.trim() : '';
   if (!bundle) {
@@ -6208,6 +6327,19 @@ async function bagherApplyBundleClick() {
   on('bagherCopyBundleBtn', 'click', bagherCopyBundleClick);
   on('bagherApplyBundleBtn', 'click', bagherApplyBundleClick);
 
+  // License Modal events
+  on('bagherLicModalClose', 'click', closeBagherLicModal);
+  on('bagherLicCancelBtn', 'click', cancelBagherLicModal);
+  on('bagherLicSubmitBtn', 'click', activateBagherLicenseClick);
+  on('bagherLicCopyMachineBtn', 'click', bagherLicCopyMachineClick);
+  on('bagherOpenLicModalBtn', 'click', openBagherLicModal);
+
+  // Auto-select text on click
+  ['bagherBundleText', 'sshfwdForeignCmd', 'sshfwdAuthLine', 'bagherLicMachineHash'].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener('click', () => { el.select(); });
+  });
+
   // Periodic poll when on sshfwd tab
   setInterval(() => {
     const tab = $('tab-sshfwd');
@@ -6215,15 +6347,6 @@ async function bagherApplyBundleClick() {
       loadSSHFwd();
     }
   }, 3500);
-  on('sshfwdMode', 'change', () => {
-    const isFRP = $('sshfwdMode') && $('sshfwdMode').value !== 'direct';
-    if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';
-    if ($('sshfwdForeignBox')) $('sshfwdForeignBox').style.display = isFRP ? 'block' : 'none';
-    if ($('sshfwdLicBanner')) {
-      const isLicensed = _sshfwdData && (_sshfwdData.licensed_bagher || _sshfwdData.licensed_frp_ssh);
-      $('sshfwdLicBanner').classList.toggle('hidden', !isFRP || isLicensed);
-    }
-  });
 })();
 
 /* --- License & Premium Feature Management --- */
@@ -6313,11 +6436,7 @@ async function deactivateLicenseClick() {
 function copyMachineHashClick() {
   const el = $('licMachineHash');
   if (el && el.value) {
-    navigator.clipboard.writeText(el.value).then(() => {
-      toastOk('Copied', 'Hardware machine hash copied to clipboard.');
-    }).catch(err => {
-      toastErr('Copy failed', String(err));
-    });
+    copyTextSafe(el.value, 'Copied', 'Hardware machine hash copied to clipboard.');
   }
 }
 

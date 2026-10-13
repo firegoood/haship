@@ -1256,7 +1256,19 @@
         </div>
       </section>
       <section id="tab-sshfwd" role="tabpanel" hidden>
-        <div class="tunnel-card" style="border:1px solid rgba(56,189,248,0.22); background:linear-gradient(180deg, rgba(15,23,42,0.85) 0%, rgba(10,15,28,0.95) 100%);">
+        <!-- Locked Banner (shown when un-licensed and modal is closed) -->
+        <div id="bagherLockedBanner" class="hidden" style="text-align:center; padding:60px 20px; background:linear-gradient(180deg, rgba(15,23,42,0.85) 0%, rgba(10,15,28,0.95) 100%); border:1px solid rgba(56,189,248,0.22); border-radius:12px; margin-bottom:20px;">
+          <div style="font-size:42px; margin-bottom:14px;">🔒</div>
+          <h3 style="font-size:18px; font-weight:700; color:#38bdf8; margin-bottom:8px;">موتور باقر نیازمند لایسنس پرمیوم است</h3>
+          <p style="font-size:13px; color:#94a3b8; max-width:500px; margin:0 auto 20px auto; line-height:1.6;">
+            تنظیمات و تانل هیبرید استتار Bagher Engine منحصراً در نسخه پرمیوم ارائه می‌شود. برای بازگشایی دسترسی، کلید لایسنس خود را وارد نمایید.
+          </p>
+          <button class="hashem-btn hashem-btn-primary" id="bagherOpenLicModalBtn" style="background:#0284c7; border-color:#0284c7; padding:8px 24px; font-size:14px; font-weight:600;">
+            🔑 فعال‌سازی لایسنس موتور باقر
+          </button>
+        </div>
+
+        <div id="bagherCardContainer" class="tunnel-card" style="border:1px solid rgba(56,189,248,0.22); background:linear-gradient(180deg, rgba(15,23,42,0.85) 0%, rgba(10,15,28,0.95) 100%);">
           <div class="tc-header" style="border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:14px; margin-bottom:16px;">
             <div>
               <div class="u-flex-center-gap10">
@@ -1301,49 +1313,50 @@
           </div>
 
           <!-- Foreign One-Click Zero-Terminal Setup Box -->
-          <div class="tc-box" id="bagherForeignJoinBox" style="background:linear-gradient(180deg, rgba(16,185,129,0.08) 0%, rgba(15,23,42,0.4) 100%); border:1px solid rgba(16,185,129,0.25); padding:14px; border-radius:8px; margin-bottom:16px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <span style="font-weight:700; font-size:14px; color:#34d399; display:flex; align-items:center; gap:6px;">
+          <div class="tc-box" id="bagherForeignJoinBox" style="background:linear-gradient(180deg, rgba(16,185,129,0.08) 0%, rgba(15,23,42,0.4) 100%); border:1px solid rgba(16,185,129,0.25); padding:16px; border-radius:8px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <span style="font-weight:700; font-size:15px; color:#34d399; display:flex; align-items:center; gap:8px;">
                 📥 فعال‌سازی در سرور خارج (Paste Bundle &amp; Connect)
               </span>
               <span class="badge ok" style="font-size:11px;">Zero-Terminal Setup</span>
             </div>
-            <div class="u-hint-12" style="margin-bottom:8px;">
-              اگر این سرور خارج است، رشته باندل تولیدشده در سرور ایران را اینجا قرار دهید و دکمه زیر را بزنید تا کلید SSH، کانفیگ استتار FRP و سرویس به طور کاملاً اتوماتیک پیکربندی شوند:
+            <div class="u-hint-12" style="margin-bottom:10px; line-height:1.5;">
+              اگر این سرور خارج است، رشته باندل تولیدشده در سرور ایران را در کادر زیر قرار دهید و دکمه فعال‌سازی را بزنید تا کلید SSH، کانفیگ استتار FRP و سرویس به طور خودکار پیکربندی شوند:
             </div>
-            <div style="display:flex; gap:8px; align-items:stretch; flex-wrap:wrap;">
-              <input type="text" id="bagherPasteBundleInput" class="hashem-input" placeholder="BAGHER:eyJ2Ijox..." style="flex:1; min-width:240px; font-family:monospace; font-size:12px;">
-              <button class="hashem-btn hashem-btn-primary" id="bagherApplyBundleBtn" style="white-space:nowrap; padding:6px 18px; font-weight:600; background:#059669; border-color:#059669;">
-                ⚡ فعال‌سازی خودکار در سرور خارج
-              </button>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <textarea id="bagherPasteBundleInput" class="hashem-input" rows="3" placeholder="BAGHER:eyJ2Ijox..." style="width:100%; min-height:75px; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.45); resize:vertical; padding:10px; border-radius:6px;"></textarea>
+              <div style="display:flex; justify-content:flex-end;">
+                <button class="hashem-btn hashem-btn-primary" id="bagherApplyBundleBtn" style="padding:7px 22px; font-weight:600; font-size:13px; background:#059669; border-color:#059669;">
+                  ⚡ فعال‌سازی خودکار در سرور خارج
+                </button>
+              </div>
             </div>
           </div>
 
           <!-- Iran Bundle Output Card -->
-          <div class="tc-box" id="bagherIranBundleCard" style="background:rgba(56,189,248,0.06); border:1px solid rgba(56,189,248,0.22); padding:14px; border-radius:8px; margin-bottom:16px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <span style="font-weight:700; font-size:14px; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+          <div class="tc-box" id="bagherIranBundleCard" style="background:rgba(56,189,248,0.06); border:1px solid rgba(56,189,248,0.22); padding:16px; border-radius:8px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <span style="font-weight:700; font-size:15px; color:#38bdf8; display:flex; align-items:center; gap:8px;">
                 📦 باندل اتصال Bagher Engine (جهت پیست در پنل خارج)
               </span>
-              <button class="hashem-btn" id="bagherCopyBundleBtn" style="padding:4px 14px; font-size:12px; font-weight:600; background:#0284c7; color:#fff; border-color:#0284c7;">
+              <button class="hashem-btn" id="bagherCopyBundleBtn" style="padding:6px 18px; font-size:13px; font-weight:600; background:#0284c7; color:#fff; border-color:#0284c7;">
                 📋 کپی باندل (Copy Bundle)
               </button>
             </div>
-            <div class="u-hint-12" style="margin-bottom:6px;">
-              این رشته باندل را کپی کرده و در پنل وب سرور خارج (کادر بالا) پیست نمایید:
+            <div class="u-hint-12" style="margin-bottom:8px; line-height:1.5;">
+              این رشته باندل رمزنگاری‌شده را کپی کرده و در پنل وب سرور خارج (کادر سبز رنگ بالا در سرور خارج) پیست نمایید:
             </div>
-            <textarea id="bagherBundleText" class="hashem-input" rows="2" readonly style="width:100%; font-family:monospace; font-size:11px; background:rgba(0,0,0,0.5); resize:none; color:#38bdf8; word-break:break-all;"></textarea>
+            <textarea id="bagherBundleText" class="hashem-input" rows="5" readonly style="width:100%; min-height:115px; font-family:monospace; font-size:12px; line-height:1.45; background:rgba(0,0,0,0.55); resize:vertical; color:#38bdf8; word-break:break-all; padding:10px; border-radius:6px;"></textarea>
           </div>
 
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:16px;">
             <div class="tc-box">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Carrier Engine Mode</label>
-              <select id="sshfwdMode" class="hashem-input" style="width:100%;">
-                <option value="bagher">Bagher Engine (Low Latency &amp; High Speed — 25 Pool) [PRO]</option>
-                <option value="direct">Direct SSH Forward (Pure TCP tunnel) [Free]</option>
+              <select id="sshfwdMode" class="hashem-input" style="width:100%;" disabled>
+                <option value="bagher" selected>Bagher Engine (Low Latency &amp; High Speed — 25 Pool) [PRO]</option>
               </select>
-              <div class="u-hint-12 u-mt-4">Bagher Engine pre-warms connection pools over SSH to cut handshake latency by ~110ms.</div>
-              <div class="u-hint-12 u-mt-4 hidden" id="sshfwdLicBanner" style="color:#f59e0b; font-weight:600;">⚠ Requires active Premium License for Bagher Engine. (Direct SSH is free).</div>
+              <div class="u-hint-12 u-mt-4">Bagher Engine pre-warms connection pools over SSH to cut handshake latency by ~110ms. [Premium Only]</div>
+              <div class="u-hint-12 u-mt-4 hidden" id="sshfwdLicBanner" style="color:#f59e0b; font-weight:600;">⚠ Requires active Premium License for Bagher Engine.</div>
             </div>
             <div class="tc-box">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Remote Host (Foreign IP)</label>
@@ -1352,51 +1365,44 @@
             <div class="tc-box">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">SSH Port &amp; User</label>
               <div style="display:flex; gap:8px;">
-                <input type="text" id="sshfwdRemoteUser" class="hashem-input" placeholder="root" value="root" style="width:40%;">
-                <input type="number" id="sshfwdRemotePort" class="hashem-input" placeholder="22" value="22" style="width:60%;">
+                <input type="text" id="sshfwdRemoteUser" class="hashem-input" placeholder="e.g. root" style="width:40%;">
+                <input type="number" id="sshfwdRemotePort" class="hashem-input" placeholder="e.g. 22" style="width:60%;">
               </div>
             </div>
             <div class="tc-box" id="sshfwdPoolBox">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Pool Count &amp; FRP Port</label>
               <div style="display:flex; gap:8px;">
-                <input type="number" id="sshfwdPoolCount" class="hashem-input" placeholder="25" value="25" style="width:50%;" title="Pre-connected work sockets (poolCount)">
-                <input type="number" id="sshfwdFRPPort" class="hashem-input" placeholder="55400" value="55400" style="width:50%;" title="FRP control port">
+                <input type="number" id="sshfwdPoolCount" class="hashem-input" placeholder="e.g. 25" style="width:50%;" title="Pre-connected work sockets (poolCount)">
+                <input type="number" id="sshfwdFRPPort" class="hashem-input" placeholder="e.g. 55400" style="width:50%;" title="FRP control port">
               </div>
               <div class="u-hint-12 u-mt-4">Pre-connected sockets in pool (25 rec.) and internal bind port.</div>
             </div>
             <div class="tc-box" style="grid-column: 1 / -1;">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Forwarded Ports (Local -&gt; Foreign 127.0.0.1)</label>
-              <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="443, 8443, 1020, 1030, 1040" style="width:100%;">
+              <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="e.g. 443, 8443, 1020, 1030 (ports to tunnel)" style="width:100%;">
               <div class="u-hint-12 u-mt-4">Traffic hitting these ports on Iran will be safely tunneled to 127.0.0.1 on the Foreign host.</div>
             </div>
           </div>
 
-          <div class="tc-box u-mt-12" id="sshfwdForeignBox" style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); padding:12px; border-radius:8px;">
+          <div class="tc-box u-mt-12" id="sshfwdForeignBox" style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); padding:14px; border-radius:8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <span style="font-weight:600; font-size:13px;">Foreign Client Setup (Run on Foreign Server)</span>
-              <button class="hashem-btn" id="sshfwdCopyForeignBtn" style="padding:4px 10px; font-size:12px;">Copy Command</button>
+              <button class="hashem-btn" id="sshfwdCopyForeignBtn" style="padding:5px 14px; font-size:12px;">Copy Command</button>
             </div>
-            <textarea id="sshfwdForeignCmd" class="hashem-input" rows="4" readonly style="width:100%; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.4); resize:none;"></textarea>
+            <textarea id="sshfwdForeignCmd" class="hashem-input" rows="5" readonly style="width:100%; min-height:105px; font-family:monospace; font-size:12px; line-height:1.4; background:rgba(0,0,0,0.4); resize:vertical; padding:10px; border-radius:6px;"></textarea>
             <div class="u-hint-12 u-mt-4">Run this snippet once on your Foreign server to establish the FRP workpool client.</div>
           </div>
 
-          <div class="tc-box u-mt-12" style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); padding:12px; border-radius:8px;">
+          <div class="tc-box u-mt-12" style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); padding:14px; border-radius:8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <span style="font-weight:600; font-size:13px;">Foreign authorized_keys Entry</span>
               <div style="display:flex; gap:8px;">
-                <button class="hashem-btn" id="sshfwdCopyAuthBtn" style="padding:4px 10px; font-size:12px;">Copy Line</button>
-                <button class="hashem-btn" id="sshfwdSyncPeerBtn" style="padding:4px 10px; font-size:12px;">Auto-Sync to Peer</button>
+                <button class="hashem-btn" id="sshfwdCopyAuthBtn" style="padding:5px 14px; font-size:12px;">Copy Line</button>
+                <button class="hashem-btn" id="sshfwdSyncPeerBtn" style="padding:5px 14px; font-size:12px;">Auto-Sync to Peer</button>
               </div>
             </div>
-            <textarea id="sshfwdAuthLine" class="hashem-input" rows="3" readonly style="width:100%; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.4); resize:none;"></textarea>
+            <textarea id="sshfwdAuthLine" class="hashem-input" rows="4" readonly style="width:100%; min-height:85px; font-family:monospace; font-size:12px; line-height:1.4; background:rgba(0,0,0,0.4); resize:vertical; padding:10px; border-radius:6px;"></textarea>
             <div class="u-hint-12 u-mt-4">Paste this line into <code>~/.ssh/authorized_keys</code> on your Foreign server, or click Auto-Sync if Peer Link is configured.</div>
-          </div>
-
-          <div class="u-mt-16">
-            <h4 style="font-size:14px; font-weight:600; margin-bottom:8px;">Active Port Status (Local Listeners)</h4>
-            <div id="sshfwdPortPills" style="display:flex; flex-wrap:wrap; gap:8px;">
-              <span class="badge info">Loading status...</span>
-            </div>
           </div>
         </div>
       </section>
@@ -2688,6 +2694,46 @@
     <div class="ent-modal-f">
       <button class="hashem-btn hashem-btn-ghost" id="editPortsCancel" type="button">Cancel</button>
       <button class="hashem-btn hashem-btn-primary" id="editPortsSave" type="button">&#x1F4BE; Save &amp; Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Bagher Engine Premium License Activation -->
+<div class="ent-modal-ov" id="bagherLicModal" hidden>
+  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="bagherLicModalTitle" style="max-width:540px; width:100%;">
+    <div class="ent-modal-h" style="border-bottom:1px solid rgba(56,189,248,0.2);">
+      <b id="bagherLicModalTitle" style="display:flex; align-items:center; gap:8px; color:#38bdf8; font-size:15px;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        فعال‌سازی لایسنس موتور باقر [Bagher Engine PRO]
+      </b>
+      <button class="ent-x" id="bagherLicModalClose" aria-label="Close">&#xD7;</button>
+    </div>
+    <div class="ent-modal-b" style="gap:14px; padding:18px;">
+      <p class="u-m-0" style="font-size:13px; line-height:1.6; color:var(--text, #cbd5e1);">
+        بخش <b>Bagher Engine</b> یک قابلیت کاملاً اختصاصی (پرمیوم) است. برای مشاهده و استفاده از تنظیمات تانل هیبرید استتار، باید لایسنس معتبر فعال شود.
+      </p>
+      <div class="fg">
+        <label for="bagherLicMachineHash" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          هش سخت‌افزاری سرور (Machine Hash):
+        </label>
+        <div style="display:flex; gap:8px;">
+          <input class="hashem-input" id="bagherLicMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:#38bdf8; background:rgba(0,0,0,0.4);" placeholder="در حال بررسی...">
+          <button type="button" class="hashem-btn" id="bagherLicCopyMachineBtn" style="white-space:nowrap; padding:6px 14px;">📋 کپی هش</button>
+        </div>
+        <div class="u-hint-12 u-mt-4">این هش را جهت دریافت یا تمدید لایسنس اختصاصی ارائه دهید.</div>
+      </div>
+      <div class="fg">
+        <label for="bagherLicKeyInput" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          کلید لایسنس پرمیوم (License Key):
+        </label>
+        <textarea class="hashem-input" id="bagherLicKeyInput" rows="4" placeholder="کلید لایسنس دریافت شده را اینجا Paste کنید..." style="font-family:monospace; font-size:12px; width:100%; resize:vertical; padding:8px; line-height:1.4;"></textarea>
+      </div>
+    </div>
+    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:12px 18px;">
+      <button type="button" class="hashem-btn hashem-btn-ghost" id="bagherLicCancelBtn">بازگشت به داشبورد</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" id="bagherLicSubmitBtn" style="background:#0284c7; border-color:#0284c7; padding:7px 22px; font-weight:600;">
+        ⚡ فعال‌سازی و بازگشایی
+      </button>
     </div>
   </div>
 </div>

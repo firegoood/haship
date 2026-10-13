@@ -75,9 +75,7 @@ func loadSSHFwdConfigLocked() SSHFwdConfig {
 	if err == nil {
 		_ = json.Unmarshal(b, &cfg)
 	}
-	if cfg.Mode == "" || cfg.Mode == "frp_ssh" {
-		cfg.Mode = "bagher"
-	}
+	cfg.Mode = "bagher"
 	if cfg.RemoteUser == "" {
 		cfg.RemoteUser = "root"
 	}
@@ -87,8 +85,8 @@ func loadSSHFwdConfigLocked() SSHFwdConfig {
 	if cfg.KeyPath == "" {
 		cfg.KeyPath = "/root/.ssh/hashem-fwd"
 	}
-	if len(cfg.Ports) == 0 {
-		cfg.Ports = []int{443, 8443, 1020, 1030, 1040}
+	if cfg.Ports == nil {
+		cfg.Ports = []int{}
 	}
 	if cfg.BindAddr == "" {
 		cfg.BindAddr = "0.0.0.0"
@@ -806,6 +804,10 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 
 	switch act {
 	case "apply_bundle", "apply-bundle":
+		if !(HasFeature("bagher") || HasFeature("frp_ssh")) {
+			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
+			return
+		}
 		bundleStr := strings.TrimSpace(body.Bundle)
 		if bundleStr == "" {
 			writeAPIError(w, r, "E-SSHFWD-07", "bundle string is required")
@@ -827,6 +829,10 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "get_bundle", "get-bundle":
+		if !(HasFeature("bagher") || HasFeature("frp_ssh")) {
+			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
+			return
+		}
 		pub, err := ensureSSHFwdKey(cfg.KeyPath)
 		if err != nil {
 			writeAPIError(w, r, "E-SSHFWD-03", err.Error())
@@ -840,6 +846,10 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"status": "ok", "bundle": bundleStr})
 
 	case "gen_key", "gen-key":
+		if !(HasFeature("bagher") || HasFeature("frp_ssh")) {
+			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
+			return
+		}
 		pub, err := ensureSSHFwdKey(cfg.KeyPath)
 		if err != nil {
 			writeAPIError(w, r, "E-SSHFWD-03", err.Error())
@@ -848,12 +858,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"status": "ok", "pub_key": pub, "auth_line": formatAuthorizedKeyLine(pub, cfg.Mode, cfg.FRPBindPort, cfg.Ports)})
 
 	case "enable", "apply":
-		if body.Mode != "" {
-			cfg.Mode = strings.ToLower(strings.TrimSpace(body.Mode))
-			if cfg.Mode == "frp_ssh" {
-				cfg.Mode = "bagher"
-			}
-		}
+		cfg.Mode = "bagher"
 		if body.RemoteHost != "" {
 			cfg.RemoteHost = strings.TrimSpace(body.RemoteHost)
 		}
@@ -883,9 +888,11 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-SSHFWD-01", "remote_host is required")
 			return
 		}
-
-		isBagher := cfg.Mode == "bagher" || cfg.Mode == "frp_ssh"
-		if isBagher && !(HasFeature("bagher") || HasFeature("frp_ssh")) {
+		if len(cfg.Ports) == 0 {
+			writeAPIError(w, r, "E-SSHFWD-02", "At least one port must be specified in Forwarded Ports")
+			return
+		}
+		if !(HasFeature("bagher") || HasFeature("frp_ssh")) {
 			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
 			return
 		}
