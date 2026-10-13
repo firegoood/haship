@@ -1274,6 +1274,67 @@
             </div>
           </div>
 
+          <!-- Live Health & Traffic Monitoring -->
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px;">
+            <div class="tc-box" style="background:rgba(255,255,255,0.03); border:1px solid rgba(56,189,248,0.15); padding:12px 14px; border-radius:8px;">
+              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:6px; font-weight:600;">وضعیت اتصال تانل</div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge" id="bagherConnBadge">بررسی...</span>
+              </div>
+              <div id="bagherRoleTxt" style="font-size:11px; color:#94a3b8; margin-top:4px;">نقش: سرور ایران</div>
+            </div>
+            <div class="tc-box" style="background:rgba(255,255,255,0.03); border:1px solid rgba(56,189,248,0.15); padding:12px 14px; border-radius:8px;">
+              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">تاخیر رفت و برگشت (RTT)</div>
+              <div style="font-size:18px; font-weight:700; color:#38bdf8;" id="bagherLatencyVal">—</div>
+              <div style="font-size:11px; color:#94a3b8; margin-top:2px;">پینگ لحظه‌ای سشن استتار</div>
+            </div>
+            <div class="tc-box" style="background:rgba(255,255,255,0.03); border:1px solid rgba(56,189,248,0.15); padding:12px 14px; border-radius:8px;">
+              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">مصرف دیتا (Data Usage)</div>
+              <div style="font-size:18px; font-weight:700; color:#10b981;" id="bagherTrafficTotal">0 B</div>
+              <div style="font-size:11px; color:#94a3b8; margin-top:2px;" id="bagherTrafficUpDown">↓ 0 B  ↑ 0 B</div>
+            </div>
+            <div class="tc-box" style="background:rgba(255,255,255,0.03); border:1px solid rgba(56,189,248,0.15); padding:12px 14px; border-radius:8px;">
+              <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">سوکت‌های فعال (Pool)</div>
+              <div style="font-size:18px; font-weight:700; color:#f59e0b;" id="bagherConnsVal">0</div>
+              <div style="font-size:11px; color:#94a3b8; margin-top:2px;">اتصالات همگام آماده انتقال</div>
+            </div>
+          </div>
+
+          <!-- Foreign One-Click Zero-Terminal Setup Box -->
+          <div class="tc-box" id="bagherForeignJoinBox" style="background:linear-gradient(180deg, rgba(16,185,129,0.08) 0%, rgba(15,23,42,0.4) 100%); border:1px solid rgba(16,185,129,0.25); padding:14px; border-radius:8px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-weight:700; font-size:14px; color:#34d399; display:flex; align-items:center; gap:6px;">
+                📥 فعال‌سازی در سرور خارج (Paste Bundle &amp; Connect)
+              </span>
+              <span class="badge ok" style="font-size:11px;">Zero-Terminal Setup</span>
+            </div>
+            <div class="u-hint-12" style="margin-bottom:8px;">
+              اگر این سرور خارج است، رشته باندل تولیدشده در سرور ایران را اینجا قرار دهید و دکمه زیر را بزنید تا کلید SSH، کانفیگ استتار FRP و سرویس به طور کاملاً اتوماتیک پیکربندی شوند:
+            </div>
+            <div style="display:flex; gap:8px; align-items:stretch; flex-wrap:wrap;">
+              <input type="text" id="bagherPasteBundleInput" class="hashem-input" placeholder="BAGHER:eyJ2Ijox..." style="flex:1; min-width:240px; font-family:monospace; font-size:12px;">
+              <button class="hashem-btn hashem-btn-primary" id="bagherApplyBundleBtn" style="white-space:nowrap; padding:6px 18px; font-weight:600; background:#059669; border-color:#059669;">
+                ⚡ فعال‌سازی خودکار در سرور خارج
+              </button>
+            </div>
+          </div>
+
+          <!-- Iran Bundle Output Card -->
+          <div class="tc-box" id="bagherIranBundleCard" style="background:rgba(56,189,248,0.06); border:1px solid rgba(56,189,248,0.22); padding:14px; border-radius:8px; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-weight:700; font-size:14px; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+                📦 باندل اتصال Bagher Engine (جهت پیست در پنل خارج)
+              </span>
+              <button class="hashem-btn" id="bagherCopyBundleBtn" style="padding:4px 14px; font-size:12px; font-weight:600; background:#0284c7; color:#fff; border-color:#0284c7;">
+                📋 کپی باندل (Copy Bundle)
+              </button>
+            </div>
+            <div class="u-hint-12" style="margin-bottom:6px;">
+              این رشته باندل را کپی کرده و در پنل وب سرور خارج (کادر بالا) پیست نمایید:
+            </div>
+            <textarea id="bagherBundleText" class="hashem-input" rows="2" readonly style="width:100%; font-family:monospace; font-size:11px; background:rgba(0,0,0,0.5); resize:none; color:#38bdf8; word-break:break-all;"></textarea>
+          </div>
+
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:16px;">
             <div class="tc-box">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Carrier Engine Mode</label>

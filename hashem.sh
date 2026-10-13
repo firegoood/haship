@@ -8145,6 +8145,14 @@ cli_bagher() {
             fi
             echo -e "Bagher Service:     $SVC_ACT"
 
+            local FRPC_ACT="inactive"
+            if systemctl is-active hashem-bagher-frpc.service >/dev/null 2>&1; then
+                FRPC_ACT="${GREEN}active (running)${NC} [Foreign client: hashem-bagher-frpc.service]"
+            fi
+            if [[ "$FRPC_ACT" != "inactive" ]]; then
+                echo -e "Bagher Client (Ext): $FRPC_ACT"
+            fi
+
             local FRPS_ACT="inactive"
             if systemctl is-active hashem-bagher-frps.service >/dev/null 2>&1; then
                 FRPS_ACT="${GREEN}active (running)${NC} [hashem-bagher-frps.service]"
@@ -8154,6 +8162,20 @@ cli_bagher() {
                 FRPS_ACT="${YELLOW}inactive${NC}"
             fi
             echo -e "Bagher FRP Engine:  $FRPS_ACT"
+
+            # Check FRP dashboard traffic if available
+            local DASH_INFO
+            DASH_INFO=$(curl -s -u admin:bagher-dash-local http://127.0.0.1:55401/api/serverinfo 2>/dev/null || true)
+            if [[ -n "$DASH_INFO" && "$DASH_INFO" == *"totalTrafficIn"* ]]; then
+                local RX=$(echo "$DASH_INFO" | grep -o '"totalTrafficIn":[0-9]*' | cut -d':' -f2)
+                local TX=$(echo "$DASH_INFO" | grep -o '"totalTrafficOut":[0-9]*' | cut -d':' -f2)
+                local CONNS=$(echo "$DASH_INFO" | grep -o '"curConns":[0-9]*' | cut -d':' -f2)
+                local CLIENTS=$(echo "$DASH_INFO" | grep -o '"clientCounts":[0-9]*' | cut -d':' -f2)
+                echo -e "\n${CYAN}Live Traffic & Connection Metrics:${NC}"
+                echo -e "  Tunnel State:     ${GREEN}Connected${NC} (Clients: $CLIENTS, Cur Conns: $CONNS)"
+                echo -e "  Traffic RX:       $RX bytes"
+                echo -e "  Traffic TX:       $TX bytes"
+            fi
 
             if [ -f /etc/gre-panel/sshfwd.json ]; then
                 echo -e "\nConfiguration (/etc/gre-panel/sshfwd.json):"
@@ -8364,8 +8386,131 @@ EOF
             nft delete table inet hashem_dnat >/dev/null 2>&1 || true
             echo -e "${GREEN}[✔] hashem_dnat cleared from nftables.${NC}"
             ;;
+        bundle)
+            mkdir -p /root/.ssh
+            if [[ ! -f /root/.ssh/hashem-fwd ]]; then
+                ssh-keygen -t ed25519 -N "" -f /root/.ssh/hashem-fwd -C "hashem-ssh-carrier" >/dev/null 2>&1
+            fi
+            local PUBKEY=$(cat /root/.ssh/hashem-fwd.pub)
+            local MY_IP
+            MY_IP=$(curl -s -4 https://api.ipify.org || curl -s -4 https://ifconfig.me || hostname -I | awk '{print $1}')
+            local JSON_PAYLOAD
+            JSON_PAYLOAD=$(printf '{"v":1,"role":"foreign","iran_pub":"%s","frp_port":55400,"ports":[443,8443,1020,1030,1040],"token":"hashem-bagher-sec","pool_count":25,"ssh_pub_key":"%s","ssh_port":22,"ts":%d}' "$MY_IP" "$PUBKEY" "$(date +%s)")
+            local B64
+            B64=$(printf "%s" "$JSON_PAYLOAD" | base64 | tr -d '\n\r ')
+            echo -e "${GREEN}BAGHER:${B64}${NC}"
+            ;;
+        apply-bundle)
+            shift
+            local BUNDLE="$1"
+            if [[ -z "$BUNDLE" ]]; then
+                echo -e "${RED}[!] Usage: hashem bagher apply-bundle BAGHER:...${NC}"
+                return 1
+            fi
+            if [[ "$BUNDLE" != BAGHER:* ]]; then
+                echo -e "${RED}[!] Invalid bundle format. Must start with BAGHER:${NC}"
+                return 1
+            fi
+            local B64="${BUNDLE#BAGHER:}"
+            local DECODED
+            DECODED=$(printf "%s" "$B64" | base64 -d 2>/dev/null || true)
+            if [[ -z "$DECODED" ]]; then
+                echo -e "${RED}[!] Failed decoding Base64 bundle payload.${NC}"
+                return 1
+            fi
+            local PUBKEY=$(echo "$DECODED" | grep -o '"ssh_pub_key":"[^"]*"' | cut -d'"' -f4)
+            local FRP_PORT=$(echo "$DECODED" | grep -o '"frp_port":[0-9]*' | cut -d':' -f2)
+            local POOL_COUNT=$(echo "$DECODED" | grep -o '"pool_count":[0-9]*' | cut -d':' -f2)
+            FRP_PORT="${FRP_PORT:-55400}"
+            POOL_COUNT="${POOL_COUNT:-25}"
+            if [[ -z "$PUBKEY" ]]; then
+                echo -e "${RED}[!] Bundle missing ssh_pub_key.${NC}"
+                return 1
+            fi
+            echo -e "${CYAN}[*] Injecting SSH public key to /root/.ssh/authorized_keys...${NC}"
+            mkdir -p /root/.ssh
+            touch /root/.ssh/authorized_keys
+            chmod 600 /root/.ssh/authorized_keys
+            # Remove old key if present, append restricted line
+            local CLEAN_PUB=$(echo "$PUBKEY" | awk '{print $2}')
+            sed -i "/$CLEAN_PUB/d" /root/.ssh/authorized_keys 2>/dev/null || true
+            local AUTH_LINE="restrict,port-forwarding,permitopen=\"127.0.0.1:${FRP_PORT}\",permitopen=\"127.0.0.1:443\",permitopen=\"127.0.0.1:8443\",permitopen=\"127.0.0.1:1020\",permitopen=\"127.0.0.1:1030\",permitopen=\"127.0.0.1:1040\" $PUBKEY"
+            echo "$AUTH_LINE" >> /root/.ssh/authorized_keys
+
+            echo -e "${CYAN}[*] Writing /etc/gre-panel/bagher/frpc.toml...${NC}"
+            mkdir -p /etc/gre-panel/bagher
+            cat <<EOF > /etc/gre-panel/bagher/frpc.toml
+serverAddr = "127.0.0.1"
+serverPort = ${FRP_PORT}
+auth.token = "hashem-bagher-sec"
+transport.tcpMux = false
+transport.poolCount = ${POOL_COUNT}
+loginFailExit = false
+
+webServer.addr = "127.0.0.1"
+webServer.port = $((FRP_PORT + 2))
+webServer.user = "admin"
+webServer.password = "bagher-dash-local"
+
+[[proxies]]
+name = "p443"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 443
+remotePort = 443
+
+[[proxies]]
+name = "p8443"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8443
+remotePort = 8443
+
+[[proxies]]
+name = "p1020"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 1020
+remotePort = 1020
+
+[[proxies]]
+name = "p1030"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 1030
+remotePort = 1030
+
+[[proxies]]
+name = "p1040"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 1040
+remotePort = 1040
+EOF
+
+            echo -e "${CYAN}[*] Enabling and starting hashem-bagher-frpc.service...${NC}"
+            cat <<'EOF' > /etc/systemd/system/hashem-bagher-frpc.service
+[Unit]
+Description=Hashem Bagher Engine client (Foreign)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/bagher/frpc.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload
+            systemctl enable --now hashem-bagher-frpc.service
+            echo -e "${GREEN}[✔] Bagher Engine client successfully started on Foreign server!${NC}"
+            ;;
         *)
-            echo "Usage: hashem bagher [status|enable --remote-host IP [--mode bagher|direct] [--pool-count 25] [--frp-port 55400] [--ports \"...\"]|disable|start|stop|restart|logs|gen-key|clear-dnat]"
+            echo "Usage: hashem bagher [status|bundle|apply-bundle <bundle>|enable --remote-host IP [--mode bagher|direct] [--pool-count 25] [--frp-port 55400] [--ports \"...\"]|disable|start|stop|restart|logs|gen-key|clear-dnat]"
             return 1
             ;;
     esac

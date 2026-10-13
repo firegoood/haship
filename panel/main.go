@@ -338,6 +338,8 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/rescue", requireAuth(requireCSRF(handleRescuePost)))
 	mux.HandleFunc("GET "+base+"/api/sshfwd", requireAuth(handleSSHFwdGet))
 	mux.HandleFunc("POST "+base+"/api/sshfwd", requireAuth(requireCSRF(handleSSHFwdPost)))
+	mux.HandleFunc("GET "+base+"/api/bagher", requireAuth(handleSSHFwdGet))
+	mux.HandleFunc("POST "+base+"/api/bagher", requireAuth(requireCSRF(handleSSHFwdPost)))
 	mux.HandleFunc("POST "+base+"/api/peer/sshfwd-install-key", requirePeerAuth(handlePeerSSHFwdInstallKey))
 	mux.HandleFunc("GET "+base+"/api/license", requireAuth(handleLicenseGet))
 	mux.HandleFunc("POST "+base+"/api/license", requireAuth(requireCSRF(handleLicensePost)))

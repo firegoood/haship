@@ -139,3 +139,105 @@ func TestSSHFwdLicenseGating(t *testing.T) {
 		t.Fatalf("unexpected error message: %v", res["error"])
 	}
 }
+
+func TestBagherBundleRoundtrip(t *testing.T) {
+	cfg := SSHFwdConfig{
+		Mode:          "bagher",
+		RemoteHost:    "1.2.3.4",
+		RemoteSSHPort: 22,
+		FRPBindPort:   55400,
+		PoolCount:     25,
+		Ports:         []int{443, 8443, 1020},
+		BindAddr:      "127.0.0.1",
+	}
+	pub := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGo345test hashem-bagher-carrier"
+
+	bundleStr, err := MakeBagherBundle(cfg, pub)
+	if err != nil {
+		t.Fatalf("MakeBagherBundle failed: %v", err)
+	}
+	if !strings.HasPrefix(bundleStr, "BAGHER:") {
+		t.Fatalf("expected bundle prefix 'BAGHER:', got: %s", bundleStr)
+	}
+
+	parsed, err := ParseBagherBundle(bundleStr)
+	if err != nil {
+		t.Fatalf("ParseBagherBundle failed: %v", err)
+	}
+	if parsed.FRPPort != 55400 {
+		t.Errorf("expected FRPPort 55400, got: %d", parsed.FRPPort)
+	}
+	if parsed.PoolCount != 25 {
+		t.Errorf("expected PoolCount 25, got: %d", parsed.PoolCount)
+	}
+	if len(parsed.Ports) != 3 || parsed.Ports[0] != 443 {
+		t.Errorf("unexpected ports: %v", parsed.Ports)
+	}
+	if parsed.SSHPublicKey != pub {
+		t.Errorf("expected pub key %q, got: %q", pub, parsed.SSHPublicKey)
+	}
+
+	// Corrupted bundle test
+	if _, err := ParseBagherBundle("BAGHER:invalid-b64-here"); err == nil {
+		t.Error("expected error parsing corrupted bundle, got nil")
+	}
+	if _, err := ParseBagherBundle("WRONGPREFIX:xxx"); err == nil {
+		t.Error("expected error for wrong prefix, got nil")
+	}
+}
+
+func TestBagherFormatByteSize(t *testing.T) {
+	if formatByteSize(0) != "0 B" {
+		t.Errorf("expected 0 B, got %s", formatByteSize(0))
+	}
+	if formatByteSize(500) != "500 B" {
+		t.Errorf("expected 500 B, got %s", formatByteSize(500))
+	}
+	if formatByteSize(1024) != "1.0 KB" {
+		t.Errorf("expected 1.0 KB, got %s", formatByteSize(1024))
+	}
+	if formatByteSize(1048576) != "1.0 MB" {
+		t.Errorf("expected 1.0 MB, got %s", formatByteSize(1048576))
+	}
+	if formatByteSize(1073741824*2) != "2.0 GB" {
+		t.Errorf("expected 2.0 GB, got %s", formatByteSize(1073741824*2))
+	}
+}
+
+func TestBagherAPIEndpoints(t *testing.T) {
+	// Test get_bundle
+	body := `{"action":"get_bundle"}`
+	req := httptest.NewRequest("POST", "/api/sshfwd", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	handleSSHFwdPost(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for get_bundle, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	var res map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("invalid json from get_bundle: %v", err)
+	}
+	bundleStr, ok := res["bundle"].(string)
+	if !ok || !strings.HasPrefix(bundleStr, "BAGHER:") {
+		t.Fatalf("expected bundle starting with BAGHER:, got: %v", res["bundle"])
+	}
+
+	// Test apply_bundle with empty bundle
+	bodyEmpty := `{"action":"apply_bundle","bundle":""}`
+	reqEmpty := httptest.NewRequest("POST", "/api/sshfwd", strings.NewReader(bodyEmpty))
+	recEmpty := httptest.NewRecorder()
+	handleSSHFwdPost(recEmpty, reqEmpty)
+	if recEmpty.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty bundle, got %d", recEmpty.Code)
+	}
+
+	// Test apply_bundle with invalid bundle
+	bodyInvalid := `{"action":"apply_bundle","bundle":"NOT_BAGHER_FORMAT"}`
+	reqInvalid := httptest.NewRequest("POST", "/api/sshfwd", strings.NewReader(bodyInvalid))
+	recInvalid := httptest.NewRecorder()
+	handleSSHFwdPost(recInvalid, reqInvalid)
+	if recInvalid.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid bundle prefix, got %d", recInvalid.Code)
+	}
+}

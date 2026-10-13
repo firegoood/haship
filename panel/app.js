@@ -6023,6 +6023,45 @@ function renderSSHFwd() {
     toggleBtn.className = 'hashem-btn ' + (active ? 'hashem-btn-danger' : 'hashem-btn-primary');
   }
 
+  // Live health & metrics
+  const connBadge = $('bagherConnBadge');
+  if (connBadge) {
+    if (d.connected) {
+      connBadge.className = 'badge ok';
+      connBadge.textContent = 'متصل (Online)';
+      connBadge.style.background = '#10b981';
+      connBadge.style.color = '#fff';
+    } else if (active) {
+      connBadge.className = 'badge warn';
+      connBadge.textContent = 'در انتظار سرور مقابل (Waiting)';
+      connBadge.style.background = '#f59e0b';
+      connBadge.style.color = '#000';
+    } else {
+      connBadge.className = 'badge info';
+      connBadge.textContent = 'غیرفعال (Offline)';
+      connBadge.style.background = 'rgba(255,255,255,0.1)';
+      connBadge.style.color = '';
+    }
+  }
+  if ($('bagherRoleTxt')) {
+    $('bagherRoleTxt').textContent = 'نقش: ' + (d.role === 'foreign' ? 'سرور خارج (Foreign)' : 'سرور ایران (Iran)');
+  }
+  if ($('bagherLatencyVal')) {
+    $('bagherLatencyVal').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : '—';
+  }
+  if ($('bagherTrafficTotal')) {
+    $('bagherTrafficTotal').textContent = d.total_formatted || '0 B';
+  }
+  if ($('bagherTrafficUpDown')) {
+    $('bagherTrafficUpDown').textContent = `↓ ${d.rx_formatted || '0 B'}  ↑ ${d.tx_formatted || '0 B'}`;
+  }
+  if ($('bagherConnsVal')) {
+    $('bagherConnsVal').textContent = String(d.cur_conns || 0);
+  }
+  if ($('bagherBundleText')) {
+    $('bagherBundleText').value = d.bundle || '';
+  }
+
   if ($('sshfwdRemoteHost') && !$('sshfwdRemoteHost').value) $('sshfwdRemoteHost').value = d.remote_host || '';
   if ($('sshfwdRemoteUser') && !$('sshfwdRemoteUser').value) $('sshfwdRemoteUser').value = d.remote_user || 'root';
   if ($('sshfwdRemotePort') && !$('sshfwdRemotePort').value) $('sshfwdRemotePort').value = d.remote_ssh_port || 22;
@@ -6131,6 +6170,34 @@ function sshfwdCopyForeignClick() {
   }
 }
 
+function bagherCopyBundleClick() {
+  const t = $('bagherBundleText');
+  if (t && t.value) {
+    navigator.clipboard.writeText(t.value).then(() => {
+      toastOk('باندل کپی شد', 'رشته اتصال باقر در کلیپ‌بورد ذخیره شد.');
+    }).catch(err => {
+      toastErr('خطا در کپی', String(err));
+    });
+  }
+}
+
+async function bagherApplyBundleClick() {
+  const input = $('bagherPasteBundleInput');
+  const bundle = input ? input.value.trim() : '';
+  if (!bundle) {
+    toastErr('باندل خالی است', 'لطفاً رشته باندل شروع شونده با BAGHER: را وارد کنید.');
+    return;
+  }
+  try {
+    const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle });
+    toastOk('موتور باقر راه‌اندازی شد', res.message || 'سرور خارج با موفقیت و بدون ترمینال تنظیم شد!');
+    if (input) input.value = '';
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('خطا در اعمال باندل', err.message || String(err));
+  }
+}
+
 (function initSSHFwdEvents() {
   function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
   on('sshfwdToggleBtn', 'click', sshfwdToggleClick);
@@ -6138,6 +6205,16 @@ function sshfwdCopyForeignClick() {
   on('sshfwdSyncPeerBtn', 'click', sshfwdSyncPeerClick);
   on('sshfwdCopyAuthBtn', 'click', sshfwdCopyAuthClick);
   on('sshfwdCopyForeignBtn', 'click', sshfwdCopyForeignClick);
+  on('bagherCopyBundleBtn', 'click', bagherCopyBundleClick);
+  on('bagherApplyBundleBtn', 'click', bagherApplyBundleClick);
+
+  // Periodic poll when on sshfwd tab
+  setInterval(() => {
+    const tab = $('tab-sshfwd');
+    if (tab && !tab.hidden && document.visibilityState === 'visible') {
+      loadSSHFwd();
+    }
+  }, 3500);
   on('sshfwdMode', 'change', () => {
     const isFRP = $('sshfwdMode') && $('sshfwdMode').value !== 'direct';
     if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';

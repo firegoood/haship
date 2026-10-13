@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -199,12 +200,18 @@ WantedBy=multi-user.target
 
 // buildFRPSConfig generates the frps TOML configuration for Iran host in Bagher mode.
 func buildFRPSConfig(cfg SSHFwdConfig) string {
+	dashPort := cfg.FRPBindPort + 1
 	return fmt.Sprintf(`bindAddr = "127.0.0.1"
 bindPort = %d
 proxyBindAddr = "0.0.0.0"
 auth.token = "hashem-bagher-sec"
 transport.tcpMux = false
-`, cfg.FRPBindPort)
+
+webServer.addr = "127.0.0.1"
+webServer.port = %d
+webServer.user = "admin"
+webServer.password = "bagher-dash-local"
+`, cfg.FRPBindPort, dashPort)
 }
 
 // buildFRPSService generates the systemd unit for frps on Iran host.
@@ -226,10 +233,10 @@ WantedBy=multi-user.target
 `
 }
 
-// buildForeignSetupCommand creates a standalone shell command to be executed on Foreign host.
-func buildForeignSetupCommand(cfg SSHFwdConfig) string {
+// buildFRPCConfig generates the frpc TOML configuration for Foreign host in Bagher mode.
+func buildFRPCConfig(frpBindPort int, poolCount int, ports []int) string {
 	var proxyBlocks strings.Builder
-	for _, p := range cfg.Ports {
+	for _, p := range ports {
 		proxyBlocks.WriteString(fmt.Sprintf(`
 [[proxies]]
 name = "p%d"
@@ -239,14 +246,24 @@ localPort = %d
 remotePort = %d
 `, p, p, p))
 	}
-
-	frpcToml := fmt.Sprintf(`serverAddr = "127.0.0.1"
+	dashPort := frpBindPort + 2
+	return fmt.Sprintf(`serverAddr = "127.0.0.1"
 serverPort = %d
 auth.token = "hashem-bagher-sec"
 transport.tcpMux = false
 transport.poolCount = %d
-%s`, cfg.FRPBindPort, cfg.PoolCount, proxyBlocks.String())
+loginFailExit = false
 
+webServer.addr = "127.0.0.1"
+webServer.port = %d
+webServer.user = "admin"
+webServer.password = "bagher-dash-local"
+%s`, frpBindPort, poolCount, dashPort, proxyBlocks.String())
+}
+
+// buildForeignSetupCommand creates a standalone shell command to be executed on Foreign host.
+func buildForeignSetupCommand(cfg SSHFwdConfig) string {
+	frpcToml := buildFRPCConfig(cfg.FRPBindPort, cfg.PoolCount, cfg.Ports)
 	return fmt.Sprintf(`mkdir -p /etc/gre-panel/bagher
 cat > /etc/gre-panel/bagher/frpc.toml <<'EOF'
 %sEOF
@@ -267,6 +284,314 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload && systemctl enable --now hashem-bagher-frpc.service`, strings.TrimSpace(frpcToml))
+}
+
+// BagherBundle encapsulates all connection, authentication, and port parameters
+// for zero-terminal Foreign server auto-configuration.
+type BagherBundle struct {
+	Version      int    `json:"v"`
+	Role         string `json:"role"`
+	IranPub      string `json:"iran_pub"`
+	FRPPort      int    `json:"frp_port"`
+	Ports        []int  `json:"ports"`
+	Token        string `json:"token"`
+	PoolCount    int    `json:"pool_count"`
+	SSHPublicKey string `json:"ssh_pub_key"`
+	SSHPort      int    `json:"ssh_port"`
+	Timestamp    int64  `json:"ts"`
+}
+
+// MakeBagherBundle builds a portable encrypted/base64 string for zero-terminal Foreign setup.
+func MakeBagherBundle(cfg SSHFwdConfig, pubKey string) (string, error) {
+	iranIP := detectPublicIP()
+	if iranIP == "" {
+		iranIP = cfg.BindAddr
+	}
+	b := BagherBundle{
+		Version:      1,
+		Role:         "foreign",
+		IranPub:      iranIP,
+		FRPPort:      cfg.FRPBindPort,
+		Ports:        cfg.Ports,
+		Token:        "hashem-bagher-sec",
+		PoolCount:    cfg.PoolCount,
+		SSHPublicKey: strings.TrimSpace(pubKey),
+		SSHPort:      cfg.RemoteSSHPort,
+		Timestamp:    time.Now().Unix(),
+	}
+	data, err := json.Marshal(b)
+	if err != nil {
+		return "", err
+	}
+	return "BAGHER:" + base64.StdEncoding.EncodeToString(data), nil
+}
+
+// ParseBagherBundle parses and validates a BAGHER:... bundle string.
+func ParseBagherBundle(bundleStr string) (*BagherBundle, error) {
+	bundleStr = strings.TrimSpace(bundleStr)
+	if !strings.HasPrefix(bundleStr, "BAGHER:") {
+		return nil, fmt.Errorf("invalid bundle prefix: must start with BAGHER:")
+	}
+	rawB64 := strings.TrimPrefix(bundleStr, "BAGHER:")
+	data, err := base64.StdEncoding.DecodeString(rawB64)
+	if err != nil {
+		return nil, fmt.Errorf("failed decoding base64 bundle: %w", err)
+	}
+	var b BagherBundle
+	if err := json.Unmarshal(data, &b); err != nil {
+		return nil, fmt.Errorf("invalid bundle json: %w", err)
+	}
+	if strings.TrimSpace(b.SSHPublicKey) == "" {
+		return nil, fmt.Errorf("bundle missing ssh_pub_key")
+	}
+	if b.FRPPort <= 0 {
+		b.FRPPort = 55400
+	}
+	if len(b.Ports) == 0 {
+		b.Ports = []int{443, 8443, 1020, 1030, 1040}
+	}
+	if b.PoolCount <= 0 {
+		b.PoolCount = 25
+	}
+	if b.Token == "" {
+		b.Token = "hashem-bagher-sec"
+	}
+	return &b, nil
+}
+
+// applyBagherBundle configures Foreign host automatically from a parsed BagherBundle.
+func applyBagherBundle(b *BagherBundle) error {
+	// 1. Authorize SSH public key in /root/.ssh/authorized_keys with restrict directives
+	authLine := formatAuthorizedKeyLine(b.SSHPublicKey, "bagher", b.FRPPort, b.Ports)
+	authFile := "/root/.ssh/authorized_keys"
+	_ = os.MkdirAll("/root/.ssh", 0700)
+
+	existing, _ := os.ReadFile(authFile)
+	existingStr := string(existing)
+
+	cleanPub := strings.TrimSpace(b.SSHPublicKey)
+	keyParts := strings.Fields(cleanPub)
+	targetKey := cleanPub
+	if len(keyParts) >= 2 {
+		targetKey = keyParts[1]
+	}
+
+	var newLines []string
+	for _, line := range strings.Split(existingStr, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.Contains(trimmed, targetKey) {
+			newLines = append(newLines, trimmed)
+		}
+	}
+	newLines = append(newLines, authLine)
+	finalContent := strings.Join(newLines, "\n") + "\n"
+	if err := os.WriteFile(authFile, []byte(finalContent), 0600); err != nil {
+		return fmt.Errorf("failed writing authorized_keys: %w", err)
+	}
+
+	// 2. Write Foreign frpc config
+	_ = os.MkdirAll("/etc/gre-panel/bagher", 0755)
+	frpcToml := buildFRPCConfig(b.FRPPort, b.PoolCount, b.Ports)
+	if err := os.WriteFile("/etc/gre-panel/bagher/frpc.toml", []byte(frpcToml), 0644); err != nil {
+		return fmt.Errorf("failed writing frpc.toml: %w", err)
+	}
+
+	// 3. Write Foreign systemd unit
+	frpcUnit := `[Unit]
+Description=Hashem Bagher Engine client (Foreign)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/bagher/frpc.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+`
+	if err := os.WriteFile("/etc/systemd/system/hashem-bagher-frpc.service", []byte(frpcUnit), 0644); err != nil {
+		return fmt.Errorf("failed writing frpc service: %w", err)
+	}
+
+	// 4. Reload and start Foreign service
+	if _, err := runCmd("systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("daemon-reload failed: %w", err)
+	}
+	if _, err := runCmd("systemctl", "enable", "--now", "hashem-bagher-frpc.service"); err != nil {
+		return fmt.Errorf("failed starting hashem-bagher-frpc: %w", err)
+	}
+
+	// 5. Update local config
+	cfg := loadSSHFwdConfigLocked()
+	cfg.Role = "foreign"
+	cfg.Mode = "bagher"
+	cfg.FRPBindPort = b.FRPPort
+	cfg.PoolCount = b.PoolCount
+	cfg.Ports = b.Ports
+	if b.IranPub != "" {
+		cfg.RemoteHost = b.IranPub
+	}
+	cfg.Enabled = true
+	cfg.LastStatus = "active"
+	cfg.LastError = ""
+	return saveSSHFwdConfigLocked(cfg)
+}
+
+func formatByteSize(b int64) string {
+	if b <= 0 {
+		return "0 B"
+	}
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+type BagherLiveMetrics struct {
+	Connected      bool    `json:"connected"`
+	StatusText     string  `json:"status_text"`
+	LatencyMs      float64 `json:"latency_ms"`
+	RxBytes        int64   `json:"rx_bytes"`
+	TxBytes        int64   `json:"tx_bytes"`
+	TotalBytes     int64   `json:"total_bytes"`
+	RxFormatted    string  `json:"rx_formatted"`
+	TxFormatted    string  `json:"tx_formatted"`
+	TotalFormatted string  `json:"total_formatted"`
+	CurConns       int     `json:"cur_conns"`
+	ClientCounts   int     `json:"client_counts"`
+}
+
+func getBagherLiveMetrics(cfg SSHFwdConfig) BagherLiveMetrics {
+	isForeign := cfg.Role == "foreign" || cfg.Role == "server"
+	if !isForeign {
+		outFrpc, _ := runCmd("systemctl", "is-active", "hashem-bagher-frpc.service")
+		if strings.TrimSpace(outFrpc) == "active" {
+			isForeign = true
+		}
+	}
+
+	if isForeign {
+		outFrpc, _ := runCmd("systemctl", "is-active", "hashem-bagher-frpc.service")
+		if strings.TrimSpace(outFrpc) != "active" {
+			return BagherLiveMetrics{Connected: false, StatusText: "inactive", RxFormatted: "0 B", TxFormatted: "0 B", TotalFormatted: "0 B"}
+		}
+
+		// Dial 127.0.0.1:FRPBindPort (SSH reverse forward to Iran)
+		t0 := time.Now()
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.FRPBindPort), 600*time.Millisecond)
+		var lat float64
+		connected := false
+		statusText := "waiting_for_iran"
+		if err == nil {
+			lat = float64(time.Since(t0).Microseconds()) / 1000.0
+			_ = conn.Close()
+			connected = true
+			statusText = "connected"
+		}
+
+		return BagherLiveMetrics{
+			Connected:      connected,
+			StatusText:     statusText,
+			LatencyMs:      lat,
+			RxFormatted:    "0 B",
+			TxFormatted:    "0 B",
+			TotalFormatted: "0 B",
+			ClientCounts:   1,
+		}
+	}
+
+	// Iran side
+	outBagher, _ := runCmd("systemctl", "is-active", "hashem-bagher.service")
+	outFrps, _ := runCmd("systemctl", "is-active", "hashem-bagher-frps.service")
+	bagherActive := strings.TrimSpace(outBagher) == "active"
+	frpsActive := strings.TrimSpace(outFrps) == "active"
+
+	if !bagherActive && !frpsActive {
+		return BagherLiveMetrics{Connected: false, StatusText: "inactive", RxFormatted: "0 B", TxFormatted: "0 B", TotalFormatted: "0 B"}
+	}
+
+	// Measure local TCP RTT to FRPBindPort
+	t0 := time.Now()
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.FRPBindPort), 400*time.Millisecond)
+	var lat float64
+	if err == nil {
+		lat = float64(time.Since(t0).Microseconds()) / 1000.0
+		_ = conn.Close()
+	}
+
+	// Query frps dashboard at 127.0.0.1:(FRPBindPort+1)/api/serverinfo
+	dashPort := cfg.FRPBindPort + 1
+	dashURL := fmt.Sprintf("http://127.0.0.1:%d/api/serverinfo", dashPort)
+	client := &http.Client{Timeout: 400 * time.Millisecond}
+	req, err := http.NewRequest("GET", dashURL, nil)
+	var rx, tx int64
+	var clientCount, curConns int
+	gotDashboard := false
+	if err == nil {
+		req.SetBasicAuth("admin", "bagher-dash-local")
+		resp, rErr := client.Do(req)
+		if rErr == nil && resp.StatusCode == 200 {
+			var info struct {
+				TotalTrafficIn  int64 `json:"totalTrafficIn"`
+				TotalTrafficOut int64 `json:"totalTrafficOut"`
+				CurConns        int   `json:"curConns"`
+				ClientCounts    int   `json:"clientCounts"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&info) == nil {
+				rx = info.TotalTrafficIn
+				tx = info.TotalTrafficOut
+				curConns = info.CurConns
+				clientCount = info.ClientCounts
+				gotDashboard = true
+			}
+			_ = resp.Body.Close()
+		}
+	}
+
+	connected := false
+	statusText := "waiting_for_peer"
+	if gotDashboard {
+		if clientCount > 0 {
+			connected = true
+			statusText = "connected"
+		}
+	} else {
+		// Fallback check: check established TCP sockets on FRPBindPort
+		outSS, _ := runCmd("ss", "-tn", "state", "established", fmt.Sprintf("sport = :%d or dport = :%d", cfg.FRPBindPort, cfg.FRPBindPort))
+		lines := strings.Split(strings.TrimSpace(outSS), "\n")
+		if len(lines) > 1 {
+			connected = true
+			statusText = "connected"
+			clientCount = 1
+		}
+	}
+
+	tot := rx + tx
+	return BagherLiveMetrics{
+		Connected:      connected,
+		StatusText:     statusText,
+		LatencyMs:      lat,
+		RxBytes:        rx,
+		TxBytes:        tx,
+		TotalBytes:     tot,
+		RxFormatted:    formatByteSize(rx),
+		TxFormatted:    formatByteSize(tx),
+		TotalFormatted: formatByteSize(tot),
+		CurConns:       curConns,
+		ClientCounts:   clientCount,
+	}
 }
 
 // cleanDnatConflict removes conflicting nftables table or rescues that capture these ports.
@@ -344,6 +669,7 @@ func disableSSHFwd() error {
 	cfg := loadSSHFwdConfigLocked()
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-bagher.service")
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-bagher-frps.service")
+	_, _ = runCmd("systemctl", "disable", "--now", "hashem-bagher-frpc.service")
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-ssh-fwd.service")
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-ssh-frps.service")
 	cfg.Enabled = false
@@ -369,6 +695,12 @@ func getSSHFwdStatus() map[string]any {
 
 	out, _ := runCmd("systemctl", "is-active", "hashem-bagher.service")
 	isActive := strings.TrimSpace(out) == "active"
+	if !isActive {
+		outFrpc, _ := runCmd("systemctl", "is-active", "hashem-bagher-frpc.service")
+		if strings.TrimSpace(outFrpc) == "active" {
+			isActive = true
+		}
+	}
 	// Fallback check for legacy services
 	if !isActive {
 		outLegacy, _ := runCmd("systemctl", "is-active", "hashem-ssh-fwd.service")
@@ -399,6 +731,8 @@ func getSSHFwdStatus() map[string]any {
 	}
 
 	foreignCmd := buildForeignSetupCommand(cfg)
+	bundleStr, _ := MakeBagherBundle(cfg, pubKey)
+	metrics := getBagherLiveMetrics(cfg)
 
 	hasBagher := HasFeature("bagher") || HasFeature("frp_ssh")
 
@@ -414,6 +748,7 @@ func getSSHFwdStatus() map[string]any {
 		"pub_key":           pubKey,
 		"auth_line":         authLine,
 		"foreign_setup_cmd": foreignCmd,
+		"bundle":            bundleStr,
 		"ports":             cfg.Ports,
 		"bind_addr":         cfg.BindAddr,
 		"frp_bind_port":     cfg.FRPBindPort,
@@ -425,6 +760,18 @@ func getSSHFwdStatus() map[string]any {
 		"dnat_conflict":     dnatActive,
 		"last_error":        cfg.LastError,
 		"updated_at":        cfg.UpdatedAt,
+		// Live connection health & traffic metrics
+		"connected":         metrics.Connected,
+		"status_text":       metrics.StatusText,
+		"latency_ms":        metrics.LatencyMs,
+		"rx_bytes":          metrics.RxBytes,
+		"tx_bytes":          metrics.TxBytes,
+		"total_bytes":       metrics.TotalBytes,
+		"rx_formatted":      metrics.RxFormatted,
+		"tx_formatted":      metrics.TxFormatted,
+		"total_formatted":   metrics.TotalFormatted,
+		"cur_conns":         metrics.CurConns,
+		"client_counts":     metrics.ClientCounts,
 	}
 }
 
@@ -433,7 +780,7 @@ func handleSSHFwdGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, getSSHFwdStatus())
 }
 
-// handleSSHFwdPost handles commands like enable, disable, update-ports, gen-key, sync-peer.
+// handleSSHFwdPost handles commands like enable, disable, update-ports, gen-key, sync-peer, apply-bundle.
 func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Action      string `json:"action"`
@@ -445,6 +792,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		BindAddr    string `json:"bind_addr"`
 		FRPBindPort int    `json:"frp_bind_port"`
 		PoolCount   int    `json:"pool_count"`
+		Bundle      string `json:"bundle"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-SSHFWD-01", "invalid json payload")
@@ -457,6 +805,40 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 	cfg := loadSSHFwdConfigLocked()
 
 	switch act {
+	case "apply_bundle", "apply-bundle":
+		bundleStr := strings.TrimSpace(body.Bundle)
+		if bundleStr == "" {
+			writeAPIError(w, r, "E-SSHFWD-07", "bundle string is required")
+			return
+		}
+		b, err := ParseBagherBundle(bundleStr)
+		if err != nil {
+			writeAPIError(w, r, "E-SSHFWD-07", fmt.Sprintf("invalid bagher bundle: %v", err))
+			return
+		}
+		if err := applyBagherBundle(b); err != nil {
+			writeAPIError(w, r, "E-SSHFWD-08", fmt.Sprintf("failed applying bagher bundle: %v", err))
+			return
+		}
+		writeJSON(w, map[string]any{
+			"status":      "ok",
+			"message":     "Bagher bundle applied successfully. Foreign client active.",
+			"status_data": getSSHFwdStatus(),
+		})
+
+	case "get_bundle", "get-bundle":
+		pub, err := ensureSSHFwdKey(cfg.KeyPath)
+		if err != nil {
+			writeAPIError(w, r, "E-SSHFWD-03", err.Error())
+			return
+		}
+		bundleStr, err := MakeBagherBundle(cfg, pub)
+		if err != nil {
+			writeAPIError(w, r, "E-SSHFWD-07", fmt.Sprintf("failed generating bundle: %v", err))
+			return
+		}
+		writeJSON(w, map[string]any{"status": "ok", "bundle": bundleStr})
+
 	case "gen_key", "gen-key":
 		pub, err := ensureSSHFwdKey(cfg.KeyPath)
 		if err != nil {
