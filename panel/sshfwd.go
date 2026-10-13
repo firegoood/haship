@@ -15,19 +15,22 @@ import (
 
 // SSHFwdConfig stores configuration for the SSH port forwarding carrier.
 type SSHFwdConfig struct {
-	Role                 string `json:"role"` // "client" (Iran entry) or "server" (Foreign origin)
-	RemoteHost           string `json:"remote_host"`
-	RemoteUser           string `json:"remote_user"`
-	RemoteSSHPort        int    `json:"remote_ssh_port"`
-	KeyPath              string `json:"key_path"`
-	Ports                []int  `json:"ports"`
-	BindAddr             string `json:"bind_addr"`
-	Enabled              bool   `json:"enabled"`
-	ServerAliveInterval  int    `json:"server_alive_interval"`
-	ServerAliveCountMax   int    `json:"server_alive_count_max"`
-	LastStatus           string `json:"last_status"`
-	LastError            string `json:"last_error"`
-	UpdatedAt            string `json:"updated_at"`
+	Role                string `json:"role"` // "client" (Iran entry) or "server" (Foreign origin)
+	Mode                string `json:"mode"` // "frp_ssh" (default hybrid) or "direct" (pure ssh)
+	RemoteHost          string `json:"remote_host"`
+	RemoteUser          string `json:"remote_user"`
+	RemoteSSHPort       int    `json:"remote_ssh_port"`
+	KeyPath             string `json:"key_path"`
+	Ports               []int  `json:"ports"`
+	BindAddr            string `json:"bind_addr"`
+	FRPBindPort         int    `json:"frp_bind_port"`
+	PoolCount           int    `json:"pool_count"`
+	Enabled             bool   `json:"enabled"`
+	ServerAliveInterval int    `json:"server_alive_interval"`
+	ServerAliveCountMax int    `json:"server_alive_count_max"`
+	LastStatus          string `json:"last_status"`
+	LastError           string `json:"last_error"`
+	UpdatedAt           string `json:"updated_at"`
 }
 
 var (
@@ -37,15 +40,18 @@ var (
 func defaultSSHFwdConfig() SSHFwdConfig {
 	return SSHFwdConfig{
 		Role:                "client",
+		Mode:                "frp_ssh",
 		RemoteHost:          "",
 		RemoteUser:          "root",
 		RemoteSSHPort:       22,
 		KeyPath:             "/root/.ssh/hashem-fwd",
 		Ports:               []int{443, 8443, 1020, 1030, 1040},
 		BindAddr:            "0.0.0.0",
+		FRPBindPort:         55400,
+		PoolCount:           25,
 		Enabled:             false,
 		ServerAliveInterval: 10,
-		ServerAliveCountMax:  3,
+		ServerAliveCountMax: 3,
 		LastStatus:          "inactive",
 		LastError:           "",
 		UpdatedAt:           "",
@@ -68,6 +74,9 @@ func loadSSHFwdConfigLocked() SSHFwdConfig {
 	if err == nil {
 		_ = json.Unmarshal(b, &cfg)
 	}
+	if cfg.Mode == "" {
+		cfg.Mode = "frp_ssh"
+	}
 	if cfg.RemoteUser == "" {
 		cfg.RemoteUser = "root"
 	}
@@ -82,6 +91,12 @@ func loadSSHFwdConfigLocked() SSHFwdConfig {
 	}
 	if cfg.BindAddr == "" {
 		cfg.BindAddr = "0.0.0.0"
+	}
+	if cfg.FRPBindPort <= 0 {
+		cfg.FRPBindPort = 55400
+	}
+	if cfg.PoolCount <= 0 {
+		cfg.PoolCount = 25
 	}
 	if cfg.ServerAliveInterval <= 0 {
 		cfg.ServerAliveInterval = 10
@@ -123,8 +138,14 @@ func ensureSSHFwdKey(keyPath string) (pubKey string, err error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// formatAuthorizedKeyLine constructs an authorized_keys entry with restrict & permitopen.
-func formatAuthorizedKeyLine(pubKey string, ports []int) string {
+// formatAuthorizedKeyLine constructs an authorized_keys entry with restrict & permitopen/permitlisten.
+func formatAuthorizedKeyLine(pubKey string, mode string, frpPort int, ports []int) string {
+	if mode == "frp_ssh" {
+		if frpPort <= 0 {
+			frpPort = 55400
+		}
+		return fmt.Sprintf("restrict,port-forwarding,permitlisten=\"127.0.0.1:%d\" %s", frpPort, strings.TrimSpace(pubKey))
+	}
 	permitOpenOpts := make([]string, 0, len(ports))
 	for _, p := range ports {
 		permitOpenOpts = append(permitOpenOpts, fmt.Sprintf("permitopen=\"127.0.0.1:%d\"", p))
@@ -133,24 +154,35 @@ func formatAuthorizedKeyLine(pubKey string, ports []int) string {
 	return fmt.Sprintf("restrict,port-forwarding,%s %s", permitStr, strings.TrimSpace(pubKey))
 }
 
-// buildSSHFwdService generates the systemd service file content.
+// buildSSHFwdService generates the systemd service file content for SSH tunnel carrier.
 func buildSSHFwdService(cfg SSHFwdConfig) string {
-	forwards := make([]string, 0, len(cfg.Ports))
-	for _, p := range cfg.Ports {
-		forwards = append(forwards, fmt.Sprintf("-L %s:%d:127.0.0.1:%d", cfg.BindAddr, p, p))
-	}
-	fwArgs := strings.Join(forwards, " ")
 	remoteTarget := fmt.Sprintf("%s@%s", cfg.RemoteUser, cfg.RemoteHost)
 	portArg := ""
 	if cfg.RemoteSSHPort > 0 && cfg.RemoteSSHPort != 22 {
 		portArg = fmt.Sprintf("-p %d ", cfg.RemoteSSHPort)
 	}
 
+	var fwArgs string
+	if cfg.Mode == "frp_ssh" {
+		fwArgs = fmt.Sprintf("-R 127.0.0.1:%d:127.0.0.1:%d -o Ciphers=aes128-gcm@openssh.com,chacha20-poly1305@openssh.com -o TCPKeepAlive=yes", cfg.FRPBindPort, cfg.FRPBindPort)
+	} else {
+		forwards := make([]string, 0, len(cfg.Ports))
+		for _, p := range cfg.Ports {
+			forwards = append(forwards, fmt.Sprintf("-L %s:%d:127.0.0.1:%d", cfg.BindAddr, p, p))
+		}
+		fwArgs = strings.Join(forwards, " ")
+	}
+
 	execCmd := fmt.Sprintf("/usr/bin/ssh -N -i %s -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=%d -o ServerAliveCountMax=%d -o StrictHostKeyChecking=accept-new %s%s %s",
 		cfg.KeyPath, cfg.ServerAliveInterval, cfg.ServerAliveCountMax, portArg, fwArgs, remoteTarget)
 
+	desc := "Hashem SSH Forward Carrier (Direct SSH tunnel)"
+	if cfg.Mode == "frp_ssh" {
+		desc = "Hashem FRP-over-SSH Carrier (Reverse SSH tunnel)"
+	}
+
 	return fmt.Sprintf(`[Unit]
-Description=Hashem SSH Forward Carrier (port forwarding via SSH tunnel)
+Description=%s
 After=network-online.target
 Wants=network-online.target
 
@@ -162,7 +194,79 @@ LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
-`, execCmd)
+`, desc, execCmd)
+}
+
+// buildFRPSConfig generates the frps TOML configuration for Iran host in FRP-over-SSH mode.
+func buildFRPSConfig(cfg SSHFwdConfig) string {
+	return fmt.Sprintf(`bindAddr = "127.0.0.1"
+bindPort = %d
+proxyBindAddr = "0.0.0.0"
+auth.token = "hashem-frp-ssh-sec"
+transport.tcpMux = false
+`, cfg.FRPBindPort)
+}
+
+// buildFRPSService generates the systemd unit for frps on Iran host.
+func buildFRPSService() string {
+	return `[Unit]
+Description=Hashem FRP-over-SSH server (Iran)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frps -c /etc/gre-panel/frp-ssh/frps.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+`
+}
+
+// buildForeignSetupCommand creates a standalone shell command to be executed on Foreign host.
+func buildForeignSetupCommand(cfg SSHFwdConfig) string {
+	var proxyBlocks strings.Builder
+	for _, p := range cfg.Ports {
+		proxyBlocks.WriteString(fmt.Sprintf(`
+[[proxies]]
+name = "p%d"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = %d
+remotePort = %d
+`, p, p, p))
+	}
+
+	frpcToml := fmt.Sprintf(`serverAddr = "127.0.0.1"
+serverPort = %d
+auth.token = "hashem-frp-ssh-sec"
+transport.tcpMux = false
+transport.poolCount = %d
+%s`, cfg.FRPBindPort, cfg.PoolCount, proxyBlocks.String())
+
+	return fmt.Sprintf(`mkdir -p /etc/gre-panel/frp-ssh
+cat > /etc/gre-panel/frp-ssh/frpc.toml <<'EOF'
+%sEOF
+cat > /etc/systemd/system/hashem-frp-ssh-frpc.service <<'EOF'
+[Unit]
+Description=Hashem FRP-over-SSH client (Foreign)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/frp-ssh/frpc.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload && systemctl enable --now hashem-frp-ssh-frpc.service`, strings.TrimSpace(frpcToml))
 }
 
 // cleanDnatConflict removes conflicting nftables table or rescues that capture these ports.
@@ -184,10 +288,25 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 		return fmt.Errorf("failed ensuring key: %w", err)
 	}
 
-	// 1. Remove DNAT conflicts so traffic hits the SSH local socket
+	// 1. Remove DNAT conflicts so traffic hits the local sockets
 	_ = cleanDnatConflict(cfg.Ports)
 
-	// 2. Write systemd unit
+	if cfg.Mode == "frp_ssh" {
+		// Prepare frps directory and config
+		_ = os.MkdirAll("/etc/gre-panel/frp-ssh", 0755)
+		frpsToml := buildFRPSConfig(cfg)
+		if err := os.WriteFile("/etc/gre-panel/frp-ssh/frps.toml", []byte(frpsToml), 0644); err != nil {
+			return fmt.Errorf("failed writing frps.toml: %w", err)
+		}
+		if err := os.WriteFile("/etc/systemd/system/hashem-ssh-frps.service", []byte(buildFRPSService()), 0644); err != nil {
+			return fmt.Errorf("failed writing frps service: %w", err)
+		}
+	} else {
+		// Stop frps if switching to pure direct mode
+		_, _ = runCmd("systemctl", "disable", "--now", "hashem-ssh-frps.service")
+	}
+
+	// 2. Write systemd unit for SSH carrier
 	svcContent := buildSSHFwdService(cfg)
 	unitPath := "/etc/systemd/system/hashem-ssh-fwd.service"
 	if err := os.WriteFile(unitPath, []byte(svcContent), 0644); err != nil {
@@ -197,6 +316,11 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 	// 3. Reload and enable
 	if _, err := runCmd("systemctl", "daemon-reload"); err != nil {
 		return fmt.Errorf("daemon-reload failed: %w", err)
+	}
+	if cfg.Mode == "frp_ssh" {
+		if _, err := runCmd("systemctl", "enable", "--now", "hashem-ssh-frps.service"); err != nil {
+			return fmt.Errorf("failed starting hashem-ssh-frps: %w", err)
+		}
 	}
 	if _, err := runCmd("systemctl", "enable", "--now", "hashem-ssh-fwd.service"); err != nil {
 		return fmt.Errorf("systemctl enable --now hashem-ssh-fwd failed: %w", err)
@@ -212,6 +336,7 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 func disableSSHFwd() error {
 	cfg := loadSSHFwdConfigLocked()
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-ssh-fwd.service")
+	_, _ = runCmd("systemctl", "disable", "--now", "hashem-ssh-frps.service")
 	cfg.Enabled = false
 	cfg.LastStatus = "inactive"
 	return saveSSHFwdConfigLocked(cfg)
@@ -235,11 +360,16 @@ func getSSHFwdStatus() map[string]any {
 
 	out, _ := runCmd("systemctl", "is-active", "hashem-ssh-fwd.service")
 	isActive := strings.TrimSpace(out) == "active"
-	// Fallback check: if user already has hashem-ssh-carrier running
+	// Fallback check: if user already has hashem-frp-ssh-tunnel or legacy carrier running
 	if !isActive {
-		outLegacy, _ := runCmd("systemctl", "is-active", "hashem-ssh-carrier.service")
-		if strings.TrimSpace(outLegacy) == "active" {
+		outTun, _ := runCmd("systemctl", "is-active", "hashem-frp-ssh-tunnel.service")
+		if strings.TrimSpace(outTun) == "active" {
 			isActive = true
+		} else {
+			outLegacy, _ := runCmd("systemctl", "is-active", "hashem-ssh-carrier.service")
+			if strings.TrimSpace(outLegacy) == "active" {
+				isActive = true
+			}
 		}
 	}
 
@@ -256,25 +386,31 @@ func getSSHFwdStatus() map[string]any {
 	// Remote auth line
 	authLine := ""
 	if pubKey != "" {
-		authLine = formatAuthorizedKeyLine(pubKey, cfg.Ports)
+		authLine = formatAuthorizedKeyLine(pubKey, cfg.Mode, cfg.FRPBindPort, cfg.Ports)
 	}
 
+	foreignCmd := buildForeignSetupCommand(cfg)
+
 	return map[string]any{
-		"enabled":         cfg.Enabled || isActive,
-		"is_active":       isActive,
-		"role":            cfg.Role,
-		"remote_host":     cfg.RemoteHost,
-		"remote_user":     cfg.RemoteUser,
-		"remote_ssh_port": cfg.RemoteSSHPort,
-		"key_path":        cfg.KeyPath,
-		"pub_key":         pubKey,
-		"auth_line":       authLine,
-		"ports":           cfg.Ports,
-		"bind_addr":       cfg.BindAddr,
-		"port_status":     portStatus,
-		"dnat_conflict":   dnatActive,
-		"last_error":      cfg.LastError,
-		"updated_at":      cfg.UpdatedAt,
+		"enabled":           cfg.Enabled || isActive,
+		"is_active":         isActive,
+		"mode":              cfg.Mode,
+		"role":              cfg.Role,
+		"remote_host":       cfg.RemoteHost,
+		"remote_user":       cfg.RemoteUser,
+		"remote_ssh_port":   cfg.RemoteSSHPort,
+		"key_path":          cfg.KeyPath,
+		"pub_key":           pubKey,
+		"auth_line":         authLine,
+		"foreign_setup_cmd": foreignCmd,
+		"ports":             cfg.Ports,
+		"bind_addr":         cfg.BindAddr,
+		"frp_bind_port":     cfg.FRPBindPort,
+		"pool_count":        cfg.PoolCount,
+		"port_status":       portStatus,
+		"dnat_conflict":     dnatActive,
+		"last_error":        cfg.LastError,
+		"updated_at":        cfg.UpdatedAt,
 	}
 }
 
@@ -286,12 +422,15 @@ func handleSSHFwdGet(w http.ResponseWriter, r *http.Request) {
 // handleSSHFwdPost handles commands like enable, disable, update-ports, gen-key, sync-peer.
 func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Action     string `json:"action"`
-		RemoteHost string `json:"remote_host"`
-		RemoteUser string `json:"remote_user"`
-		SSHPort    int    `json:"ssh_port"`
-		Ports      string `json:"ports"`
-		BindAddr   string `json:"bind_addr"`
+		Action      string `json:"action"`
+		Mode        string `json:"mode"`
+		RemoteHost  string `json:"remote_host"`
+		RemoteUser  string `json:"remote_user"`
+		SSHPort     int    `json:"ssh_port"`
+		Ports       string `json:"ports"`
+		BindAddr    string `json:"bind_addr"`
+		FRPBindPort int    `json:"frp_bind_port"`
+		PoolCount   int    `json:"pool_count"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-SSHFWD-01", "invalid json payload")
@@ -310,9 +449,12 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-SSHFWD-03", err.Error())
 			return
 		}
-		writeJSON(w, map[string]any{"status": "ok", "pub_key": pub, "auth_line": formatAuthorizedKeyLine(pub, cfg.Ports)})
+		writeJSON(w, map[string]any{"status": "ok", "pub_key": pub, "auth_line": formatAuthorizedKeyLine(pub, cfg.Mode, cfg.FRPBindPort, cfg.Ports)})
 
 	case "enable", "apply":
+		if body.Mode != "" {
+			cfg.Mode = strings.ToLower(strings.TrimSpace(body.Mode))
+		}
 		if body.RemoteHost != "" {
 			cfg.RemoteHost = strings.TrimSpace(body.RemoteHost)
 		}
@@ -324,6 +466,12 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.BindAddr != "" {
 			cfg.BindAddr = strings.TrimSpace(body.BindAddr)
+		}
+		if body.FRPBindPort > 0 {
+			cfg.FRPBindPort = body.FRPBindPort
+		}
+		if body.PoolCount > 0 {
+			cfg.PoolCount = body.PoolCount
 		}
 		if body.Ports != "" {
 			parsed := parsePorts(body.Ports)
@@ -363,8 +511,10 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reqPayload := map[string]any{
-			"pub_key": pubKey,
-			"ports":   cfg.Ports,
+			"pub_key":       pubKey,
+			"mode":          cfg.Mode,
+			"frp_bind_port": cfg.FRPBindPort,
+			"ports":         cfg.Ports,
 		}
 		respBytes, err := sendToPeer("/api/peer/sshfwd-install-key", "POST", reqPayload)
 		if err != nil {
@@ -385,8 +535,10 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 // handlePeerSSHFwdInstallKey is called on Kharej by Iran panel to register the restrict SSH key.
 func handlePeerSSHFwdInstallKey(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		PubKey string `json:"pub_key"`
-		Ports  []int  `json:"ports"`
+		PubKey      string `json:"pub_key"`
+		Mode        string `json:"mode"`
+		FRPBindPort int    `json:"frp_bind_port"`
+		Ports       []int  `json:"ports"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-SSHFWD-01", "invalid json")
@@ -399,8 +551,14 @@ func handlePeerSSHFwdInstallKey(w http.ResponseWriter, r *http.Request) {
 	if len(body.Ports) == 0 {
 		body.Ports = []int{443, 8443, 1020, 1030, 1040}
 	}
+	if body.FRPBindPort <= 0 {
+		body.FRPBindPort = 55400
+	}
+	if body.Mode == "" {
+		body.Mode = "frp_ssh"
+	}
 
-	authLine := formatAuthorizedKeyLine(body.PubKey, body.Ports)
+	authLine := formatAuthorizedKeyLine(body.PubKey, body.Mode, body.FRPBindPort, body.Ports)
 	authFile := "/root/.ssh/authorized_keys"
 	_ = os.MkdirAll("/root/.ssh", 0700)
 
@@ -433,6 +591,6 @@ func handlePeerSSHFwdInstallKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	LogSecurityAudit("sshfwd_key_installed", "peer", ClientIP(r), fmt.Sprintf("ports=%v", body.Ports))
+	LogSecurityAudit("sshfwd_key_installed", "peer", ClientIP(r), fmt.Sprintf("mode=%s ports=%v frp_port=%d", body.Mode, body.Ports, body.FRPBindPort))
 	writeJSON(w, map[string]any{"status": "ok", "message": "ssh forward key authorized with restrictions", "ports": body.Ports})
 }

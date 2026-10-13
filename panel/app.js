@@ -6026,6 +6026,18 @@ function renderSSHFwd() {
   if ($('sshfwdRemotePort') && !$('sshfwdRemotePort').value) $('sshfwdRemotePort').value = d.remote_ssh_port || 22;
   if ($('sshfwdPorts') && !$('sshfwdPorts').value && Array.isArray(d.ports)) $('sshfwdPorts').value = d.ports.join(', ');
 
+  const modeEl = $('sshfwdMode');
+  if (modeEl && d.mode) modeEl.value = d.mode;
+  if ($('sshfwdPoolCount') && d.pool_count) $('sshfwdPoolCount').value = d.pool_count;
+  if ($('sshfwdFRPPort') && d.frp_bind_port) $('sshfwdFRPPort').value = d.frp_bind_port;
+
+  const isFRP = (modeEl ? modeEl.value : (d.mode || 'frp_ssh')) !== 'direct';
+  if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';
+  if ($('sshfwdForeignBox')) $('sshfwdForeignBox').style.display = isFRP ? 'block' : 'none';
+
+  const foreignCmd = $('sshfwdForeignCmd');
+  if (foreignCmd) foreignCmd.value = d.foreign_setup_cmd || '';
+
   const authLine = $('sshfwdAuthLine');
   if (authLine) authLine.value = d.auth_line || '';
 
@@ -6056,11 +6068,14 @@ async function sshfwdToggleClick() {
       const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() : 'root';
       const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '22', 10) || 22;
       const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
+      const mode = $('sshfwdMode') ? $('sshfwdMode').value : 'frp_ssh';
+      const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '25', 10) || 25;
+      const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '55400', 10) || 55400;
       if (!remote_host) {
         toastErr('Missing Host', 'Remote Host IP is required.');
         return;
       }
-      await api('/api/sshfwd', { action: 'enable', remote_host, remote_user, ssh_port, ports });
+      await api('/api/sshfwd', { action: 'enable', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
       toastOk('SSH Forward', 'Service enabled and started.');
     }
     await loadSSHFwd();
@@ -6099,10 +6114,27 @@ function sshfwdCopyAuthClick() {
   }
 }
 
+function sshfwdCopyForeignClick() {
+  const t = $('sshfwdForeignCmd');
+  if (t && t.value) {
+    navigator.clipboard.writeText(t.value).then(() => {
+      toastOk('Copied', 'Foreign setup command copied to clipboard.');
+    }).catch(err => {
+      toastErr('Copy failed', String(err));
+    });
+  }
+}
+
 (function initSSHFwdEvents() {
   function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
   on('sshfwdToggleBtn', 'click', sshfwdToggleClick);
   on('sshfwdClearDnatBtn', 'click', sshfwdClearDnatClick);
   on('sshfwdSyncPeerBtn', 'click', sshfwdSyncPeerClick);
   on('sshfwdCopyAuthBtn', 'click', sshfwdCopyAuthClick);
+  on('sshfwdCopyForeignBtn', 'click', sshfwdCopyForeignClick);
+  on('sshfwdMode', 'change', () => {
+    const isFRP = $('sshfwdMode') && $('sshfwdMode').value !== 'direct';
+    if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';
+    if ($('sshfwdForeignBox')) $('sshfwdForeignBox').style.display = isFRP ? 'block' : 'none';
+  });
 })();

@@ -1276,6 +1276,14 @@
 
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:16px;">
             <div class="tc-box">
+              <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Carrier Engine Mode</label>
+              <select id="sshfwdMode" class="hashem-input" style="width:100%;">
+                <option value="frp_ssh">FRP over SSH (Low Latency &amp; High Speed — 25 Pool)</option>
+                <option value="direct">Direct SSH Forward (Pure TCP tunnel)</option>
+              </select>
+              <div class="u-hint-12 u-mt-4">FRP-over-SSH pre-warms connection pools to cut handshake latency by ~110ms.</div>
+            </div>
+            <div class="tc-box">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Remote Host (Foreign IP)</label>
               <input type="text" id="sshfwdRemoteHost" class="hashem-input" placeholder="e.g. 91.107.174.173" style="width:100%;">
             </div>
@@ -1286,6 +1294,14 @@
                 <input type="number" id="sshfwdRemotePort" class="hashem-input" placeholder="22" value="22" style="width:60%;">
               </div>
             </div>
+            <div class="tc-box" id="sshfwdPoolBox">
+              <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Pool Count &amp; FRP Port</label>
+              <div style="display:flex; gap:8px;">
+                <input type="number" id="sshfwdPoolCount" class="hashem-input" placeholder="25" value="25" style="width:50%;" title="Pre-connected work sockets (poolCount)">
+                <input type="number" id="sshfwdFRPPort" class="hashem-input" placeholder="55400" value="55400" style="width:50%;" title="FRP control port">
+              </div>
+              <div class="u-hint-12 u-mt-4">Pre-connected sockets in pool (25 rec.) and internal bind port.</div>
+            </div>
             <div class="tc-box" style="grid-column: 1 / -1;">
               <label class="field-label" style="font-weight:600; margin-bottom:6px; display:block;">Forwarded Ports (Local -&gt; Foreign 127.0.0.1)</label>
               <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="443, 8443, 1020, 1030, 1040" style="width:100%;">
@@ -1293,9 +1309,18 @@
             </div>
           </div>
 
+          <div class="tc-box u-mt-12" id="sshfwdForeignBox" style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); padding:12px; border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-weight:600; font-size:13px;">Foreign Client Setup (Run on Foreign Server)</span>
+              <button class="hashem-btn" id="sshfwdCopyForeignBtn" style="padding:4px 10px; font-size:12px;">Copy Command</button>
+            </div>
+            <textarea id="sshfwdForeignCmd" class="hashem-input" rows="4" readonly style="width:100%; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.4); resize:none;"></textarea>
+            <div class="u-hint-12 u-mt-4">Run this snippet once on your Foreign server to establish the FRP workpool client.</div>
+          </div>
+
           <div class="tc-box u-mt-12" style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); padding:12px; border-radius:8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-              <span style="font-weight:600; font-size:13px;">Foreign authorized_keys Entry (restrict + permitopen)</span>
+              <span style="font-weight:600; font-size:13px;">Foreign authorized_keys Entry</span>
               <div style="display:flex; gap:8px;">
                 <button class="hashem-btn" id="sshfwdCopyAuthBtn" style="padding:4px 10px; font-size:12px;">Copy Line</button>
                 <button class="hashem-btn" id="sshfwdSyncPeerBtn" style="padding:4px 10px; font-size:12px;">Auto-Sync to Peer</button>

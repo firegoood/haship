@@ -8120,10 +8120,14 @@ cli_sshfwd() {
             echo -e "${CYAN}=== Hashem SSH Forward Carrier Status ===${NC}"
             local SVC_ACT="inactive"
             systemctl is-active hashem-ssh-fwd.service >/dev/null 2>&1 && SVC_ACT="${GREEN}active (running)${NC}" || SVC_ACT="${YELLOW}inactive${NC}"
-            echo -e "Service: $SVC_ACT"
+            echo -e "SSH Carrier Service: $SVC_ACT"
+            local FRPS_ACT="inactive"
+            systemctl is-active hashem-ssh-frps.service >/dev/null 2>&1 && FRPS_ACT="${GREEN}active (running)${NC}" || FRPS_ACT="${YELLOW}inactive${NC}"
+            echo -e "FRP Server (pool engine): $FRPS_ACT"
+
             if [ -f /etc/gre-panel/sshfwd.json ]; then
                 echo "Config: /etc/gre-panel/sshfwd.json"
-                cat /etc/gre-panel/sshfwd.json | grep -E "remote_host|ports|enabled" || true
+                cat /etc/gre-panel/sshfwd.json | grep -E "mode|remote_host|ports|pool_count|frp_bind_port|enabled" || true
             fi
             echo -e "\nListening Ports:"
             for p in 443 8443 1020 1030 1040; do
@@ -8139,11 +8143,14 @@ cli_sshfwd() {
             ;;
         enable)
             shift
-            local REMOTE_HOST="" PORTS="443, 8443, 1020, 1030, 1040" SSH_PORT="22" USER="root"
+            local REMOTE_HOST="" PORTS="443, 8443, 1020, 1030, 1040" SSH_PORT="22" USER="root" MODE="frp_ssh" POOL_COUNT="25" FRP_PORT="55400"
             while [[ $# -gt 0 ]]; do
                 case "$1" in
                     --remote-host|--remote-pub|-r) REMOTE_HOST="$2"; shift 2 ;;
+                    --mode|-m) MODE="$2"; shift 2 ;;
                     --ports|-p) PORTS="$2"; shift 2 ;;
+                    --pool-count) POOL_COUNT="$2"; shift 2 ;;
+                    --frp-port) FRP_PORT="$2"; shift 2 ;;
                     --ssh-port) SSH_PORT="$2"; shift 2 ;;
                     --user|-u) USER="$2"; shift 2 ;;
                     *) shift ;;
@@ -8162,20 +8169,30 @@ cli_sshfwd() {
                 ssh-keygen -t ed25519 -N "" -f /root/.ssh/hashem-fwd -C "hashem-ssh-carrier" >/dev/null 2>&1
             fi
             local PUBKEY=$(cat /root/.ssh/hashem-fwd.pub)
-            local FWD_ARGS=""
             IFS=',' read -ra PORT_ARR <<< "$PORTS"
-            for p in "${PORT_ARR[@]}"; do
-                p=$(echo "$p" | tr -d ' ')
-                [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L 0.0.0.0:$p:127.0.0.1:$p"
-            done
-            cat <<EOF > /etc/systemd/system/hashem-ssh-fwd.service
+
+            local PORT_OPT=""
+            [[ "$SSH_PORT" != "22" && -n "$SSH_PORT" ]] && PORT_OPT="-p $SSH_PORT"
+
+            if [[ "$MODE" == "frp_ssh" ]]; then
+                echo -e "${CYAN}[*] Configuring FRP-over-SSH (poolCount=${POOL_COUNT}, frpPort=${FRP_PORT})...${NC}"
+                mkdir -p /etc/gre-panel/frp-ssh
+                cat <<EOF > /etc/gre-panel/frp-ssh/frps.toml
+bindAddr = "127.0.0.1"
+bindPort = ${FRP_PORT}
+proxyBindAddr = "0.0.0.0"
+auth.token = "hashem-frp-ssh-sec"
+transport.tcpMux = false
+EOF
+                cat <<EOF > /etc/systemd/system/hashem-ssh-frps.service
 [Unit]
-Description=Hashem SSH Forward Carrier (port forwarding via SSH tunnel)
+Description=Hashem FRP-over-SSH server (Iran)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/ssh -N -i /root/.ssh/hashem-fwd -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -p ${SSH_PORT} ${FWD_ARGS} ${USER}@${REMOTE_HOST}
+Type=simple
+ExecStart=/usr/local/bin/frps -c /etc/gre-panel/frp-ssh/frps.toml
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -8183,20 +8200,102 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
-            systemctl daemon-reload
-            systemctl enable --now hashem-ssh-fwd.service
-            echo -e "${GREEN}[✔] SSH Forward carrier service started and enabled.${NC}"
-            echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
-            local PERMITS=""
-            for p in "${PORT_ARR[@]}"; do
-                p=$(echo "$p" | tr -d ' ')
-                [[ -n "$p" ]] && PERMITS="${PERMITS}permitopen=\"127.0.0.1:$p\","
-            done
-            PERMITS=\${PERMITS%,}
-            echo -e "restrict,port-forwarding,\${PERMITS} \${PUBKEY}\n"
+
+                cat <<EOF > /etc/systemd/system/hashem-ssh-fwd.service
+[Unit]
+Description=Hashem FRP-over-SSH Carrier (Reverse SSH tunnel)
+After=network-online.target hashem-ssh-frps.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -i /root/.ssh/hashem-fwd -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -o TCPKeepAlive=yes -o Ciphers=aes128-gcm@openssh.com,chacha20-poly1305@openssh.com -R 127.0.0.1:${FRP_PORT}:127.0.0.1:${FRP_PORT} ${PORT_OPT} ${USER}@${REMOTE_HOST}
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                systemctl daemon-reload
+                systemctl enable --now hashem-ssh-frps.service
+                systemctl enable --now hashem-ssh-fwd.service
+                echo -e "${GREEN}[✔] FRP-over-SSH carrier started and enabled.${NC}"
+
+                echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
+                echo -e "restrict,port-forwarding,permitlisten=\"127.0.0.1:${FRP_PORT}\" ${PUBKEY}\n"
+
+                echo -e "${CYAN}=== Foreign Client Setup Snippet (Run on Foreign Server) ===${NC}"
+                local PROXY_CFG=""
+                for p in "${PORT_ARR[@]}"; do
+                    p=$(echo "$p" | tr -d ' ')
+                    [[ -n "$p" ]] && PROXY_CFG="${PROXY_CFG}\n[[proxies]]\nname = \"p$p\"\ntype = \"tcp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = $p\nremotePort = $p\n"
+                done
+                cat <<EOF
+mkdir -p /etc/gre-panel/frp-ssh && cat > /etc/gre-panel/frp-ssh/frpc.toml <<'EOF_FRPC'
+serverAddr = "127.0.0.1"
+serverPort = ${FRP_PORT}
+auth.token = "hashem-frp-ssh-sec"
+transport.tcpMux = false
+transport.poolCount = ${POOL_COUNT}
+$(echo -e "$PROXY_CFG")
+EOF_FRPC
+cat > /etc/systemd/system/hashem-frp-ssh-frpc.service <<'EOF_SVC'
+[Unit]
+Description=Hashem FRP-over-SSH client (Foreign)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/frp-ssh/frpc.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF_SVC
+systemctl daemon-reload && systemctl enable --now hashem-frp-ssh-frpc.service
+EOF
+            else
+                local FWD_ARGS=""
+                for p in "${PORT_ARR[@]}"; do
+                    p=$(echo "$p" | tr -d ' ')
+                    [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L 0.0.0.0:$p:127.0.0.1:$p"
+                done
+                systemctl disable --now hashem-ssh-frps.service >/dev/null 2>&1 || true
+                cat <<EOF > /etc/systemd/system/hashem-ssh-fwd.service
+[Unit]
+Description=Hashem SSH Forward Carrier (Direct SSH tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -i /root/.ssh/hashem-fwd -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new ${PORT_OPT} ${FWD_ARGS} ${USER}@${REMOTE_HOST}
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                systemctl daemon-reload
+                systemctl enable --now hashem-ssh-fwd.service
+                echo -e "${GREEN}[✔] Direct SSH Forward carrier service started and enabled.${NC}"
+
+                echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
+                local PERMITS=""
+                for p in "${PORT_ARR[@]}"; do
+                    p=$(echo "$p" | tr -d ' ')
+                    [[ -n "$p" ]] && PERMITS="${PERMITS}permitopen=\"127.0.0.1:$p\","
+                done
+                PERMITS=${PERMITS%,}
+                echo -e "restrict,port-forwarding,${PERMITS} ${PUBKEY}\n"
+            fi
             ;;
         disable)
             systemctl disable --now hashem-ssh-fwd.service >/dev/null 2>&1 || true
+            systemctl disable --now hashem-ssh-frps.service >/dev/null 2>&1 || true
             echo -e "${YELLOW}[*] SSH Forward service disabled.${NC}"
             ;;
         gen-key)
@@ -8213,7 +8312,7 @@ EOF
             echo -e "${GREEN}[✔] hashem_dnat cleared from nftables.${NC}"
             ;;
         *)
-            echo "Usage: hashem ssh-fwd [status|enable --remote-host IP [--ports \"...\"]|disable|gen-key|clear-dnat]"
+            echo "Usage: hashem ssh-fwd [status|enable --remote-host IP [--mode frp_ssh|direct] [--pool-count 25] [--frp-port 55400] [--ports \"...\"]|disable|gen-key|clear-dnat]"
             return 1
             ;;
     esac
