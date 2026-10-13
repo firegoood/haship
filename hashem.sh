@@ -5681,10 +5681,6 @@ EOF
     sleep 2
 
     if systemctl is-active --quiet gre-panel; then
-        if [[ -z "$PANEL_PASS" ]]; then
-            NEWPASS=$(journalctl -u gre-panel -n 30 --no-pager 2>/dev/null | grep -o 'INITIAL PANEL PASSWORD: [^ ]*' | tail -1 | awk '{print $4}')
-            [[ -n "$NEWPASS" ]] && PANEL_PASS="$NEWPASS"
-        fi
         echo -e "${GREEN}[✔️] Panel installed and running.${NC}"
         # full credentials right here — no need to open another menu
         echo ""
@@ -5702,24 +5698,27 @@ EOF
 }
 
 show_panel_url() {
-    if [[ ! -f /etc/gre-panel/panel.json ]]; then
+    local cfg="/etc/gre-panel/panel.json"
+    if [[ ! -f "$cfg" && -f /etc/gre-panel/config.json ]]; then
+        cfg="/etc/gre-panel/config.json"
+    fi
+    if [[ ! -f "$cfg" ]]; then
         echo -e "${YELLOW}Panel is not installed on this server (no /etc/gre-panel/panel.json). Run Setup first.${NC}"
         return 1
     fi
     local port base user
-    port=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*')
-    base=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
-    user=$(grep -o '"username": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
+    port=$(grep -o '"port": *[0-9]*' "$cfg" 2>/dev/null | grep -o '[0-9]*')
+    base=$(grep -o '"base_path": *"[^"]*"' "$cfg" 2>/dev/null | cut -d'"' -f4)
+    user=$(grep -o '"username": *"[^"]*"' "$cfg" 2>/dev/null | cut -d'"' -f4)
     port=${port:-7777}
     user=${user:-admin}
-    ensure_panel_pass
     MYIP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
     echo -e "${GREEN}Panel URL:  ${CYAN}http://${MYIP:-<this-server-ip>}:${port}/${base}${NC}"
     echo -e "${GREEN}Username:   ${CYAN}${user}${NC}"
     if [[ -n "$PANEL_PASS" ]]; then
         echo -e "${GREEN}Password:   ${CYAN}${PANEL_PASS}${NC} ${YELLOW}(Please record this password now!)${NC}"
     else
-        echo -e "${GREEN}Password:   ${YELLOW}(hashed in panel.json — reset anytime via: ${CYAN}hashem reset-password${YELLOW})${NC}"
+        echo -e "${GREEN}Password:   ${YELLOW}(unchanged — your existing password is kept. Reset anytime: ${CYAN}hashem pass${YELLOW})${NC}"
     fi
 }
 
@@ -5807,8 +5806,14 @@ ensure_backup_key() {
 # make sure panel config exists. Passwords are never stored as plaintext on disk (CWE-256).
 ensure_panel_pass() {
     ensure_backup_key
+    # Migrate legacy config.json to panel.json if needed
+    if [[ ! -f /etc/gre-panel/panel.json && -f /etc/gre-panel/config.json ]]; then
+        cp -a /etc/gre-panel/config.json /etc/gre-panel/panel.json 2>/dev/null || true
+    fi
     if [[ -f /etc/gre-panel/panel.json ]]; then
-        return 0
+        if grep -Eq '"(pass_hash|password)" *: *"[^"]+"' /etc/gre-panel/panel.json 2>/dev/null; then
+            return 0
+        fi
     fi
     echo -e "${YELLOW}[*] No panel config found — generating initial credentials...${NC}"
     local NEWPASS HASH
@@ -7049,6 +7054,10 @@ remove_legacy_units() {
         echo -e "${GREEN}[✔️] Removed obsolete unit ${name}.service${NC}"
         removed=1
     done
+    if [[ -L "${dir}/multi-user.target.wants/gre-panel.service" && ! -f "${dir}/gre-panel.service" ]]; then
+        rm -f "${dir}/multi-user.target.wants/gre-panel.service"
+        removed=1
+    fi
     (( removed )) && { systemctl daemon-reload >/dev/null 2>&1 || true; }
     return 0
 }
@@ -8679,7 +8688,7 @@ if [[ $# -gt 0 ]]; then
         uninstall)
             if [[ "${2:-}" == "--force" ]]; then uninstall_all_force; else uninstall_all; fi ;;
         show-panel-url) show_panel_url ;;
-        password|reset-password|reset-pass)
+        pass|password|reset-password|reset-pass)
             shift
             if [[ -n "${1:-}" ]]; then
                 cli_set_panel_password "$1"

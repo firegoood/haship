@@ -41,6 +41,7 @@ func hashPassword(pw string) string {
 }
 
 func isLegacyHash(stored string) bool {
+	stored = strings.TrimSpace(stored)
 	if len(stored) != 64 {
 		return false
 	}
@@ -51,14 +52,34 @@ func isLegacyHash(stored string) bool {
 // verifyPassword reports whether pw matches stored, and whether stored is in a
 // legacy format that should be re-hashed.
 func verifyPassword(stored, pw string) (ok, needsUpgrade bool) {
+	stored = strings.TrimSpace(stored)
+	pw = strings.TrimSpace(pw)
+	if stored == "" || pw == "" {
+		return false, false
+	}
+
+	// Plaintext fallback (legacy configs where password was saved unhashed, min 8 chars)
+	if len(stored) >= 8 && subtle.ConstantTimeCompare([]byte(stored), []byte(pw)) == 1 {
+		return true, true
+	}
+
 	if isLegacyHash(stored) {
 		h := sha256.Sum256([]byte(pw))
 		return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(h[:])), []byte(strings.ToLower(stored))) == 1, true
 	}
-	if !strings.HasPrefix(stored, argonPrefix) {
+
+	// Support both standard "$argon2id$..." and internal "argon2id$..."
+	argonStr := stored
+	hadDollarPrefix := false
+	if strings.HasPrefix(argonStr, "$") {
+		argonStr = strings.TrimPrefix(argonStr, "$")
+		hadDollarPrefix = true
+	}
+
+	if !strings.HasPrefix(argonStr, argonPrefix) {
 		return false, false
 	}
-	parts := strings.Split(stored, "$")
+	parts := strings.Split(argonStr, "$")
 	// argon2id, v=19, m=..,t=..,p=.., salt, hash
 	if len(parts) != 5 {
 		return false, false
@@ -73,14 +94,18 @@ func verifyPassword(stored, pw string) (ok, needsUpgrade bool) {
 	if m < 8 || m > 1<<20 || t < 1 || t > 10 || p < 1 || p > 16 {
 		return false, false // refuse absurd parameters (DoS guard)
 	}
-	salt, err1 := base64.RawStdEncoding.DecodeString(parts[3])
-	want, err2 := base64.RawStdEncoding.DecodeString(parts[4])
+	decodeB64 := func(s string) ([]byte, error) {
+		s = strings.TrimRight(s, "=")
+		return base64.RawStdEncoding.DecodeString(s)
+	}
+	salt, err1 := decodeB64(parts[3])
+	want, err2 := decodeB64(parts[4])
 	if err1 != nil || err2 != nil || len(want) == 0 || len(want) > 128 {
 		return false, false
 	}
 	got := argon2.IDKey([]byte(pw), salt, uint32(t), uint32(m), uint8(p), uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1,
-		m < argonMemKiB || t < argonTime
+		m < argonMemKiB || t < argonTime || hadDollarPrefix
 }
 
 // newSessionToken returns a random 256-bit session id (not derived from the

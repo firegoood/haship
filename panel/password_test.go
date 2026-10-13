@@ -112,3 +112,33 @@ func TestSessionTokenNotDerivableFromHash(t *testing.T) {
 		t.Fatal("session tokens must be unique per login")
 	}
 }
+
+func TestVerifyPasswordDollarPrefixAndWhitespace(t *testing.T) {
+	orig := hashPassword("SecretP@ss123")
+	withDollar := "$" + orig
+	withWhitespace := "  \n" + withDollar + " 	\n"
+
+	ok, up := verifyPassword(withWhitespace, "SecretP@ss123")
+	if !ok {
+		t.Fatal("verifyPassword failed for dollar prefix and whitespace")
+	}
+	if !up {
+		t.Fatal("dollar prefix should request upgrade to canonical format")
+	}
+
+	// Plaintext fallback
+	okPlain, upPlain := verifyPassword("SimplePlainPass", "SimplePlainPass")
+	if !okPlain || !upPlain {
+		t.Fatal("plaintext should verify and request upgrade")
+	}
+}
+
+func TestLoginWhitespaceAndCaseInsensitiveUser(t *testing.T) {
+	setupAuthCfg(t, hashPassword("SecretP@ss123"))
+
+	// Test user with whitespace and different case
+	rec := login(t, "  Admin  ", "SecretP@ss123")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login failed for user with whitespace/case: %d %s", rec.Code, rec.Body.String())
+	}
+}

@@ -245,8 +245,16 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, "E-AUTH-03", "")
 		return
 	}
+	bodyUser := strings.TrimSpace(body.Username)
+	cfgUser := strings.TrimSpace(cfg.Username)
+	if cfgUser == "" {
+		cfgUser = "admin"
+	}
+	userMatches := subtle.ConstantTimeCompare([]byte(bodyUser), []byte(cfgUser)) == 1 ||
+		strings.EqualFold(bodyUser, cfgUser)
+
 	passOK, upgrade := verifyPassword(cfg.PassHash, body.Password)
-	if subtle.ConstantTimeCompare([]byte(body.Username), []byte(cfg.Username)) != 1 || !passOK {
+	if !userMatches || !passOK {
 		recordLoginFailure(ip)
 		LogSecurityAudit("login_failed", body.Username, ip, "invalid credentials")
 		writeAPIError(w, r, "E-AUTH-02", "")

@@ -171,16 +171,84 @@ func loadOrInit() {
 		log.Printf("Security migration (CWE-256): deleted legacy plaintext password file %s", legacyPassFile)
 	}
 
-	data, err := os.ReadFile(cfgPath())
-	if err == nil && json.Unmarshal(data, &cfg) == nil && cfg.PassHash != "" {
-		// Test/dev override: fixed password via env (takes effect on restart).
-		if pw := os.Getenv("GRE_PANEL_PASSWORD"); pw != "" {
-			cfg.PassHash = hashPassword(pw)
-			_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
-			log.Printf("panel password updated from GRE_PANEL_PASSWORD environment variable")
+	primaryPath := cfgPath()
+	data, err := os.ReadFile(primaryPath)
+	if err != nil {
+		// Fallback check for config.json if panel.json does not exist
+		altPath := filepath.Join(configDir, "config.json")
+		if altData, altErr := os.ReadFile(altPath); altErr == nil && len(altData) > 0 {
+			data = altData
+			err = nil
+			log.Printf("migrating config from %s to %s", altPath, primaryPath)
 		}
-		return
 	}
+
+	if err == nil && len(data) > 0 {
+		var parsed panelConfig
+		if json.Unmarshal(data, &parsed) == nil && strings.TrimSpace(parsed.PassHash) != "" {
+			cfg = parsed
+			if strings.TrimSpace(cfg.Username) == "" {
+				cfg.Username = "admin"
+			}
+			if cfg.Port <= 0 || cfg.Port > 65535 {
+				cfg.Port = 7777
+			}
+			if strings.TrimSpace(cfg.BasePath) == "" {
+				cfg.BasePath = "panel"
+			}
+			// Test/dev override: fixed password via env (takes effect on restart).
+			if pw := os.Getenv("GRE_PANEL_PASSWORD"); pw != "" {
+				cfg.PassHash = hashPassword(pw)
+				_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
+				log.Printf("panel password updated from GRE_PANEL_PASSWORD environment variable")
+			}
+			return
+		}
+
+		// Resilient fallback: rescue credentials if fields differed or minor format issue
+		var raw map[string]any
+		if json.Unmarshal(data, &raw) == nil {
+			passHash := ""
+			for _, k := range []string{"pass_hash", "password", "hash", "admin_pass", "admin_password"} {
+				if v, ok := raw[k].(string); ok && strings.TrimSpace(v) != "" {
+					passHash = strings.TrimSpace(v)
+					break
+				}
+			}
+			if passHash != "" {
+				username := "admin"
+				for _, k := range []string{"username", "admin_user", "user"} {
+					if v, ok := raw[k].(string); ok && strings.TrimSpace(v) != "" {
+						username = strings.TrimSpace(v)
+						break
+					}
+				}
+				port := 7777
+				if v, ok := raw["port"].(float64); ok && v >= 1 && v <= 65535 {
+					port = int(v)
+				}
+				basePath := "panel"
+				if v, ok := raw["base_path"].(string); ok && strings.TrimSpace(v) != "" {
+					basePath = strings.TrimSpace(v)
+				}
+
+				if !strings.HasPrefix(passHash, "argon2id$") && !strings.HasPrefix(passHash, "$argon2id$") && len(passHash) != 64 {
+					passHash = hashPassword(passHash)
+				}
+
+				cfg = panelConfig{
+					Username: username,
+					PassHash: passHash,
+					Port:     port,
+					BasePath: basePath,
+				}
+				_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
+				log.Printf("rescued panel credentials from config (user: %s, port: %d)", cfg.Username, cfg.Port)
+				return
+			}
+		}
+	}
+
 	pass := os.Getenv("GRE_PANEL_PASSWORD")
 	if pass == "" {
 		pass = SecureRandomPassword(16)
