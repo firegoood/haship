@@ -769,7 +769,7 @@ const I18N = {
     refresh: "بازخوانی",
     kpi_traffic: "ترافیک و سرعت",
     kpi_status: "وضعیت تونل",
-    kpi_links: "لینک‌ها (GRE / FRP)",
+    kpi_links: "لینک‌ها (⁦GRE / FRP⁩)",
     kpi_latency: "تاخیر (پینگ)",
     kpi_cpu: "پردازنده (CPU)",
     kpi_ram: "حافظه (RAM)",
@@ -840,14 +840,14 @@ const I18N = {
     tun_view_bundle_btn: "📦 مشاهده رشته باندل ستاپ",
 
     // Setup Tab
-    setup_title: "راه‌اندازی سریع — تونل GRE + FRP",
+    setup_title: "راه‌اندازی سریع — تونل ⁦GRE + FRP⁩",
     setup_sub: "دو سرور، یک تونل پایدار. ابتدا مشخصات را روی سرور ایران ثبت کنید و سپس رشته باندل تولیدشده را در سرور خارج وارد نمایید.",
     setup_step1: "۱. هم‌اکنون روی کدام سرور هستید؟",
     setup_role_iran: "سرور ایران — کاربران به این سرور وصل می‌شوند",
     setup_role_foreign: "سرور خارج — سرویس‌ها و فیلترشکن اینجا اجرا می‌شوند",
     setup_step2_engine: "۲. انتخاب موتور تونل",
-    setup_eng_frp: "🚀 تونل GRE + FRP",
-    setup_eng_grebh: "⚡ تونل GRE + Backhaul",
+    setup_eng_frp: "🚀 تونل ⁦GRE + FRP⁩",
+    setup_eng_grebh: "⚡ تونل ⁦GRE + Backhaul⁩",
     setup_eng_bh: "🌐 تونل مستقیم Backhaul (بدون GRE)",
     setup_step3_params: "۳. پارامترهای اتصال",
     setup_local_pub: "آی‌پی عمومی ایران (خودکار / قابل ویرایش)",
@@ -872,7 +872,7 @@ const I18N = {
     setup_add_tunnel_btn: "افزودن و اتصال تونل جدید",
 
     // Performance & Tuning Tab
-    perf_status_pool: "استخر اتصال کاری (frpc / frps)",
+    perf_status_pool: "استخر اتصال کاری (⁦frpc / frps⁩)",
     perf_status_decision: "تصمیم Auto Pool",
     perf_mode_auto: "Auto Pool",
     perf_mode_manual: "دستی",
