@@ -310,7 +310,8 @@ const I18N = {
   en: {
     nav_dashboard: "Dashboard",
     nav_tunnel: "Tunnel",
-    nav_sshfwd: "SSH Forward",
+    nav_sshfwd: "Bagher Engine [PRO]",
+    nav_bagher: "Bagher Engine [PRO]",
     nav_setup: "Setup",
     nav_logs: "Logs",
     nav_perf: "Performance",
@@ -723,7 +724,8 @@ const I18N = {
   fa: {
     nav_dashboard: "داشبورد",
     nav_tunnel: "تونل",
-    nav_sshfwd: "هدایت SSH",
+    nav_sshfwd: "موتور باقر [PRO]",
+    nav_bagher: "موتور باقر [PRO]",
     nav_setup: "راه‌اندازی (Setup)",
     nav_logs: "گزارش‌ها (Logs)",
     nav_perf: "عملکرد سیستم",
@@ -6031,11 +6033,11 @@ function renderSSHFwd() {
   if ($('sshfwdPoolCount') && d.pool_count) $('sshfwdPoolCount').value = d.pool_count;
   if ($('sshfwdFRPPort') && d.frp_bind_port) $('sshfwdFRPPort').value = d.frp_bind_port;
 
-  const isFRP = (modeEl ? modeEl.value : (d.mode || 'frp_ssh')) !== 'direct';
+  const isFRP = (modeEl ? modeEl.value : (d.mode || 'bagher')) !== 'direct';
   if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';
   if ($('sshfwdForeignBox')) $('sshfwdForeignBox').style.display = isFRP ? 'block' : 'none';
   if ($('sshfwdLicBanner')) {
-    const isLicensed = !!d.licensed_frp_ssh;
+    const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
     $('sshfwdLicBanner').classList.toggle('hidden', !isFRP || isLicensed);
   }
 
@@ -6072,7 +6074,7 @@ async function sshfwdToggleClick() {
       const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() : 'root';
       const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '22', 10) || 22;
       const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
-      const mode = $('sshfwdMode') ? $('sshfwdMode').value : 'frp_ssh';
+      const mode = $('sshfwdMode') ? $('sshfwdMode').value : 'bagher';
       const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '25', 10) || 25;
       const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '55400', 10) || 55400;
       if (!remote_host) {
@@ -6080,7 +6082,7 @@ async function sshfwdToggleClick() {
         return;
       }
       await api('/api/sshfwd', { action: 'enable', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
-      toastOk('SSH Forward', 'Service enabled and started.');
+      toastOk('Bagher Engine', 'Service enabled and started.');
     }
     await loadSSHFwd();
   } catch (err) {
@@ -6141,7 +6143,7 @@ function sshfwdCopyForeignClick() {
     if ($('sshfwdPoolBox')) $('sshfwdPoolBox').style.display = isFRP ? 'block' : 'none';
     if ($('sshfwdForeignBox')) $('sshfwdForeignBox').style.display = isFRP ? 'block' : 'none';
     if ($('sshfwdLicBanner')) {
-      const isLicensed = _sshfwdData && _sshfwdData.licensed_frp_ssh;
+      const isLicensed = _sshfwdData && (_sshfwdData.licensed_bagher || _sshfwdData.licensed_frp_ssh);
       $('sshfwdLicBanner').classList.toggle('hidden', !isFRP || isLicensed);
     }
   });
@@ -6195,7 +6197,7 @@ function renderLicense(d) {
     }
     if (details) details.classList.add('hidden');
     if (deactBtn) deactBtn.classList.add('hidden');
-    if ($('sshfwdLicBanner') && $('sshfwdMode') && $('sshfwdMode').value === 'frp_ssh') {
+    if ($('sshfwdLicBanner') && $('sshfwdMode') && ($('sshfwdMode').value === 'bagher' || $('sshfwdMode').value === 'frp_ssh')) {
       $('sshfwdLicBanner').classList.remove('hidden');
     }
   }

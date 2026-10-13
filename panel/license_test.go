@@ -46,18 +46,18 @@ func TestLicenseVerificationAndFeatures(t *testing.T) {
 
 	// 1. Valid token with matching machine hash
 	expFuture := time.Now().Add(24 * time.Hour).Unix()
-	validToken := generateTestToken(t, "Alice", mHash, []string{"frp_ssh", "watchdog"}, expFuture, priv)
+	validToken := generateTestToken(t, "Alice", mHash, []string{"bagher", "watchdog"}, expFuture, priv)
 
 	p, err := verifyLicenseKey(validToken)
 	if err != nil {
 		t.Fatalf("expected valid token, got err: %v", err)
 	}
-	if p.Customer != "Alice" || !HasFeatureString(p.Features, "frp_ssh") {
+	if p.Customer != "Alice" || !HasFeatureString(p.Features, "bagher") {
 		t.Errorf("payload mismatch: %+v", p)
 	}
 
 	// 2. Token with wildcard machine hash
-	wildcardToken := generateTestToken(t, "Bob", "*", []string{"frp_ssh"}, expFuture, priv)
+	wildcardToken := generateTestToken(t, "Bob", "*", []string{"bagher"}, expFuture, priv)
 	pWildcard, err := verifyLicenseKey(wildcardToken)
 	if err != nil {
 		t.Fatalf("wildcard token error: %v", err)
@@ -67,14 +67,14 @@ func TestLicenseVerificationAndFeatures(t *testing.T) {
 	}
 
 	// 3. Token with mismatched machine hash
-	badMachineToken := generateTestToken(t, "Charlie", "deadbeef000011112222333344445555", []string{"frp_ssh"}, expFuture, priv)
+	badMachineToken := generateTestToken(t, "Charlie", "deadbeef000011112222333344445555", []string{"bagher"}, expFuture, priv)
 	if _, err := verifyLicenseKey(badMachineToken); err == nil {
 		t.Fatalf("expected machine mismatch error, got nil")
 	}
 
 	// 4. Expired token
 	expPast := time.Now().Add(-24 * time.Hour).Unix()
-	expiredToken := generateTestToken(t, "Dave", mHash, []string{"frp_ssh"}, expPast, priv)
+	expiredToken := generateTestToken(t, "Dave", mHash, []string{"bagher"}, expPast, priv)
 	if _, err := verifyLicenseKey(expiredToken); err == nil {
 		t.Fatalf("expected expired error, got nil")
 	}
@@ -108,11 +108,16 @@ func TestLicenseAPI(t *testing.T) {
 
 	origKey := masterPublicKeyB64
 	masterPublicKeyB64 = base64.StdEncoding.EncodeToString(pub)
-	defer func() { masterPublicKeyB64 = origKey }()
+	defer func() {
+		masterPublicKeyB64 = origKey
+		activeLicenseMu.Lock()
+		activeLicense = nil
+		activeLicenseMu.Unlock()
+	}()
 
 	mHash := getMachineHash()
 	expFuture := time.Now().Add(48 * time.Hour).Unix()
-	validToken := generateTestToken(t, "VIP_User", mHash, []string{"frp_ssh"}, expFuture, priv)
+	validToken := generateTestToken(t, "VIP_User", mHash, []string{"bagher"}, expFuture, priv)
 
 	// POST /api/license to activate
 	body, _ := json.Marshal(map[string]string{"key": validToken})
@@ -123,8 +128,8 @@ func TestLicenseAPI(t *testing.T) {
 		t.Fatalf("POST /api/license failed with code %d: %s", rrPost.Code, rrPost.Body.String())
 	}
 
-	if !HasFeature("frp_ssh") {
-		t.Errorf("expected HasFeature(frp_ssh) == true after activation")
+	if !HasFeature("bagher") {
+		t.Errorf("expected HasFeature(bagher) == true after activation")
 	}
 
 	// GET /api/license

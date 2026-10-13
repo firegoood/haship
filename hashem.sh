@@ -7309,7 +7309,7 @@ menu_tunnel() {
         echo "  7) Tunnel Health Status & GRE Ping Test"
         echo "  8) Restart All Tunnel Services"
         echo "  9) Teardown All Tunnels (Panel remains active)"
-        echo "  10) SSH Forward Carrier (Port forwarding via SSH tunnel)"
+        echo "  10) Bagher Engine [PRO] (موتور باقر - تانل هیبرید استتار)"
         echo "  0) Back to Main Menu"
         echo ""
         read -p "Select an option [0-10]: " T_OPT
@@ -7375,36 +7375,53 @@ menu_tunnel() {
     done
 }
 
-menu_sshfwd() {
+menu_bagher() {
     clear
     show_banner
-    echo -e "${CYAN}--- SSH FORWARD CARRIER ---${NC}"
-    cli_sshfwd status
+    echo -e "${CYAN}--- BAGHER ENGINE [PRO] (موتور باقر - تانل هیبرید استتار) ---${NC}"
+    cli_bagher status
     echo ""
-    echo "  1) Enable SSH Forward Carrier"
-    echo "  2) Disable SSH Forward Carrier"
-    echo "  3) Generate Key & Show Foreign authorized_keys Line"
-    echo "  4) Clear Conflicting DNAT Rules"
+    echo "  1) Enable Bagher Engine (Stealth Hybrid Pool)"
+    echo "  2) Disable Bagher Engine"
+    echo "  3) Start Bagher Engine Service"
+    echo "  4) Stop Bagher Engine Service"
+    echo "  5) Restart Bagher Engine Service"
+    echo "  6) View Bagher Service Logs"
+    echo "  7) Generate Key & Show Foreign authorized_keys Line"
+    echo "  8) Clear Conflicting DNAT Rules"
     echo "  0) Back"
     echo ""
-    read -p "Select an option [0-4]: " SF_OPT
+    read -p "Select an option [0-8]: " SF_OPT
     case "$SF_OPT" in
         1)
-            local R_IP R_PORTS R_PORT
+            local R_IP R_PORTS R_PORT R_POOL R_MODE
             read -p "Enter Remote Host (Foreign IP): " R_IP
             read -p "Enter Remote SSH Port [22]: " R_PORT
             R_PORT=${R_PORT:-22}
             read -p "Enter Ports to forward [443, 8443, 1020, 1030, 1040]: " R_PORTS
             R_PORTS=${R_PORTS:-"443, 8443, 1020, 1030, 1040"}
-            cli_sshfwd enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS"
+            read -p "Mode (1: Bagher Hybrid Pool [PRO], 2: Direct SSH [Free]) [1]: " R_MODE
+            if [[ "$R_MODE" == "2" ]]; then
+                cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode direct
+            else
+                read -p "Enter Pool Count [25]: " R_POOL
+                R_POOL=${R_POOL:-25}
+                cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode bagher --pool-count "$R_POOL"
+            fi
             ;;
-        2) cli_sshfwd disable ;;
-        3) cli_sshfwd gen-key ;;
-        4) cli_sshfwd clear-dnat ;;
+        2) cli_bagher disable ;;
+        3) cli_bagher start ;;
+        4) cli_bagher stop ;;
+        5) cli_bagher restart ;;
+        6) cli_bagher logs ;;
+        7) cli_bagher gen-key ;;
+        8) cli_bagher clear-dnat ;;
         0) return 0 ;;
         *) echo -e "${RED}[!] Invalid option.${NC}" ;;
     esac
 }
+
+menu_sshfwd() { menu_bagher "$@"; }
 
 menu_panel() {
     while true; do
@@ -8113,20 +8130,33 @@ cli_carrier() {
     esac
 }
 
-cli_sshfwd() {
+cli_bagher() {
     local SUB="${1:-status}"
     case "$SUB" in
         status)
-            echo -e "${CYAN}=== Hashem SSH Forward Carrier Status ===${NC}"
+            echo -e "${CYAN}=== Hashem Bagher Engine [PRO] Status ===${NC}"
             local SVC_ACT="inactive"
-            systemctl is-active hashem-ssh-fwd.service >/dev/null 2>&1 && SVC_ACT="${GREEN}active (running)${NC}" || SVC_ACT="${YELLOW}inactive${NC}"
-            echo -e "SSH Carrier Service: $SVC_ACT"
+            if systemctl is-active hashem-bagher.service >/dev/null 2>&1; then
+                SVC_ACT="${GREEN}active (running)${NC} [hashem-bagher.service]"
+            elif systemctl is-active hashem-ssh-fwd.service >/dev/null 2>&1; then
+                SVC_ACT="${GREEN}active (running)${NC} [legacy: hashem-ssh-fwd.service]"
+            else
+                SVC_ACT="${YELLOW}inactive${NC}"
+            fi
+            echo -e "Bagher Service:     $SVC_ACT"
+
             local FRPS_ACT="inactive"
-            systemctl is-active hashem-ssh-frps.service >/dev/null 2>&1 && FRPS_ACT="${GREEN}active (running)${NC}" || FRPS_ACT="${YELLOW}inactive${NC}"
-            echo -e "FRP Server (pool engine): $FRPS_ACT"
+            if systemctl is-active hashem-bagher-frps.service >/dev/null 2>&1; then
+                FRPS_ACT="${GREEN}active (running)${NC} [hashem-bagher-frps.service]"
+            elif systemctl is-active hashem-ssh-frps.service >/dev/null 2>&1; then
+                FRPS_ACT="${GREEN}active (running)${NC} [legacy: hashem-ssh-frps.service]"
+            else
+                FRPS_ACT="${YELLOW}inactive${NC}"
+            fi
+            echo -e "Bagher FRP Engine:  $FRPS_ACT"
 
             if [ -f /etc/gre-panel/sshfwd.json ]; then
-                echo "Config: /etc/gre-panel/sshfwd.json"
+                echo -e "\nConfiguration (/etc/gre-panel/sshfwd.json):"
                 cat /etc/gre-panel/sshfwd.json | grep -E "mode|remote_host|ports|pool_count|frp_bind_port|enabled" || true
             fi
             echo -e "\nListening Ports:"
@@ -8138,12 +8168,12 @@ cli_sshfwd() {
                 fi
             done
             if nft list table inet hashem_dnat >/dev/null 2>&1; then
-                echo -e "${RED}[!] Conflict: table inet hashem_dnat is active. Run 'hashem ssh-fwd clear-dnat'${NC}"
+                echo -e "${RED}[!] Conflict: table inet hashem_dnat is active. Run 'hashem bagher clear-dnat'${NC}"
             fi
             ;;
         enable)
             shift
-            local REMOTE_HOST="" PORTS="443, 8443, 1020, 1030, 1040" SSH_PORT="22" USER="root" MODE="frp_ssh" POOL_COUNT="25" FRP_PORT="55400"
+            local REMOTE_HOST="" PORTS="443, 8443, 1020, 1030, 1040" SSH_PORT="22" USER="root" MODE="bagher" POOL_COUNT="25" FRP_PORT="55400"
             while [[ $# -gt 0 ]]; do
                 case "$1" in
                     --remote-host|--remote-pub|-r) REMOTE_HOST="$2"; shift 2 ;;
@@ -8174,25 +8204,27 @@ cli_sshfwd() {
             local PORT_OPT=""
             [[ "$SSH_PORT" != "22" && -n "$SSH_PORT" ]] && PORT_OPT="-p $SSH_PORT"
 
-            if [[ "$MODE" == "frp_ssh" ]]; then
-                echo -e "${CYAN}[*] Configuring FRP-over-SSH (poolCount=${POOL_COUNT}, frpPort=${FRP_PORT})...${NC}"
-                mkdir -p /etc/gre-panel/frp-ssh
-                cat <<EOF > /etc/gre-panel/frp-ssh/frps.toml
+            systemctl disable --now hashem-ssh-fwd.service hashem-ssh-frps.service >/dev/null 2>&1 || true
+
+            if [[ "$MODE" == "bagher" || "$MODE" == "frp_ssh" ]]; then
+                echo -e "${CYAN}[*] Configuring Bagher Engine [PRO] (poolCount=${POOL_COUNT}, frpPort=${FRP_PORT})...${NC}"
+                mkdir -p /etc/gre-panel/bagher
+                cat <<EOF > /etc/gre-panel/bagher/frps.toml
 bindAddr = "127.0.0.1"
 bindPort = ${FRP_PORT}
 proxyBindAddr = "0.0.0.0"
-auth.token = "hashem-frp-ssh-sec"
+auth.token = "hashem-bagher-sec"
 transport.tcpMux = false
 EOF
-                cat <<EOF > /etc/systemd/system/hashem-ssh-frps.service
+                cat <<EOF > /etc/systemd/system/hashem-bagher-frps.service
 [Unit]
-Description=Hashem FRP-over-SSH server (Iran)
+Description=Hashem Bagher Engine FRP Server (Iran)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/frps -c /etc/gre-panel/frp-ssh/frps.toml
+ExecStart=/usr/local/bin/frps -c /etc/gre-panel/bagher/frps.toml
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -8201,10 +8233,10 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
-                cat <<EOF > /etc/systemd/system/hashem-ssh-fwd.service
+                cat <<EOF > /etc/systemd/system/hashem-bagher.service
 [Unit]
-Description=Hashem FRP-over-SSH Carrier (Reverse SSH tunnel)
-After=network-online.target hashem-ssh-frps.service
+Description=Hashem Bagher Engine Carrier (Reverse SSH tunnel)
+After=network-online.target hashem-bagher-frps.service
 Wants=network-online.target
 
 [Service]
@@ -8217,9 +8249,9 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
                 systemctl daemon-reload
-                systemctl enable --now hashem-ssh-frps.service
-                systemctl enable --now hashem-ssh-fwd.service
-                echo -e "${GREEN}[✔] FRP-over-SSH carrier started and enabled.${NC}"
+                systemctl enable --now hashem-bagher-frps.service
+                systemctl enable --now hashem-bagher.service
+                echo -e "${GREEN}[✔] Bagher Engine [PRO] started and enabled.${NC}"
 
                 echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
                 echo -e "restrict,port-forwarding,permitlisten=\"127.0.0.1:${FRP_PORT}\" ${PUBKEY}\n"
@@ -8231,23 +8263,23 @@ EOF
                     [[ -n "$p" ]] && PROXY_CFG="${PROXY_CFG}\n[[proxies]]\nname = \"p$p\"\ntype = \"tcp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = $p\nremotePort = $p\n"
                 done
                 cat <<EOF
-mkdir -p /etc/gre-panel/frp-ssh && cat > /etc/gre-panel/frp-ssh/frpc.toml <<'EOF_FRPC'
+mkdir -p /etc/gre-panel/bagher && cat > /etc/gre-panel/bagher/frpc.toml <<'EOF_FRPC'
 serverAddr = "127.0.0.1"
 serverPort = ${FRP_PORT}
-auth.token = "hashem-frp-ssh-sec"
+auth.token = "hashem-bagher-sec"
 transport.tcpMux = false
 transport.poolCount = ${POOL_COUNT}
 $(echo -e "$PROXY_CFG")
 EOF_FRPC
-cat > /etc/systemd/system/hashem-frp-ssh-frpc.service <<'EOF_SVC'
+cat > /etc/systemd/system/hashem-bagher-frpc.service <<'EOF_SVC'
 [Unit]
-Description=Hashem FRP-over-SSH client (Foreign)
+Description=Hashem Bagher Engine Client (Foreign)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/frp-ssh/frpc.toml
+ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/bagher/frpc.toml
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -8255,7 +8287,7 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF_SVC
-systemctl daemon-reload && systemctl enable --now hashem-frp-ssh-frpc.service
+systemctl daemon-reload && systemctl enable --now hashem-bagher-frpc.service
 EOF
             else
                 local FWD_ARGS=""
@@ -8263,10 +8295,10 @@ EOF
                     p=$(echo "$p" | tr -d ' ')
                     [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L 0.0.0.0:$p:127.0.0.1:$p"
                 done
-                systemctl disable --now hashem-ssh-frps.service >/dev/null 2>&1 || true
-                cat <<EOF > /etc/systemd/system/hashem-ssh-fwd.service
+                systemctl disable --now hashem-bagher-frps.service >/dev/null 2>&1 || true
+                cat <<EOF > /etc/systemd/system/hashem-bagher.service
 [Unit]
-Description=Hashem SSH Forward Carrier (Direct SSH tunnel)
+Description=Hashem Bagher Engine Carrier (Direct SSH tunnel)
 After=network-online.target
 Wants=network-online.target
 
@@ -8280,7 +8312,7 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
                 systemctl daemon-reload
-                systemctl enable --now hashem-ssh-fwd.service
+                systemctl enable --now hashem-bagher.service
                 echo -e "${GREEN}[✔] Direct SSH Forward carrier service started and enabled.${NC}"
 
                 echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
@@ -8294,9 +8326,30 @@ EOF
             fi
             ;;
         disable)
+            systemctl disable --now hashem-bagher.service >/dev/null 2>&1 || true
+            systemctl disable --now hashem-bagher-frps.service >/dev/null 2>&1 || true
             systemctl disable --now hashem-ssh-fwd.service >/dev/null 2>&1 || true
             systemctl disable --now hashem-ssh-frps.service >/dev/null 2>&1 || true
-            echo -e "${YELLOW}[*] SSH Forward service disabled.${NC}"
+            echo -e "${YELLOW}[*] Bagher Engine service disabled.${NC}"
+            ;;
+        start)
+            systemctl start hashem-bagher.service 2>/dev/null || systemctl start hashem-ssh-fwd.service 2>/dev/null || true
+            systemctl start hashem-bagher-frps.service 2>/dev/null || true
+            echo -e "${GREEN}[✔] Bagher Engine service started.${NC}"
+            ;;
+        stop)
+            systemctl stop hashem-bagher.service 2>/dev/null || true
+            systemctl stop hashem-ssh-fwd.service 2>/dev/null || true
+            systemctl stop hashem-bagher-frps.service 2>/dev/null || true
+            echo -e "${YELLOW}[*] Bagher Engine service stopped.${NC}"
+            ;;
+        restart)
+            systemctl restart hashem-bagher.service 2>/dev/null || systemctl restart hashem-ssh-fwd.service 2>/dev/null || true
+            systemctl restart hashem-bagher-frps.service 2>/dev/null || true
+            echo -e "${GREEN}[✔] Bagher Engine service restarted.${NC}"
+            ;;
+        logs)
+            journalctl -u hashem-bagher.service -u hashem-ssh-fwd.service -n 50 --no-pager
             ;;
         gen-key)
             mkdir -p /root/.ssh
@@ -8312,11 +8365,13 @@ EOF
             echo -e "${GREEN}[✔] hashem_dnat cleared from nftables.${NC}"
             ;;
         *)
-            echo "Usage: hashem ssh-fwd [status|enable --remote-host IP [--mode frp_ssh|direct] [--pool-count 25] [--frp-port 55400] [--ports \"...\"]|disable|gen-key|clear-dnat]"
+            echo "Usage: hashem bagher [status|enable --remote-host IP [--mode bagher|direct] [--pool-count 25] [--frp-port 55400] [--ports \"...\"]|disable|start|stop|restart|logs|gen-key|clear-dnat]"
             return 1
             ;;
     esac
 }
+
+cli_sshfwd() { cli_bagher "$@"; }
 
 cli_license() {
     local SUB="${1:-status}"
@@ -8454,7 +8509,7 @@ if [[ $# -gt 0 ]]; then
         panel-tls) shift; panel_tls_issue "$@" ;;
         panel-remove-domain|panel-tls-remove) panel_tls_remove ;;
         carrier) shift; cli_carrier "$@" ;;
-        ssh-fwd|sshfwd) shift; cli_sshfwd "$@" ;;
+        bagher|hashem-bagher|ssh-fwd|sshfwd) shift; cli_bagher "$@" ;;
         license|lic) shift; cli_license "$@" ;;
         carrier-kernel-init) carrier_init_kernel ;;
         dial) shift; cli_dial "$@" ;;
