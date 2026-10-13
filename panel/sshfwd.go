@@ -261,6 +261,9 @@ webServer.password = "bagher-dash-local"
 
 // buildForeignSetupCommand creates a standalone shell command to be executed on Foreign host.
 func buildForeignSetupCommand(cfg SSHFwdConfig) string {
+	if len(cfg.Ports) == 0 {
+		return ""
+	}
 	frpcToml := buildFRPCConfig(cfg.FRPBindPort, cfg.PoolCount, cfg.Ports)
 	return fmt.Sprintf(`mkdir -p /etc/gre-panel/bagher
 cat > /etc/gre-panel/bagher/frpc.toml <<'EOF'
@@ -290,6 +293,7 @@ type BagherBundle struct {
 	Version      int    `json:"v"`
 	Role         string `json:"role"`
 	IranPub      string `json:"iran_pub"`
+	RemoteHost   string `json:"remote_host,omitempty"`
 	FRPPort      int    `json:"frp_port"`
 	Ports        []int  `json:"ports"`
 	Token        string `json:"token"`
@@ -300,7 +304,14 @@ type BagherBundle struct {
 }
 
 // MakeBagherBundle builds a portable encrypted/base64 string for zero-terminal Foreign setup.
+// It requires both remote host IP and forwarded ports to be set before generating a bundle.
 func MakeBagherBundle(cfg SSHFwdConfig, pubKey string) (string, error) {
+	if len(cfg.Ports) == 0 {
+		return "", fmt.Errorf("forwarded ports are required before generating bundle")
+	}
+	if strings.TrimSpace(cfg.RemoteHost) == "" {
+		return "", fmt.Errorf("remote host IP is required before generating bundle")
+	}
 	iranIP := detectPublicIP()
 	if iranIP == "" {
 		iranIP = cfg.BindAddr
@@ -309,6 +320,7 @@ func MakeBagherBundle(cfg SSHFwdConfig, pubKey string) (string, error) {
 		Version:      1,
 		Role:         "foreign",
 		IranPub:      iranIP,
+		RemoteHost:   strings.TrimSpace(cfg.RemoteHost),
 		FRPPort:      cfg.FRPBindPort,
 		Ports:        cfg.Ports,
 		Token:        "hashem-bagher-sec",
@@ -342,11 +354,14 @@ func ParseBagherBundle(bundleStr string) (*BagherBundle, error) {
 	if strings.TrimSpace(b.SSHPublicKey) == "" {
 		return nil, fmt.Errorf("bundle missing ssh_pub_key")
 	}
+	if len(b.Ports) == 0 {
+		return nil, fmt.Errorf("bundle contains no forwarded ports")
+	}
+	if strings.TrimSpace(b.IranPub) == "" && strings.TrimSpace(b.RemoteHost) == "" {
+		return nil, fmt.Errorf("bundle missing server IP")
+	}
 	if b.FRPPort <= 0 {
 		b.FRPPort = 55400
-	}
-	if len(b.Ports) == 0 {
-		b.Ports = []int{443, 8443, 1020, 1030, 1040}
 	}
 	if b.PoolCount <= 0 {
 		b.PoolCount = 25
@@ -434,6 +449,8 @@ WantedBy=multi-user.target
 	cfg.Ports = b.Ports
 	if b.IranPub != "" {
 		cfg.RemoteHost = b.IranPub
+	} else if b.RemoteHost != "" {
+		cfg.RemoteHost = b.RemoteHost
 	}
 	cfg.Enabled = true
 	cfg.LastStatus = "active"
@@ -728,8 +745,12 @@ func getSSHFwdStatus() map[string]any {
 		authLine = formatAuthorizedKeyLine(pubKey, cfg.Mode, cfg.FRPBindPort, cfg.Ports)
 	}
 
-	foreignCmd := buildForeignSetupCommand(cfg)
-	bundleStr, _ := MakeBagherBundle(cfg, pubKey)
+	foreignCmd := ""
+	bundleStr := ""
+	if len(cfg.Ports) > 0 && strings.TrimSpace(cfg.RemoteHost) != "" {
+		foreignCmd = buildForeignSetupCommand(cfg)
+		bundleStr, _ = MakeBagherBundle(cfg, pubKey)
+	}
 	metrics := getBagherLiveMetrics(cfg)
 
 	hasBagher := HasFeature("bagher") || HasFeature("frp_ssh")
@@ -783,6 +804,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Action      string `json:"action"`
 		Mode        string `json:"mode"`
+		Role        string `json:"role"`
 		RemoteHost  string `json:"remote_host"`
 		RemoteUser  string `json:"remote_user"`
 		SSHPort     int    `json:"ssh_port"`
@@ -833,6 +855,25 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
 			return
 		}
+		if body.RemoteHost != "" {
+			cfg.RemoteHost = strings.TrimSpace(body.RemoteHost)
+		}
+		if body.Ports != "" {
+			parsed := parsePorts(body.Ports)
+			if len(parsed) > 0 {
+				cfg.Ports = parsed
+			}
+		}
+		if len(cfg.Ports) == 0 {
+			writeAPIError(w, r, "E-SSHFWD-02", "Forwarded ports must be specified before generating bundle")
+			return
+		}
+		if strings.TrimSpace(cfg.RemoteHost) == "" {
+			writeAPIError(w, r, "E-SSHFWD-01", "Remote host IP must be specified before generating bundle")
+			return
+		}
+		_ = saveSSHFwdConfigLocked(cfg)
+
 		pub, err := ensureSSHFwdKey(cfg.KeyPath)
 		if err != nil {
 			writeAPIError(w, r, "E-SSHFWD-03", err.Error())
@@ -859,6 +900,11 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 
 	case "enable", "apply":
 		cfg.Mode = "bagher"
+		if body.Role != "" {
+			cfg.Role = strings.TrimSpace(body.Role)
+		} else if cfg.Role == "" || cfg.Role == "foreign" {
+			cfg.Role = "iran"
+		}
 		if body.RemoteHost != "" {
 			cfg.RemoteHost = strings.TrimSpace(body.RemoteHost)
 		}

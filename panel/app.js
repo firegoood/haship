@@ -6011,6 +6011,26 @@ async function loadSSHFwd() {
   }
 }
 
+let _bagherUserPickedRole = null;
+
+function setBagherRole(role) {
+  _bagherUserPickedRole = role;
+  const iran = role === 'iran';
+  if ($('bagherRoleIran')) $('bagherRoleIran').setAttribute('aria-pressed', iran ? 'true' : 'false');
+  if ($('bagherRoleForeign')) $('bagherRoleForeign').setAttribute('aria-pressed', !iran ? 'true' : 'false');
+  if ($('bagherRoleInput')) $('bagherRoleInput').value = role;
+  if ($('bagherIranWrap')) $('bagherIranWrap').hidden = !iran;
+  if ($('bagherForeignWrap')) $('bagherForeignWrap').hidden = iran;
+  if ($('bagherActiveRoleBadge')) {
+    $('bagherActiveRoleBadge').textContent = 'نقش: ' + (iran ? 'سرور ایران (Iran)' : 'سرور خارج (Foreign)');
+  }
+  if ($('bagherRoleHint')) {
+    $('bagherRoleHint').textContent = iran
+      ? 'سرور ایران ورودی ترافیک کاربران است، پورت‌ها را گوش می‌دهد و با تانل استتار به خارج متصل می‌کند.'
+      : 'سرور خارج محل اجرای سرویس و فیلترشکن است، ترافیک را از تانل تحویل گرفته و پردازش می‌کند.';
+  }
+}
+
 function renderSSHFwd() {
   const d = _sshfwdData || {};
   const active = !!d.is_active;
@@ -6024,6 +6044,31 @@ function renderSSHFwd() {
   if (toggleBtn) {
     toggleBtn.textContent = active ? 'Disable' : 'Enable';
     toggleBtn.className = 'hashem-btn ' + (active ? 'hashem-btn-danger' : 'hashem-btn-primary');
+  }
+
+  // Server role rendering
+  const serverRole = d.role === 'foreign' ? 'foreign' : 'iran';
+  if (!_bagherUserPickedRole) {
+    setBagherRole(serverRole);
+  } else {
+    setBagherRole(_bagherUserPickedRole);
+  }
+
+  const iranApplyBtn = $('bagherIranApplyBtn');
+  const iranStopBtn = $('bagherIranStopBtn');
+  const foreignConnectBtn = $('bagherForeignConnectBtn');
+  const foreignStopBtn = $('bagherForeignStopBtn');
+
+  if (active) {
+    if (iranApplyBtn) iranApplyBtn.textContent = '🔄 بروزرسانی سرور ایران و صدور مجدد باندل';
+    if (iranStopBtn) iranStopBtn.classList.remove('hidden');
+    if (foreignConnectBtn) foreignConnectBtn.textContent = '🔄 بروزرسانی اتصال در سرور خارج';
+    if (foreignStopBtn) foreignStopBtn.classList.remove('hidden');
+  } else {
+    if (iranApplyBtn) iranApplyBtn.textContent = '🚀 راه‌اندازی در سرور ایران و صدور باندل';
+    if (iranStopBtn) iranStopBtn.classList.add('hidden');
+    if (foreignConnectBtn) foreignConnectBtn.textContent = '⚡ اتصال به ایران و فعال‌سازی تانل در سرور خارج';
+    if (foreignStopBtn) foreignStopBtn.classList.add('hidden');
   }
 
   // Live health & metrics
@@ -6253,7 +6298,7 @@ async function sshfwdToggleClick() {
   }
 }
 
-async function sshfwdApplyClick() {
+async function bagherIranApplyClick() {
   const d = _sshfwdData || {};
   const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
   if (!isLicensed) {
@@ -6262,70 +6307,46 @@ async function sshfwdApplyClick() {
     return;
   }
   const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
-  const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() || 'root' : 'root';
-  const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '', 10) || 22;
   const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
-  const mode = 'bagher';
-  const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
-  const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
   if (!remote_host) {
-    toastErr('IP سرور خارج لازم است', 'لطفاً آدرس IP سرور خارج را وارد کنید.');
+    toastErr('IP سرور خارج لازم است', 'لطفاً آدرس IP سرور خارج را وارد نمایید.');
+    if ($('sshfwdRemoteHost')) $('sshfwdRemoteHost').focus();
     return;
   }
   if (!ports) {
     toastErr('پورت‌های فوروارد لازم است', 'لطفاً حداقل یک پورت برای عبور از تانل مشخص کنید (مثال: 443, 8443).');
+    if ($('sshfwdPorts')) $('sshfwdPorts').focus();
     return;
   }
+  const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() || 'root' : 'root';
+  const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '', 10) || 22;
+  const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
+  const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
+
   try {
-    await api('/api/sshfwd', { action: 'apply', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
-    toastOk('پورت‌ها با موفقیت اعمال شدند', 'باندل جدید تولید شد؛ لطفاً آن را کپی کرده و در پنل سرور خارج اعمال نمایید.');
+    toastOk('در حال راه‌اندازی...', 'در حال پیکربندی سرویس ایران و ایجاد باندل اتصال...');
+    await api('/api/sshfwd', {
+      action: 'enable',
+      mode: 'bagher',
+      role: 'iran',
+      remote_host,
+      remote_user,
+      ssh_port,
+      ports,
+      pool_count,
+      frp_bind_port
+    });
+    toastOk('سرور ایران راه‌اندازی شد', 'سرویس ایران فعال گردید و باندل اختصاصی در مرحله ۳ تولید شد.');
     await loadSSHFwd();
+    if ($('bagherIranBundleCard')) {
+      $('bagherIranBundleCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   } catch (err) {
-    toastErr('خطا در اعمال پورت‌ها', err.message || err);
+    toastErr('خطا در راه‌اندازی سرور ایران', err.message || err);
   }
 }
 
-async function sshfwdClearDnatClick() {
-  try {
-    await api('/api/sshfwd', { action: 'clear_dnat' });
-    toastOk('DNAT Conflicts Cleared', 'nftables hashem_dnat table removed.');
-    await loadSSHFwd();
-  } catch (err) {
-    toastErr('Clear DNAT Failed', err.message || err);
-  }
-}
-
-async function sshfwdSyncPeerClick() {
-  try {
-    await api('/api/sshfwd', { action: 'sync_peer' });
-    toastOk('Synced to Peer', 'Public key installed in remote authorized_keys with restrict & permitopen.');
-  } catch (err) {
-    toastErr('Peer Sync Failed', err.message || err);
-  }
-}
-
-function sshfwdCopyAuthClick() {
-  const t = $('sshfwdAuthLine');
-  if (t && t.value) {
-    copyTextSafe(t.value, 'کپی شد', 'کلید مجاز سرور خارج در کلیپ‌بورد کپی شد.');
-  }
-}
-
-function sshfwdCopyForeignClick() {
-  const t = $('sshfwdForeignCmd');
-  if (t && t.value) {
-    copyTextSafe(t.value, 'کپی شد', 'دستور راه‌اندازی سرور خارج در کلیپ‌بورد کپی شد.');
-  }
-}
-
-function bagherCopyBundleClick() {
-  const t = $('bagherBundleText');
-  if (t && t.value) {
-    copyTextSafe(t.value, 'باندل کپی شد', 'رشته اتصال باقر در کلیپ‌بورد ذخیره شد.');
-  }
-}
-
-async function bagherApplyBundleClick() {
+async function bagherForeignConnectClick() {
   const d = _sshfwdData || {};
   const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
   if (!isLicensed) {
@@ -6336,21 +6357,58 @@ async function bagherApplyBundleClick() {
   const input = $('bagherPasteBundleInput');
   const bundle = input ? input.value.trim() : '';
   if (!bundle) {
-    toastErr('باندل خالی است', 'لطفاً رشته باندل شروع شونده با BAGHER: را وارد کنید.');
+    toastErr('باندل خالی است', 'لطفاً رشته باندل دریافت شده از سرور ایران را در کادر بالا پیست کنید.');
+    if (input) input.focus();
     return;
   }
   try {
+    toastOk('در حال اتصال...', 'در حال اعمال تنظیمات و اتصال سرور خارج به ایران...');
     const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle });
-    toastOk('موتور باقر راه‌اندازی شد', res.message || 'سرور خارج با موفقیت و بدون ترمینال تنظیم شد!');
+    toastOk('سرور خارج متصل شد', res.message || 'سرور خارج با موفقیت به ایران متصل و تانل برقرار شد!');
     if (input) input.value = '';
     await loadSSHFwd();
   } catch (err) {
-    toastErr('خطا در اعمال باندل', err.message || String(err));
+    toastErr('خطا در اتصال به ایران', err.message || String(err));
   }
+}
+
+async function bagherStopTunnelClick() {
+  try {
+    toastOk('در حال توقف...', 'در حال متوقف‌سازی سرویس‌های تانل باقر...');
+    await api('/api/sshfwd', { action: 'disable' });
+    toastOk('تانل متوقف شد', 'سرویس تانل باقر با موفقیت غیرفعال شد.');
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('خطا در توقف تانل', err.message || err);
+  }
+}
+
+function bagherCopyBundleClick() {
+  const t = $('bagherBundleText');
+  const val = t ? t.value.trim() : '';
+  if (!val) {
+    toastErr('باندل موجود نیست', 'ابتدا در مرحله ۲ اطلاعات را پر کرده و دکمه «راه‌اندازی در سرور ایران» را بزنید.');
+    return;
+  }
+  copyTextSafe(val, 'باندل کپی شد', 'رشته اتصال باقر در کلیپ‌بورد ذخیره شد؛ اکنون در پنل خارج پیست نمایید.');
+}
+
+async function sshfwdApplyClick() {
+  await bagherIranApplyClick();
+}
+
+async function bagherApplyBundleClick() {
+  await bagherForeignConnectClick();
 }
 
 (function initSSHFwdEvents() {
   function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
+  on('bagherRoleIran', 'click', () => setBagherRole('iran'));
+  on('bagherRoleForeign', 'click', () => setBagherRole('foreign'));
+  on('bagherIranApplyBtn', 'click', bagherIranApplyClick);
+  on('bagherIranStopBtn', 'click', bagherStopTunnelClick);
+  on('bagherForeignConnectBtn', 'click', bagherForeignConnectClick);
+  on('bagherForeignStopBtn', 'click', bagherStopTunnelClick);
   on('sshfwdToggleBtn', 'click', sshfwdToggleClick);
   on('sshfwdApplyBtn', 'click', sshfwdApplyClick);
   on('sshfwdClearDnatBtn', 'click', sshfwdClearDnatClick);

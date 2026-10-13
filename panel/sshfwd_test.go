@@ -239,8 +239,17 @@ func TestBagherAPIEndpoints(t *testing.T) {
 		activeLicenseMu.Unlock()
 	}()
 
-	// Test get_bundle
-	body := `{"action":"get_bundle"}`
+	// Test get_bundle without remote_host (should fail with 400)
+	bodyNoHost := `{"action":"get_bundle"}`
+	reqNoHost := httptest.NewRequest("POST", "/api/sshfwd", strings.NewReader(bodyNoHost))
+	recNoHost := httptest.NewRecorder()
+	handleSSHFwdPost(recNoHost, reqNoHost)
+	if recNoHost.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for get_bundle without remote host, got %d", recNoHost.Code)
+	}
+
+	// Test get_bundle with valid remote_host and ports
+	body := `{"action":"get_bundle","remote_host":"91.107.174.173","ports":"443,8443"}`
 	req := httptest.NewRequest("POST", "/api/sshfwd", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	handleSSHFwdPost(rec, req)
