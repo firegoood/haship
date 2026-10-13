@@ -669,9 +669,10 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 			return fmt.Errorf("failed starting hashem-bagher-frps: %w", err)
 		}
 	}
-	if _, err := runCmd("systemctl", "enable", "--now", "hashem-bagher.service"); err != nil {
-		return fmt.Errorf("systemctl enable --now hashem-bagher failed: %w", err)
-	}
+	// Start carrier service asynchronously to avoid blocking HTTP response or timing out
+	go func() {
+		_, _ = runCmd("systemctl", "enable", "--now", "hashem-bagher.service")
+	}()
 
 	cfg.Enabled = true
 	cfg.LastStatus = "active"
@@ -947,7 +948,14 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-SSHFWD-04", err.Error())
 			return
 		}
-		writeJSON(w, map[string]any{"status": "ok", "message": "Bagher Engine enabled successfully", "status_data": getSSHFwdStatus()})
+		pubKey, _ := ensureSSHFwdKey(cfg.KeyPath)
+		bundleStr, _ := MakeBagherBundle(cfg, pubKey)
+		writeJSON(w, map[string]any{
+			"status":      "ok",
+			"message":     "Bagher Engine enabled successfully",
+			"bundle":      bundleStr,
+			"status_data": getSSHFwdStatus(),
+		})
 
 	case "disable", "stop":
 		if err := disableSSHFwd(); err != nil {

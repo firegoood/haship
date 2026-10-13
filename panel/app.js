@@ -217,6 +217,7 @@ function goTab(name) {
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
   if (name === 'terminal') termOnShow();
+  if (name === 'settings' || name === 'sshfwd') loadLicense();
   if (name === 'dashboard') {
     // tab was hidden: the rAF loop stopped itself; resume it without replaying
     // the draw-in animation (refreshDash() also redraws within 5s anyway).
@@ -5901,7 +5902,7 @@ async function bagherIranApplyClick() {
 
   try {
     toastOk('Initializing...', 'Configuring Iran service and generating connection bundle...');
-    await api('/api/sshfwd', {
+    const res = await api('/api/sshfwd', {
       action: 'enable',
       mode: 'bagher',
       role: 'iran',
@@ -5912,6 +5913,9 @@ async function bagherIranApplyClick() {
       pool_count,
       frp_bind_port
     });
+    if (res && res.bundle && $('bagherBundleText')) {
+      $('bagherBundleText').value = res.bundle;
+    }
     toastOk('Iran Server Ready', 'Iran service active. Connection bundle generated in Step 3.');
     await loadSSHFwd();
     if ($('bagherIranBundleCard')) {
@@ -6106,6 +6110,24 @@ function copyMachineHashClick() {
     copyTextSafe(el.value, 'Copied', 'Hardware machine hash copied to clipboard.');
   }
 }
+
+// Expose functions globally on window for inline onclick handlers
+window.openBagherLicModal = openBagherLicModal;
+window.closeBagherLicModal = closeBagherLicModal;
+window.cancelBagherLicModal = cancelBagherLicModal;
+window.activateBagherLicenseClick = activateBagherLicenseClick;
+window.bagherLicCopyMachineClick = bagherLicCopyMachineClick;
+window.bagherIranApplyClick = bagherIranApplyClick;
+window.bagherForeignConnectClick = bagherForeignConnectClick;
+window.bagherStopTunnelClick = bagherStopTunnelClick;
+window.bagherCopyBundleClick = bagherCopyBundleClick;
+window.setBagherRole = setBagherRole;
+window.sshfwdClearDnatClick = sshfwdClearDnatClick;
+window.sshfwdCopyForeignClick = sshfwdCopyForeignClick;
+window.sshfwdCopyAuthClick = sshfwdCopyAuthClick;
+window.activateLicenseClick = activateLicenseClick;
+window.deactivateLicenseClick = deactivateLicenseClick;
+window.copyMachineHashClick = copyMachineHashClick;
 
 (function initLicenseEvents() {
   function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }

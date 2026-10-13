@@ -1259,7 +1259,7 @@
           <p style="font-size:13px; color:#94a3b8; max-width:500px; margin:0 auto 20px auto; line-height:1.6;">
             Stealth obfuscation and multiplexed SSH key pool tunneling is exclusively provided in the Premium edition. Enter your license key to unlock.
           </p>
-          <button class="hashem-btn hashem-btn-primary" id="bagherOpenLicModalBtn" style="background:#0284c7; border-color:#0284c7; padding:8px 24px; font-size:14px; font-weight:600;">
+          <button class="hashem-btn hashem-btn-primary" id="bagherOpenLicModalBtn" onclick="openBagherLicModal()" style="background:#0284c7; border-color:#0284c7; padding:8px 24px; font-size:14px; font-weight:600;">
             🔑 Activate Bagher License
           </button>
         </div>
@@ -1287,10 +1287,10 @@
               Step 1: Which role does this server have?
             </label>
             <div class="qs-seg" role="group" aria-label="Bagher Server Role">
-              <button type="button" id="bagherRoleIran" aria-pressed="true" style="font-weight:700; padding:10px 20px; font-size:13px;">
+              <button type="button" id="bagherRoleIran" onclick="setBagherRole('iran')" aria-pressed="true" style="font-weight:700; padding:10px 20px; font-size:13px;">
                 🇮🇷 Iran Server — User Inbound Traffic
               </button>
-              <button type="button" id="bagherRoleForeign" aria-pressed="false" style="font-weight:700; padding:10px 20px; font-size:13px;">
+              <button type="button" id="bagherRoleForeign" onclick="setBagherRole('foreign')" aria-pressed="false" style="font-weight:700; padding:10px 20px; font-size:13px;">
                 🌍 Foreign Server — Exit Node &amp; Services
               </button>
             </div>
@@ -1345,13 +1345,13 @@
               </details>
 
               <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn" style="padding:10px 24px; font-size:14px; font-weight:700; background:#0284c7; border-color:#0284c7;">
+                <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn" onclick="bagherIranApplyClick()" style="padding:10px 24px; font-size:14px; font-weight:700; background:#0284c7; border-color:#0284c7;">
                   🚀 Initialize Iran Server &amp; Issue Bundle
                 </button>
-                <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherIranStopBtn" style="padding:10px 20px; font-size:13px; font-weight:600;">
+                <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherIranStopBtn" onclick="bagherStopTunnelClick()" style="padding:10px 20px; font-size:13px; font-weight:600;">
                   🛑 Stop Iran Tunnel
                 </button>
-                <button type="button" class="hashem-btn" id="sshfwdClearDnatBtn" style="padding:10px 16px; font-size:12px;">
+                <button type="button" class="hashem-btn" id="sshfwdClearDnatBtn" onclick="sshfwdClearDnatClick()" style="padding:10px 16px; font-size:12px;">
                   Clear DNAT Conflicts
                 </button>
               </div>
@@ -1363,7 +1363,7 @@
                 <span style="font-weight:700; font-size:15px; color:#38bdf8; display:flex; align-items:center; gap:8px;">
                   📦 Step 3: Generated Connection Bundle (Copy &amp; Paste into Foreign Server)
                 </span>
-                <button type="button" class="hashem-btn" id="bagherCopyBundleBtn" style="padding:7px 20px; font-size:13px; font-weight:700; background:#0284c7; color:#fff; border-color:#0284c7;">
+                <button type="button" class="hashem-btn" id="bagherCopyBundleBtn" onclick="bagherCopyBundleClick()" style="padding:7px 20px; font-size:13px; font-weight:700; background:#0284c7; color:#fff; border-color:#0284c7;">
                   📋 Copy Bundle
                 </button>
               </div>
@@ -1389,10 +1389,10 @@
               <div style="display:flex; flex-direction:column; gap:12px;">
                 <textarea id="bagherPasteBundleInput" class="hashem-input" rows="4" placeholder="BAGHER:eyJ2Ij...NDNd..." style="width:100%; min-height:90px; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.5); resize:vertical; padding:10px; border-radius:6px; color:#34d399; word-break:break-all;"></textarea>
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                  <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn" style="padding:10px 26px; font-weight:700; font-size:14px; background:#059669; border-color:#059669;">
+                  <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn" onclick="bagherForeignConnectClick()" style="padding:10px 26px; font-weight:700; font-size:14px; background:#059669; border-color:#059669;">
                     ⚡ Connect to Iran &amp; Start Foreign Tunnel
                   </button>
-                  <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn" style="padding:10px 20px; font-size:13px; font-weight:600;">
+                  <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn" onclick="bagherStopTunnelClick()" style="padding:10px 20px; font-size:13px; font-weight:600;">
                     🛑 Stop Foreign Tunnel
                   </button>
                 </div>
@@ -1408,12 +1408,12 @@
                 <div class="u-hint-12" style="margin-bottom:6px;">One-line Bash command to execute on headless Foreign server:</div>
                 <div style="position:relative; margin-bottom:12px;">
                   <textarea id="sshfwdForeignCmd" class="hashem-input" rows="3" readonly style="width:100%; font-family:monospace; font-size:11px; background:rgba(0,0,0,0.6);"></textarea>
-                  <button type="button" class="hashem-btn" id="sshfwdCopyForeignBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
+                  <button type="button" class="hashem-btn" id="sshfwdCopyForeignBtn" onclick="sshfwdCopyForeignClick()" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
                 </div>
                 <div class="u-hint-12" style="margin-bottom:6px;">Foreign server authorized_keys configuration line:</div>
                 <div style="position:relative;">
                   <textarea id="sshfwdAuthLine" class="hashem-input" rows="2" readonly style="width:100%; font-family:monospace; font-size:11px; background:rgba(0,0,0,0.6);"></textarea>
-                  <button type="button" class="hashem-btn" id="sshfwdCopyAuthBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
+                  <button type="button" class="hashem-btn" id="sshfwdCopyAuthBtn" onclick="sshfwdCopyAuthClick()" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
                 </div>
               </div>
             </details>
@@ -2394,7 +2394,7 @@
             <label for="licMachineHash">Server Hardware Fingerprint (Machine Hash)</label>
             <div style="display:flex; gap:8px;">
               <input class="hashem-input" id="licMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%;" placeholder="Calculating…">
-              <button class="hashem-btn" id="licCopyMachineBtn" style="white-space:nowrap;">Copy</button>
+              <button class="hashem-btn" id="licCopyMachineBtn" onclick="copyMachineHashClick()" style="white-space:nowrap;">Copy</button>
             </div>
             <div class="ent-help">Provide this fingerprint to your provider to issue or renew a hardware-locked license.</div>
           </div>
@@ -2409,8 +2409,8 @@
             <textarea class="hashem-input" id="licKeyInput" rows="3" placeholder="Paste your license token here (payload.signature)…" style="font-family:monospace; font-size:12px; resize:none;"></textarea>
           </div>
           <div style="display:flex; gap:8px;">
-            <button class="hashem-btn hashem-btn-primary" id="licActivateBtn">Activate License</button>
-            <button class="hashem-btn hashem-btn-secondary hidden" id="licDeactivateBtn">Deactivate</button>
+            <button class="hashem-btn hashem-btn-primary" id="licActivateBtn" onclick="activateLicenseClick()">Activate License</button>
+            <button class="hashem-btn hashem-btn-secondary hidden" id="licDeactivateBtn" onclick="deactivateLicenseClick()">Deactivate</button>
           </div>
         </div>
         <div class="tunnel-card">
@@ -2746,7 +2746,7 @@
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         Activate Bagher Engine [PRO] License
       </b>
-      <button class="ent-x" id="bagherLicModalClose" aria-label="Close">&#xD7;</button>
+      <button class="ent-x" id="bagherLicModalClose" onclick="closeBagherLicModal()" aria-label="Close">&#xD7;</button>
     </div>
     <div class="ent-modal-b" style="gap:14px; padding:18px;">
       <p class="u-m-0" style="font-size:13px; line-height:1.6; color:var(--text, #cbd5e1);">
@@ -2758,7 +2758,7 @@
         </label>
         <div style="display:flex; gap:8px;">
           <input class="hashem-input" id="bagherLicMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:#38bdf8; background:rgba(0,0,0,0.4);" placeholder="Checking...">
-          <button type="button" class="hashem-btn" id="bagherLicCopyMachineBtn" style="white-space:nowrap; padding:6px 14px;">📋 Copy Hash</button>
+          <button type="button" class="hashem-btn" id="bagherLicCopyMachineBtn" onclick="bagherLicCopyMachineClick()" style="white-space:nowrap; padding:6px 14px;">📋 Copy Hash</button>
         </div>
         <div class="u-hint-12 u-mt-4">Provide this machine hash to obtain or renew your license.</div>
       </div>
@@ -2770,8 +2770,8 @@
       </div>
     </div>
     <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:12px 18px;">
-      <button type="button" class="hashem-btn hashem-btn-ghost" id="bagherLicCancelBtn">Back to Dashboard</button>
-      <button type="button" class="hashem-btn hashem-btn-primary" id="bagherLicSubmitBtn" style="background:#0284c7; border-color:#0284c7; padding:7px 22px; font-weight:600;">
+      <button type="button" class="hashem-btn hashem-btn-ghost" id="bagherLicCancelBtn" onclick="cancelBagherLicModal()">Back to Dashboard</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" id="bagherLicSubmitBtn" onclick="activateBagherLicenseClick()" style="background:#0284c7; border-color:#0284c7; padding:7px 22px; font-weight:600;">
         ⚡ Activate License
       </button>
     </div>

@@ -25,18 +25,11 @@ var (
 	activeLicenseMu    sync.RWMutex
 	cachedMachineHash  string
 	machineHashOnce    sync.Once
-
-	defaultCommunityLicense = &LicensePayload{
-		Customer:    "Official Edition",
-		MachineHash: "*",
-		Features:    []string{"bagher", "frp_ssh", "watchdog", "all"},
-		ExpiresAt:   -1, // Permanent Lifetime
-		IssuedAt:    1700000000,
-	}
 )
 
 func init() {
-	activeLicense = defaultCommunityLicense
+	// Start un-licensed (Free Edition) until key is loaded or activated
+	activeLicense = nil
 }
 
 type LicensePayload struct {
@@ -145,24 +138,18 @@ func loadLicenseFromDisk() {
 	data, err := os.ReadFile(keyPath)
 	if err != nil {
 		activeLicenseMu.Lock()
-		if activeLicense == nil {
-			activeLicense = defaultCommunityLicense
-		}
+		activeLicense = nil
 		activeLicenseMu.Unlock()
 		return
 	}
 	payload, err := verifyLicenseKey(string(data))
+	activeLicenseMu.Lock()
 	if err == nil {
-		activeLicenseMu.Lock()
 		activeLicense = payload
-		activeLicenseMu.Unlock()
 	} else {
-		activeLicenseMu.Lock()
-		if activeLicense == nil {
-			activeLicense = defaultCommunityLicense
-		}
-		activeLicenseMu.Unlock()
+		activeLicense = nil
 	}
+	activeLicenseMu.Unlock()
 }
 
 // HasFeature returns true if the feature is unlocked by an active license.
@@ -233,7 +220,7 @@ func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		_ = os.Remove(filepath.Join(configDir, "license.key"))
 		activeLicenseMu.Lock()
-		activeLicense = defaultCommunityLicense
+		activeLicense = nil
 		activeLicenseMu.Unlock()
 		writeJSON(w, map[string]any{"status": "deactivated"})
 		return
