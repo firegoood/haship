@@ -69,6 +69,7 @@ type panelConfig struct {
 	// MetricsToken enables GET /metrics (Prometheus) for scrapers using a
 	// bearer token; empty = endpoint disabled (404).
 	MetricsToken   string   `json:"metrics_token,omitempty"`
+	LicenseKey     string   `json:"license_key,omitempty"`
 	TOTPEnabled    bool     `json:"totp_enabled,omitempty"`
 	TOTPSecret     string   `json:"totp_secret,omitempty"`
 	RecoveryHashes []string `json:"recovery_hashes,omitempty"`
@@ -525,6 +526,12 @@ func serveAsset(name, ctype string) http.HandlerFunc {
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
+	if authed(r) {
+		if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
+			csrfTok := GenerateCSRFToken(c.Value)
+			http.SetCookie(w, csrfCookie(r, csrfTok, 86400))
+		}
+	}
 	data, err := panelFS.ReadFile("index.html")
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)

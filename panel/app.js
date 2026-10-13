@@ -206,7 +206,6 @@ function goTab(name) {
   const dr = $('drawerNav');
   if (dr) dr.querySelectorAll('[data-tab]').forEach(markTab);
   if (name === 'sshfwd') {
-    _bagherModalDismissed = false;
     loadSSHFwd();
   }
   if (name === 'perf') { loadPerf(); loadCarrier(); }
@@ -314,8 +313,8 @@ const I18N = {
   en: {
     nav_dashboard: "Dashboard",
     nav_tunnel: "Tunnel",
-    nav_sshfwd: "Bagher PRO",
-    nav_bagher: "Bagher PRO",
+    nav_sshfwd: "Bagher",
+    nav_bagher: "Bagher",
     nav_setup: "Setup",
     nav_logs: "Logs",
     nav_perf: "Performance",
@@ -868,12 +867,57 @@ function renderPeers(peers) {
   if (!box) return;
   tunPeerCache = peers || null;
   try { renderTunChips(window._lastLocal || null); } catch(_){ /* chips are cosmetic; cards still render */ }
+  const b = (_sshfwdData || (window._lastDash && window._lastDash.bagher) || window._lastBagher || {});
+  const bagherUp = !!(b.is_active || b.enabled || b.connected);
+  const bagherHasCfg = !!(bagherUp || b.has_config || (b.remote_host && b.remote_host.length) || (Array.isArray(b.ports) && b.ports.length));
+  
+  let bagherCardHtml = '';
+  if (bagherHasCfg) {
+    const fwdPorts = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
+    const roleLabel = b.role === 'foreign' ? 'Foreign Client' : 'Iran Hub';
+    bagherCardHtml = `<div class="tunnel-card peer-card u-peer-card-wide" id="peer-card-bagher" style="border:1px solid rgba(16,185,129,0.3); background:linear-gradient(135deg, rgba(15,23,42,0.85) 0%, rgba(6,78,59,0.2) 100%);">
+      <div class="tc-header u-flex-wrap-gap8">
+        <div class="u-flex-center-gap10">
+          <span class="status-indicator ${bagherUp ? 'active' : 'offline'}"><span class="dot"></span></span>
+          <b class="u-fs-16-tx">Bagher Tunnel</b>
+          <span class="qs-hint mono">#stealth</span>
+          <span class="badge" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700">🟢 Bagher Engine</span>
+          <span class="badge" style="background:rgba(255,255,255,0.06);color:var(--mu);font-size:12px">${esc(roleLabel)}</span>
+          <span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'active' : 'inactive'}</span>
+        </div>
+      </div>
+      <div class="det-grid">
+        <div class="det-card">
+          <div class="det-card-head">${ICO_SRV} <span>Bagher Node</span></div>
+          <div class="det-row"><span class="det-k">Foreign Endpoint</span><span class="det-v mono">${esc(b.remote_host || '—')}</span></div>
+          <div class="det-row"><span class="det-k">Role</span><span class="det-v mono">${esc(roleLabel)}</span></div>
+          <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(fwdPorts)}</span></div>
+        </div>
+        <div class="det-card">
+          <div class="det-card-head">⚡ <span>Link Status</span></div>
+          <div class="det-row"><span class="det-k">Status</span><span class="det-v"><span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'Running' : 'Stopped'}</span></span></div>
+          <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono" style="color:#38bdf8">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : (bagherUp ? 'Optimal' : '—')}</span></div>
+          <div class="det-row"><span class="det-k">Services</span><span class="det-v mono">${esc(b.active_services || (bagherUp ? 'frps, frpc, ssh-fwd' : 'none'))}</span></div>
+        </div>
+      </div>
+      <div class="tc-acts u-flex-gap-8 u-mt-4">
+        <button class="hashem-btn hashem-btn-secondary" onclick="openBagherQuickEdit()">✏️ Quick Edit</button>
+        <button class="hashem-btn hashem-btn-secondary" onclick="goTab('sshfwd')">⚙️ Manage</button>
+        <button class="hashem-btn hashem-btn-danger" onclick="cleanBagherTunnelClick()">🗑️ Clean</button>
+      </div>
+    </div>`;
+  }
+
   if (!peers || !peers.length) {
-    box.innerHTML = '<div class="u-col-full">' + stateEmpty({ title: tr('empty_peers_title', 'No peer tunnels yet'), msg: tr('empty_peers_msg', 'Add one from Setup → Add another foreign server.'), icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>' }) + '</div>';
+    if (bagherCardHtml) {
+      box.innerHTML = bagherCardHtml;
+    } else {
+      box.innerHTML = '<div class="u-col-full">' + stateEmpty({ title: tr('empty_peers_title', 'No peer tunnels yet'), msg: tr('empty_peers_msg', 'Add one from Setup → Add another foreign server.'), icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>' }) + '</div>';
+    }
     return;
   }
   const stBadge = (ok, label) => `<span class="badge ${ok ? 'ok' : 'err'}"><span class="dot"></span>${esc(label)}</span>`;
-  box.innerHTML = peers.map(p => {
+  box.innerHTML = bagherCardHtml + peers.map(p => {
     const up = !!(p.gre_up || p.frp_up);
     const nm = p.name || ('peer-' + p.id);
     const traffic = (p.rx != null && p.tx != null)
@@ -1649,24 +1693,38 @@ async function refreshDash() {
     const nPeers = d.peer_count || 0;
     { const g0 = $('dashGrid'); if (g0) g0.classList.remove('dash-loading'); }
     const multi = nPeers > 0;
-    const statusText = d.health ? (d.health === 'HEALTHY' ? 'Healthy' : (d.health === 'DEGRADED' ? 'Degraded' : 'Down')) : (on ? 'Online' : 'Offline');
-    const statusColor = d.health ? (d.health === 'HEALTHY' ? 'var(--ok)' : (d.health === 'DEGRADED' ? 'var(--wr)' : 'var(--er)')) : (on ? 'var(--ok)' : 'var(--er)');
+    const bObj = d.bagher || {};
+    window._lastBagher = bObj;
+    const bagherUp = !!(bObj.is_active || bObj.enabled || bObj.connected);
+    let statusText = d.health ? (d.health === 'HEALTHY' ? 'Healthy' : (d.health === 'DEGRADED' ? 'Degraded' : 'Down')) : (on ? 'Online' : 'Offline');
+    let statusColor = d.health ? (d.health === 'HEALTHY' ? 'var(--ok)' : (d.health === 'DEGRADED' ? 'var(--wr)' : 'var(--er)')) : (on ? 'var(--ok)' : 'var(--er)');
+    if (bagherUp && (statusText === 'Down' || statusText === 'Offline')) {
+      statusText = 'Healthy';
+      statusColor = 'var(--ok)';
+    }
     set('kpiStatus', statusText);
     const kpiStatus = $('kpiStatus'); if (kpiStatus) kpiStatus.style.color = statusColor;
-    set('kpiStatusSub', (multi ? nPeers + ' tunnel' + (nPeers > 1 ? 's' : '') + ' · ' : '') + (d.role || 'unknown role') + ' · ' + (d.checked ? 'checked ' + String(d.checked).slice(11, 19) + ' UTC' : ''));
+    set('kpiStatusSub', (multi ? nPeers + ' tunnel' + (nPeers > 1 ? 's' : '') + ' · ' : (bagherUp && !nPeers ? 'Bagher tunnel · ' : '')) + (d.role || 'unknown role') + ' · ' + (d.checked ? 'checked ' + String(d.checked).slice(11, 19) + ' UTC' : ''));
     const g = d.gre || {}, f = d.frp || {};
     const peers = d.peers || [];
     const kpiLinks = $('kpiLinks');
     if (multi) {
       // multi-peer: count legs up
       const greUp = peers.filter(p => p.gre_up).length, frpUp = peers.filter(p => p.frp_up).length;
-      if (kpiLinks) kpiLinks.innerHTML = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE ' + greUp + '/' + nPeers + '</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP ' + frpUp + '/' + nPeers + '</span>';
+      let multiLinks = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE ' + greUp + '/' + nPeers + '</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP ' + frpUp + '/' + nPeers + '</span>';
+      if (bagherUp) {
+        multiLinks += ' <span class="badge ok" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700"><span class="dot"></span>Bagher</span>';
+      }
+      if (kpiLinks) kpiLinks.innerHTML = multiLinks;
     } else {
       const greUp = !!g.exists, frpUp = !!f.up;
-      let linksHtml = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP</span>';
-      const bObj = d.bagher || {};
-      if (bObj.is_active || bObj.enabled) {
-        linksHtml += ' <span class="badge ok" style="background:#0284c7;color:#fff;"><span class="dot"></span>BAGHER PRO</span>';
+      let linksHtml = '';
+      if (bagherUp) {
+        linksHtml += '<span class="badge ok" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700"><span class="dot"></span>Bagher</span>';
+      }
+      if (greUp || frpUp || !bagherUp) {
+        if (linksHtml) linksHtml += ' ';
+        linksHtml += '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP</span>';
       }
       if (kpiLinks) kpiLinks.innerHTML = linksHtml;
     }
@@ -1678,10 +1736,22 @@ async function refreshDash() {
       set('kpiPing', best != null ? Math.round(best) + 'ms' : NA);
       setHTML('kpiPingSub', best == null ? 'no answer' : best < 80 ? '<span class="badge ok"><span class="dot"></span>Optimal</span>' : best < 200 ? '<span class="badge ok"><span class="dot"></span>Good</span>' : '<span class="badge warn"><span class="dot"></span>High</span>');
     } else {
-      set('kpiLinksSub', (f.svc || 'no frp') + ((f.proxies || []).length ? ' · ' + f.proxies.length + ' proxies' : '') + ' · ' + (g.inner || 'no gre ip'));
+      if (bagherUp && !g.exists && !f.up) {
+        set('kpiLinksSub', 'Bagher stealth tunnel · ' + ((bObj.ports || []).length ? bObj.ports.length + ' forwarded ports' : 'active link') + ' · ' + (bObj.remote_host || 'connected'));
+      } else {
+        set('kpiLinksSub', (f.svc || 'no frp') + ((f.proxies || []).length ? ' · ' + f.proxies.length + ' proxies' : '') + ' · ' + (g.inner || 'no gre ip'));
+      }
       const ms = d.ping_ok && d.ping ? parseFloat(d.ping) : (d.health_state === 'healthy' && d.latency_ms >= 0 ? d.latency_ms : null);
-      set('kpiPing', d.ping_ok && d.ping ? d.ping : (ms != null ? Math.round(ms) + 'ms' : NA));
-      setHTML('kpiPingSub', (ms == null ? 'no answer' : ms < 80 ? '<span class="badge ok"><span class="dot"></span>Optimal</span>' : ms < 200 ? '<span class="badge ok"><span class="dot"></span>Good</span>' : '<span class="badge warn"><span class="dot"></span>High</span>') + (d.icmp_filtered ? icmpChip() : ''));
+      if (ms != null) {
+        set('kpiPing', d.ping_ok && d.ping ? d.ping : (Math.round(ms) + 'ms'));
+        setHTML('kpiPingSub', (ms < 80 ? '<span class="badge ok"><span class="dot"></span>Optimal</span>' : ms < 200 ? '<span class="badge ok"><span class="dot"></span>Good</span>' : '<span class="badge warn"><span class="dot"></span>High</span>') + (d.icmp_filtered ? icmpChip() : ''));
+      } else if (bagherUp && typeof bObj.latency_ms === 'number' && bObj.latency_ms > 0) {
+        set('kpiPing', Math.round(bObj.latency_ms) + 'ms');
+        setHTML('kpiPingSub', '<span class="badge ok"><span class="dot"></span>Optimal</span>');
+      } else {
+        set('kpiPing', NA);
+        setHTML('kpiPingSub', 'no answer');
+      }
     }
     const t = d.traffic || {};
     set('kpiTraffic', fmtBytes(t.total));
@@ -4915,7 +4985,9 @@ function uiObserve(s) {
   navBadge('tunnel', bad, (anyDown || (!peers.length && bad)) ? 'err' : 'warn', 'badge_tunnel');
   // onboarding: only when nothing is configured at all
   // `role` is always populated (it has a default), so it cannot signal "configured".
-  const empty = !peers.length && !(L.gre && L.gre.exists) && !L.frp_up;
+  const bObj = (_sshfwdData || (window._lastDash && window._lastDash.bagher) || window._lastBagher || {});
+  const bagherConfigured = !!(bObj.is_active || bObj.enabled || bObj.connected || bObj.has_config || (bObj.remote_host && bObj.remote_host.length) || (Array.isArray(bObj.ports) && bObj.ports.length));
+  const empty = !peers.length && !(L.gre && L.gre.exists) && !L.frp_up && !bagherConfigured;
   let dismissed = false; try { dismissed = localStorage.getItem('hashem_onb_done') === '1'; } catch (e) { /* storage blocked */ }
   const c = $('onbCard'); if (c) c.hidden = !empty || dismissed;
 }
@@ -5676,13 +5748,13 @@ function setBagherRole(role) {
 
 function renderSSHFwd() {
   const d = _sshfwdData || {};
-  const active = !!d.is_active;
+  const active = !!(d.is_active || d.enabled);
   const badge = $('sshfwdStatusBadge');
   const toggleBtn = $('sshfwdToggleBtn');
 
   if (badge) {
     badge.className = 'badge ' + (active ? 'ok' : 'info');
-    badge.textContent = active ? 'Active' : 'Inactive';
+    badge.textContent = active ? (d.connected ? 'Active' : 'Standby / Ready') : 'Inactive';
   }
   if (toggleBtn) {
     toggleBtn.textContent = active ? 'Disable' : 'Enable';
@@ -5724,7 +5796,7 @@ function renderSSHFwd() {
       connBadge.style.color = '#fff';
     } else if (active) {
       connBadge.className = 'badge warn';
-      connBadge.textContent = 'Waiting for Peer';
+      connBadge.textContent = d.role === 'foreign' ? 'Connecting to Iran...' : 'Ready (Waiting for Peer)';
       connBadge.style.background = '#f59e0b';
       connBadge.style.color = '#000';
     } else {
@@ -5791,7 +5863,9 @@ function renderSSHFwd() {
   if (authLine) authLine.value = d.auth_line || '';
 
   // Bagher Premium License Gate & UI blur/lock
-  const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
+  let savedLic = '';
+  try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
+  const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
   const bagherContainer = $('bagherCardContainer');
   const bagherLockedBanner = $('bagherLockedBanner');
   const bagherModal = $('bagherLicModal');
@@ -5815,7 +5889,7 @@ function renderSSHFwd() {
       bagherModal.hidden = false;
     }
   } else {
-    _bagherModalDismissed = false;
+    _bagherModalDismissed = true;
     if (bagherContainer) {
       bagherContainer.style.filter = '';
       bagherContainer.style.pointerEvents = '';
@@ -5882,6 +5956,13 @@ function openBagherLicModal() {
   if (_sshfwdData && _sshfwdData.machine_hash && $('bagherLicMachineHash')) {
     $('bagherLicMachineHash').value = _sshfwdData.machine_hash;
   }
+  const keyEl = $('bagherLicKeyInput');
+  if (keyEl && !keyEl.value) {
+    try {
+      const saved = localStorage.getItem('hashem_bagher_license');
+      if (saved) keyEl.value = saved;
+    } catch (e) {}
+  }
 }
 
 function closeBagherLicModal() {
@@ -5904,11 +5985,12 @@ async function activateBagherLicenseClick() {
   }
   try {
     const res = await api('/api/license', { key });
+    try { localStorage.setItem('hashem_bagher_license', key); } catch (e) {}
     toastOk('License Activated', 'Bagher Engine premium features unlocked successfully!');
     if (keyEl) keyEl.value = '';
     const m = $('bagherLicModal');
     if (m) m.hidden = true;
-    _bagherModalDismissed = false;
+    _bagherModalDismissed = true;
     await loadLicense();
     await loadSSHFwd();
   } catch (err) {
@@ -5925,7 +6007,23 @@ function bagherLicCopyMachineClick() {
 
 async function sshfwdToggleClick() {
   const d = _sshfwdData || {};
-  const active = !!d.is_active;
+  const active = !!(d.is_active || d.enabled);
+  if (!active) {
+    let savedLic = '';
+    try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
+    let isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
+    if (!isLicensed && savedLic) {
+      try {
+        await api('/api/license', { key: savedLic });
+        isLicensed = true;
+      } catch (e) {}
+    }
+    if (!isLicensed) {
+      openBagherLicModal();
+      toastErr('License Required', 'Bagher Engine requires an active premium license.');
+      return;
+    }
+  }
   try {
     if (active) {
       await api('/api/sshfwd', { action: 'disable' });
@@ -5963,7 +6061,15 @@ async function sshfwdToggleClick() {
 
 async function bagherIranApplyClick() {
   const d = _sshfwdData || {};
-  const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
+  let savedLic = '';
+  try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
+  let isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
+  if (!isLicensed && savedLic) {
+    try {
+      await api('/api/license', { key: savedLic });
+      isLicensed = true;
+    } catch (e) {}
+  }
   if (!isLicensed) {
     openBagherLicModal();
     toastErr('License Required', 'Bagher Engine requires an active premium license.');
@@ -6014,7 +6120,15 @@ async function bagherIranApplyClick() {
 
 async function bagherForeignConnectClick() {
   const d = _sshfwdData || {};
-  const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
+  let savedLic = '';
+  try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
+  let isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
+  if (!isLicensed && savedLic) {
+    try {
+      await api('/api/license', { key: savedLic });
+      isLicensed = true;
+    } catch (e) {}
+  }
   if (!isLicensed) {
     openBagherLicModal();
     toastErr('License Required', 'Bagher Engine requires an active premium license.');
@@ -6049,6 +6163,27 @@ async function bagherStopTunnelClick() {
   }
 }
 
+async function cleanBagherTunnelClick() {
+  const ok = confirm('Clean and purge Bagher Tunnel?\n\nThis will stop and remove all Bagher systemd services (frps, frpc, ssh-fwd), delete systemd service units, remove generated frp configs, clear firewall rules, and reset the tunnel to initial state. The SSH keypair is preserved.');
+  if (!ok) return;
+  try {
+    toastOk('Cleaning Tunnel', 'Purging Bagher services and configuration...');
+    const res = await api('/api/sshfwd', { action: 'clean' });
+    if (res && res.status === 'ok') {
+      toastOk('Tunnel Cleaned', 'Bagher tunnel has been completely reset.');
+      const bText = $('bagherBundleText'); if (bText) bText.value = '';
+      const bPast = $('bagherPasteBundleInput'); if (bPast) bPast.value = '';
+      await loadSSHFwd();
+      if (typeof refreshDash === 'function') await refreshDash();
+      if (typeof refreshTunnel === 'function') await refreshTunnel();
+    } else {
+      toastErr('Clean Failed', res ? res.message : 'Unknown error');
+    }
+  } catch (err) {
+    toastErr('Clean Error', err.message || err);
+  }
+}
+
 function bagherCopyBundleClick() {
   const t = $('bagherBundleText');
   const val = t ? t.value.trim() : '';
@@ -6073,8 +6208,10 @@ async function bagherApplyBundleClick() {
   on('bagherRoleForeign', 'click', () => setBagherRole('foreign'));
   on('bagherIranApplyBtn', 'click', bagherIranApplyClick);
   on('bagherIranStopBtn', 'click', bagherStopTunnelClick);
+  on('bagherIranCleanBtn', 'click', cleanBagherTunnelClick);
   on('bagherForeignConnectBtn', 'click', bagherForeignConnectClick);
   on('bagherForeignStopBtn', 'click', bagherStopTunnelClick);
+  on('bagherForeignCleanBtn', 'click', cleanBagherTunnelClick);
   on('sshfwdToggleBtn', 'click', sshfwdToggleClick);
   on('sshfwdApplyBtn', 'click', sshfwdApplyClick);
   on('sshfwdClearDnatBtn', 'click', sshfwdClearDnatClick);
@@ -6111,7 +6248,19 @@ let _licenseData = null;
 
 async function loadLicense() {
   try {
-    const d = await api('/api/license');
+    let d = await api('/api/license');
+    if (!d || !d.is_valid) {
+      let saved = null;
+      try { saved = localStorage.getItem('hashem_bagher_license'); } catch (e) {}
+      if (saved && saved.trim()) {
+        try {
+          const autoRes = await api('/api/license', { key: saved.trim() });
+          if (autoRes && autoRes.status === 'ok') {
+            d = await api('/api/license');
+          }
+        } catch (e) {}
+      }
+    }
     _licenseData = d;
     renderLicense(d);
   } catch (err) {
@@ -6126,8 +6275,12 @@ function renderLicense(d) {
   const badge = $('licBadge');
   const details = $('licActiveDetails');
   const deactBtn = $('licDeactivateBtn');
+  const brandEls = document.querySelectorAll('.sidebar-brand .brand-name, .drawer-head .brand-name, #sidebarBrandName, #drawerBrandName');
 
   if (d.is_valid) {
+    brandEls.forEach(el => {
+      el.innerHTML = 'Hashem <span class="badge" style="background:linear-gradient(135deg, #f59e0b, #ec4899); color:#fff; font-size:10px; font-weight:800; padding:2px 7px; border-radius:12px; letter-spacing:0.05em; vertical-align:middle; margin-left:6px; box-shadow:0 2px 8px rgba(245,158,11,0.4);">PRO</span>';
+    });
     if (badge) {
       badge.textContent = 'PREMIUM (Active)';
       badge.style.background = '#10b981';
@@ -6147,6 +6300,9 @@ function renderLicense(d) {
     }
     if ($('sshfwdLicBanner')) $('sshfwdLicBanner').classList.add('hidden');
   } else {
+    brandEls.forEach(el => {
+      el.textContent = 'Hashem';
+    });
     if (badge) {
       badge.textContent = 'FREE EDITION';
       badge.style.background = 'rgba(255,255,255,0.1)';
@@ -6169,6 +6325,7 @@ async function activateLicenseClick() {
   }
   try {
     const res = await api('/api/license', { key });
+    try { localStorage.setItem('hashem_bagher_license', key); } catch (e) {}
     toastOk('License Activated', 'Premium features unlocked for ' + (res.customer || 'this server') + '!');
     if (keyEl) keyEl.value = '';
     await loadLicense();
@@ -6182,6 +6339,7 @@ async function deactivateLicenseClick() {
   if (!confirm('Deactivate and remove current license? Premium features will lock.')) return;
   try {
     await api('/api/license', { key: '' });
+    try { localStorage.removeItem('hashem_bagher_license'); } catch (e) {}
     toastOk('License Removed', 'Reverted to Free edition.');
     await loadLicense();
     if (typeof loadSSHFwd === 'function') await loadSSHFwd();
@@ -6270,6 +6428,7 @@ window.bagherIranApplyClick = bagherIranApplyClick;
 window.bagherForeignConnectClick = bagherForeignConnectClick;
 window.bagherStopTunnelClick = bagherStopTunnelClick;
 window.bagherCopyBundleClick = bagherCopyBundleClick;
+window.cleanBagherTunnelClick = cleanBagherTunnelClick;
 window.openBagherQuickEdit = openBagherQuickEdit;
 window.closeBagherQuickEdit = closeBagherQuickEdit;
 window.saveBagherQuickEdit = saveBagherQuickEdit;
@@ -6295,6 +6454,11 @@ window.copyMachineHashClick = copyMachineHashClick;
       if (name === 'settings') loadLicense();
     };
   }
+  try {
+    if (localStorage.getItem('hashem_bagher_license')) {
+      renderLicense({ is_valid: true });
+    }
+  } catch(e) {}
   document.addEventListener('DOMContentLoaded', () => {
     loadLicense();
   });

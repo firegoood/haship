@@ -707,6 +707,38 @@ func disableSSHFwd() error {
 	return saveSSHFwdConfigLocked(cfg)
 }
 
+// cleanSSHFwd completely purges Bagher services, units, configs, and firewall rules while preserving SSH keys.
+func cleanSSHFwd() error {
+	_ = disableSSHFwd()
+	units := []string{
+		"/etc/systemd/system/hashem-bagher.service",
+		"/etc/systemd/system/hashem-bagher-frps.service",
+		"/etc/systemd/system/hashem-bagher-frpc.service",
+		"/etc/systemd/system/hashem-ssh-fwd.service",
+		"/etc/systemd/system/hashem-ssh-frps.service",
+	}
+	for _, u := range units {
+		_ = os.Remove(u)
+	}
+	_, _ = runCmd("systemctl", "daemon-reload")
+	_, _ = runCmd("systemctl", "reset-failed")
+
+	_ = os.Remove("/etc/gre-panel/bagher/frps.toml")
+	_ = os.Remove("/etc/gre-panel/bagher/frpc.toml")
+	_, _ = runCmd("nft", "delete", "table", "inet", "hashem_dnat")
+
+	cfg := loadSSHFwdConfigLocked()
+	cfg.Enabled = false
+	cfg.RemoteHost = ""
+	cfg.Ports = nil
+	cfg.Mode = "bagher"
+	cfg.LastStatus = "inactive"
+	cfg.LastError = ""
+	cfg.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	cfg.Role = ""
+	return saveSSHFwdConfigLocked(cfg)
+}
+
 // checkPortListening returns true if a TCP listener exists on bind:port.
 func checkPortListening(bind string, port int) bool {
 	target := net.JoinHostPort(bind, strconv.Itoa(port))
@@ -720,7 +752,14 @@ func checkPortListening(bind string, port int) bool {
 
 // getSSHFwdStatus returns runtime status of the forwarder.
 func getSSHFwdStatus() map[string]any {
-	cfg := loadSSHFwdConfig()
+	sshFwdMu.Lock()
+	defer sshFwdMu.Unlock()
+	return getSSHFwdStatusLocked()
+}
+
+// getSSHFwdStatusLocked returns runtime status when sshFwdMu is already held.
+func getSSHFwdStatusLocked() map[string]any {
+	cfg := loadSSHFwdConfigLocked()
 	pubKey, _ := ensureSSHFwdKey(cfg.KeyPath)
 
 	out, _ := runCmd("systemctl", "is-active", "hashem-bagher.service")
@@ -728,6 +767,12 @@ func getSSHFwdStatus() map[string]any {
 	if !isActive {
 		outFrpc, _ := runCmd("systemctl", "is-active", "hashem-bagher-frpc.service")
 		if strings.TrimSpace(outFrpc) == "active" {
+			isActive = true
+		}
+	}
+	if !isActive {
+		outFrps, _ := runCmd("systemctl", "is-active", "hashem-bagher-frps.service")
+		if strings.TrimSpace(outFrps) == "active" {
 			isActive = true
 		}
 	}
@@ -864,7 +909,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{
 			"status":      "ok",
 			"message":     "Bagher bundle applied successfully. Foreign client active.",
-			"status_data": getSSHFwdStatus(),
+			"status_data": getSSHFwdStatusLocked(),
 		})
 
 	case "get_bundle", "get-bundle":
@@ -970,7 +1015,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			"status":      "ok",
 			"message":     "Bagher Engine enabled successfully",
 			"bundle":      bundleStr,
-			"status_data": getSSHFwdStatus(),
+			"status_data": getSSHFwdStatusLocked(),
 		})
 
 	case "disable", "stop":
@@ -978,7 +1023,18 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-SSHFWD-04", err.Error())
 			return
 		}
-		writeJSON(w, map[string]any{"status": "ok", "message": "Bagher Engine disabled", "status_data": getSSHFwdStatus()})
+		writeJSON(w, map[string]any{"status": "ok", "message": "Bagher Engine disabled", "status_data": getSSHFwdStatusLocked()})
+
+	case "clean", "purge", "reset":
+		if err := cleanSSHFwd(); err != nil {
+			writeAPIError(w, r, "E-SSHFWD-07", err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{
+			"status":      "ok",
+			"message":     "Bagher tunnel cleaned and reset",
+			"status_data": getSSHFwdStatusLocked(),
+		})
 
 	case "sync_peer", "sync-peer":
 		pubKey, err := ensureSSHFwdKey(cfg.KeyPath)

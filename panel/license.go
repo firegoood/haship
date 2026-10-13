@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -132,20 +133,48 @@ func verifyLicenseKey(token string) (*LicensePayload, error) {
 	return &payload, nil
 }
 
-// loadLicenseFromDisk tries to load and verify the license file.
+// loadLicenseFromDisk tries to load and verify the license file from multiple locations.
 func loadLicenseFromDisk() {
-	keyPath := filepath.Join(configDir, "license.key")
-	data, err := os.ReadFile(keyPath)
-	if err != nil {
+	candidatePaths := []string{
+		filepath.Join(configDir, "license.key"),
+		"/etc/hashem/license.key",
+		"/root/.hashem/license.key",
+		"/root/.hashem-license/license.key",
+	}
+
+	var keyData []byte
+	for _, p := range candidatePaths {
+		if d, err := os.ReadFile(p); err == nil && len(bytes.TrimSpace(d)) > 0 {
+			keyData = d
+			break
+		}
+	}
+
+	if (len(bytes.TrimSpace(keyData)) == 0) && strings.TrimSpace(cfg.LicenseKey) != "" {
+		keyData = []byte(strings.TrimSpace(cfg.LicenseKey))
+	}
+
+	if len(bytes.TrimSpace(keyData)) == 0 {
 		activeLicenseMu.Lock()
 		activeLicense = nil
 		activeLicenseMu.Unlock()
 		return
 	}
-	payload, err := verifyLicenseKey(string(data))
+
+	keyStr := strings.TrimSpace(string(keyData))
+	payload, err := verifyLicenseKey(keyStr)
 	activeLicenseMu.Lock()
 	if err == nil {
 		activeLicense = payload
+		// Mirror key across persistent disk paths & config for redundancy
+		_ = os.MkdirAll(configDir, 0755)
+		_ = os.WriteFile(filepath.Join(configDir, "license.key"), []byte(keyStr), 0600)
+		_ = os.MkdirAll("/etc/hashem", 0755)
+		_ = os.WriteFile("/etc/hashem/license.key", []byte(keyStr), 0600)
+		if cfg.LicenseKey != keyStr {
+			cfg.LicenseKey = keyStr
+			saveCfg()
+		}
 	} else {
 		activeLicense = nil
 	}
@@ -155,15 +184,23 @@ func loadLicenseFromDisk() {
 // HasFeature returns true if the feature is unlocked by an active license.
 func HasFeature(feature string) bool {
 	activeLicenseMu.RLock()
-	defer activeLicenseMu.RUnlock()
+	lic := activeLicense
+	activeLicenseMu.RUnlock()
 
-	if activeLicense == nil {
+	if lic == nil {
+		loadLicenseFromDisk()
+		activeLicenseMu.RLock()
+		lic = activeLicense
+		activeLicenseMu.RUnlock()
+	}
+
+	if lic == nil {
 		return false
 	}
-	if activeLicense.ExpiresAt > 0 && time.Now().Unix() > activeLicense.ExpiresAt {
+	if lic.ExpiresAt > 0 && time.Now().Unix() > lic.ExpiresAt {
 		return false
 	}
-	for _, f := range activeLicense.Features {
+	for _, f := range lic.Features {
 		if f == "*" || f == "all" || strings.EqualFold(f, feature) {
 			return true
 		}
@@ -176,6 +213,13 @@ func handleLicenseGet(w http.ResponseWriter, r *http.Request) {
 	activeLicenseMu.RLock()
 	lic := activeLicense
 	activeLicenseMu.RUnlock()
+
+	if lic == nil {
+		loadLicenseFromDisk()
+		activeLicenseMu.RLock()
+		lic = activeLicense
+		activeLicenseMu.RUnlock()
+	}
 
 	mHash := getMachineHash()
 	res := map[string]any{
@@ -219,6 +263,9 @@ func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(req.Key)
 	if key == "" {
 		_ = os.Remove(filepath.Join(configDir, "license.key"))
+		_ = os.Remove("/etc/hashem/license.key")
+		cfg.LicenseKey = ""
+		saveCfg()
 		activeLicenseMu.Lock()
 		activeLicense = nil
 		activeLicenseMu.Unlock()
@@ -241,6 +288,10 @@ func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"error": "failed saving license to disk"})
 		return
 	}
+	_ = os.MkdirAll("/etc/hashem", 0755)
+	_ = os.WriteFile("/etc/hashem/license.key", []byte(key), 0600)
+	cfg.LicenseKey = key
+	saveCfg()
 
 	activeLicenseMu.Lock()
 	activeLicense = payload

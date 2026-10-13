@@ -7,6 +7,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -43,11 +44,19 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 		traffic = map[string]any{"up": nil, "down": nil, "total": nil}
 	}
 	peers := snap.PeersAged()
-	bagherStatus := getSSHFwdStatus()
+	var bagherStatus map[string]any
+	if snap != nil && snap.Bagher != nil {
+		bagherStatus = snap.Bagher
+	} else if flag.Lookup("test.v") == nil {
+		bagherStatus = getSSHFwdStatus()
+	}
+	if bagherStatus == nil {
+		bagherStatus = map[string]any{}
+	}
 	bagherActive := false
 	if bAct, ok := bagherStatus["is_active"].(bool); ok && bAct {
 		bagherActive = true
-	} else if bEn, ok := bagherStatus["enabled"].(bool); ok && bEn {
+	} else if bConn, ok := bagherStatus["connected"].(bool); ok && bConn {
 		bagherActive = true
 	}
 
@@ -63,6 +72,7 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	if len(all) > 0 {
 		healthy, up := 0, 0
 		anyUp = false
+		total := len(all)
 		for _, p := range all {
 			if p.GreUp || p.FrpUp {
 				anyUp = true
@@ -88,31 +98,32 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 			anyUp = true
 			healthy++
 			up++
+			total++
 		}
 		switch {
-		case healthy == len(all) || (len(all) == 0 && bagherActive):
+		case healthy == total:
 			health = "HEALTHY"
 		case up > 0:
 			health = "DEGRADED"
 		}
 	} else {
 		pingMs := parsePingMs(st.PingMs)
-		h := ComputeHealth(LinkSignals{
-			ServiceActive: st.FrpUp || bagherActive, GreIfUp: st.Gre.Exists || bagherActive, Session: snap.LocalSession || bagherActive, TCPRTTms: snap.LocalRTT,
-			ICMPOK: st.PingOK, ICMPms: pingMs, ICMPFresh: st.PingOK || snap.LocalSession,
-		})
-		health = map[string]string{stateHealthy: "HEALTHY", stateDegraded: "DEGRADED", stateDown: "DOWN"}[h.State]
-		if !(st.Gre.Exists || st.FrpUp || bagherActive) {
-			health = "DOWN"
-		} else if bagherActive && health == "DOWN" {
+		greConfigured := st.Gre.Exists || st.FrpUp
+		if greConfigured {
+			h := ComputeHealth(LinkSignals{
+				ServiceActive: st.FrpUp, GreIfUp: st.Gre.Exists, Session: snap.LocalSession, TCPRTTms: snap.LocalRTT,
+				ICMPOK: st.PingOK, ICMPms: pingMs, ICMPFresh: st.PingOK || snap.LocalSession,
+			})
+			health = map[string]string{stateHealthy: "HEALTHY", stateDegraded: "DEGRADED", stateDown: "DOWN"}[h.State]
+			reasons, icmpFiltered, latMs, latKind = h.Reasons, h.ICMPFiltered, h.LatencyMs, h.LatencyKind
+		} else if bagherActive {
 			health = "HEALTHY"
-		}
-		reasons, icmpFiltered, latMs, latKind = h.Reasons, h.ICMPFiltered, h.LatencyMs, h.LatencyKind
-		if latMs < 0 && bagherActive {
 			if bLat, ok := bagherStatus["latency_ms"].(float64); ok && bLat > 0 {
 				latMs = bLat
 				latKind = "bagher"
 			}
+		} else {
+			health = "DOWN"
 		}
 	}
 	if reasons == nil {

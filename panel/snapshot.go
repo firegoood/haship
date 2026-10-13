@@ -304,6 +304,7 @@ type HubSnapshot struct {
 	ActiveConns  any
 	PublicIP     string
 	FrpSince     string
+	Bagher       map[string]any
 }
 
 // AgeMs is the snapshot age in milliseconds, -1 for the empty snapshot.
@@ -436,6 +437,7 @@ func buildSnapshot() *HubSnapshot {
 	s.At = time.Now()
 	s.BuildMs = ms(time.Since(t0))
 	recordSampler("snapshot", time.Since(t0))
+	s.Bagher = getSSHFwdStatus()
 	return s
 }
 
