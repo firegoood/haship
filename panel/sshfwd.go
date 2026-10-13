@@ -769,8 +769,10 @@ func getSSHFwdStatus() map[string]any {
 	metrics := getBagherLiveMetrics(cfg)
 
 	hasBagher := HasFeature("bagher") || HasFeature("frp_ssh")
+	hasConfig := len(strings.TrimSpace(cfg.RemoteHost)) > 0 || len(cfg.Ports) > 0 || cfg.Enabled || isActive
 
 	return map[string]any{
+		"has_config":        hasConfig,
 		"enabled":           cfg.Enabled || isActive,
 		"is_active":         isActive,
 		"mode":              cfg.Mode,

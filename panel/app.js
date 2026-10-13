@@ -314,8 +314,8 @@ const I18N = {
   en: {
     nav_dashboard: "Dashboard",
     nav_tunnel: "Tunnel",
-    nav_sshfwd: "Bagher Engine [PRO]",
-    nav_bagher: "Bagher Engine [PRO]",
+    nav_sshfwd: "Bagher PRO",
+    nav_bagher: "Bagher PRO",
     nav_setup: "Setup",
     nav_logs: "Logs",
     nav_perf: "Performance",
@@ -1727,17 +1727,23 @@ async function refreshDash() {
         set('dashBagherPorts', portsStr);
         const bBadge = $('dashBagherStatusBadge');
         if (bBadge) {
-          bBadge.className = 'badge ' + (b.connected ? 'ok' : 'ok');
-          set('dashBagherStatusText', b.connected ? 'Connected' : 'Active');
+          if (b.connected) {
+            bBadge.className = 'badge ok';
+            set('dashBagherStatusText', 'Connected');
+          } else {
+            bBadge.className = 'badge warn';
+            set('dashBagherStatusText', 'Waiting for Peer');
+          }
         }
       } else {
         dashBagherCard.classList.add('hidden');
       }
     }
+    const hasBagherConfigOrActive = !!(bagherActive || b.has_config || (b.remote_host && b.remote_host.length > 0) || (Array.isArray(b.ports) && b.ports.length > 0));
     if (tunBagherCard) {
-      if (bagherActive) {
+      if (hasBagherConfigOrActive) {
         tunBagherCard.classList.remove('hidden');
-        set('tunBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal');
+        set('tunBagherPing', bagherActive ? ((typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal') : 'Standby');
         set('tunBagherForeign', b.remote_host || '—');
         const portsStr = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
         set('tunBagherPorts', portsStr);
@@ -1746,8 +1752,16 @@ async function refreshDash() {
         set('tunBagherTotal', fmtBytes(tot));
         const tbBadge = $('tunBagherStatusBadge');
         if (tbBadge) {
-          tbBadge.className = 'badge ' + (b.connected ? 'ok' : 'ok');
-          set('tunBagherStatusText', b.connected ? 'Connected' : 'Active');
+          if (b.connected) {
+            tbBadge.className = 'badge ok';
+            set('tunBagherStatusText', 'Connected');
+          } else if (bagherActive) {
+            tbBadge.className = 'badge warn';
+            set('tunBagherStatusText', 'Waiting for Peer');
+          } else {
+            tbBadge.className = 'badge dim';
+            set('tunBagherStatusText', 'Stopped');
+          }
         }
       } else {
         tunBagherCard.classList.add('hidden');
@@ -5727,7 +5741,11 @@ function renderSSHFwd() {
     $('bagherLatencyVal').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : '—';
   }
   if ($('bagherLivePing')) {
-    $('bagherLivePing').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : 'Optimal';
+    if (active) {
+      $('bagherLivePing').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : 'Optimal';
+    } else {
+      $('bagherLivePing').textContent = 'Standby';
+    }
   }
   if ($('bagherTrafficTotal')) {
     $('bagherTrafficTotal').textContent = d.total_formatted || '0 B';
@@ -5742,7 +5760,11 @@ function renderSSHFwd() {
     $('bagherLiveTotal').textContent = d.total_formatted || '0 B';
   }
   if ($('bagherLiveSockets')) {
-    $('bagherLiveSockets').textContent = (d.pool_count || 25) + ' Active';
+    if (active) {
+      $('bagherLiveSockets').textContent = (d.pool_count || 25) + ' Active';
+    } else {
+      $('bagherLiveSockets').textContent = `0 Active (Pool: ${d.pool_count || 25})`;
+    }
   }
   if ($('bagherConnsVal')) {
     $('bagherConnsVal').textContent = String(d.cur_conns || 0);
