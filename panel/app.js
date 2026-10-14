@@ -3690,10 +3690,6 @@ async function loadCarrier() {
       cms.innerHTML = opts.map(o => `<option value="${o.v}" ${o.v === curActive ? 'selected' : ''}>${o.t}</option>`).join('');
     }
 
-    if ($('carrierPortsInput') && document.activeElement !== $('carrierPortsInput')) {
-      $('carrierPortsInput').value = (curPorts && curPorts.length > 0) ? curPorts.join(', ') : '443, 55555';
-    }
-
     if ($('carrierWSSPortInput') && s.wss_port && document.activeElement !== $('carrierWSSPortInput')) {
       $('carrierWSSPortInput').value = s.wss_port;
     }
@@ -5821,6 +5817,15 @@ async function savePeerConfigClick() {
 // ---------- SSH Forward Carrier (tab-sshfwd) ----------
 let _sshfwdData = null;
 
+let lastBagherBytesRx = 0, lastBagherBytesTx = 0, lastBagherTime = 0;
+function formatSpeedRate(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s';
+  const k = 1024;
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  const i = Math.min(Math.floor(Math.log(bytesPerSec) / Math.log(k)), sizes.length - 1);
+  return (bytesPerSec / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+}
+
 async function loadSSHFwd() {
   try {
     _sshfwdData = await api('/api/sshfwd');
@@ -5929,8 +5934,23 @@ function renderSSHFwd() {
   if ($('bagherTrafficUpDown')) {
     $('bagherTrafficUpDown').textContent = `↓ ${d.rx_formatted || '0 B'}  ↑ ${d.tx_formatted || '0 B'}`;
   }
+  const now = Date.now();
+  let rxSpeedStr = '0 B/s', txSpeedStr = '0 B/s';
+  const curRx = typeof d.rx_bytes === 'number' ? d.rx_bytes : 0;
+  const curTx = typeof d.tx_bytes === 'number' ? d.tx_bytes : 0;
+  if (lastBagherTime && now > lastBagherTime) {
+    const deltaSec = (now - lastBagherTime) / 1000;
+    if (deltaSec >= 0.5) {
+      if (curRx >= lastBagherBytesRx) rxSpeedStr = formatSpeedRate((curRx - lastBagherBytesRx) / deltaSec);
+      if (curTx >= lastBagherBytesTx) txSpeedStr = formatSpeedRate((curTx - lastBagherBytesTx) / deltaSec);
+    }
+  }
+  lastBagherBytesRx = curRx;
+  lastBagherBytesTx = curTx;
+  lastBagherTime = now;
+
   if ($('bagherLiveSpeed')) {
-    $('bagherLiveSpeed').textContent = `↓ ${d.rx_formatted || '0 B/s'}  ↑ ${d.tx_formatted || '0 B/s'}`;
+    $('bagherLiveSpeed').textContent = `↓ ${rxSpeedStr}  ↑ ${txSpeedStr}`;
   }
   if ($('bagherLiveTotal')) {
     $('bagherLiveTotal').textContent = d.total_formatted || '0 B';
@@ -6317,14 +6337,10 @@ async function bagherApplyBundleClick() {
   on('bagherForeignConnectBtn', 'click', bagherForeignConnectClick);
   on('bagherForeignStopBtn', 'click', bagherStopTunnelClick);
   on('bagherForeignCleanBtn', 'click', cleanBagherTunnelClick);
-  on('sshfwdToggleBtn', 'click', sshfwdToggleClick);
-  on('sshfwdApplyBtn', 'click', sshfwdApplyClick);
   on('sshfwdClearDnatBtn', 'click', sshfwdClearDnatClick);
-  on('sshfwdSyncPeerBtn', 'click', sshfwdSyncPeerClick);
   on('sshfwdCopyAuthBtn', 'click', sshfwdCopyAuthClick);
   on('sshfwdCopyForeignBtn', 'click', sshfwdCopyForeignClick);
   on('bagherCopyBundleBtn', 'click', bagherCopyBundleClick);
-  on('bagherApplyBundleBtn', 'click', bagherApplyBundleClick);
 
   // License Modal events
   on('bagherLicModalClose', 'click', closeBagherLicModal);
@@ -6403,7 +6419,7 @@ function renderLicense(d) {
     if ($('licFeaturesRow')) {
       $('licFeaturesRow').textContent = 'Unlocked Features: ' + (d.features && d.features.length ? d.features.join(', ') : 'All');
     }
-    if ($('sshfwdLicBanner')) $('sshfwdLicBanner').classList.add('hidden');
+    if ($('bagherLockedBanner')) $('bagherLockedBanner').classList.add('hidden');
   } else {
     brandEls.forEach(el => {
       el.textContent = 'Hashem';
@@ -6415,8 +6431,8 @@ function renderLicense(d) {
     }
     if (details) details.classList.add('hidden');
     if (deactBtn) deactBtn.classList.add('hidden');
-    if ($('sshfwdLicBanner') && $('sshfwdMode') && ($('sshfwdMode').value === 'bagher' || $('sshfwdMode').value === 'frp_ssh')) {
-      $('sshfwdLicBanner').classList.remove('hidden');
+    if ($('bagherLockedBanner') && $('sshfwdMode') && ($('sshfwdMode').value === 'bagher' || $('sshfwdMode').value === 'frp_ssh')) {
+      $('bagherLockedBanner').classList.remove('hidden');
     }
   }
 }
@@ -6645,8 +6661,82 @@ function renderClusterUI(data) {
     }
   }
 
+  // Foreign Nodes List (Kharej Pool)
+  const foreignNodes = Array.isArray(data.foreign_nodes) ? data.foreign_nodes : Object.values(data.foreign_nodes || {});
+  if ($('clusterForeignCount')) $('clusterForeignCount').textContent = foreignNodes.length;
+  const fContainer = $('clusterForeignList');
+  if (fContainer) {
+    if (foreignNodes.length === 0) {
+      fContainer.innerHTML = `
+        <div style="grid-column:1/-1; text-align:center; padding:24px 16px; background:rgba(0,0,0,0.25); border:1px dashed rgba(2,132,199,0.25); border-radius:10px;">
+          <div style="font-size:22px; margin-bottom:6px;">🌐</div>
+          <div style="font-weight:700; color:#cbd5e1; font-size:13px; margin-bottom:4px;">No Foreign Exit Servers Configured</div>
+          <div style="font-size:12px; color:#94a3b8; max-width:440px; margin:0 auto 10px auto;">
+            Add your foreign servers here to monitor latency, auto-failover, or manually switch exit paths.
+          </div>
+          <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddForeignModal()" style="font-size:11px; padding:5px 14px; background:#0284c7; border-color:#0284c7;">
+            + Add Foreign Exit Server
+          </button>
+        </div>`;
+    } else {
+      let fhtml = '';
+      foreignNodes.forEach(fn => {
+        const isActive = (fn.id === data.active_foreign) || !!fn.is_active;
+        const isHealthy = !!fn.is_healthy;
+        const latency = fn.latency_ms ? `${fn.latency_ms.toFixed(1)} ms` : '--';
+
+        fhtml += `
+          <div style="background:rgba(15,23,42,0.7); border:1px solid ${isActive ? '#0284c7' : 'rgba(2,132,199,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                <div>
+                  <div style="font-weight:700; color:#f8fafc; font-size:14px; display:flex; align-items:center; gap:6px;">
+                    <span>🌐</span> ${escapeHtml(fn.name || fn.id)}
+                  </div>
+                  <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${escapeHtml(fn.id)}</div>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  ${isActive ? `<span class="badge info" style="font-size:9px; font-weight:800; background:#0284c7; color:#fff;">ACTIVE</span>` : ''}
+                  <span class="badge ${isHealthy ? 'ok' : 'err'}" style="font-size:10px; font-weight:700;">${isHealthy ? 'UP' : 'DOWN'}</span>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
+                <div>
+                  <span style="color:#94a3b8;">Public IP:</span>
+                  <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${escapeHtml(fn.public_ip || '--')}</div>
+                </div>
+                <div>
+                  <span style="color:#94a3b8;">Port / Proto:</span>
+                  <div style="font-family:monospace; color:#38bdf8; font-weight:600;">${fn.tunnel_port || 55354} / ${(fn.protocol || 'wss').toUpperCase()}</div>
+                </div>
+                <div>
+                  <span style="color:#94a3b8;">TCP Latency:</span>
+                  <div style="font-family:monospace; color:#34d399; font-weight:600;">${latency}</div>
+                </div>
+                <div>
+                  <span style="color:#94a3b8;">Status:</span>
+                  <div style="font-weight:600; color:${isHealthy ? '#34d399' : '#f87171'};">${isHealthy ? 'Reachable' : 'Unreachable'}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
+              ${isActive
+                ? `<span style="font-size:11px; color:#38bdf8; font-weight:700;">✓ In Use</span>`
+                : `<button class="hashem-btn" onclick="switchClusterForeign('${escapeHtml(fn.id)}')" style="font-size:11px; padding:4px 10px; background:rgba(2,132,199,0.2); border-color:#0284c7; color:#38bdf8;">Switch to This</button>`
+              }
+              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign('${escapeHtml(fn.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove foreign node">&#128465;</button>
+            </div>
+          </div>
+        `;
+      });
+      fContainer.innerHTML = fhtml;
+    }
+  }
+
   // Nodes List
-  const nodes = data.nodes || [];
+  const nodes = Array.isArray(data.nodes) ? data.nodes : Object.values(data.nodes || {});
   if ($('clusterNodeCount')) $('clusterNodeCount').textContent = nodes.length;
 
   const container = $('clusterNodesList');
@@ -6851,11 +6941,73 @@ async function revertClusterFailover() {
   }
 }
 
+function openClusterAddForeignModal() {
+  $('clusterForeignID').value = '';
+  $('clusterForeignName').value = '';
+  $('clusterForeignIP').value = '';
+  $('clusterForeignPort').value = '55354';
+  $('clusterForeignProtocol').value = 'wss';
+  $('clusterForeignModal').hidden = false;
+}
+
+function closeClusterAddForeignModal() {
+  $('clusterForeignModal').hidden = true;
+}
+
+async function submitClusterAddForeign() {
+  const id = ($('clusterForeignID').value || '').trim();
+  const name = ($('clusterForeignName').value || '').trim();
+  const public_ip = ($('clusterForeignIP').value || '').trim();
+  const tunnel_port = parseInt(($('clusterForeignPort').value || '55354').trim(), 10) || 55354;
+  const protocol = ($('clusterForeignProtocol').value || 'wss').trim();
+
+  if (!id || !public_ip) {
+    toastMsg('err', 'Node ID and Public IP are required');
+    return;
+  }
+
+  try {
+    await api('/api/cluster/foreign/add', { id, name, public_ip, tunnel_port, protocol });
+    toastMsg('ok', 'Foreign exit node added to pool');
+    closeClusterAddForeignModal();
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to add foreign node: ' + (err.message || err));
+  }
+}
+
+async function deleteClusterForeign(id) {
+  if (!confirm(`Remove foreign exit node "${id}" from the pool?`)) return;
+  try {
+    await api('/api/cluster/foreign/delete', { id });
+    toastMsg('ok', 'Foreign exit node removed');
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to remove foreign node: ' + (err.message || err));
+  }
+}
+
+async function switchClusterForeign(targetId) {
+  if (!confirm(`Switch active exit tunnel to "${targetId}"?`)) return;
+  try {
+    await api('/api/cluster/foreign/switch', { target_id: targetId });
+    toastMsg('ok', `Active foreign exit switched to ${targetId}`);
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to switch foreign node: ' + (err.message || err));
+  }
+}
+
 window.loadClusterStatus = loadClusterStatus;
 window.openClusterAddNodeModal = openClusterAddNodeModal;
 window.closeClusterAddNodeModal = closeClusterAddNodeModal;
 window.submitClusterAddNode = submitClusterAddNode;
 window.deleteClusterNode = deleteClusterNode;
+window.openClusterAddForeignModal = openClusterAddForeignModal;
+window.closeClusterAddForeignModal = closeClusterAddForeignModal;
+window.submitClusterAddForeign = submitClusterAddForeign;
+window.deleteClusterForeign = deleteClusterForeign;
+window.switchClusterForeign = switchClusterForeign;
 window.openClusterConfigModal = openClusterConfigModal;
 window.closeClusterConfigModal = closeClusterConfigModal;
 window.generateClusterSecret = generateClusterSecret;

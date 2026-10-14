@@ -227,3 +227,128 @@ func TestClusterStatusLicenseGate(t *testing.T) {
 		t.Errorf("expected 402 Payment Required on node add when unlicensed, got %d", w2.Code)
 	}
 }
+
+func TestClusterMultiForeignConfig(t *testing.T) {
+	_, cleanup := setupClusterTest(t)
+	defer cleanup()
+
+	cfg := loadClusterConfig()
+	if cfg.ForeignNodes == nil {
+		t.Fatalf("expected ForeignNodes map to be initialized")
+	}
+
+	cfg.ForeignNodes["foreign-de"] = ForeignNode{
+		ID:         "foreign-de",
+		Name:       "Frankfurt Exit",
+		PublicIP:   "91.107.174.173",
+		TunnelPort: 55354,
+		Protocol:   "wss",
+		IsActive:   true,
+	}
+	cfg.ActiveForeign = "foreign-de"
+
+	if err := saveClusterConfig(cfg); err != nil {
+		t.Fatalf("saveClusterConfig failed: %v", err)
+	}
+
+	clusterMu.Lock()
+	clusterCache = nil
+	clusterMu.Unlock()
+
+	reloaded := loadClusterConfig()
+	if len(reloaded.ForeignNodes) != 1 {
+		t.Fatalf("expected 1 foreign node, got %d", len(reloaded.ForeignNodes))
+	}
+	if reloaded.ActiveForeign != "foreign-de" {
+		t.Fatalf("expected active_foreign 'foreign-de', got '%s'", reloaded.ActiveForeign)
+	}
+	fn := reloaded.ForeignNodes["foreign-de"]
+	if fn.PublicIP != "91.107.174.173" || fn.TunnelPort != 55354 || fn.Protocol != "wss" {
+		t.Errorf("unexpected foreign node fields: %+v", fn)
+	}
+}
+
+func TestClusterForeignNodeEndpoints(t *testing.T) {
+	_, cleanup := setupClusterTest(t)
+	defer cleanup()
+
+	// 1. Without license -> 402
+	activeLicenseMu.Lock()
+	activeLicense = nil
+	activeLicenseMu.Unlock()
+
+	bodyAdd := []byte(`{"id":"fn-1","name":"Kharej 1","public_ip":"198.51.100.1","tunnel_port":55354,"protocol":"wss"}`)
+	req := httptest.NewRequest("POST", "/api/cluster/foreign/add", bytes.NewReader(bodyAdd))
+	w := httptest.NewRecorder()
+	handleClusterForeignNodeAdd(w, req)
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("expected 402, got %d", w.Code)
+	}
+
+	// 2. With license
+	activeLicenseMu.Lock()
+	activeLicense = &LicensePayload{
+		Customer:  "Test",
+		Features:  []string{"cluster"},
+		ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
+	}
+	activeLicenseMu.Unlock()
+	defer func() {
+		activeLicenseMu.Lock()
+		activeLicense = nil
+		activeLicenseMu.Unlock()
+	}()
+
+	// Add foreign node 1
+	req2 := httptest.NewRequest("POST", "/api/cluster/foreign/add", bytes.NewReader(bodyAdd))
+	w2 := httptest.NewRecorder()
+	handleClusterForeignNodeAdd(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// Add foreign node 2
+	bodyAdd2 := []byte(`{"id":"fn-2","name":"Kharej 2","public_ip":"198.51.100.2","tunnel_port":55354,"protocol":"gre"}`)
+	req3 := httptest.NewRequest("POST", "/api/cluster/foreign/add", bytes.NewReader(bodyAdd2))
+	w3 := httptest.NewRecorder()
+	handleClusterForeignNodeAdd(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w3.Code)
+	}
+
+	cfg := loadClusterConfig()
+	if len(cfg.ForeignNodes) != 2 {
+		t.Fatalf("expected 2 foreign nodes, got %d", len(cfg.ForeignNodes))
+	}
+	if cfg.ActiveForeign != "fn-1" {
+		t.Fatalf("expected active foreign fn-1, got %s", cfg.ActiveForeign)
+	}
+
+	// Switch active to fn-2
+	bodySwitch := []byte(`{"target_id":"fn-2"}`)
+	reqSwitch := httptest.NewRequest("POST", "/api/cluster/foreign/switch", bytes.NewReader(bodySwitch))
+	wSwitch := httptest.NewRecorder()
+	handleClusterForeignSwitch(wSwitch, reqSwitch)
+	if wSwitch.Code != http.StatusOK {
+		t.Fatalf("expected 200 on switch, got %d", wSwitch.Code)
+	}
+
+	cfg = loadClusterConfig()
+	if cfg.ActiveForeign != "fn-2" {
+		t.Fatalf("expected active foreign fn-2 after switch, got %s", cfg.ActiveForeign)
+	}
+
+	// Delete fn-1
+	bodyDel := []byte(`{"id":"fn-1"}`)
+	reqDel := httptest.NewRequest("POST", "/api/cluster/foreign/delete", bytes.NewReader(bodyDel))
+	wDel := httptest.NewRecorder()
+	handleClusterForeignNodeDelete(wDel, reqDel)
+	if wDel.Code != http.StatusOK {
+		t.Fatalf("expected 200 on delete, got %d", wDel.Code)
+	}
+
+	cfg = loadClusterConfig()
+	if len(cfg.ForeignNodes) != 1 {
+		t.Fatalf("expected 1 foreign node left, got %d", len(cfg.ForeignNodes))
+	}
+}

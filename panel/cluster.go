@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -25,11 +26,26 @@ type ClusterConfig struct {
 	ClusterSecret  string                 `json:"cluster_secret"`
 	PublicIP       string                 `json:"public_ip"`
 	ServicePorts   []int                  `json:"service_ports"`
-	Nodes          map[string]ClusterNode `json:"nodes"`
+	Nodes          map[string]ClusterNode `json:"nodes"`         // Peer Iran Hubs
+	ForeignNodes   map[string]ForeignNode `json:"foreign_nodes"` // Foreign Exit Nodes Pool
+	ActiveForeign  string                 `json:"active_foreign,omitempty"`
 	AutoFailover   bool                   `json:"auto_failover"`
 	ActiveFailover string                 `json:"active_failover,omitempty"` // Target NodeID if currently redirected
 	FailoverTarget string                 `json:"failover_target,omitempty"` // Target Public IP
 	Updated        string                 `json:"updated,omitempty"`
+}
+
+// ForeignNode represents an exit foreign server in the cluster pool.
+type ForeignNode struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	PublicIP   string    `json:"public_ip"`
+	TunnelPort int       `json:"tunnel_port"`
+	Protocol   string    `json:"protocol"` // "gre", "wss", "bagher"
+	IsActive   bool      `json:"is_active"`
+	IsHealthy  bool      `json:"is_healthy"`
+	LatencyMs  float64   `json:"latency_ms"`
+	LastProbe  time.Time `json:"last_probe"`
 }
 
 // ClusterNode represents a remote Iran hub peer in the cluster.
@@ -76,6 +92,7 @@ func defaultClusterConfig() ClusterConfig {
 		PublicIP:      "",
 		ServicePorts:  []int{443, 8443, 2083},
 		Nodes:         make(map[string]ClusterNode),
+		ForeignNodes:  make(map[string]ForeignNode),
 		AutoFailover:  true,
 	}
 }
@@ -109,6 +126,9 @@ func loadClusterConfig() ClusterConfig {
 	if c.Nodes == nil {
 		c.Nodes = make(map[string]ClusterNode)
 	}
+	if c.ForeignNodes == nil {
+		c.ForeignNodes = make(map[string]ForeignNode)
+	}
 	if len(c.ServicePorts) == 0 {
 		c.ServicePorts = []int{443, 8443, 2083}
 	}
@@ -123,6 +143,9 @@ func saveClusterConfig(c ClusterConfig) error {
 	c.Updated = time.Now().Format("2006-01-02 15:04:05")
 	if c.Nodes == nil {
 		c.Nodes = make(map[string]ClusterNode)
+	}
+	if c.ForeignNodes == nil {
+		c.ForeignNodes = make(map[string]ForeignNode)
 	}
 
 	_ = os.MkdirAll(configDir, 0700)
@@ -179,6 +202,8 @@ func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 		FailoverTarget string                 `json:"failover_target"`
 		LocalTunnel    map[string]any         `json:"local_tunnel"`
 		Nodes          map[string]ClusterNode `json:"nodes"`
+		ForeignNodes   map[string]ForeignNode `json:"foreign_nodes"`
+		ActiveForeign  string                 `json:"active_foreign"`
 		Updated        string                 `json:"updated"`
 	}
 
@@ -197,8 +222,10 @@ func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 			"loss_pct":   localLoss,
 			"latency_ms": localLat,
 		},
-		Nodes:   cfg.Nodes,
-		Updated: cfg.Updated,
+		Nodes:         cfg.Nodes,
+		ForeignNodes:  cfg.ForeignNodes,
+		ActiveForeign: cfg.ActiveForeign,
+		Updated:       cfg.Updated,
 	}
 
 	writeJSON(w, resp)
@@ -360,6 +387,140 @@ func handleClusterNodeDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
+// handleClusterForeignNodeAdd adds or updates a foreign exit node.
+func handleClusterForeignNodeAdd(w http.ResponseWriter, r *http.Request) {
+	if !isClusterLicensed() {
+		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
+		return
+	}
+
+	var req struct {
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		PublicIP   string `json:"public_ip"`
+		TunnelPort int    `json:"tunnel_port"`
+		Protocol   string `json:"protocol"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	req.ID = strings.TrimSpace(req.ID)
+	req.PublicIP = strings.TrimSpace(req.PublicIP)
+	if req.ID == "" || req.PublicIP == "" {
+		http.Error(w, `{"error":"id and public_ip are required"}`, http.StatusBadRequest)
+		return
+	}
+	if req.TunnelPort <= 0 {
+		req.TunnelPort = 55354
+	}
+	if req.Protocol == "" {
+		req.Protocol = "wss"
+	}
+
+	cfg := loadClusterConfig()
+	fn := ForeignNode{
+		ID:         req.ID,
+		Name:       req.Name,
+		PublicIP:   req.PublicIP,
+		TunnelPort: req.TunnelPort,
+		Protocol:   req.Protocol,
+		IsActive:   len(cfg.ForeignNodes) == 0,
+		LastProbe:  time.Now(),
+	}
+
+	status, lat := probeForeignNodeHealth(fn)
+	fn.IsHealthy = (status == "UP")
+	fn.LatencyMs = lat
+
+	if cfg.ForeignNodes == nil {
+		cfg.ForeignNodes = make(map[string]ForeignNode)
+	}
+	cfg.ForeignNodes[req.ID] = fn
+	if cfg.ActiveForeign == "" {
+		cfg.ActiveForeign = req.ID
+	}
+
+	if err := saveClusterConfig(cfg); err != nil {
+		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{"status": "ok", "foreign_node": fn})
+}
+
+// handleClusterForeignNodeDelete removes a foreign exit node from the pool.
+func handleClusterForeignNodeDelete(w http.ResponseWriter, r *http.Request) {
+	if !isClusterLicensed() {
+		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
+		return
+	}
+
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	cfg := loadClusterConfig()
+	delete(cfg.ForeignNodes, req.ID)
+	if cfg.ActiveForeign == req.ID {
+		cfg.ActiveForeign = ""
+		for k, fn := range cfg.ForeignNodes {
+			cfg.ActiveForeign = k
+			fn.IsActive = true
+			cfg.ForeignNodes[k] = fn
+			break
+		}
+	}
+
+	if err := saveClusterConfig(cfg); err != nil {
+		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// handleClusterForeignSwitch switches the active foreign exit node.
+func handleClusterForeignSwitch(w http.ResponseWriter, r *http.Request) {
+	if !isClusterLicensed() {
+		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
+		return
+	}
+
+	var req struct {
+		TargetID string `json:"target_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	cfg := loadClusterConfig()
+	target, exists := cfg.ForeignNodes[req.TargetID]
+	if !exists {
+		http.Error(w, `{"error":"target foreign node not found"}`, http.StatusBadRequest)
+		return
+	}
+
+	for k, fn := range cfg.ForeignNodes {
+		fn.IsActive = (k == req.TargetID)
+		cfg.ForeignNodes[k] = fn
+	}
+	cfg.ActiveForeign = req.TargetID
+
+	if err := saveClusterConfig(cfg); err != nil {
+		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]any{"status": "ok", "active_foreign": target.ID})
+}
+
 // handleClusterHeartbeat is the inter-node endpoint for gossip and status exchange.
 func handleClusterHeartbeat(w http.ResponseWriter, r *http.Request) {
 	cfg := loadClusterConfig()
@@ -491,8 +652,35 @@ func sendClusterHeartbeat(apiURL string, secret string, req ClusterHeartbeatPayl
 	return &res, lat, nil
 }
 
+// probeForeignNodeHealth performs a synthetic TCP connection test to the foreign exit node.
+func probeForeignNodeHealth(node ForeignNode) (status string, latency float64) {
+	if node.PublicIP == "" || node.TunnelPort <= 0 {
+		return "UNKNOWN", 0
+	}
+	addr := net.JoinHostPort(node.PublicIP, strconv.Itoa(node.TunnelPort))
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		return "DOWN", 0
+	}
+	_ = conn.Close()
+	lat := float64(time.Since(start).Microseconds()) / 1000.0
+	return "UP", lat
+}
+
 // getLocalTunnelStatus inspects the local machine's connection to Kharej.
 func getLocalTunnelStatus() (status string, loss float64, latency float64) {
+	cfg := loadClusterConfig()
+	if cfg.ActiveForeign != "" && len(cfg.ForeignNodes) > 0 {
+		if fn, ok := cfg.ForeignNodes[cfg.ActiveForeign]; ok {
+			s, lat := probeForeignNodeHealth(fn)
+			if s == "UP" {
+				return "UP", 0, lat
+			}
+			return "DOWN", 100.0, 0
+		}
+	}
+
 	peer := loadPeerConfig()
 	if peer.PeerURL != "" {
 		if peer.IsConnected {
@@ -512,16 +700,35 @@ func getLocalTunnelStatus() (status string, loss float64, latency float64) {
 		return "DOWN", 100.0, 0
 	}
 
-	return "UP", 0, 1.0 // Default healthy state if unconfigured
+	// Active check: can we reach internet DNS / gateway?
+	conn, err := net.DialTimeout("tcp", "1.1.1.1:53", 2*time.Second)
+	if err == nil {
+		_ = conn.Close()
+		return "UP", 0, 5.0
+	}
+
+	return "DOWN", 100.0, 0
 }
 
-// applyClusterFailover adds safe iptables DNAT/MASQUERADE rules to forward incoming client ports.
+func ensureClusterChains() {
+	_ = exec.Command("iptables", "-t", "nat", "-N", "HASHEM-CLUSTER-PREROUTING").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-N", "HASHEM-CLUSTER-POSTROUTING").Run()
+
+	if err := exec.Command("iptables", "-t", "nat", "-C", "PREROUTING", "-j", "HASHEM-CLUSTER-PREROUTING").Run(); err != nil {
+		_ = exec.Command("iptables", "-t", "nat", "-I", "PREROUTING", "1", "-j", "HASHEM-CLUSTER-PREROUTING").Run()
+	}
+	if err := exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-j", "HASHEM-CLUSTER-POSTROUTING").Run(); err != nil {
+		_ = exec.Command("iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-j", "HASHEM-CLUSTER-POSTROUTING").Run()
+	}
+}
+
+// applyClusterFailover adds safe iptables DNAT/MASQUERADE rules inside dedicated HASHEM-CLUSTER chains.
 func applyClusterFailover(cfg *ClusterConfig, target ClusterNode) error {
 	if target.PublicIP == "" {
 		return fmt.Errorf("target node has no public IP")
 	}
 
-	// Clean any previous rules first
+	ensureClusterChains()
 	_ = clearClusterFailover(cfg)
 
 	// Enable IP forwarding
@@ -529,13 +736,12 @@ func applyClusterFailover(cfg *ClusterConfig, target ClusterNode) error {
 
 	for _, port := range cfg.ServicePorts {
 		pStr := strconv.Itoa(port)
-		// PREROUTING TCP
-		_ = exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", pStr, "-j", "DNAT", "--to-destination", target.PublicIP+":"+pStr).Run()
-		// PREROUTING UDP
-		_ = exec.Command("iptables", "-t", "nat", "-A", "PREROUTING", "-p", "udp", "--dport", pStr, "-j", "DNAT", "--to-destination", target.PublicIP+":"+pStr).Run()
-		// POSTROUTING MASQUERADE
-		_ = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-d", target.PublicIP, "-p", "tcp", "--dport", pStr, "-j", "MASQUERADE").Run()
-		_ = exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-d", target.PublicIP, "-p", "udp", "--dport", pStr, "-j", "MASQUERADE").Run()
+		// HASHEM-CLUSTER-PREROUTING TCP & UDP
+		_ = exec.Command("iptables", "-t", "nat", "-A", "HASHEM-CLUSTER-PREROUTING", "-p", "tcp", "--dport", pStr, "-j", "DNAT", "--to-destination", target.PublicIP+":"+pStr).Run()
+		_ = exec.Command("iptables", "-t", "nat", "-A", "HASHEM-CLUSTER-PREROUTING", "-p", "udp", "--dport", pStr, "-j", "DNAT", "--to-destination", target.PublicIP+":"+pStr).Run()
+		// HASHEM-CLUSTER-POSTROUTING MASQUERADE
+		_ = exec.Command("iptables", "-t", "nat", "-A", "HASHEM-CLUSTER-POSTROUTING", "-d", target.PublicIP, "-p", "tcp", "--dport", pStr, "-j", "MASQUERADE").Run()
+		_ = exec.Command("iptables", "-t", "nat", "-A", "HASHEM-CLUSTER-POSTROUTING", "-d", target.PublicIP, "-p", "udp", "--dport", pStr, "-j", "MASQUERADE").Run()
 	}
 
 	cfg.ActiveFailover = target.ID
@@ -544,22 +750,11 @@ func applyClusterFailover(cfg *ClusterConfig, target ClusterNode) error {
 	return nil
 }
 
-// clearClusterFailover removes iptables rerouting rules.
+// clearClusterFailover removes iptables rerouting rules cleanly by flushing dedicated chains.
 func clearClusterFailover(cfg *ClusterConfig) error {
-	if cfg.FailoverTarget == "" && cfg.ActiveFailover == "" {
-		return nil
-	}
-
-	targetIP := cfg.FailoverTarget
-	for _, port := range cfg.ServicePorts {
-		pStr := strconv.Itoa(port)
-		if targetIP != "" {
-			_ = exec.Command("iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "--dport", pStr, "-j", "DNAT", "--to-destination", targetIP+":"+pStr).Run()
-			_ = exec.Command("iptables", "-t", "nat", "-D", "PREROUTING", "-p", "udp", "--dport", pStr, "-j", "DNAT", "--to-destination", targetIP+":"+pStr).Run()
-			_ = exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-d", targetIP, "-p", "tcp", "--dport", pStr, "-j", "MASQUERADE").Run()
-			_ = exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-d", targetIP, "-p", "udp", "--dport", pStr, "-j", "MASQUERADE").Run()
-		}
-	}
+	ensureClusterChains()
+	_ = exec.Command("iptables", "-t", "nat", "-F", "HASHEM-CLUSTER-PREROUTING").Run()
+	_ = exec.Command("iptables", "-t", "nat", "-F", "HASHEM-CLUSTER-POSTROUTING").Run()
 
 	cfg.ActiveFailover = ""
 	cfg.FailoverTarget = ""
@@ -578,7 +773,32 @@ func startClusterMonitor() {
 		}
 
 		cfg := loadClusterConfig()
-		if !cfg.Enabled || len(cfg.Nodes) == 0 || cfg.ClusterSecret == "" {
+		if !cfg.Enabled || (len(cfg.Nodes) == 0 && len(cfg.ForeignNodes) == 0) {
+			continue
+		}
+
+		// Probe foreign nodes pool
+		if len(cfg.ForeignNodes) > 0 {
+			var fwg sync.WaitGroup
+			for fid, fnode := range cfg.ForeignNodes {
+				fwg.Add(1)
+				go func(id string, fn ForeignNode) {
+					defer fwg.Done()
+					status, lat := probeForeignNodeHealth(fn)
+					clusterMu.Lock()
+					if existing, ok := cfg.ForeignNodes[id]; ok {
+						existing.IsHealthy = (status == "UP")
+						existing.LatencyMs = lat
+						existing.LastProbe = time.Now()
+						cfg.ForeignNodes[id] = existing
+					}
+					clusterMu.Unlock()
+				}(fid, fnode)
+			}
+			fwg.Wait()
+		}
+
+		if len(cfg.Nodes) == 0 || cfg.ClusterSecret == "" {
 			continue
 		}
 
@@ -671,6 +891,14 @@ func cliCluster(args []string) int {
 		fmt.Printf("Peer Nodes:       %d\n", len(cfg.Nodes))
 		for id, node := range cfg.Nodes {
 			fmt.Printf(" - %s (%s, %s): Healthy=%v, Tunnel=%s\n", id, node.Name, node.PublicIP, node.IsHealthy, node.TunnelStatus)
+		}
+		fmt.Printf("Foreign Nodes:    %d (Active: %s)\n", len(cfg.ForeignNodes), cfg.ActiveForeign)
+		for id, fnode := range cfg.ForeignNodes {
+			activeMark := ""
+			if id == cfg.ActiveForeign || fnode.IsActive {
+				activeMark = " [ACTIVE]"
+			}
+			fmt.Printf(" - %s (%s, %s:%d/%s)%s: Healthy=%v, Latency=%.1fms\n", id, fnode.Name, fnode.PublicIP, fnode.TunnelPort, fnode.Protocol, activeMark, fnode.IsHealthy, fnode.LatencyMs)
 		}
 		return 0
 	}

@@ -166,7 +166,7 @@ func buildSSHFwdService(cfg SSHFwdConfig) string {
 		fwArgs = strings.Join(forwards, " ")
 	}
 
-	execCmd := fmt.Sprintf("/usr/bin/ssh -N -i %s -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=%d -o ServerAliveCountMax=%d -o StrictHostKeyChecking=accept-new %s%s %s",
+	execCmd := fmt.Sprintf("/usr/bin/ssh -N -i %s -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o ServerAliveInterval=%d -o ServerAliveCountMax=%d -o StrictHostKeyChecking=accept-new %s%s %s",
 		cfg.KeyPath, cfg.ServerAliveInterval, cfg.ServerAliveCountMax, portArg, fwArgs, remoteTarget)
 
 	desc := "Hashem Direct SSH Forward Carrier"
@@ -182,7 +182,9 @@ Wants=network-online.target
 [Service]
 ExecStart=%s
 Restart=always
-RestartSec=3
+RestartSec=15
+StartLimitIntervalSec=120
+StartLimitBurst=5
 LimitNOFILE=1048576
 
 [Install]
@@ -1040,7 +1042,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"status": "ok", "message": "dnat table cleared"})
 
 	default:
-		writeAPIError(w, r, "E-SSHFWD-01", "unknown action: want enable, disable, gen_key, sync_peer, or clear_dnat")
+		writeAPIError(w, r, "E-SSHFWD-01", "unknown action: want enable, disable, gen_key, sync_peer, clear_dnat, apply_bundle, get_bundle, or clean")
 	}
 }
 

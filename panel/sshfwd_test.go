@@ -284,3 +284,27 @@ func TestBagherAPIEndpoints(t *testing.T) {
 		t.Fatalf("expected 400 for invalid bundle prefix, got %d", recInvalid.Code)
 	}
 }
+
+func TestSSHFwdServiceBackoff(t *testing.T) {
+	cfg := SSHFwdConfig{
+		Mode:          "bagher",
+		RemoteHost:    "1.2.3.4",
+		RemoteUser:    "root",
+		RemoteSSHPort: 22,
+		KeyPath:       "/etc/gre-panel/sshfwd_id_ed25519",
+		Ports:         []int{443, 8443},
+		BindAddr:      "127.0.0.1",
+		FRPBindPort:   55400,
+	}
+
+	svc := buildSSHFwdService(cfg)
+	if !strings.Contains(svc, "RestartSec=15") {
+		t.Fatalf("expected RestartSec=15 for fail2ban protection, got:\n%s", svc)
+	}
+	if !strings.Contains(svc, "StartLimitIntervalSec=120") {
+		t.Fatalf("expected StartLimitIntervalSec=120 in service unit, got:\n%s", svc)
+	}
+	if !strings.Contains(svc, "ConnectTimeout=8") {
+		t.Fatalf("expected ConnectTimeout=8 in ssh command, got:\n%s", svc)
+	}
+}

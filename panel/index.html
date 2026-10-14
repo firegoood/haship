@@ -1294,7 +1294,7 @@
             <button class="hashem-btn hashem-btn-secondary" data-act="ping">Ping peer</button>
             <button class="hashem-btn hashem-btn-secondary" data-act="restart-gre">Restart GRE</button>
             <button class="hashem-btn hashem-btn-secondary" data-act="restart-frps" id="frpRestartBtn">Restart frps</button>
-            <button class="hashem-btn hashem-btn-secondary" id="tunnelCarrierCycleBtn" title="Cycle encapsulation carrier (Direct GRE / FOU UDP)">⚡ Carrier: <span id="tunnelCarrierTxt">GRE</span></button>
+            <button class="hashem-btn hashem-btn-secondary" id="tunnelCarrierCycleBtn" title="Cycle encapsulation carrier (Direct GRE / WSS)">⚡ Carrier: <span id="tunnelCarrierTxt">GRE</span></button>
             <button class="hashem-btn hashem-btn-primary" id="optimizeBtn">⚡ Optimize tunnel</button>
             <button class="hashem-btn hashem-btn-secondary hidden" id="restoreBtn">Restore pre-optimize</button>
             <button class="hashem-btn hashem-btn-danger" id="removeTunnelBtn">Remove tunnel</button>
@@ -1352,6 +1352,7 @@
         </div>
       </section>
       <section id="tab-sshfwd" role="tabpanel" hidden>
+        <input type="hidden" id="sshfwdMode" value="bagher" />
         <!-- Locked Banner (shown when un-licensed and modal is closed) -->
         <div id="bagherLockedBanner" class="hidden" style="text-align:center; padding:60px 20px; background:linear-gradient(180deg, rgba(15,23,42,0.85) 0%, rgba(10,15,28,0.95) 100%); border:1px solid rgba(56,189,248,0.22); border-radius:12px; margin-bottom:20px;">
           <div style="font-size:42px; margin-bottom:14px;">🔒</div>
@@ -1468,16 +1469,16 @@
               </details>
 
               <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn" onclick="bagherIranApplyClick()" style="padding:10px 24px; font-size:14px; font-weight:700; background:#0284c7; border-color:#0284c7;">
+                <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn" style="padding:10px 24px; font-size:14px; font-weight:700; background:#0284c7; border-color:#0284c7;">
                   🚀 Initialize Iran Server &amp; Issue Bundle
                 </button>
-                <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherIranStopBtn" onclick="bagherStopTunnelClick()" style="padding:10px 20px; font-size:13px; font-weight:600;">
+                <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherIranStopBtn" style="padding:10px 20px; font-size:13px; font-weight:600;">
                   🛑 Stop Iran Tunnel
                 </button>
-                <button type="button" class="hashem-btn" id="bagherIranCleanBtn" onclick="cleanBagherTunnelClick()" style="padding:10px 18px; font-size:13px; font-weight:700; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#ef4444;">
+                <button type="button" class="hashem-btn" id="bagherIranCleanBtn" style="padding:10px 18px; font-size:13px; font-weight:700; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#ef4444;">
                   🗑️ Clean Tunnel
                 </button>
-                <button type="button" class="hashem-btn" id="sshfwdClearDnatBtn" onclick="sshfwdClearDnatClick()" style="padding:10px 16px; font-size:12px;">
+                <button type="button" class="hashem-btn" id="sshfwdClearDnatBtn" style="padding:10px 16px; font-size:12px;">
                   Clear DNAT Conflicts
                 </button>
               </div>
@@ -1489,7 +1490,7 @@
                 <span style="font-weight:700; font-size:15px; color:#38bdf8; display:flex; align-items:center; gap:8px;">
                   📦 Step 3: Generated Connection Bundle (Copy &amp; Paste into Foreign Server)
                 </span>
-                <button type="button" class="hashem-btn" id="bagherCopyBundleBtn" onclick="bagherCopyBundleClick()" style="padding:7px 20px; font-size:13px; font-weight:700; background:#0284c7; color:#fff; border-color:#0284c7;">
+                <button type="button" class="hashem-btn" id="bagherCopyBundleBtn" style="padding:7px 20px; font-size:13px; font-weight:700; background:#0284c7; color:#fff; border-color:#0284c7;">
                   📋 Copy Bundle
                 </button>
               </div>
@@ -1515,14 +1516,14 @@
               <div style="display:flex; flex-direction:column; gap:12px;">
                 <textarea id="bagherPasteBundleInput" class="hashem-input" rows="4" placeholder="BAGHER:eyJ2Ij...NDNd..." style="width:100%; min-height:90px; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.5); resize:vertical; padding:10px; border-radius:6px; color:#34d399; word-break:break-all;"></textarea>
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                  <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn" onclick="bagherForeignConnectClick()" style="padding:10px 26px; font-weight:700; font-size:14px; background:#059669; border-color:#059669;">
+                  <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn" style="padding:10px 26px; font-weight:700; font-size:14px; background:#059669; border-color:#059669;">
                     ⚡ Connect to Iran &amp; Start Foreign Tunnel
                   </button>
                   <div style="display:flex; align-items:center; gap:8px;">
-                    <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn" onclick="bagherStopTunnelClick()" style="padding:10px 20px; font-size:13px; font-weight:600;">
+                    <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn" style="padding:10px 20px; font-size:13px; font-weight:600;">
                       🛑 Stop Foreign Tunnel
                     </button>
-                    <button type="button" class="hashem-btn" id="bagherForeignCleanBtn" onclick="cleanBagherTunnelClick()" style="padding:10px 18px; font-size:13px; font-weight:700; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#ef4444;">
+                    <button type="button" class="hashem-btn" id="bagherForeignCleanBtn" style="padding:10px 18px; font-size:13px; font-weight:700; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#ef4444;">
                       🗑️ Clean Tunnel
                     </button>
                   </div>
@@ -1539,12 +1540,12 @@
                 <div class="u-hint-12" style="margin-bottom:6px;">One-line Bash command to execute on headless Foreign server:</div>
                 <div style="position:relative; margin-bottom:12px;">
                   <textarea id="sshfwdForeignCmd" class="hashem-input" rows="3" readonly style="width:100%; font-family:monospace; font-size:11px; background:rgba(0,0,0,0.6);"></textarea>
-                  <button type="button" class="hashem-btn" id="sshfwdCopyForeignBtn" onclick="sshfwdCopyForeignClick()" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
+                  <button type="button" class="hashem-btn" id="sshfwdCopyForeignBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
                 </div>
                 <div class="u-hint-12" style="margin-bottom:6px;">Foreign server authorized_keys configuration line:</div>
                 <div style="position:relative;">
                   <textarea id="sshfwdAuthLine" class="hashem-input" rows="2" readonly style="width:100%; font-family:monospace; font-size:11px; background:rgba(0,0,0,0.6);"></textarea>
-                  <button type="button" class="hashem-btn" id="sshfwdCopyAuthBtn" onclick="sshfwdCopyAuthClick()" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
+                  <button type="button" class="hashem-btn" id="sshfwdCopyAuthBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:11px;">Copy</button>
                 </div>
               </div>
             </details>
@@ -1642,6 +1643,19 @@
               </div>
             </div>
             <button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="padding:4px 12px; font-size:12px; white-space:nowrap;">Revert to Local</button>
+          </div>
+
+          <!-- Foreign Exit Nodes Pool (Multi-Kharej HA) -->
+          <div style="margin-bottom:22px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <h4 style="font-size:14px; font-weight:700; color:#e2e8f0; margin:0; display:flex; align-items:center; gap:8px;">
+                <span>🌐</span> Foreign Exit Nodes Pool (<span id="clusterForeignCount">0</span>)
+              </h4>
+              <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddForeignModal()" style="font-size:11px; padding:4px 12px; background:#0284c7; border-color:#0284c7;">+ Add Foreign Server</button>
+            </div>
+            <div id="clusterForeignList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+              <!-- Dynamic Foreign Node Cards -->
+            </div>
           </div>
 
           <!-- Nodes Topology Section -->
@@ -3084,6 +3098,60 @@
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddNodeModal()">Cancel</button>
       <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddNode()" style="background:#7c3aed; border-color:#7c3aed; font-weight:700; padding:8px 22px;">
         🔗 Handshake &amp; Save Node
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Cluster Add Foreign Server Modal -->
+<div class="ent-modal-ov" id="clusterForeignModal" hidden>
+  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="clusterForeignModalTitle" style="max-width:520px; width:100%; border:1px solid rgba(2,132,199,0.35); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px rgba(2,132,199,0.2);">
+    <div class="ent-modal-h" style="border-bottom:1px solid rgba(2,132,199,0.25); background:rgba(2,132,199,0.1);">
+      <b id="clusterForeignModalTitle" style="display:flex; align-items:center; gap:8px; color:#38bdf8; font-size:15px; font-weight:700;">
+        <span>🌐</span> Add Foreign Exit Server (Kharej)
+      </b>
+      <button class="ent-x" onclick="closeClusterAddForeignModal()" aria-label="Close">&#xD7;</button>
+    </div>
+    <div class="ent-modal-b" style="gap:14px; padding:20px;">
+      <div class="fg">
+        <label for="clusterForeignID" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Foreign Node ID (Unique Slug):
+        </label>
+        <input type="text" class="hashem-input" id="clusterForeignID" placeholder="e.g. kharej-germany" style="width:100%; font-family:monospace;">
+      </div>
+      <div class="fg">
+        <label for="clusterForeignName" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Display Label:
+        </label>
+        <input type="text" class="hashem-input" id="clusterForeignName" placeholder="e.g. Frankfurt Hetzner" style="width:100%;">
+      </div>
+      <div class="fg">
+        <label for="clusterForeignIP" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Kharej Public IP:
+        </label>
+        <input type="text" class="hashem-input" id="clusterForeignIP" placeholder="e.g. 91.107.174.173" style="width:100%; font-family:monospace;">
+      </div>
+      <div class="fg">
+        <label for="clusterForeignPort" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Tunnel / FRP Port:
+        </label>
+        <input type="number" class="hashem-input" id="clusterForeignPort" placeholder="55354" style="width:100%; font-family:monospace;" value="55354">
+      </div>
+      <div class="fg">
+        <label for="clusterForeignProtocol" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Carrying Protocol:
+        </label>
+        <select class="hashem-input" id="clusterForeignProtocol" style="width:100%;">
+          <option value="wss">WSS (WebSocket TLS)</option>
+          <option value="gre">Direct GRE (Proto 47)</option>
+          <option value="bagher">Bagher SSH Engine</option>
+        </select>
+      </div>
+    </div>
+    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:14px 20px;">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddForeignModal()">Cancel</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddForeign()" style="background:#0284c7; border-color:#0284c7; font-weight:700; padding:8px 22px;">
+        💾 Save Foreign Exit
       </button>
     </div>
   </div>
