@@ -1020,8 +1020,8 @@ func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 bindPort = %d
 auth.method = "token"
 auth.token = %q
-%stransport.tcpKeepalive = 30
-transport.heartbeatTimeout = 90
+%stransport.tcpKeepalive = 15
+transport.heartbeatTimeout = 45
 transport.maxPoolCount = %d
 `, port, token, tcpMuxTomlLines(), maxPool)
 			if err := writeEngineFile(frpDir, "frps.toml", frpsToml); err != nil {
@@ -1087,10 +1087,10 @@ auth.method = "token"
 auth.token = %q
 loginFailExit = false
 transport.protocol = %q
-%stransport.heartbeatInterval = 30
-transport.heartbeatTimeout = 90
-transport.dialServerTimeout = 15
-transport.dialServerKeepalive = 30
+%stransport.heartbeatInterval = 15
+transport.heartbeatTimeout = 45
+transport.dialServerTimeout = 10
+transport.dialServerKeepalive = 15
 transport.poolCount = %d
 `, peerGre, effPort, token, frpProto, tcpMuxTomlLines(), pool))
 

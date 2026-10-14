@@ -31,15 +31,15 @@ WATCHDOG_FILE="${PANEL_CONFIG_DIR}/watchdog.json"
 PERF_FILE="${PANEL_CONFIG_DIR}/perf.json"
 CARRIER_FILE="${PANEL_CONFIG_DIR}/carrier.json"
 AUTO_POOL_STATE="${PANEL_CONFIG_DIR}/auto_pool.json"
-# Auto Pool tuning (env-overridable): frpc poolCount 20..200, frps maxPoolCount 60..500 (also RAM-capped)
-AUTOPOOL_MIN="${AUTOPOOL_MIN:-20}"
+# Auto Pool tuning (env-overridable): frpc poolCount 3..200, frps maxPoolCount 15..500 (also RAM-capped)
+AUTOPOOL_MIN="${AUTOPOOL_MIN:-3}"
 AUTOPOOL_MAX="${AUTOPOOL_MAX:-200}"
-AUTOPOOL_MAXPOOL_MIN="${AUTOPOOL_MAXPOOL_MIN:-60}"
+AUTOPOOL_MAXPOOL_MIN="${AUTOPOOL_MAXPOOL_MIN:-15}"
 AUTOPOOL_MAXPOOL_MAX="${AUTOPOOL_MAXPOOL_MAX:-500}"
-AUTOPOOL_LOW_CONNS="${AUTOPOOL_LOW_CONNS:-30}"       # restart frpc only below this many active user conns
-AUTOPOOL_COOLDOWN="${AUTOPOOL_COOLDOWN:-300}"        # min seconds between automatic frpc restarts
+AUTOPOOL_LOW_CONNS="${AUTOPOOL_LOW_CONNS:-10}"       # restart frpc only below this many active user conns
+AUTOPOOL_COOLDOWN="${AUTOPOOL_COOLDOWN:-60}"         # min seconds between automatic frpc restarts
 AUTOPOOL_SEVERE_ERRS="${AUTOPOOL_SEVERE_ERRS:-20}"   # pool-full lines per tick that justify a restart under load
-AUTOPOOL_DOWN_QUIET="${AUTOPOOL_DOWN_QUIET:-15}"     # consecutive quiet ticks before scaling down
+AUTOPOOL_DOWN_QUIET="${AUTOPOOL_DOWN_QUIET:-3}"      # consecutive quiet ticks before scaling down
 AUTOPOOL_MIN_FREE_MB="${AUTOPOOL_MIN_FREE_MB:-150}"  # below this free RAM, never scale up
 BACKUP_DIR="/var/backups/hashem"
 
@@ -2648,8 +2648,8 @@ quicBindPort = ${QUIC_PORT}
 auth.method = "token"
 auth.token = "${TOKEN}"
 $(perf_tcpmux_lines)
-transport.tcpKeepalive = 30
-transport.heartbeatTimeout = 90
+transport.tcpKeepalive = 15
+transport.heartbeatTimeout = 45
 transport.maxPoolCount = ${MAX_POOL}
 EOF
     cat <<EOF > /etc/systemd/system/frps.service
@@ -2662,8 +2662,9 @@ Wants=network-online.target
 Type=simple
 User=root
 Restart=always
-RestartSec=3s
-StartLimitIntervalSec=0
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity
@@ -2847,10 +2848,10 @@ auth.token = "${TOKEN}"
 loginFailExit = false
 transport.protocol = "${FRP_TRANSPORT}"
 $(perf_tcpmux_lines)
-transport.heartbeatInterval = 30
-transport.heartbeatTimeout = 90
-transport.dialServerTimeout = 15
-transport.dialServerKeepalive = 30
+transport.heartbeatInterval = 15
+transport.heartbeatTimeout = 45
+transport.dialServerTimeout = 10
+transport.dialServerKeepalive = 15
 transport.poolCount = ${EFF_POOL}
 
 EOF
@@ -2900,8 +2901,9 @@ Wants=network-online.target
 Type=simple
 User=root
 Restart=always
-RestartSec=3s
-StartLimitIntervalSec=0
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity
@@ -3473,8 +3475,8 @@ bindPort = ${BIND_PORT}
 auth.method = "token"
 auth.token = "${TOKEN}"
 $(perf_tcpmux_lines)
-transport.tcpKeepalive = 30
-transport.heartbeatTimeout = 90
+transport.tcpKeepalive = 15
+transport.heartbeatTimeout = 45
 transport.maxPoolCount = ${MAX_POOL}
 EOF
     local SVC="frps${SUF}"
@@ -3488,8 +3490,9 @@ Wants=network-online.target
 Type=simple
 User=root
 Restart=always
-RestartSec=3s
-StartLimitIntervalSec=0
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity

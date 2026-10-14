@@ -90,8 +90,8 @@ func TestSSHFwdDefaultConfig(t *testing.T) {
 	if cfg.FRPBindPort != 55400 {
 		t.Fatalf("expected FRPBindPort 55400, got: %d", cfg.FRPBindPort)
 	}
-	if cfg.PoolCount != 25 {
-		t.Fatalf("expected PoolCount 25, got: %d", cfg.PoolCount)
+	if cfg.PoolCount != 5 {
+		t.Fatalf("expected PoolCount 5, got: %d", cfg.PoolCount)
 	}
 	if len(cfg.Ports) != 0 {
 		t.Fatalf("expected default Ports to be empty for clean installation, got: %v", cfg.Ports)

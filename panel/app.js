@@ -2,6 +2,7 @@ const BASE = document.documentElement.dataset.base || '';
 const at = p => BASE + p;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const escapeHtml = esc;
 
 function toast(msg) { toastMsg('info', String(msg)); }
 function toastOk(title, sub) { toastMsg('ok', title, sub); }
@@ -34,6 +35,9 @@ function toastMsg(kind, title, sub) {
 // ---- Error surfacing: console.warn + deduplicated, rate-limited toast (language-aware) ----
 const _errSeen = new Map();
 let _errLastToast = 0;
+var _licenseData = null;
+var _sshfwdData = null;
+var _clusterData = null;
 function reportErr(ctx, err) {
   const msg = (err && err.message) ? err.message : String(err == null ? '' : err);
   console.warn('[hashem] ' + ctx + ' failed:', err);
@@ -5812,7 +5816,7 @@ async function savePeerConfigClick() {
 })();
 
 // ---------- SSH Forward Carrier (tab-sshfwd) ----------
-let _sshfwdData = null;
+_sshfwdData = null;
 
 let lastBagherBytesRx = 0, lastBagherBytesTx = 0, lastBagherTime = 0;
 function formatSpeedRate(bytesPerSec) {
@@ -6291,7 +6295,7 @@ async function bagherStopTunnelClick() {
 }
 
 async function cleanBagherTunnelClick() {
-  const ok = confirm('Clean and purge Bagher Tunnel?\n\nThis will stop and remove all Bagher systemd services (frps, frpc, ssh-fwd), delete systemd service units, remove generated frp configs, clear firewall rules, and reset the tunnel to initial state. The SSH keypair is preserved.');
+  const ok = await entConfirm('Purge Bagher Tunnel', 'Clean and purge Bagher Tunnel?\n\nThis will stop and remove all Bagher systemd services (frps, frpc, ssh-fwd), delete systemd service units, remove generated frp configs, clear firewall rules, and reset the tunnel to initial state. The SSH keypair is preserved.', 'Purge Services');
   if (!ok) return;
   try {
     toastOk('Cleaning Tunnel', 'Purging Bagher services and configuration...');
@@ -6367,7 +6371,7 @@ async function bagherApplyBundleClick() {
 })();
 
 /* --- License & Premium Feature Management --- */
-let _licenseData = null;
+_licenseData = null;
 
 async function loadLicense() {
   try {
@@ -6459,7 +6463,7 @@ async function activateLicenseClick() {
 }
 
 async function deactivateLicenseClick() {
-  if (!confirm('Deactivate and remove current license? Premium features will lock.')) return;
+  if (!await entConfirm('Deactivate License', 'Deactivate and remove current license? Premium features will lock.', 'Deactivate')) return;
   try {
     await api('/api/license', { key: '' });
     try { localStorage.removeItem('hashem_bagher_license'); } catch (e) {}
@@ -6585,7 +6589,7 @@ window.copyMachineHashClick = copyMachineHashClick;
 // ==========================================
 // Iran Mesh Cluster & High Availability
 // ==========================================
-let _clusterData = null;
+_clusterData = null;
 
 async function loadClusterStatus() {
   try {
@@ -6693,9 +6697,9 @@ function renderClusterUI(data) {
               <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
                 <div>
                   <div style="font-weight:700; color:#f8fafc; font-size:14px; display:flex; align-items:center; gap:6px;">
-                    <span>🌐</span> ${escapeHtml(fn.name || fn.id)}
+                    <span>🌐</span> ${esc(fn.name || fn.id)}
                   </div>
-                  <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${escapeHtml(fn.id)}</div>
+                  <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${esc(fn.id)}</div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
                   ${isActive ? `<span class="badge info" style="font-size:9px; font-weight:800; background:#0284c7; color:#fff;">ACTIVE</span>` : ''}
@@ -6706,7 +6710,7 @@ function renderClusterUI(data) {
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
                 <div>
                   <span style="color:#94a3b8;">Public IP:</span>
-                  <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${escapeHtml(fn.public_ip || '--')}</div>
+                  <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${esc(fn.public_ip || '--')}</div>
                 </div>
                 <div>
                   <span style="color:#94a3b8;">Port / Proto:</span>
@@ -6726,9 +6730,9 @@ function renderClusterUI(data) {
             <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
               ${isActive
                 ? `<span style="font-size:11px; color:#38bdf8; font-weight:700;">✓ In Use</span>`
-                : `<button class="hashem-btn" onclick="switchClusterForeign('${escapeHtml(fn.id)}')" style="font-size:11px; padding:4px 10px; background:rgba(2,132,199,0.2); border-color:#0284c7; color:#38bdf8;">Switch to This</button>`
+                : `<button class="hashem-btn" onclick="switchClusterForeign('${esc(fn.id)}')" style="font-size:11px; padding:4px 10px; background:rgba(2,132,199,0.2); border-color:#0284c7; color:#38bdf8;">Switch to This</button>`
               }
-              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign('${escapeHtml(fn.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove foreign node">&#128465;</button>
+              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign('${esc(fn.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove foreign node">&#128465;</button>
             </div>
           </div>
         `;
@@ -6785,9 +6789,9 @@ function renderClusterUI(data) {
           <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
             <div>
               <div style="font-weight:700; color:#f8fafc; font-size:14px; display:flex; align-items:center; gap:6px;">
-                <span>🇮🇷</span> ${escapeHtml(node.name || node.id)}
+                <span>🇮🇷</span> ${esc(node.name || node.id)}
               </div>
-              <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${escapeHtml(node.id)}</div>
+              <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${esc(node.id)}</div>
             </div>
             <span class="badge ${statusBadgeClass}" style="font-size:10px; font-weight:700;">${statusText}</span>
           </div>
@@ -6795,7 +6799,7 @@ function renderClusterUI(data) {
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
             <div>
               <span style="color:#94a3b8;">Public IP:</span>
-              <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${escapeHtml(node.public_ip || '--')}</div>
+              <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${esc(node.public_ip || '--')}</div>
             </div>
             <div>
               <span style="color:#94a3b8;">Peer Ping:</span>
@@ -6815,9 +6819,9 @@ function renderClusterUI(data) {
         <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
           ${isCurrentFailoverTarget
             ? `<button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="font-size:11px; padding:4px 10px;">Revert Reroute</button>`
-            : `<button class="hashem-btn" onclick="triggerClusterFailover('${escapeHtml(node.id)}')" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:11px; padding:4px 10px; background:rgba(124,58,237,0.2); border-color:#7c3aed; color:#c084fc;">\u2192 Failover Here</button>`
+            : `<button class="hashem-btn" onclick="triggerClusterFailover('${esc(node.id)}')" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:11px; padding:4px 10px; background:rgba(124,58,237,0.2); border-color:#7c3aed; color:#c084fc;">\u2192 Failover Here</button>`
           }
-          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode('${escapeHtml(node.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove peer">&#128465;</button>
+          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode('${esc(node.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove peer">&#128465;</button>
         </div>
       </div>
     `;
@@ -6860,7 +6864,7 @@ async function submitClusterAddNode() {
 }
 
 async function deleteClusterNode(id) {
-  if (!confirm(`Are you sure you want to remove peer node "${id}" from the cluster?`)) return;
+  if (!await entConfirm('Delete Peer Node', `Are you sure you want to remove peer node "${id}" from the cluster?`, 'Delete Node')) return;
   try {
     await api('/api/cluster/nodes/delete', { id });
     toastMsg('ok', 'Peer node removed');
@@ -6927,7 +6931,7 @@ async function submitClusterConfig() {
 }
 
 async function triggerClusterFailover(targetId) {
-  if (!confirm(`Manual failover: Reroute all client traffic to peer "${targetId}"?`)) return;
+  if (!await entConfirm('Trigger Failover', `Manual failover: Reroute all client traffic to peer "${targetId}"?`, 'Reroute Traffic')) return;
   try {
     await api('/api/cluster/failover/trigger', { target_id: targetId });
     toastMsg('ok', `Failover active: Traffic rerouted to ${targetId}`);
@@ -6938,7 +6942,7 @@ async function triggerClusterFailover(targetId) {
 }
 
 async function revertClusterFailover() {
-  if (!confirm('Revert failover: Restore traffic routing to the local tunnel?')) return;
+  if (!await entConfirm('Revert Failover', 'Revert failover: Restore traffic routing to the local tunnel?', 'Restore Local')) return;
   try {
     await api('/api/cluster/failover/revert', {});
     toastMsg('ok', 'Failover reverted: Local routing restored');
@@ -7002,7 +7006,7 @@ async function submitClusterAddForeign() {
 }
 
 async function deleteClusterForeign(id) {
-  if (!confirm(`Remove foreign exit node "${id}" from the pool?`)) return;
+  if (!await entConfirm('Remove Foreign Node', `Remove foreign exit node "${id}" from the pool?`, 'Remove Node')) return;
   try {
     await api('/api/cluster/foreign/delete', { id });
     toastMsg('ok', 'Foreign exit node removed');
@@ -7013,7 +7017,7 @@ async function deleteClusterForeign(id) {
 }
 
 async function switchClusterForeign(targetId) {
-  if (!confirm(`Switch active exit tunnel to "${targetId}"?`)) return;
+  if (!await entConfirm('Switch Exit Tunnel', `Switch active exit tunnel to "${targetId}"?`, 'Switch Active')) return;
   try {
     await api('/api/cluster/foreign/switch', { target_id: targetId });
     toastMsg('ok', `Active foreign exit switched to ${targetId}`);

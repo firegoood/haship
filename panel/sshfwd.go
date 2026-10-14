@@ -50,9 +50,9 @@ func defaultSSHFwdConfig() SSHFwdConfig {
 		Ports:               []int{},
 		BindAddr:            "0.0.0.0",
 		FRPBindPort:         55400,
-		PoolCount:           25,
+		PoolCount:           5,
 		Enabled:             false,
-		ServerAliveInterval: 10,
+		ServerAliveInterval: 15,
 		ServerAliveCountMax: 3,
 		LastStatus:          "inactive",
 		LastError:           "",
@@ -220,7 +220,9 @@ Wants=network-online.target
 Type=simple
 ExecStart=/usr/local/bin/frps -c /etc/gre-panel/bagher/frps.toml
 Restart=always
-RestartSec=3
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
 LimitNOFILE=1048576
 
 [Install]
@@ -247,6 +249,9 @@ serverPort = %d
 auth.token = "hashem-bagher-sec"
 transport.tcpMux = false
 transport.poolCount = %d
+transport.heartbeatInterval = 15
+transport.heartbeatTimeout = 45
+transport.tcpKeepalive = 15
 loginFailExit = false
 
 webServer.addr = "127.0.0.1"
@@ -275,7 +280,9 @@ Wants=network-online.target
 Type=simple
 ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/bagher/frpc.toml
 Restart=always
-RestartSec=3
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
 LimitNOFILE=1048576
 
 [Install]
@@ -460,7 +467,9 @@ Wants=network-online.target
 Type=simple
 ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/bagher/frpc.toml
 Restart=always
-RestartSec=3
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=5
 LimitNOFILE=1048576
 
 [Install]
