@@ -1864,11 +1864,11 @@ async function refreshDash() {
         dashBagherCard.classList.add('hidden');
       }
     }
-    const hasBagherConfigOrActive = !!(bagherActive || b.has_config || (b.remote_host && b.remote_host.length > 0) || (Array.isArray(b.ports) && b.ports.length > 0));
+    // Bagher Card in Tunnels: ONLY display when Bagher is ACTUALLY ACTIVE
     if (tunBagherCard) {
-      if (hasBagherConfigOrActive) {
+      if (bagherActive) {
         tunBagherCard.classList.remove('hidden');
-        set('tunBagherPing', bagherActive ? ((typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal') : 'Standby');
+        set('tunBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal');
         set('tunBagherForeign', b.remote_host || '—');
         const portsStr = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
         set('tunBagherPorts', portsStr);
@@ -1880,12 +1880,9 @@ async function refreshDash() {
           if (b.connected) {
             tbBadge.className = 'badge ok';
             set('tunBagherStatusText', 'Connected');
-          } else if (bagherActive) {
+          } else {
             tbBadge.className = 'badge warn';
             set('tunBagherStatusText', 'Waiting for Peer');
-          } else {
-            tbBadge.className = 'badge dim';
-            set('tunBagherStatusText', 'Stopped');
           }
         }
       } else {
@@ -6006,11 +6003,16 @@ function renderSSHFwd() {
     if (bagherLockedBanner) {
       bagherLockedBanner.classList.remove('hidden');
     }
-    if (state && state.tab === 'sshfwd' && bagherModal && bagherModal.hidden && !_bagherModalDismissed) {
+    const navLock = $('bagherNavLock');
+    if (navLock) navLock.classList.remove('hidden');
+    const curTab = (typeof state !== 'undefined' && state && state.tab) ? state.tab : '';
+    if (curTab === 'sshfwd' && bagherModal && bagherModal.hidden && !_bagherModalDismissed) {
       bagherModal.hidden = false;
     }
   } else {
     _bagherModalDismissed = true;
+    const navLock = $('bagherNavLock');
+    if (navLock) navLock.classList.add('hidden');
     if (bagherContainer) {
       bagherContainer.style.filter = '';
       bagherContainer.style.pointerEvents = '';

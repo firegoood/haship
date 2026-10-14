@@ -93,6 +93,9 @@ func TestSSHFwdDefaultConfig(t *testing.T) {
 	if cfg.PoolCount != 25 {
 		t.Fatalf("expected PoolCount 25, got: %d", cfg.PoolCount)
 	}
+	if len(cfg.Ports) != 0 {
+		t.Fatalf("expected default Ports to be empty for clean installation, got: %v", cfg.Ports)
+	}
 }
 
 func TestSSHFwdLicenseGating(t *testing.T) {
@@ -306,5 +309,61 @@ func TestSSHFwdServiceBackoff(t *testing.T) {
 	}
 	if !strings.Contains(svc, "ConnectTimeout=8") {
 		t.Fatalf("expected ConnectTimeout=8 in ssh command, got:\n%s", svc)
+	}
+}
+
+func TestIsPrivateIP(t *testing.T) {
+	if !isPrivateIP("127.0.0.1") {
+		t.Fatalf("expected 127.0.0.1 to be private")
+	}
+	if !isPrivateIP("10.0.0.5") {
+		t.Fatalf("expected 10.0.0.5 to be private")
+	}
+	if !isPrivateIP("172.16.5.1") {
+		t.Fatalf("expected 172.16.5.1 to be private")
+	}
+	if !isPrivateIP("172.26.32.7") {
+		t.Fatalf("expected 172.26.32.7 to be private")
+	}
+	if !isPrivateIP("192.168.1.100") {
+		t.Fatalf("expected 192.168.1.100 to be private")
+	}
+	if isPrivateIP("1.1.1.1") {
+		t.Fatalf("expected 1.1.1.1 to be public")
+	}
+	if isPrivateIP("8.8.8.8") {
+		t.Fatalf("expected 8.8.8.8 to be public")
+	}
+}
+
+func TestBagherBundleGeneration(t *testing.T) {
+	cfg := SSHFwdConfig{
+		Role:        "iran",
+		RemoteHost:  "198.51.100.1",
+		Ports:       []int{443, 8443},
+		FRPBindPort: 55400,
+		PoolCount:   25,
+	}
+	pubKey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKey hashem-fwd"
+	bundleStr, err := MakeBagherBundle(cfg, pubKey)
+	if err != nil {
+		t.Fatalf("failed to make bundle: %v", err)
+	}
+	if !strings.HasPrefix(bundleStr, "BAGHER:") {
+		t.Fatalf("expected bundle prefix BAGHER:, got: %s", bundleStr)
+	}
+
+	bundle, err := ParseBagherBundle(bundleStr)
+	if err != nil {
+		t.Fatalf("failed to parse bundle: %v", err)
+	}
+	if bundle.Role != "foreign" {
+		t.Fatalf("expected foreign role in bundle, got: %s", bundle.Role)
+	}
+	if bundle.RemoteHost != "198.51.100.1" {
+		t.Fatalf("expected remote host 198.51.100.1, got: %s", bundle.RemoteHost)
+	}
+	if len(bundle.Ports) != 2 || bundle.Ports[0] != 443 || bundle.Ports[1] != 8443 {
+		t.Fatalf("unexpected ports in bundle: %v", bundle.Ports)
 	}
 }

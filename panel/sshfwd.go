@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -40,13 +41,13 @@ var (
 
 func defaultSSHFwdConfig() SSHFwdConfig {
 	return SSHFwdConfig{
-		Role:                "client",
+		Role:                "iran",
 		Mode:                "bagher",
 		RemoteHost:          "",
 		RemoteUser:          "root",
 		RemoteSSHPort:       22,
 		KeyPath:             "/root/.ssh/hashem-fwd",
-		Ports:               []int{443, 8443, 1020, 1030, 1040},
+		Ports:               []int{},
 		BindAddr:            "0.0.0.0",
 		FRPBindPort:         55400,
 		PoolCount:           25,
@@ -299,6 +300,50 @@ type BagherBundle struct {
 	Timestamp    int64  `json:"ts"`
 }
 
+func isPrivateIP(ipStr string) bool {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	if ip4[0] == 10 {
+		return true
+	}
+	if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
+		return true
+	}
+	if ip4[0] == 192 && ip4[1] == 168 {
+		return true
+	}
+	return false
+}
+
+func resolvePublicIP() string {
+	ip := detectPublicIP()
+	if ip != "" && !isPrivateIP(ip) {
+		return ip
+	}
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+	for _, url := range []string{"https://api.ipify.org", "https://icanhazip.com", "https://ifconfig.me/ip"} {
+		resp, err := client.Get(url)
+		if err == nil && resp.StatusCode == 200 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
+			_ = resp.Body.Close()
+			candidate := strings.TrimSpace(string(body))
+			if net.ParseIP(candidate) != nil && !isPrivateIP(candidate) {
+				return candidate
+			}
+		}
+	}
+	return ip
+}
+
 // MakeBagherBundle builds a portable encrypted/base64 string for zero-terminal Foreign setup.
 // It requires both remote host IP and forwarded ports to be set before generating a bundle.
 func MakeBagherBundle(cfg SSHFwdConfig, pubKey string) (string, error) {
@@ -308,8 +353,8 @@ func MakeBagherBundle(cfg SSHFwdConfig, pubKey string) (string, error) {
 	if strings.TrimSpace(cfg.RemoteHost) == "" {
 		return "", fmt.Errorf("remote host IP is required before generating bundle")
 	}
-	iranIP := detectPublicIP()
-	if iranIP == "" {
+	iranIP := resolvePublicIP()
+	if iranIP == "" || iranIP == "0.0.0.0" {
 		iranIP = cfg.BindAddr
 	}
 	b := BagherBundle{
@@ -792,7 +837,7 @@ func getSSHFwdStatusLocked() map[string]any {
 	metrics := getBagherLiveMetrics(cfg)
 
 	hasBagher := HasFeature("bagher") || HasFeature("frp_ssh")
-	hasConfig := len(strings.TrimSpace(cfg.RemoteHost)) > 0 || len(cfg.Ports) > 0 || cfg.Enabled || isActive
+	hasConfig := (len(strings.TrimSpace(cfg.RemoteHost)) > 0 && len(cfg.Ports) > 0) || cfg.Enabled || isActive
 
 	return map[string]any{
 		"has_config":        hasConfig,
@@ -938,6 +983,10 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"status": "ok", "pub_key": pub, "auth_line": formatAuthorizedKeyLine(pub, cfg.Mode, cfg.FRPBindPort, cfg.Ports)})
 
 	case "enable", "apply":
+		if !(HasFeature("bagher") || HasFeature("frp_ssh")) {
+			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
+			return
+		}
 		cfg.Mode = "bagher"
 		if body.Role != "" {
 			cfg.Role = strings.TrimSpace(body.Role)
@@ -975,10 +1024,6 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(cfg.Ports) == 0 {
 			writeAPIError(w, r, "E-SSHFWD-02", "At least one port must be specified in Forwarded Ports")
-			return
-		}
-		if !(HasFeature("bagher") || HasFeature("frp_ssh")) {
-			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
 			return
 		}
 
