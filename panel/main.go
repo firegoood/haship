@@ -484,10 +484,12 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy]")
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy | cluster]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
+		case "cluster", "mesh":
+			os.Exit(cliCluster(os.Args[2:]))
 		case "password", "pass", "set-password":
 			os.Exit(cliSetPassword(os.Args[2:]))
 		case "info", "status", "url":
@@ -618,6 +620,15 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/rescue", requireAuth(requireCSRF(handleRescuePost)))
 	mux.HandleFunc("GET "+base+"/api/sshfwd", requireAuth(handleSSHFwdGet))
 	mux.HandleFunc("POST "+base+"/api/sshfwd", requireAuth(requireCSRF(handleSSHFwdPost)))
+
+	// Iran-to-Iran Mesh Cluster endpoints
+	mux.HandleFunc("GET "+base+"/api/cluster/status", requireAuth(handleClusterStatus))
+	mux.HandleFunc("POST "+base+"/api/cluster/config", requireAuth(requireCSRF(handleClusterConfigPost)))
+	mux.HandleFunc("POST "+base+"/api/cluster/nodes/add", requireAuth(requireCSRF(handleClusterNodeAdd)))
+	mux.HandleFunc("POST "+base+"/api/cluster/nodes/delete", requireAuth(requireCSRF(handleClusterNodeDelete)))
+	mux.HandleFunc("POST "+base+"/api/cluster/heartbeat", handleClusterHeartbeat)
+	mux.HandleFunc("POST "+base+"/api/cluster/failover/trigger", requireAuth(requireCSRF(handleClusterFailoverTrigger)))
+	mux.HandleFunc("POST "+base+"/api/cluster/failover/revert", requireAuth(requireCSRF(handleClusterFailoverRevert)))
 	mux.HandleFunc("GET "+base+"/api/bagher", requireAuth(handleSSHFwdGet))
 	mux.HandleFunc("POST "+base+"/api/bagher", requireAuth(requireCSRF(handleSSHFwdPost)))
 	mux.HandleFunc("POST "+base+"/api/peer/sshfwd-install-key", requirePeerAuth(handlePeerSSHFwdInstallKey))
@@ -646,6 +657,7 @@ func main() {
 	go startTrafficRecorder()
 	go startFleetSampler()
 	go startRescueMonitor()
+	go startClusterMonitor()
 	go func() {
 		cc := loadCarrierConfig()
 		if strings.HasPrefix(cc.ActiveCarrier, "wss") {

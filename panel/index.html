@@ -1019,6 +1019,7 @@
       <div class="nav-sec" role="presentation" data-i18n="sec_tunnel">Tunnel</div>
       <button role="tab" aria-selected="false" aria-controls="tab-tunnel" tabindex="-1" class="nav-item" data-tab="tunnel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg><span data-i18n="nav_tunnel">Tunnel</span><span class="nav-badge hidden u-ml-auto" aria-hidden="false"></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-sshfwd" tabindex="-1" class="nav-item" data-tab="sshfwd" id="sshfwdNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span data-i18n="nav_bagher">Bagher</span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-cluster" tabindex="-1" class="nav-item" data-tab="cluster" id="clusterNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span data-i18n="nav_cluster">Cluster</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-setup" tabindex="-1" class="nav-item" data-tab="setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span data-i18n="nav_setup">Setup</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" class="nav-item" data-tab="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span data-i18n="nav_logs">Logs</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_system">System</div>
@@ -1572,6 +1573,85 @@
               <div style="font-size:11px; text-transform:uppercase; color:var(--text-dim, #94a3b8); margin-bottom:4px; font-weight:600;">Active Sockets (Pool)</div>
               <div style="font-size:18px; font-weight:700; color:#f59e0b;" id="bagherConnsVal">0</div>
               <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Synchronized multiplexed tunnels</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- ==================== CLUSTER TAB ==================== -->
+      <section id="tab-cluster" role="tabpanel" hidden>
+        <!-- Locked Banner (shown when un-licensed) -->
+        <div id="clusterLockedBanner" class="hidden" style="text-align:center; padding:60px 20px; background:linear-gradient(180deg, rgba(15,23,42,0.85) 0%, rgba(10,15,28,0.95) 100%); border:1px solid rgba(168,85,247,0.3); border-radius:12px; margin-bottom:20px;">
+          <div style="font-size:42px; margin-bottom:14px;">🔒</div>
+          <h3 style="font-size:18px; font-weight:700; color:#c084fc; margin-bottom:8px;">Iran Mesh Cluster Requires an Active License</h3>
+          <p style="font-size:13px; color:#94a3b8; max-width:520px; margin:0 auto 20px auto; line-height:1.6;">
+            Autonomous Iran-to-Iran health gossip, latency probing, and automated zero-downtime failover rerouting is exclusively unlocked with a Bagher or Cluster license.
+          </p>
+          <button class="hashem-btn hashem-btn-primary" onclick="openBagherLicModal()" style="background:#9333ea; border-color:#9333ea; padding:8px 24px; font-size:14px; font-weight:600;">
+            🔑 Activate License
+          </button>
+        </div>
+
+        <div id="clusterCardContainer" class="tunnel-card" style="border:1px solid rgba(168,85,247,0.38); background:radial-gradient(circle at top right, rgba(147,51,234,0.15), transparent 45%), linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(10,15,28,0.98) 100%); box-shadow:0 16px 40px -8px rgba(147,51,234,0.22), inset 0 1px 0 rgba(255,255,255,0.1); border-radius:14px;">
+          <div class="tc-header" style="border-bottom:1px solid rgba(168,85,247,0.2); padding-bottom:16px; margin-bottom:18px;">
+            <div>
+              <div class="u-flex-center-gap10" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
+                <span class="tc-title" style="font-size:19px; font-weight:800; display:flex; align-items:center; gap:10px; color:#f8fafc; letter-spacing:-0.02em; white-space:nowrap;">
+                  <span style="display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px; background:linear-gradient(135deg, #7c3aed, #c084fc); color:#fff; box-shadow:0 0 14px rgba(168,85,247,0.5);">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                  </span>
+                  Iran Hub Mesh Cluster
+                </span>
+                <span class="badge" style="background:linear-gradient(135deg, #a855f7, #7c3aed); color:#fff; font-weight:800; font-size:10px; padding:2px 8px; border-radius:20px; box-shadow:0 0 10px rgba(168,85,247,0.4); white-space:nowrap;">MULTI-HUB HA</span>
+                <span class="badge" id="clusterStatusBadge" style="white-space:nowrap;">Checking...</span>
+              </div>
+              <div class="qs-hint u-mt-4" style="color:#94a3b8; font-size:12px;">Real-time gossip heartbeats across Iran nodes · Automatic zero-downtime client failover upon foreign tunnel drop</div>
+            </div>
+            <div class="qs-actions" style="display:flex; gap:8px; align-items:center;">
+              <button class="hashem-btn" onclick="openClusterConfigModal()" style="font-size:12px; padding:6px 14px; background:rgba(255,255,255,0.06);">⚙️ Settings</button>
+              <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddNodeModal()" style="font-size:12px; padding:6px 14px; background:#7c3aed; border-color:#7c3aed;">+ Add Peer Node</button>
+            </div>
+          </div>
+
+          <!-- Cluster Live Gauges -->
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; background:rgba(0,0,0,0.45); border:1px solid rgba(168,85,247,0.2); border-radius:10px; padding:12px 18px; margin-bottom:18px;">
+            <div>
+              <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600; letter-spacing:0.05em;">This Node ID</div>
+              <div style="font-size:15px; font-weight:800; color:#c084fc; font-family:monospace; margin-top:2px;" id="clusterLocalNodeID">--</div>
+            </div>
+            <div>
+              <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600; letter-spacing:0.05em;">Public IP</div>
+              <div style="font-size:14px; font-weight:700; color:#f8fafc; font-family:monospace; margin-top:4px;" id="clusterLocalIP">--</div>
+            </div>
+            <div>
+              <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600; letter-spacing:0.05em;">Local Tunnel to Kharej</div>
+              <div style="font-size:13px; font-weight:800; margin-top:4px;" id="clusterLocalTunnelStatus"><span class="badge ok">UP</span></div>
+            </div>
+            <div>
+              <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:600; letter-spacing:0.05em;">Active Routing Path</div>
+              <div style="font-size:13px; font-weight:700; color:#34d399; font-family:monospace; margin-top:4px;" id="clusterActiveRouting">Local Tunnel (Direct)</div>
+            </div>
+          </div>
+
+          <!-- Active Failover Alert Bar (Visible only when rerouted) -->
+          <div id="clusterFailoverBar" class="hidden" style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:linear-gradient(90deg, rgba(239,68,68,0.2), rgba(245,158,11,0.2)); border:1px solid rgba(239,68,68,0.5); border-radius:8px; padding:12px 16px; margin-bottom:18px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:20px;">⚠️</span>
+              <div>
+                <b style="color:#f87171; font-size:13px;">FAILOVER ACTIVE:</b>
+                <span style="color:#f1f5f9; font-size:13px; margin-left:6px;" id="clusterFailoverBarText">Local tunnel dropped. All client traffic is currently rerouted through Iran peer.</span>
+              </div>
+            </div>
+            <button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="padding:4px 12px; font-size:12px; white-space:nowrap;">Revert to Local</button>
+          </div>
+
+          <!-- Nodes Topology Section -->
+          <div style="margin-bottom:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <h4 style="font-size:14px; font-weight:700; color:#e2e8f0; margin:0;">Connected Iran Hubs (<span id="clusterNodeCount">0</span>)</h4>
+              <button class="hashem-btn" onclick="loadClusterStatus()" style="font-size:11px; padding:4px 10px;">↻ Ping Now</button>
+            </div>
+            <div id="clusterNodesList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+              <!-- Dynamic Peer Node Cards -->
             </div>
           </div>
         </div>
@@ -2958,6 +3038,112 @@
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeBagherQuickEdit()">Cancel</button>
       <button type="button" class="hashem-btn hashem-btn-primary" onclick="saveBagherQuickEdit()" style="background:#0284c7; border-color:#0284c7; font-weight:700; padding:8px 22px;">
         💾 Save &amp; Apply Changes
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Cluster Add Peer Node Modal -->
+<div class="ent-modal-ov" id="clusterNodeModal" hidden>
+  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="clusterNodeModalTitle" style="max-width:520px; width:100%; border:1px solid rgba(168,85,247,0.35); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px rgba(168,85,247,0.2);">
+    <div class="ent-modal-h" style="border-bottom:1px solid rgba(168,85,247,0.25); background:rgba(147,51,234,0.1);">
+      <b id="clusterNodeModalTitle" style="display:flex; align-items:center; gap:8px; color:#c084fc; font-size:15px; font-weight:700;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#c084fc" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        Connect Peer Iran Server
+      </b>
+      <button class="ent-x" onclick="closeClusterAddNodeModal()" aria-label="Close">&#xD7;</button>
+    </div>
+    <div class="ent-modal-b" style="gap:14px; padding:20px;">
+      <div class="fg">
+        <label for="clusterPeerID" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Peer Node ID (Unique Slug):
+        </label>
+        <input type="text" class="hashem-input" id="clusterPeerID" placeholder="e.g. iran-2" style="width:100%; font-family:monospace;">
+      </div>
+      <div class="fg">
+        <label for="clusterPeerName" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Display Label:
+        </label>
+        <input type="text" class="hashem-input" id="clusterPeerName" placeholder="e.g. Tehran Hub (MCI)" style="width:100%;">
+      </div>
+      <div class="fg">
+        <label for="clusterPeerAPI" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Peer Panel Base URL:
+        </label>
+        <input type="text" class="hashem-input" id="clusterPeerAPI" placeholder="http://1.2.3.4:7777/secret-path" style="width:100%; font-family:monospace;">
+        <div class="u-hint-12 u-mt-4">Include http/https, port and panel secret path if applicable.</div>
+      </div>
+      <div class="fg">
+        <label for="clusterPeerIP" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Peer Public IP (For Failover DNAT):
+        </label>
+        <input type="text" class="hashem-input" id="clusterPeerIP" placeholder="e.g. 1.2.3.4" style="width:100%; font-family:monospace;">
+      </div>
+    </div>
+    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:14px 20px;">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddNodeModal()">Cancel</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddNode()" style="background:#7c3aed; border-color:#7c3aed; font-weight:700; padding:8px 22px;">
+        🔗 Handshake &amp; Save Node
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Cluster Configuration Modal -->
+<div class="ent-modal-ov" id="clusterConfigModal" hidden>
+  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="clusterConfigModalTitle" style="max-width:540px; width:100%; border:1px solid rgba(168,85,247,0.35); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px rgba(168,85,247,0.2);">
+    <div class="ent-modal-h" style="border-bottom:1px solid rgba(168,85,247,0.25); background:rgba(147,51,234,0.1);">
+      <b id="clusterConfigModalTitle" style="display:flex; align-items:center; gap:8px; color:#c084fc; font-size:15px; font-weight:700;">
+        ⚙️ Cluster Mesh Configuration
+      </b>
+      <button class="ent-x" onclick="closeClusterConfigModal()" aria-label="Close">&#xD7;</button>
+    </div>
+    <div class="ent-modal-b" style="gap:14px; padding:20px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px;">
+        <div>
+          <b style="font-size:13px; color:#f1f5f9;">Enable Cluster Gossip</b>
+          <div class="u-hint-12">Participate in heartbeat health checks with peer Iran servers</div>
+        </div>
+        <input type="checkbox" id="clusterCfgEnabled" style="width:18px; height:18px; cursor:pointer;">
+      </div>
+
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px;">
+        <div>
+          <b style="color:#f87171; font-size:13px;">Auto-Failover Rerouting</b>
+          <div class="u-hint-12">Reroute client traffic to peer Iran server on tunnel drop</div>
+        </div>
+        <input type="checkbox" id="clusterCfgAutoFailover" style="width:18px; height:18px; cursor:pointer;">
+      </div>
+
+      <div class="fg">
+        <label for="clusterCfgNodeID" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          This Node Identifier:
+        </label>
+        <input type="text" class="hashem-input" id="clusterCfgNodeID" style="width:100%; font-family:monospace;">
+      </div>
+
+      <div class="fg">
+        <label for="clusterCfgSecret" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Cluster Shared Secret (Gossip Auth Token):
+        </label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" class="hashem-input" id="clusterCfgSecret" style="width:100%; font-family:monospace;" placeholder="Must match across all Iran servers">
+          <button type="button" class="hashem-btn" onclick="generateClusterSecret()" style="white-space:nowrap; padding:6px 12px;">🎲 Gen</button>
+        </div>
+      </div>
+
+      <div class="fg">
+        <label for="clusterCfgPorts" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Failover Service Ports (comma-separated):
+        </label>
+        <input type="text" class="hashem-input" id="clusterCfgPorts" placeholder="443, 8443, 2083" style="width:100%; font-family:monospace;">
+        <div class="u-hint-12 u-mt-4">Ports redirected via DNAT to the healthy Iran hub upon failure.</div>
+      </div>
+    </div>
+    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:14px 20px;">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterConfigModal()">Cancel</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterConfig()" style="background:#7c3aed; border-color:#7c3aed; font-weight:700; padding:8px 22px;">
+        💾 Save Settings
       </button>
     </div>
   </div>

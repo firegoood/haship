@@ -224,7 +224,18 @@ function goTab(name) {
     openBagherLicModal();
     return;
   }
-  ['dashboard','tunnel','sshfwd','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  if (name === 'cluster' && !isBagherLicensed()) {
+    if (_licenseData === null) {
+      loadLicense().then(() => {
+        if (isBagherLicensed()) goTab('cluster');
+        else openBagherLicModal();
+      });
+      return;
+    }
+    openBagherLicModal();
+    return;
+  }
+  ['dashboard','tunnel','sshfwd','cluster','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -236,6 +247,9 @@ function goTab(name) {
   if (dr) dr.querySelectorAll('[data-tab]').forEach(markTab);
   if (name === 'sshfwd') {
     loadSSHFwd();
+  }
+  if (name === 'cluster') {
+    loadClusterStatus();
   }
   if (name === 'perf') { loadPerf(); loadCarrier(); }
   if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); }
@@ -344,6 +358,7 @@ const I18N = {
     nav_tunnel: "Tunnel",
     nav_sshfwd: "Bagher",
     nav_bagher: "Bagher",
+    nav_cluster: "Cluster",
     nav_setup: "Setup",
     nav_logs: "Logs",
     nav_perf: "Performance",
@@ -6548,3 +6563,302 @@ window.copyMachineHashClick = copyMachineHashClick;
   });
   setTimeout(loadLicense, 500);
 })();
+
+// ==========================================
+// Iran Mesh Cluster & High Availability
+// ==========================================
+let _clusterData = null;
+
+async function loadClusterStatus() {
+  try {
+    const res = await api('/api/cluster/status');
+    _clusterData = res;
+    renderClusterUI(res);
+  } catch (err) {
+    if (err && err.message && (err.message.includes('402') || err.message.includes('Payment Required'))) {
+      const banner = $('clusterLockedBanner');
+      const card = $('clusterCardContainer');
+      if (banner) banner.classList.remove('hidden');
+      if (card) card.classList.add('hidden');
+      return;
+    }
+    toastMsg('err', 'Failed to load cluster status: ' + (err.message || err));
+  }
+}
+
+function renderClusterUI(data) {
+  const banner = $('clusterLockedBanner');
+  const card = $('clusterCardContainer');
+  if (!data || !data.licensed) {
+    if (banner) banner.classList.remove('hidden');
+    if (card) card.classList.add('hidden');
+    return;
+  }
+  if (banner) banner.classList.add('hidden');
+  if (card) card.classList.remove('hidden');
+
+  // Status Badge
+  const badge = $('clusterStatusBadge');
+  if (badge) {
+    if (!data.enabled) {
+      badge.className = 'badge info';
+      badge.textContent = 'Disabled';
+    } else if (data.active_failover) {
+      badge.className = 'badge warn';
+      badge.textContent = 'Failover Active';
+    } else {
+      badge.className = 'badge ok';
+      badge.textContent = 'Healthy & Mesh Active';
+    }
+  }
+
+  // Live Gauges
+  if ($('clusterLocalNodeID')) $('clusterLocalNodeID').textContent = data.node_id || '--';
+  if ($('clusterLocalIP')) $('clusterLocalIP').textContent = data.public_ip || '--';
+
+  const tStatusEl = $('clusterLocalTunnelStatus');
+  if (tStatusEl) {
+    const isUp = (data.tunnel_status || 'UP').toUpperCase() === 'UP';
+    tStatusEl.innerHTML = `<span class="badge ${isUp ? 'ok' : 'err'}">${isUp ? 'UP (Healthy)' : 'DOWN (Failed)'}</span>`;
+  }
+
+  const actRouteEl = $('clusterActiveRouting');
+  if (actRouteEl) {
+    if (data.active_failover && data.failover_target) {
+      actRouteEl.innerHTML = `<span style="color:#f87171;">Rerouted \u2192 ${data.failover_target}</span>`;
+    } else {
+      actRouteEl.innerHTML = `<span style="color:#34d399;">Local Tunnel (Direct)</span>`;
+    }
+  }
+
+  // Failover Alert Banner
+  const foBar = $('clusterFailoverBar');
+  const foText = $('clusterFailoverBarText');
+  if (foBar) {
+    if (data.active_failover) {
+      foBar.classList.remove('hidden');
+      if (foText) {
+        foText.textContent = `Foreign tunnel down. All client traffic on forwarded ports is rerouted to peer ${data.failover_target}.`;
+      }
+    } else {
+      foBar.classList.add('hidden');
+    }
+  }
+
+  // Nodes List
+  const nodes = data.nodes || [];
+  if ($('clusterNodeCount')) $('clusterNodeCount').textContent = nodes.length;
+
+  const container = $('clusterNodesList');
+  if (!container) return;
+
+  if (nodes.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column:1/-1; text-align:center; padding:32px 16px; background:rgba(0,0,0,0.25); border:1px dashed rgba(168,85,247,0.25); border-radius:10px;">
+        <div style="font-size:24px; margin-bottom:8px;">📡</div>
+        <div style="font-weight:700; color:#cbd5e1; font-size:14px; margin-bottom:4px;">No Peer Iran Servers Configured</div>
+        <div style="font-size:12px; color:#94a3b8; max-width:440px; margin:0 auto 12px auto;">
+          Connect at least one additional Iran server to establish a resilient intra-Iran failover mesh.
+        </div>
+        <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddNodeModal()" style="font-size:12px; padding:6px 16px; background:#7c3aed; border-color:#7c3aed;">
+          + Add First Peer Node
+        </button>
+      </div>`;
+    return;
+  }
+
+  let html = '';
+  nodes.forEach(node => {
+    const isHealthy = !!node.is_healthy;
+    const isFailing = !!node.is_failing;
+    const tunnelUp = (node.tunnel_status || 'UP').toUpperCase() === 'UP';
+    const latency = node.ping_ms ? `${node.ping_ms.toFixed(1)} ms` : '--';
+    const lastSeen = node.last_seen ? new Date(node.last_seen * 1000).toLocaleTimeString() : 'Never';
+
+    let statusBadgeClass = 'ok';
+    let statusText = 'HEALTHY';
+    if (!isHealthy) {
+      statusBadgeClass = 'err';
+      statusText = 'OFFLINE';
+    } else if (isFailing || !tunnelUp) {
+      statusBadgeClass = 'warn';
+      statusText = 'TUNNEL DOWN';
+    }
+
+    const isCurrentFailoverTarget = data.active_failover && data.failover_target === node.id;
+
+    html += `
+      <div style="background:rgba(15,23,42,0.7); border:1px solid ${isCurrentFailoverTarget ? '#ef4444' : 'rgba(168,85,247,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:700; color:#f8fafc; font-size:14px; display:flex; align-items:center; gap:6px;">
+                <span>🇮🇷</span> ${escapeHtml(node.name || node.id)}
+              </div>
+              <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${escapeHtml(node.id)}</div>
+            </div>
+            <span class="badge ${statusBadgeClass}" style="font-size:10px; font-weight:700;">${statusText}</span>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
+            <div>
+              <span style="color:#94a3b8;">Public IP:</span>
+              <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${escapeHtml(node.public_ip || '--')}</div>
+            </div>
+            <div>
+              <span style="color:#94a3b8;">Peer Ping:</span>
+              <div style="font-family:monospace; color:#38bdf8; font-weight:600;">${latency}</div>
+            </div>
+            <div>
+              <span style="color:#94a3b8;">Kharej Tunnel:</span>
+              <div style="font-weight:600; color:${tunnelUp ? '#34d399' : '#f87171'};">${tunnelUp ? 'UP' : 'DOWN'}</div>
+            </div>
+            <div>
+              <span style="color:#94a3b8;">Last Heartbeat:</span>
+              <div style="color:#cbd5e1;">${lastSeen}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
+          ${isCurrentFailoverTarget
+            ? `<button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="font-size:11px; padding:4px 10px;">Revert Reroute</button>`
+            : `<button class="hashem-btn" onclick="triggerClusterFailover('${escapeHtml(node.id)}')" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:11px; padding:4px 10px; background:rgba(124,58,237,0.2); border-color:#7c3aed; color:#c084fc;">\u2192 Failover Here</button>`
+          }
+          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode('${escapeHtml(node.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove peer">&#128465;</button>
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
+function openClusterAddNodeModal() {
+  $('clusterPeerID').value = '';
+  $('clusterPeerName').value = '';
+  $('clusterPeerAPI').value = '';
+  $('clusterPeerIP').value = '';
+  $('clusterNodeModal').hidden = false;
+}
+
+function closeClusterAddNodeModal() {
+  $('clusterNodeModal').hidden = true;
+}
+
+async function submitClusterAddNode() {
+  const id = ($('clusterPeerID').value || '').trim();
+  const name = ($('clusterPeerName').value || '').trim();
+  const api_url = ($('clusterPeerAPI').value || '').trim();
+  const public_ip = ($('clusterPeerIP').value || '').trim();
+
+  if (!id || !api_url) {
+    toastMsg('err', 'Node ID and Panel Base URL are required');
+    return;
+  }
+
+  try {
+    await api('/api/cluster/nodes/add', { id, name, api_url, public_ip });
+    toastMsg('ok', 'Peer node added and verified');
+    closeClusterAddNodeModal();
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to add node: ' + (err.message || err));
+  }
+}
+
+async function deleteClusterNode(id) {
+  if (!confirm(`Are you sure you want to remove peer node "${id}" from the cluster?`)) return;
+  try {
+    await api('/api/cluster/nodes/delete', { id });
+    toastMsg('ok', 'Peer node removed');
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to delete node: ' + (err.message || err));
+  }
+}
+
+function openClusterConfigModal() {
+  if (!_clusterData) return;
+  $('clusterCfgEnabled').checked = !!_clusterData.enabled;
+  $('clusterCfgAutoFailover').checked = !!_clusterData.auto_failover;
+  $('clusterCfgNodeID').value = _clusterData.node_id || '';
+  $('clusterCfgSecret').value = _clusterData.cluster_secret || '';
+  $('clusterCfgPorts').value = (_clusterData.service_ports || []).join(', ');
+  $('clusterConfigModal').hidden = false;
+}
+
+function closeClusterConfigModal() {
+  $('clusterConfigModal').hidden = true;
+}
+
+function generateClusterSecret() {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_';
+  let sec = '';
+  const arr = new Uint8Array(32);
+  window.crypto.getRandomValues(arr);
+  arr.forEach(b => { sec += chars[b % chars.length]; });
+  $('clusterCfgSecret').value = sec;
+}
+
+async function submitClusterConfig() {
+  const enabled = $('clusterCfgEnabled').checked;
+  const auto_failover = $('clusterCfgAutoFailover').checked;
+  const node_id = ($('clusterCfgNodeID').value || '').trim();
+  const cluster_secret = ($('clusterCfgSecret').value || '').trim();
+  const rawPorts = ($('clusterCfgPorts').value || '').split(',');
+  const service_ports = [];
+  rawPorts.forEach(p => {
+    const n = parseInt(p.trim(), 10);
+    if (!isNaN(n) && n > 0 && n <= 65535) service_ports.push(n);
+  });
+
+  try {
+    await api('/api/cluster/config', {
+      enabled,
+      auto_failover,
+      node_id,
+      cluster_secret,
+      service_ports
+    });
+    toastMsg('ok', 'Cluster configuration updated');
+    closeClusterConfigModal();
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to save configuration: ' + (err.message || err));
+  }
+}
+
+async function triggerClusterFailover(targetId) {
+  if (!confirm(`Manual failover: Reroute all client traffic to peer "${targetId}"?`)) return;
+  try {
+    await api('/api/cluster/failover/trigger', { target_id: targetId });
+    toastMsg('ok', `Failover active: Traffic rerouted to ${targetId}`);
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failover failed: ' + (err.message || err));
+  }
+}
+
+async function revertClusterFailover() {
+  if (!confirm('Revert failover: Restore traffic routing to the local tunnel?')) return;
+  try {
+    await api('/api/cluster/failover/revert', {});
+    toastMsg('ok', 'Failover reverted: Local routing restored');
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Revert failed: ' + (err.message || err));
+  }
+}
+
+window.loadClusterStatus = loadClusterStatus;
+window.openClusterAddNodeModal = openClusterAddNodeModal;
+window.closeClusterAddNodeModal = closeClusterAddNodeModal;
+window.submitClusterAddNode = submitClusterAddNode;
+window.deleteClusterNode = deleteClusterNode;
+window.openClusterConfigModal = openClusterConfigModal;
+window.closeClusterConfigModal = closeClusterConfigModal;
+window.generateClusterSecret = generateClusterSecret;
+window.submitClusterConfig = submitClusterConfig;
+window.triggerClusterFailover = triggerClusterFailover;
+window.revertClusterFailover = revertClusterFailover;

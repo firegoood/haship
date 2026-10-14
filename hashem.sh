@@ -8655,6 +8655,72 @@ cli_license() {
     esac
 }
 
+cli_cluster() {
+    local SUB="${1:-status}"
+    local CONF_FILE="/etc/gre-panel/cluster.json"
+
+    case "$SUB" in
+        status)
+            echo -e "${CYAN}=== Hashem Iran Mesh Cluster Status ===${NC}"
+            if [[ ! -f "$CONF_FILE" ]]; then
+                echo -e "Cluster Mesh:     ${YELLOW}Not Initialized (No config at $CONF_FILE)${NC}"
+                return 0
+            fi
+
+            if command -v jq >/dev/null 2>&1; then
+                local EN
+                EN=$(jq -r '.enabled // false' "$CONF_FILE")
+                local NODE_ID
+                NODE_ID=$(jq -r '.node_id // "N/A"' "$CONF_FILE")
+                local PUB_IP
+                PUB_IP=$(jq -r '.public_ip // "N/A"' "$CONF_FILE")
+                local AUTO_FO
+                AUTO_FO=$(jq -r '.auto_failover // false' "$CONF_FILE")
+                local ACT_FO
+                ACT_FO=$(jq -r '.active_failover // false' "$CONF_FILE")
+                local FO_TGT
+                FO_TGT=$(jq -r '.failover_target // "None"' "$CONF_FILE")
+                local PEER_CNT
+                PEER_CNT=$(jq -r '.nodes | length // 0' "$CONF_FILE")
+
+                echo -e "Mesh Enabled:     $([[ "$EN" == "true" ]] && echo -e "${GREEN}YES${NC}" || echo -e "${YELLOW}NO${NC}")"
+                echo -e "Node ID:          ${GREEN}${NODE_ID}${NC}"
+                echo -e "Public IP:        ${GREEN}${PUB_IP}${NC}"
+                echo -e "Auto-Failover:    $([[ "$AUTO_FO" == "true" ]] && echo -e "${GREEN}Enabled${NC}" || echo -e "${YELLOW}Disabled${NC}")"
+                echo -e "Failover State:   $([[ "$ACT_FO" == "true" ]] && echo -e "${RED}ACTIVE (Rerouted to ${FO_TGT})${NC}" || echo -e "${GREEN}NORMAL (Local)${NC}")"
+                echo -e "Connected Peers:  ${CYAN}${PEER_CNT}${NC}"
+            else
+                cat "$CONF_FILE"
+            fi
+            ;;
+        peers)
+            echo -e "${CYAN}=== Connected Iran Peers ===${NC}"
+            if [[ ! -f "$CONF_FILE" ]] || ! command -v jq >/dev/null 2>&1; then
+                echo "No peers configured or jq missing."
+                return 0
+            fi
+            jq -r '.nodes[] | "\(.id)\t\(.name)\t\(.public_ip)\tHealth:\(.is_healthy)\tTunnel:\(.tunnel_status)"' "$CONF_FILE" 2>/dev/null || echo "No peers."
+            ;;
+        revert)
+            echo -e "${CYAN}[*] Reverting failover iptables rules...${NC}"
+            iptables -t nat -S PREROUTING 2>/dev/null | grep -E 'HASHEM-CLUSTER-FAILOVER|hashem_cluster' | while read -r line; do
+                local rule="${line#-A }"
+                # shellcheck disable=SC2086
+                iptables -t nat -D $rule 2>/dev/null || true
+            done
+            if [[ -f "$CONF_FILE" ]] && command -v jq >/dev/null 2>&1; then
+                local tmp
+                tmp=$(jq '.active_failover = false | .failover_target = ""' "$CONF_FILE")
+                echo "$tmp" > "$CONF_FILE"
+            fi
+            echo -e "${GREEN}[✔️] Failover rules removed and state reverted to local tunnel.${NC}"
+            ;;
+        *)
+            echo "Usage: hashem cluster {status|peers|revert}"
+            ;;
+    esac
+}
+
 if [[ $# -gt 0 ]]; then
     case "$1" in
         -h|--help|help) usage_cli; exit 0 ;;
@@ -8707,6 +8773,7 @@ if [[ $# -gt 0 ]]; then
         carrier) shift; cli_carrier "$@" ;;
         bagher|hashem-bagher|ssh-fwd|sshfwd) shift; cli_bagher "$@" ;;
         license|lic) shift; cli_license "$@" ;;
+        cluster|mesh) shift; cli_cluster "$@" ;;
         carrier-kernel-init) carrier_init_kernel ;;
         dial) shift; cli_dial "$@" ;;
         dial-select) dial_reselect >/dev/null 2>&1; exit 0 ;;
