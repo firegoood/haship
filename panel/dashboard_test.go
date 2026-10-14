@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -145,5 +147,82 @@ func TestTrafficHistoryDownsampling(t *testing.T) {
 	}
 	if *lastOut.Up != *lastIn.Up || *lastOut.Down != *lastIn.Down {
 		t.Errorf("last point values mismatch")
+	}
+}
+
+func TestLoadHistoryCleansNulls(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldDir := configDir
+	configDir = tmpDir
+	defer func() { configDir = oldDir }()
+
+	rawJSON := `[{"t":1000,"up":null,"down":null,"total":null},{"t":1005,"up":100,"down":200,"total":300},{"t":1010,"up":null,"down":null,"total":null}]`
+	if err := os.WriteFile(filepath.Join(tmpDir, "traffic.json"), []byte(rawJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	histMu.Lock()
+	histLoaded = false
+	histCached = nil
+	histMu.Unlock()
+
+	cleaned := loadHistory()
+	if len(cleaned) != 3 {
+		t.Fatalf("expected 3 points, got %d", len(cleaned))
+	}
+	for i, pt := range cleaned {
+		if pt.Up == nil || pt.Down == nil || pt.Total == nil {
+			t.Errorf("point %d has nil counters: up=%v, down=%v, total=%v", i, pt.Up, pt.Down, pt.Total)
+		}
+	}
+	if *cleaned[1].Up != 100 || *cleaned[2].Up != 100 {
+		t.Errorf("expected cleaned[2].Up to carry forward 100, got %d", *cleaned[2].Up)
+	}
+}
+
+func TestGreTrafficFromSmartFallback(t *testing.T) {
+	histMu.Lock()
+	histLoaded = true
+	histCached = nil
+	histMu.Unlock()
+
+	trafficStateMu.Lock()
+	trafficStateInit = false
+	lifetimeUp = 0
+	lifetimeDown = 0
+	lastRawUp = 0
+	lastRawDown = 0
+	trafficStateMu.Unlock()
+
+	devData1 := "Inter-|   Receive                                                |  Transmit\n" +
+		" face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n" +
+		"    lo: 100000       10    0    0    0     0          0         0   100000       10    0    0    0     0       0          0\n" +
+		"  ens5: 50000000     500    0    0    0     0          0         0  80000000     800    0    0    0     0       0          0\n"
+
+	t1 := greTrafficFrom(devData1)
+	if t1["up"] == nil || t1["down"] == nil || t1["total"] == nil {
+		t.Fatalf("expected non-nil traffic counters on init, got: %v", t1)
+	}
+
+	// Second sample with 5MB more rx and tx
+	devData2 := "Inter-|   Receive                                                |  Transmit\n" +
+		" face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n" +
+		"    lo: 100000       10    0    0    0     0          0         0   100000       10    0    0    0     0       0          0\n" +
+		"  ens5: 55000000     550    0    0    0     0          0         0  85000000     850    0    0    0     0       0          0\n"
+
+	t2 := greTrafficFrom(devData2)
+	upVal, okUp := t2["up"].(uint64)
+	downVal, okDown := t2["down"].(uint64)
+	if !okUp || !okDown {
+		t.Fatalf("expected uint64 counters, got up=%T down=%T", t2["up"], t2["down"])
+	}
+	if upVal != 5000000 || downVal != 5000000 {
+		t.Errorf("expected 5MB delta, got up=%d, down=%d", upVal, downVal)
+	}
+	if _, ok := t2["speed_up"].(float64); !ok {
+		t.Errorf("expected float64 speed_up, got %T", t2["speed_up"])
+	}
+	if _, ok := t2["speed_down"].(float64); !ok {
+		t.Errorf("expected float64 speed_down, got %T", t2["speed_down"])
 	}
 }

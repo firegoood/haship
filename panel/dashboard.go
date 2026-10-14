@@ -41,7 +41,7 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	st := snap.Local
 	traffic := snap.Traffic
 	if traffic == nil {
-		traffic = map[string]any{"up": nil, "down": nil, "total": nil}
+		traffic = greTraffic()
 	}
 	peers := snap.PeersAged()
 	var bagherStatus map[string]any
@@ -213,10 +213,19 @@ func peerOr(st tunnelStatus) string {
 	return st.GrePeer
 }
 
-var trafficStateMu sync.Mutex
-var lastRawUp, lastRawDown uint64
-var lifetimeUp, lifetimeDown uint64
-var trafficStateInit bool
+var (
+	trafficStateMu   sync.Mutex
+	lastRawUp        uint64
+	lastRawDown      uint64
+	lifetimeUp       uint64
+	lifetimeDown     uint64
+	trafficStateInit bool
+	lastSampleTime   time.Time
+	speedDeltaUp     uint64
+	speedDeltaDown   uint64
+	currentSpeedUp   float64
+	currentSpeedDown float64
+)
 
 var (
 	peerIfsMu       sync.RWMutex
@@ -282,6 +291,21 @@ func isTunnelInterface(ifname string) bool {
 	return false
 }
 
+// primaryInterface returns the default network interface from /proc/net/route.
+func primaryInterface() string {
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == "00000000" && fields[0] != "lo" {
+			return fields[0]
+		}
+	}
+	return ""
+}
+
 // ---- traffic: rx/tx bytes summed across tunnel interfaces ----
 // Multi-peer: sum counters of every registered GRE and Backhaul interface.
 func greTraffic() map[string]any {
@@ -289,11 +313,9 @@ func greTraffic() map[string]any {
 	return greTrafficFrom(string(data))
 }
 
-// greTrafficFrom is greTraffic over an already read /proc/net/dev (the snapshot
-// collector reads it once per tick for both peer counters and the totals).
 func greTrafficFrom(devData string) map[string]any {
 	var rawUp, rawDown uint64
-	var have bool
+	var haveTunnel bool
 
 	if devData != "" {
 		for _, line := range strings.Split(devData, "\n") {
@@ -316,40 +338,76 @@ func greTrafficFrom(devData string) map[string]any {
 			if _, err := fmt.Sscanf(f[8], "%d", &t); err == nil {
 				rawUp += t
 			}
-			have = true
+			haveTunnel = true
 		}
 	}
 
-	if !have {
-		return map[string]any{"up": nil, "down": nil, "total": nil}
+	if !haveTunnel && devData != "" {
+		primIf := primaryInterface()
+		for _, line := range strings.Split(devData, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.Contains(line, ":") {
+				continue
+			}
+			ifname := strings.TrimSpace(strings.Split(line, ":")[0])
+			if primIf != "" {
+				if ifname != primIf {
+					continue
+				}
+			} else {
+				if ifname == "lo" || strings.HasPrefix(ifname, "docker") || strings.HasPrefix(ifname, "veth") || strings.HasPrefix(ifname, "br-") {
+					continue
+				}
+			}
+			f := strings.Fields(strings.TrimPrefix(line, ifname+":"))
+			if len(f) < 9 {
+				continue
+			}
+			var r, t uint64
+			if _, err := fmt.Sscanf(f[0], "%d", &r); err == nil {
+				rawDown = r
+			}
+			if _, err := fmt.Sscanf(f[8], "%d", &t); err == nil {
+				rawUp = t
+			}
+			if rawDown > 0 || rawUp > 0 {
+				break
+			}
+		}
 	}
 
 	trafficStateMu.Lock()
 	defer trafficStateMu.Unlock()
 
+	now := time.Now()
+
 	if !trafficStateInit {
 		hist := loadHistory()
-		if len(hist) > 0 {
-			last := hist[len(hist)-1]
-			if last.Up != nil {
-				lifetimeUp = *last.Up
-			}
-			if last.Down != nil {
-				lifetimeDown = *last.Down
+		for i := len(hist) - 1; i >= 0; i-- {
+			if hist[i].Up != nil && hist[i].Down != nil {
+				lifetimeUp = *hist[i].Up
+				lifetimeDown = *hist[i].Down
+				break
 			}
 		}
 		lastRawUp = rawUp
 		lastRawDown = rawDown
+		lastSampleTime = now
 		trafficStateInit = true
 	}
 
-	dU := rawUp
+	dU := uint64(0)
 	if rawUp >= lastRawUp {
 		dU = rawUp - lastRawUp
+	} else {
+		dU = rawUp
 	}
-	dD := rawDown
+
+	dD := uint64(0)
 	if rawDown >= lastRawDown {
 		dD = rawDown - lastRawDown
+	} else {
+		dD = rawDown
 	}
 
 	lifetimeUp += dU
@@ -357,7 +415,25 @@ func greTrafficFrom(devData string) map[string]any {
 	lastRawUp = rawUp
 	lastRawDown = rawDown
 
-	return map[string]any{"up": lifetimeUp, "down": lifetimeDown, "total": lifetimeUp + lifetimeDown}
+	speedDeltaUp += dU
+	speedDeltaDown += dD
+
+	dt := now.Sub(lastSampleTime).Seconds()
+	if dt >= 1.0 {
+		currentSpeedUp = float64(speedDeltaUp) / dt
+		currentSpeedDown = float64(speedDeltaDown) / dt
+		speedDeltaUp = 0
+		speedDeltaDown = 0
+		lastSampleTime = now
+	}
+
+	return map[string]any{
+		"up":         lifetimeUp,
+		"down":       lifetimeDown,
+		"total":      lifetimeUp + lifetimeDown,
+		"speed_up":   currentSpeedUp,
+		"speed_down": currentSpeedDown,
+	}
 }
 
 // ---- uptime: system + panel + frp service ----
@@ -579,7 +655,34 @@ func loadHistory() []trafficPoint {
 	histLoaded = true
 	data, err := os.ReadFile(historyFile())
 	if err == nil {
-		_ = json.Unmarshal(data, &histCached)
+		var raw []trafficPoint
+		if json.Unmarshal(data, &raw) == nil {
+			var lastUp, lastDown uint64
+			cleaned := make([]trafficPoint, 0, len(raw))
+			for _, p := range raw {
+				if p.Up == nil {
+					u := lastUp
+					p.Up = &u
+				} else {
+					lastUp = *p.Up
+				}
+				if p.Down == nil {
+					d := lastDown
+					p.Down = &d
+				} else {
+					lastDown = *p.Down
+				}
+				if p.Total == nil {
+					tot := lastUp + lastDown
+					p.Total = &tot
+				}
+				cleaned = append(cleaned, p)
+			}
+			histCached = cleaned
+		}
+	}
+	if histCached == nil {
+		histCached = []trafficPoint{}
 	}
 	return histCached
 }
@@ -700,14 +803,23 @@ func recordTrafficSample(traffic map[string]any) {
 	if v, ok := traffic["up"].(uint64); ok {
 		c := v
 		pt.Up = &c
+	} else {
+		var z uint64 = 0
+		pt.Up = &z
 	}
 	if v, ok := traffic["down"].(uint64); ok {
 		c := v
 		pt.Down = &c
+	} else {
+		var z uint64 = 0
+		pt.Down = &z
 	}
 	if v, ok := traffic["total"].(uint64); ok {
 		c := v
 		pt.Total = &c
+	} else {
+		var z uint64 = 0
+		pt.Total = &z
 	}
 	if v, ok := activeConns().(int); ok {
 		c := v
@@ -724,8 +836,6 @@ func recordTrafficSample(traffic map[string]any) {
 	}
 	histCached = hist
 	histDirty = true
-
-	// If history is small (initial start), save immediately so it's not lost
 	if len(histCached) <= 5 || time.Since(lastFlushTime) >= 30*time.Second {
 		saveHistoryLocked()
 	}

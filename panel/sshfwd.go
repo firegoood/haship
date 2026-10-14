@@ -63,12 +63,6 @@ func sshFwdConfigFile() string {
 	return filepath.Join(configDir, "sshfwd.json")
 }
 
-func loadSSHFwdConfig() SSHFwdConfig {
-	sshFwdMu.Lock()
-	defer sshFwdMu.Unlock()
-	return loadSSHFwdConfigLocked()
-}
-
 func loadSSHFwdConfigLocked() SSHFwdConfig {
 	cfg := defaultSSHFwdConfig()
 	b, err := os.ReadFile(sshFwdConfigFile())
@@ -340,7 +334,7 @@ func MakeBagherBundle(cfg SSHFwdConfig, pubKey string) (string, error) {
 func ParseBagherBundle(bundleStr string) (*BagherBundle, error) {
 	bundleStr = strings.TrimSpace(bundleStr)
 	if !strings.HasPrefix(bundleStr, "BAGHER:") {
-		return nil, fmt.Errorf("invalid bundle prefix: must start with BAGHER:")
+		return nil, fmt.Errorf("invalid bundle prefix, expected BAGHER: prefix")
 	}
 	rawB64 := strings.TrimPrefix(bundleStr, "BAGHER:")
 	data, err := base64.StdEncoding.DecodeString(rawB64)
@@ -374,7 +368,6 @@ func ParseBagherBundle(bundleStr string) (*BagherBundle, error) {
 
 // applyBagherBundle configures Foreign host automatically from a parsed BagherBundle.
 func applyBagherBundle(b *BagherBundle) error {
-	// 1. Authorize SSH public key in /root/.ssh/authorized_keys with restrict directives
 	authLine := formatAuthorizedKeyLine(b.SSHPublicKey, "bagher", b.FRPPort, b.Ports)
 	authFile := "/root/.ssh/authorized_keys"
 	_ = os.MkdirAll("/root/.ssh", 0700)
@@ -405,14 +398,12 @@ func applyBagherBundle(b *BagherBundle) error {
 		return fmt.Errorf("failed writing authorized_keys: %w", err)
 	}
 
-	// 2. Write Foreign frpc config
 	_ = os.MkdirAll("/etc/gre-panel/bagher", 0755)
 	frpcToml := buildFRPCConfig(b.FRPPort, b.PoolCount, b.Ports)
 	if err := os.WriteFile("/etc/gre-panel/bagher/frpc.toml", []byte(frpcToml), 0644); err != nil {
 		return fmt.Errorf("failed writing frpc.toml: %w", err)
 	}
 
-	// 3. Write Foreign systemd unit
 	frpcUnit := `[Unit]
 Description=Hashem Bagher Engine client (Foreign)
 After=network-online.target
@@ -432,7 +423,6 @@ WantedBy=multi-user.target
 		return fmt.Errorf("failed writing frpc service: %w", err)
 	}
 
-	// 4. Reload and start Foreign service
 	if _, err := runCmd("systemctl", "daemon-reload"); err != nil {
 		return fmt.Errorf("daemon-reload failed: %w", err)
 	}
@@ -440,7 +430,6 @@ WantedBy=multi-user.target
 		return fmt.Errorf("failed starting hashem-bagher-frpc: %w", err)
 	}
 
-	// 5. Update local config
 	cfg := loadSSHFwdConfigLocked()
 	cfg.Role = "foreign"
 	cfg.Mode = "bagher"
@@ -537,7 +526,6 @@ func getBagherLiveMetrics(cfg SSHFwdConfig) BagherLiveMetrics {
 		return BagherLiveMetrics{Connected: false, StatusText: "inactive", RxFormatted: "0 B", TxFormatted: "0 B", TotalFormatted: "0 B"}
 	}
 
-	// Measure TCP RTT (prefer remote host if reachable, fallback to local bind port)
 	var lat float64
 	if cfg.RemoteHost != "" {
 		remoteSSHPort := cfg.RemoteSSHPort
@@ -560,7 +548,6 @@ func getBagherLiveMetrics(cfg SSHFwdConfig) BagherLiveMetrics {
 		}
 	}
 
-	// Query frps dashboard at 127.0.0.1:(FRPBindPort+1)/api/serverinfo
 	dashPort := cfg.FRPBindPort + 1
 	dashURL := fmt.Sprintf("http://127.0.0.1:%d/api/serverinfo", dashPort)
 	client := &http.Client{Timeout: 400 * time.Millisecond}
@@ -597,7 +584,6 @@ func getBagherLiveMetrics(cfg SSHFwdConfig) BagherLiveMetrics {
 			statusText = "connected"
 		}
 	} else {
-		// Fallback check: check established TCP sockets on FRPBindPort
 		outSS, _ := runCmd("ss", "-tn", "state", "established", fmt.Sprintf("sport = :%d or dport = :%d", cfg.FRPBindPort, cfg.FRPBindPort))
 		lines := strings.Split(strings.TrimSpace(outSS), "\n")
 		if len(lines) > 1 {
@@ -642,10 +628,8 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 		return fmt.Errorf("failed ensuring key: %w", err)
 	}
 
-	// 1. Remove DNAT conflicts so traffic hits the local sockets
 	_ = cleanDnatConflict(cfg.Ports)
 
-	// Clean up legacy service units if any
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-ssh-fwd.service")
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-ssh-frps.service")
 	_ = os.Remove("/etc/systemd/system/hashem-ssh-fwd.service")
@@ -653,7 +637,6 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 
 	isBagher := cfg.Mode == "bagher" || cfg.Mode == "frp_ssh"
 	if isBagher {
-		// Prepare bagher directory and config
 		_ = os.MkdirAll("/etc/gre-panel/bagher", 0755)
 		frpsToml := buildFRPSConfig(cfg)
 		if err := os.WriteFile("/etc/gre-panel/bagher/frps.toml", []byte(frpsToml), 0644); err != nil {
@@ -663,18 +646,15 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 			return fmt.Errorf("failed writing frps service: %w", err)
 		}
 	} else {
-		// Stop frps if switching to pure direct mode
 		_, _ = runCmd("systemctl", "disable", "--now", "hashem-bagher-frps.service")
 	}
 
-	// 2. Write systemd unit for Bagher/SSH carrier
 	svcContent := buildSSHFwdService(cfg)
 	unitPath := "/etc/systemd/system/hashem-bagher.service"
 	if err := os.WriteFile(unitPath, []byte(svcContent), 0644); err != nil {
 		return fmt.Errorf("failed writing unit: %w", err)
 	}
 
-	// 3. Reload and enable
 	if _, err := runCmd("systemctl", "daemon-reload"); err != nil {
 		return fmt.Errorf("daemon-reload failed: %w", err)
 	}
@@ -683,7 +663,6 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 			return fmt.Errorf("failed starting hashem-bagher-frps: %w", err)
 		}
 	}
-	// Start carrier service asynchronously to avoid blocking HTTP response or timing out
 	go func() {
 		_, _ = runCmd("systemctl", "enable", "--now", "hashem-bagher.service")
 	}()
@@ -789,17 +768,14 @@ func getSSHFwdStatusLocked() map[string]any {
 		}
 	}
 
-	// Listening port check
 	portStatus := make(map[string]bool)
 	for _, p := range cfg.Ports {
 		portStatus[strconv.Itoa(p)] = checkPortListening("127.0.0.1", p)
 	}
 
-	// DNAT status check
 	dnatOut, _ := runCmd("nft", "list", "table", "inet", "hashem_dnat")
 	dnatActive := strings.Contains(dnatOut, "table inet hashem_dnat")
 
-	// Remote auth line
 	authLine := ""
 	if pubKey != "" {
 		authLine = formatAuthorizedKeyLine(pubKey, cfg.Mode, cfg.FRPBindPort, cfg.Ports)
@@ -841,7 +817,6 @@ func getSSHFwdStatusLocked() map[string]any {
 		"dnat_conflict":     dnatActive,
 		"last_error":        cfg.LastError,
 		"updated_at":        cfg.UpdatedAt,
-		// Live connection health & traffic metrics
 		"connected":         metrics.Connected,
 		"status_text":       metrics.StatusText,
 		"latency_ms":        metrics.LatencyMs,

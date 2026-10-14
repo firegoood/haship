@@ -371,18 +371,6 @@ func peerPingTarget(peerID int) string {
 	return localStatus().GrePeer
 }
 
-// livePeers inspects every registered peer with a fresh synchronous read (one
-// batch of host commands, ICMP inline). Polling handlers must use the shared
-// snapshot instead (snapshot.go); this is the collector's building block.
-func livePeers() []peerLive {
-	defer func(t time.Time) { recordSampler("livePeers", time.Since(t)) }(time.Now())
-	recs := loadPeers()
-	if len(recs) == 0 {
-		return nil
-	}
-	return livePeersFrom(directView(recs), recs)
-}
-
 // livePeersFrom derives every peer's live state from an already collected host
 // view; it runs no commands itself.
 func livePeersFrom(v *hostView, recs []peerRecord) []peerLive {

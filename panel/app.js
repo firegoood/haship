@@ -1318,11 +1318,16 @@ function drawChart(hist, isDown) {
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i-1], b = pts[i];
     const dt = (b.t - a.t) || 1;
-    if (a.down == null || b.down == null || a.up == null || b.up == null) { series.push(null); continue; }
-    let dd = (b.down - a.down) / dt, du = (b.up - a.up) / dt;
-    if (dd < 0 || du < 0) { series.push(null); continue; } // counter reset
-    let dtot = a.total != null && b.total != null ? (b.total - a.total) / dt : (dd + du);
-    if (dtot < 0) dtot = 0;
+    const aDown = a.down != null ? a.down : 0;
+    const bDown = b.down != null ? b.down : 0;
+    const aUp = a.up != null ? a.up : 0;
+    const bUp = b.up != null ? b.up : 0;
+    let dd = (bDown - aDown) / dt, du = (bUp - aUp) / dt;
+    if (dd < 0 || du < 0) { dd = Math.max(0, dd); du = Math.max(0, du); }
+    let aTot = a.total != null ? a.total : (aDown + aUp);
+    let bTot = b.total != null ? b.total : (bDown + bUp);
+    let dtot = (bTot - aTot) / dt;
+    if (dtot < 0) dtot = dd + du;
     series.push({t: b.t, down: dd, up: du, total: dtot, conns: b.conns || 0});
   }
   cv._series = series;
@@ -1781,8 +1786,11 @@ async function refreshDash() {
     }
     const t = d.traffic || {};
     set('kpiTraffic', fmtBytes(t.total));
-    let rtUp = '—', rtDown = '—';
-    if (d.history && d.history.length >= 2) {
+    let rtUp = '0.0 B/s', rtDown = '0.0 B/s';
+    if (t.speed_up != null && t.speed_down != null) {
+      rtUp = fmtRate(t.speed_up);
+      rtDown = fmtRate(t.speed_down);
+    } else if (d.history && d.history.length >= 2) {
       const b = d.history[d.history.length - 1];
       const a = d.history[d.history.length - 2];
       const dt = (b.t - a.t) || 1;
@@ -1803,7 +1811,6 @@ async function refreshDash() {
       if (txt) txt.textContent = paused ? 'PAUSED' : 'LIVE';
     }
 
-    // Bagher PRO Dashboard Card & Tunnels Card telemetry sync
     const b = d.bagher || {};
     const bagherActive = !!(b.is_active || b.enabled);
     const dashBagherCard = $('dashBagherCard');
@@ -5888,7 +5895,6 @@ function renderSSHFwd() {
   const authLine = $('sshfwdAuthLine');
   if (authLine) authLine.value = d.auth_line || '';
 
-  // Bagher Premium License Gate & UI blur/lock
   const isLicensed = isBagherLicensed();
   const bagherContainer = $('bagherCardContainer');
   const bagherLockedBanner = $('bagherLockedBanner');
@@ -6446,7 +6452,6 @@ async function saveBagherQuickEdit() {
   }
 }
 
-// Expose functions globally on window for inline onclick handlers
 window.openBagherLicModal = openBagherLicModal;
 window.closeBagherLicModal = closeBagherLicModal;
 window.cancelBagherLicModal = cancelBagherLicModal;
@@ -6475,7 +6480,6 @@ window.copyMachineHashClick = copyMachineHashClick;
   on('licDeactivateBtn', 'click', deactivateLicenseClick);
   on('licCopyMachineBtn', 'click', copyMachineHashClick);
 
-  // Load license when settings tab clicked or initial page load
   const origTabSwitch = window.switchTab;
   if (typeof origTabSwitch === 'function') {
     window.switchTab = function(name) {

@@ -588,7 +588,9 @@ func TestWorkPoolHardTimeout(t *testing.T) {
 
 func TestJitterIsStableAndBounded(t *testing.T) {
 	for _, k := range []string{"a", "10.20.1.2", "x"} {
-		if jitter(k, 3*time.Second) != jitter(k, 3*time.Second) || jitter(k, 3*time.Second) >= 3*time.Second {
+		j1 := jitter(k, 3*time.Second)
+		j2 := jitter(k, 3*time.Second)
+		if j1 != j2 || j1 >= 3*time.Second {
 			t.Fatalf("jitter(%q) unstable or out of range", k)
 		}
 	}

@@ -26,11 +26,11 @@ var (
 	activeLicenseMu    sync.RWMutex
 	cachedMachineHash  string
 	machineHashOnce    sync.Once
+	licenseCheckedAt   time.Time
 )
 
 func init() {
-	// Start un-licensed (Free Edition) until key is loaded or activated
-	activeLicense = nil
+	loadLicenseFromDisk()
 }
 
 type LicensePayload struct {
@@ -116,13 +116,11 @@ func verifyLicenseKey(token string) (*LicensePayload, error) {
 		return nil, fmt.Errorf("corrupt license payload: %w", err)
 	}
 
-	// Expiration check
 	now := time.Now().Unix()
 	if payload.ExpiresAt > 0 && now > payload.ExpiresAt {
 		return nil, fmt.Errorf("license expired on %s", time.Unix(payload.ExpiresAt, 0).Format("2006-01-02 15:04:05 UTC"))
 	}
 
-	// Machine hash check
 	mHash := getMachineHash()
 	if payload.MachineHash != "" && payload.MachineHash != "*" {
 		if !strings.EqualFold(payload.MachineHash, mHash) {
@@ -133,7 +131,6 @@ func verifyLicenseKey(token string) (*LicensePayload, error) {
 	return &payload, nil
 }
 
-// loadLicenseFromDisk tries to load and verify the license file from multiple locations.
 func loadLicenseFromDisk() {
 	candidatePaths := []string{
 		filepath.Join(configDir, "license.key"),
@@ -154,19 +151,19 @@ func loadLicenseFromDisk() {
 		keyData = []byte(strings.TrimSpace(cfg.LicenseKey))
 	}
 
+	activeLicenseMu.Lock()
+	defer activeLicenseMu.Unlock()
+	licenseCheckedAt = time.Now()
+
 	if len(bytes.TrimSpace(keyData)) == 0 {
-		activeLicenseMu.Lock()
 		activeLicense = nil
-		activeLicenseMu.Unlock()
 		return
 	}
 
 	keyStr := strings.TrimSpace(string(keyData))
 	payload, err := verifyLicenseKey(keyStr)
-	activeLicenseMu.Lock()
 	if err == nil {
 		activeLicense = payload
-		// Mirror key across persistent disk paths & config for redundancy
 		_ = os.MkdirAll(configDir, 0755)
 		_ = os.WriteFile(filepath.Join(configDir, "license.key"), []byte(keyStr), 0600)
 		_ = os.MkdirAll("/etc/hashem", 0755)
@@ -178,16 +175,15 @@ func loadLicenseFromDisk() {
 	} else {
 		activeLicense = nil
 	}
-	activeLicenseMu.Unlock()
 }
 
-// HasFeature returns true if the feature is unlocked by an active license.
 func HasFeature(feature string) bool {
 	activeLicenseMu.RLock()
 	lic := activeLicense
+	lastCheck := licenseCheckedAt
 	activeLicenseMu.RUnlock()
 
-	if lic == nil {
+	if lic == nil && time.Since(lastCheck) > 30*time.Second {
 		loadLicenseFromDisk()
 		activeLicenseMu.RLock()
 		lic = activeLicense
