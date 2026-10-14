@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +27,8 @@ type ClusterConfig struct {
 	ClusterSecret  string                 `json:"cluster_secret"`
 	PublicIP       string                 `json:"public_ip"`
 	ServicePorts   []int                  `json:"service_ports"`
-	Nodes          map[string]ClusterNode `json:"nodes"`         // Peer Iran Hubs
+	BalancingMode  string                 `json:"balancing_mode"` // "wrr" (weighted round-robin), "failover", "lowest_latency"
+	Nodes          map[string]ClusterNode `json:"nodes"`         // Peer Iran Hubs (P2P mesh)
 	ForeignNodes   map[string]ForeignNode `json:"foreign_nodes"` // Foreign Exit Nodes Pool
 	ActiveForeign  string                 `json:"active_foreign,omitempty"`
 	AutoFailover   bool                   `json:"auto_failover"`
@@ -37,15 +39,17 @@ type ClusterConfig struct {
 
 // ForeignNode represents an exit foreign server in the cluster pool.
 type ForeignNode struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	PublicIP   string    `json:"public_ip"`
-	TunnelPort int       `json:"tunnel_port"`
-	Protocol   string    `json:"protocol"` // "gre", "wss", "bagher"
-	IsActive   bool      `json:"is_active"`
-	IsHealthy  bool      `json:"is_healthy"`
-	LatencyMs  float64   `json:"latency_ms"`
-	LastProbe  time.Time `json:"last_probe"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	PublicIP    string            `json:"public_ip"`
+	TunnelPort  int               `json:"tunnel_port"`
+	TargetPorts map[int]int       `json:"target_ports,omitempty"` // Map local service port -> foreign target port (if custom)
+	Weight      int               `json:"weight"`                 // Weight for WRR (default: 1)
+	Protocol    string            `json:"protocol"`               // "gre", "wss", "bagher"
+	IsActive    bool              `json:"is_active"`
+	IsHealthy   bool              `json:"is_healthy"`
+	LatencyMs   float64           `json:"latency_ms"`
+	LastProbe   time.Time         `json:"last_probe"`
 }
 
 // ClusterNode represents a remote Iran hub peer in the cluster.
@@ -91,6 +95,7 @@ func defaultClusterConfig() ClusterConfig {
 		ClusterSecret: "",
 		PublicIP:      "",
 		ServicePorts:  []int{443, 8443, 2083},
+		BalancingMode: "wrr",
 		Nodes:         make(map[string]ClusterNode),
 		ForeignNodes:  make(map[string]ForeignNode),
 		AutoFailover:  true,
@@ -129,8 +134,17 @@ func loadClusterConfig() ClusterConfig {
 	if c.ForeignNodes == nil {
 		c.ForeignNodes = make(map[string]ForeignNode)
 	}
+	for id, fn := range c.ForeignNodes {
+		if fn.Weight <= 0 {
+			fn.Weight = 1
+			c.ForeignNodes[id] = fn
+		}
+	}
 	if len(c.ServicePorts) == 0 {
 		c.ServicePorts = []int{443, 8443, 2083}
+	}
+	if c.BalancingMode == "" {
+		c.BalancingMode = "wrr"
 	}
 	clusterCache = &c
 	return c
@@ -244,6 +258,7 @@ func handleClusterConfigPost(w http.ResponseWriter, r *http.Request) {
 		ClusterSecret string  `json:"cluster_secret"`
 		PublicIP      string  `json:"public_ip"`
 		ServicePorts  []int   `json:"service_ports"`
+		BalancingMode string  `json:"balancing_mode"`
 		AutoFailover  *bool   `json:"auto_failover"`
 	}
 
@@ -276,6 +291,12 @@ func handleClusterConfigPost(w http.ResponseWriter, r *http.Request) {
 			cfg.ServicePorts = validPorts
 		}
 	}
+	if req.BalancingMode != "" {
+		bm := strings.ToLower(strings.TrimSpace(req.BalancingMode))
+		if bm == "wrr" || bm == "failover" || bm == "lowest_latency" {
+			cfg.BalancingMode = bm
+		}
+	}
 	if req.AutoFailover != nil {
 		cfg.AutoFailover = *req.AutoFailover
 	}
@@ -283,6 +304,12 @@ func handleClusterConfigPost(w http.ResponseWriter, r *http.Request) {
 	if err := saveClusterConfig(cfg); err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"failed to save config: %s"}`, err.Error()), http.StatusInternalServerError)
 		return
+	}
+
+	if cfg.Enabled && cfg.BalancingMode == "wrr" && len(cfg.ForeignNodes) > 0 {
+		_ = applyClusterLoadBalancing(&cfg)
+	} else if !cfg.Enabled {
+		_ = clearClusterFailover(&cfg)
 	}
 
 	writeJSON(w, map[string]string{"status": "ok"})
@@ -395,11 +422,13 @@ func handleClusterForeignNodeAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		PublicIP   string `json:"public_ip"`
-		TunnelPort int    `json:"tunnel_port"`
-		Protocol   string `json:"protocol"`
+		ID          string      `json:"id"`
+		Name        string      `json:"name"`
+		PublicIP    string      `json:"public_ip"`
+		TunnelPort  int         `json:"tunnel_port"`
+		Protocol    string      `json:"protocol"`
+		Weight      int         `json:"weight"`
+		TargetPorts map[int]int `json:"target_ports"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
@@ -418,16 +447,21 @@ func handleClusterForeignNodeAdd(w http.ResponseWriter, r *http.Request) {
 	if req.Protocol == "" {
 		req.Protocol = "wss"
 	}
+	if req.Weight <= 0 {
+		req.Weight = 1
+	}
 
 	cfg := loadClusterConfig()
 	fn := ForeignNode{
-		ID:         req.ID,
-		Name:       req.Name,
-		PublicIP:   req.PublicIP,
-		TunnelPort: req.TunnelPort,
-		Protocol:   req.Protocol,
-		IsActive:   len(cfg.ForeignNodes) == 0,
-		LastProbe:  time.Now(),
+		ID:          req.ID,
+		Name:        req.Name,
+		PublicIP:    req.PublicIP,
+		TunnelPort:  req.TunnelPort,
+		Protocol:    req.Protocol,
+		Weight:      req.Weight,
+		TargetPorts: req.TargetPorts,
+		IsActive:    len(cfg.ForeignNodes) == 0,
+		LastProbe:   time.Now(),
 	}
 
 	status, lat := probeForeignNodeHealth(fn)
@@ -762,6 +796,107 @@ func clearClusterFailover(cfg *ClusterConfig) error {
 	return nil
 }
 
+// generateClusterBalancingRules constructs iptables WRR load balancing rules across healthy foreign nodes.
+func generateClusterBalancingRules(cfg *ClusterConfig) []string {
+	if cfg == nil || !cfg.Enabled || len(cfg.ServicePorts) == 0 {
+		return nil
+	}
+
+	type targetNode struct {
+		id          string
+		ip          string
+		weight      int
+		targetPorts map[int]int
+	}
+
+	var healthy []targetNode
+	for id, fn := range cfg.ForeignNodes {
+		if fn.IsHealthy && fn.PublicIP != "" {
+			w := fn.Weight
+			if w <= 0 {
+				w = 1
+			}
+			healthy = append(healthy, targetNode{
+				id:          id,
+				ip:          fn.PublicIP,
+				weight:      w,
+				targetPorts: fn.TargetPorts,
+			})
+		}
+	}
+
+	sort.Slice(healthy, func(i, j int) bool {
+		return healthy[i].id < healthy[j].id
+	})
+
+	if len(healthy) == 0 {
+		return nil
+	}
+
+	var rules []string
+	totalWeight := 0
+	for _, n := range healthy {
+		totalWeight += n.weight
+	}
+
+	for _, port := range cfg.ServicePorts {
+		pStr := strconv.Itoa(port)
+		remainingWeight := totalWeight
+
+		for i, node := range healthy {
+			targetPort := port
+			if node.targetPorts != nil && node.targetPorts[port] > 0 {
+				targetPort = node.targetPorts[port]
+			}
+			targetDst := fmt.Sprintf("%s:%d", node.ip, targetPort)
+
+			isLast := (i == len(healthy)-1)
+			if isLast || remainingWeight <= node.weight {
+				// Remainder traffic
+				rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-PREROUTING -p tcp --dport %s -j DNAT --to-destination %s", pStr, targetDst))
+				rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-PREROUTING -p udp --dport %s -j DNAT --to-destination %s", pStr, targetDst))
+			} else {
+				prob := float64(node.weight) / float64(remainingWeight)
+				probStr := fmt.Sprintf("%.4f", prob)
+				rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-PREROUTING -p tcp --dport %s -m statistic --mode random --probability %s -j DNAT --to-destination %s", pStr, probStr, targetDst))
+				rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-PREROUTING -p udp --dport %s -m statistic --mode random --probability %s -j DNAT --to-destination %s", pStr, probStr, targetDst))
+				remainingWeight -= node.weight
+			}
+
+			rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-POSTROUTING -d %s -p tcp --dport %d -j MASQUERADE", node.ip, targetPort))
+			rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-POSTROUTING -d %s -p udp --dport %d -j MASQUERADE", node.ip, targetPort))
+		}
+	}
+
+	return rules
+}
+
+// applyClusterLoadBalancing applies kernel-level iptables WRR load balancing across healthy foreign nodes.
+func applyClusterLoadBalancing(cfg *ClusterConfig) error {
+	ensureClusterChains()
+	_ = clearClusterFailover(cfg)
+
+	rules := generateClusterBalancingRules(cfg)
+	if len(rules) == 0 {
+		return nil
+	}
+
+	// Enable IP forwarding
+	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()
+
+	for _, rule := range rules {
+		parts := strings.Fields(rule)
+		if len(parts) > 1 {
+			_ = exec.Command(parts[0], parts[1:]...).Run()
+		}
+	}
+
+	log.Printf("[cluster] load balancing applied: %d rules across %d foreign nodes", len(rules), len(cfg.ForeignNodes))
+	return nil
+}
+
+var lastClusterBalancingHash string
+
 // startClusterMonitor runs the periodic gossip and failover check loop.
 func startClusterMonitor() {
 	ticker := time.NewTicker(3 * time.Second)
@@ -796,6 +931,19 @@ func startClusterMonitor() {
 				}(fid, fnode)
 			}
 			fwg.Wait()
+
+			// In WRR Load Balancing mode, synchronize kernel rules with healthy foreign nodes
+			if cfg.Enabled && cfg.BalancingMode == "wrr" {
+				rules := generateClusterBalancingRules(&cfg)
+				rulesHash := strings.Join(rules, "\n")
+				if rulesHash != lastClusterBalancingHash {
+					_ = applyClusterLoadBalancing(&cfg)
+					lastClusterBalancingHash = rulesHash
+				}
+			} else if !cfg.Enabled && lastClusterBalancingHash != "" {
+				_ = clearClusterFailover(&cfg)
+				lastClusterBalancingHash = ""
+			}
 		}
 
 		if len(cfg.Nodes) == 0 || cfg.ClusterSecret == "" {
@@ -882,6 +1030,7 @@ func cliCluster(args []string) int {
 		cfg := loadClusterConfig()
 		fmt.Printf("Cluster Enabled:  %v\n", cfg.Enabled)
 		fmt.Printf("Node ID:          %s\n", cfg.NodeID)
+		fmt.Printf("Balancing Mode:   %s\n", cfg.BalancingMode)
 		fmt.Printf("Public IP:        %s\n", cfg.PublicIP)
 		fmt.Printf("Auto Failover:    %v\n", cfg.AutoFailover)
 		fmt.Printf("Active Failover:  %v\n", cfg.ActiveFailover != "")
@@ -898,7 +1047,11 @@ func cliCluster(args []string) int {
 			if id == cfg.ActiveForeign || fnode.IsActive {
 				activeMark = " [ACTIVE]"
 			}
-			fmt.Printf(" - %s (%s, %s:%d/%s)%s: Healthy=%v, Latency=%.1fms\n", id, fnode.Name, fnode.PublicIP, fnode.TunnelPort, fnode.Protocol, activeMark, fnode.IsHealthy, fnode.LatencyMs)
+			w := fnode.Weight
+			if w <= 0 {
+				w = 1
+			}
+			fmt.Printf(" - %s (%s, %s:%d/%s)%s: Healthy=%v, Latency=%.1fms, Weight=%d\n", id, fnode.Name, fnode.PublicIP, fnode.TunnelPort, fnode.Protocol, activeMark, fnode.IsHealthy, fnode.LatencyMs, w)
 		}
 		return 0
 	}

@@ -3152,6 +3152,20 @@
           <option value="bagher">Bagher SSH Engine</option>
         </select>
       </div>
+      <div class="fg">
+        <label for="clusterForeignWeight" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Traffic Weight (Round-Robin Ratio):
+        </label>
+        <input type="number" class="hashem-input" id="clusterForeignWeight" min="1" max="100" value="1" style="width:100%; font-family:monospace;">
+        <div class="u-hint-12 u-mt-4">Higher weight receives proportionally more connections (e.g. 2 gets 2x traffic of 1).</div>
+      </div>
+      <div class="fg">
+        <label for="clusterForeignTargetPorts" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Custom Target Ports Mapping (Optional):
+        </label>
+        <input type="text" class="hashem-input" id="clusterForeignTargetPorts" placeholder="e.g. 443:8443 (leave blank for identical 1:1 ports)" style="width:100%; font-family:monospace;">
+        <div class="u-hint-12 u-mt-4">Leave empty to forward to identical ports on this server.</div>
+      </div>
     </div>
     <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:14px 20px;">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddForeignModal()">Cancel</button>
@@ -3193,6 +3207,18 @@
           This Node Identifier:
         </label>
         <input type="text" class="hashem-input" id="clusterCfgNodeID" style="width:100%; font-family:monospace;">
+      </div>
+
+      <div class="fg">
+        <label for="clusterCfgBalancingMode" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          Multi-Foreign Balancing Strategy:
+        </label>
+        <select class="hashem-input" id="clusterCfgBalancingMode" style="width:100%;">
+          <option value="wrr">Weighted Round-Robin (WRR + Kernel Statistic)</option>
+          <option value="failover">Active-Passive Priority Failover</option>
+          <option value="lowest_latency">Lowest Latency Dynamic</option>
+        </select>
+        <div class="u-hint-12 u-mt-4">Traffic across healthy foreign servers on identical ports.</div>
       </div>
 
       <div class="fg">

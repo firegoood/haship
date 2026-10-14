@@ -352,3 +352,88 @@ func TestClusterForeignNodeEndpoints(t *testing.T) {
 		t.Fatalf("expected 1 foreign node left, got %d", len(cfg.ForeignNodes))
 	}
 }
+
+func TestClusterWeightedRoundRobinRules(t *testing.T) {
+	cfg := ClusterConfig{
+		Enabled:       true,
+		BalancingMode: "wrr",
+		ServicePorts:  []int{443, 8443},
+		ForeignNodes: map[string]ForeignNode{
+			"fn-1": {
+				ID:        "fn-1",
+				PublicIP:  "1.1.1.1",
+				Weight:    1,
+				IsHealthy: true,
+			},
+			"fn-2": {
+				ID:        "fn-2",
+				PublicIP:  "2.2.2.2",
+				Weight:    2,
+				IsHealthy: true,
+			},
+			"fn-down": {
+				ID:        "fn-down",
+				PublicIP:  "3.3.3.3",
+				Weight:    5,
+				IsHealthy: false, // Down node must NOT receive traffic
+			},
+		},
+	}
+
+	rules := generateClusterBalancingRules(&cfg)
+	if len(rules) == 0 {
+		t.Fatalf("expected balancing rules to be generated")
+	}
+
+	// Verify fn-down IP is not present in any rule
+	for _, r := range rules {
+		if bytes.Contains([]byte(r), []byte("3.3.3.3")) {
+			t.Errorf("unhealthy node 3.3.3.3 found in balancing rules: %s", r)
+		}
+	}
+
+	// Verify 1.1.1.1 and 2.2.2.2 are present
+	has1 := false
+	has2 := false
+	for _, r := range rules {
+		if bytes.Contains([]byte(r), []byte("1.1.1.1")) {
+			has1 = true
+		}
+		if bytes.Contains([]byte(r), []byte("2.2.2.2")) {
+			has2 = true
+		}
+	}
+	if !has1 || !has2 {
+		t.Errorf("expected both healthy nodes in rules, has1=%v has2=%v", has1, has2)
+	}
+}
+
+func TestClusterCustomTargetPorts(t *testing.T) {
+	cfg := ClusterConfig{
+		Enabled:       true,
+		BalancingMode: "wrr",
+		ServicePorts:  []int{443},
+		ForeignNodes: map[string]ForeignNode{
+			"fn-custom": {
+				ID:          "fn-custom",
+				PublicIP:    "5.5.5.5",
+				Weight:      1,
+				IsHealthy:   true,
+				TargetPorts: map[int]int{443: 8443}, // Map local 443 -> foreign 8443
+			},
+		},
+	}
+
+	rules := generateClusterBalancingRules(&cfg)
+	matched := false
+	for _, r := range rules {
+		if bytes.Contains([]byte(r), []byte("5.5.5.5:8443")) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Errorf("expected destination 5.5.5.5:8443 in rules, got: %+v", rules)
+	}
+}
+

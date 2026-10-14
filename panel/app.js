@@ -6713,12 +6713,12 @@ function renderClusterUI(data) {
                   <div style="font-family:monospace; color:#38bdf8; font-weight:600;">${fn.tunnel_port || 55354} / ${(fn.protocol || 'wss').toUpperCase()}</div>
                 </div>
                 <div>
-                  <span style="color:#94a3b8;">TCP Latency:</span>
-                  <div style="font-family:monospace; color:#34d399; font-weight:600;">${latency}</div>
+                  <span style="color:#94a3b8;">Weight (WRR):</span>
+                  <div style="font-family:monospace; color:#a855f7; font-weight:600;">${fn.weight || 1}</div>
                 </div>
                 <div>
-                  <span style="color:#94a3b8;">Status:</span>
-                  <div style="font-weight:600; color:${isHealthy ? '#34d399' : '#f87171'};">${isHealthy ? 'Reachable' : 'Unreachable'}</div>
+                  <span style="color:#94a3b8;">TCP Latency:</span>
+                  <div style="font-family:monospace; color:#34d399; font-weight:600;">${latency}</div>
                 </div>
               </div>
             </div>
@@ -6874,6 +6874,9 @@ function openClusterConfigModal() {
   if (!_clusterData) return;
   $('clusterCfgEnabled').checked = !!_clusterData.enabled;
   $('clusterCfgAutoFailover').checked = !!_clusterData.auto_failover;
+  if ($('clusterCfgBalancingMode')) {
+    $('clusterCfgBalancingMode').value = _clusterData.balancing_mode || 'wrr';
+  }
   $('clusterCfgNodeID').value = _clusterData.node_id || '';
   $('clusterCfgSecret').value = _clusterData.cluster_secret || '';
   $('clusterCfgPorts').value = (_clusterData.service_ports || []).join(', ');
@@ -6896,6 +6899,7 @@ function generateClusterSecret() {
 async function submitClusterConfig() {
   const enabled = $('clusterCfgEnabled').checked;
   const auto_failover = $('clusterCfgAutoFailover').checked;
+  const balancing_mode = ($('clusterCfgBalancingMode') ? $('clusterCfgBalancingMode').value : 'wrr') || 'wrr';
   const node_id = ($('clusterCfgNodeID').value || '').trim();
   const cluster_secret = ($('clusterCfgSecret').value || '').trim();
   const rawPorts = ($('clusterCfgPorts').value || '').split(',');
@@ -6909,6 +6913,7 @@ async function submitClusterConfig() {
     await api('/api/cluster/config', {
       enabled,
       auto_failover,
+      balancing_mode,
       node_id,
       cluster_secret,
       service_ports
@@ -6949,6 +6954,8 @@ function openClusterAddForeignModal() {
   $('clusterForeignIP').value = '';
   $('clusterForeignPort').value = '55354';
   $('clusterForeignProtocol').value = 'wss';
+  if ($('clusterForeignWeight')) $('clusterForeignWeight').value = '1';
+  if ($('clusterForeignTargetPorts')) $('clusterForeignTargetPorts').value = '';
   $('clusterForeignModal').hidden = false;
 }
 
@@ -6962,6 +6969,22 @@ async function submitClusterAddForeign() {
   const public_ip = ($('clusterForeignIP').value || '').trim();
   const tunnel_port = parseInt(($('clusterForeignPort').value || '55354').trim(), 10) || 55354;
   const protocol = ($('clusterForeignProtocol').value || 'wss').trim();
+  const weight = parseInt(($('clusterForeignWeight') ? $('clusterForeignWeight').value : '1') || '1', 10) || 1;
+
+  const rawTargetPorts = ($('clusterForeignTargetPorts') ? $('clusterForeignTargetPorts').value : '').trim();
+  const target_ports = {};
+  if (rawTargetPorts) {
+    rawTargetPorts.split(',').forEach(part => {
+      const pair = part.trim().split(':');
+      if (pair.length === 2) {
+        const src = parseInt(pair[0].trim(), 10);
+        const dst = parseInt(pair[1].trim(), 10);
+        if (!isNaN(src) && !isNaN(dst) && src > 0 && dst > 0) {
+          target_ports[src] = dst;
+        }
+      }
+    });
+  }
 
   if (!id || !public_ip) {
     toastMsg('err', 'Node ID and Public IP are required');
@@ -6969,7 +6992,7 @@ async function submitClusterAddForeign() {
   }
 
   try {
-    await api('/api/cluster/foreign/add', { id, name, public_ip, tunnel_port, protocol });
+    await api('/api/cluster/foreign/add', { id, name, public_ip, tunnel_port, protocol, weight, target_ports });
     toastMsg('ok', 'Foreign exit node added to pool');
     closeClusterAddForeignModal();
     loadClusterStatus();
