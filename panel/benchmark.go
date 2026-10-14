@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -64,6 +66,7 @@ type BenchmarkAutoPilotRequest struct {
 
 var (
 	benchmarkMu           sync.RWMutex
+	benchmarkRunning      atomic.Bool
 	lastBenchmarkReport   *BenchmarkReport
 	autoPilotTriggerCount int
 	lastAutoPilotSwitch   string
@@ -100,9 +103,12 @@ func saveBenchmarkReport(r *BenchmarkReport) {
 	benchmarkMu.Unlock()
 
 	_ = os.MkdirAll(configDir, 0700)
-	data, err := json.MarshalIndent(r, "", "  ")
+	data, err := json.Marshal(r)
 	if err == nil {
-		_ = os.WriteFile(benchmarkReportFile(), data, 0600)
+		tmpPath := benchmarkReportFile() + ".tmp"
+		if err := os.WriteFile(tmpPath, data, 0600); err == nil {
+			_ = os.Rename(tmpPath, benchmarkReportFile())
+		}
 	}
 }
 
@@ -151,13 +157,22 @@ func determineStatus(score int, loss float64) string {
 }
 
 // probeTCP attempts multiple TCP connections to measure latency and packet loss.
-func probeTCP(addr string, count int, timeout time.Duration) (avgRTT, minRTT, maxRTT, loss, jitter float64, err error) {
+func probeTCP(ctx context.Context, addr string, count int, timeout time.Duration) (avgRTT, minRTT, maxRTT, loss, jitter float64, err error) {
+	if count <= 0 {
+		count = 3
+	}
 	var rtts []float64
 	var failed int
 
+	dialer := &net.Dialer{Timeout: timeout}
+
 	for i := 0; i < count; i++ {
+		if ctx.Err() != nil {
+			failed += (count - i)
+			break
+		}
 		start := time.Now()
-		conn, dialErr := net.DialTimeout("tcp", addr, timeout)
+		conn, dialErr := dialer.DialContext(ctx, "tcp", addr)
 		if dialErr != nil {
 			failed++
 			continue
@@ -165,7 +180,6 @@ func probeTCP(addr string, count int, timeout time.Duration) (avgRTT, minRTT, ma
 		rtt := float64(time.Since(start).Microseconds()) / 1000.0
 		_ = conn.Close()
 		rtts = append(rtts, rtt)
-		time.Sleep(30 * time.Millisecond)
 	}
 
 	loss = (float64(failed) / float64(count)) * 100.0
@@ -199,25 +213,39 @@ func probeTCP(addr string, count int, timeout time.Duration) (avgRTT, minRTT, ma
 }
 
 // probeTLS attempts TLS handshakes to verify obfuscated WSS transport and measure RTT.
-func probeTLS(addr string, count int, timeout time.Duration) (avgRTT, minRTT, maxRTT, loss, jitter float64, err error) {
+func probeTLS(ctx context.Context, addr string, count int, timeout time.Duration) (avgRTT, minRTT, maxRTT, loss, jitter float64, err error) {
+	if count <= 0 {
+		count = 3
+	}
 	var rtts []float64
 	var failed int
 
+	dialer := &net.Dialer{Timeout: timeout}
+	// InsecureSkipVerify is intentional: this dial only measures handshake
+	// latency to the carrier port and never sends or trusts any data.
+	conf := &tls.Config{InsecureSkipVerify: true}
+
 	for i := 0; i < count; i++ {
+		if ctx.Err() != nil {
+			failed += (count - i)
+			break
+		}
 		start := time.Now()
-		dialer := &net.Dialer{Timeout: timeout}
-		// InsecureSkipVerify is intentional: this dial only measures handshake
-		// latency to the carrier port and never sends or trusts any data.
-		conf := &tls.Config{InsecureSkipVerify: true}
-		conn, dialErr := tls.DialWithDialer(dialer, "tcp", addr, conf)
+		rawConn, dialErr := dialer.DialContext(ctx, "tcp", addr)
 		if dialErr != nil {
 			failed++
 			continue
 		}
+		tlsConn := tls.Client(rawConn, conf)
+		_ = tlsConn.SetDeadline(time.Now().Add(timeout))
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = rawConn.Close()
+			failed++
+			continue
+		}
 		rtt := float64(time.Since(start).Microseconds()) / 1000.0
-		_ = conn.Close()
+		_ = tlsConn.Close()
 		rtts = append(rtts, rtt)
-		time.Sleep(30 * time.Millisecond)
 	}
 
 	loss = (float64(failed) / float64(count)) * 100.0
@@ -250,17 +278,22 @@ func probeTLS(addr string, count int, timeout time.Duration) (avgRTT, minRTT, ma
 	return avgRTT, minRTT, maxRTT, loss, jitter, nil
 }
 
-// probePing runs ping command to measure ICMP latency over GRE or direct IP.
-func probeUDP(target string, count int, timeout time.Duration) (avg, min, max, loss, jitter float64, err error) {
+// probeUDP attempts lightweight UDP datagram probes to measure latency and loss.
+func probeUDP(ctx context.Context, target string, count int, timeout time.Duration) (avg, min, max, loss, jitter float64, err error) {
 	if count <= 0 {
 		count = 3
 	}
 	var rtts []float64
 	lost := 0
 
+	dialer := &net.Dialer{Timeout: timeout}
 	for i := 0; i < count; i++ {
+		if ctx.Err() != nil {
+			lost += (count - i)
+			break
+		}
 		start := time.Now()
-		conn, dialErr := net.DialTimeout("udp", target, timeout)
+		conn, dialErr := dialer.DialContext(ctx, "udp", target)
 		if dialErr != nil {
 			lost++
 			continue
@@ -271,7 +304,6 @@ func probeUDP(target string, count int, timeout time.Duration) (avg, min, max, l
 		_ = conn.Close()
 		duration := float64(time.Since(start).Microseconds()) / 1000.0
 		rtts = append(rtts, duration)
-		time.Sleep(20 * time.Millisecond)
 	}
 
 	loss = (float64(lost) / float64(count)) * 100.0
@@ -307,12 +339,13 @@ func probeUDP(target string, count int, timeout time.Duration) (avg, min, max, l
 	return avg, min, max, loss, jitter, nil
 }
 
-func probePing(host string, count int) (avgRTT, minRTT, maxRTT, loss, jitter float64, err error) {
+func probePing(ctx context.Context, host string, count int) (avgRTT, minRTT, maxRTT, loss, jitter float64, err error) {
 	if host == "" {
 		return 0, 0, 0, 100.0, 0, fmt.Errorf("empty host")
 	}
 
-	out, err := exec.Command("ping", "-c", strconv.Itoa(count), "-W", "2", host).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "ping", "-c", strconv.Itoa(count), "-W", "2", host)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return 0, 0, 0, 100.0, 0, fmt.Errorf("ping failed: %v", err)
 	}
@@ -351,6 +384,14 @@ func probePing(host string, count int) (avgRTT, minRTT, maxRTT, loss, jitter flo
 
 // runCarrierBenchmark probes all candidate carrier models and evaluates performance.
 func runCarrierBenchmark() *BenchmarkReport {
+	if !benchmarkRunning.CompareAndSwap(false, true) {
+		benchmarkMu.RLock()
+		rep := lastBenchmarkReport
+		benchmarkMu.RUnlock()
+		return rep
+	}
+	defer benchmarkRunning.Store(false)
+
 	startTime := time.Now()
 	peerCfg := loadPeerConfig()
 	carrierCfg := loadCarrierConfig()
@@ -509,11 +550,15 @@ func runCarrierBenchmark() *BenchmarkReport {
 	isIran := strings.Contains(strings.ToLower(localSt.Role), "iran")
 	baseLatency := peerCfg.LatencyMs
 	if baseLatency <= 0 {
-		pAvg, _, _, pLoss, _, pErr := probePing(grePeer, 2)
+		pctx, pcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		pAvg, _, _, pLoss, _, pErr := probePing(pctx, grePeer, 2)
+		pcancel()
 		if pErr == nil && pLoss < 100 {
 			baseLatency = pAvg
 		} else {
-			pAvg, _, _, pLoss, _, pErr = probePing(remotePub, 2)
+			pctx2, pcancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+			pAvg, _, _, pLoss, _, pErr = probePing(pctx2, remotePub, 2)
+			pcancel2()
 			if pErr == nil && pLoss < 100 {
 				baseLatency = pAvg
 			}
@@ -523,154 +568,167 @@ func runCarrierBenchmark() *BenchmarkReport {
 		baseLatency = 1.0
 	}
 
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+
 	for i := range candidates {
-		c := &candidates[i]
-		probeCount := 4
-		timeout := 2 * time.Second
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(c *CarrierMetric) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-		switch c.Type {
-		case "gre":
-			avg, min, max, loss, jit, err := probePing(grePeer, probeCount)
-			if err != nil {
-				// Fallback probe to remote public IP if GRE link down
-				avg, min, max, loss, jit, _ = probePing(remotePub, probeCount)
-			}
-			if err != nil && isIran {
-				avg, min, max, loss, jit = 0.5, 0.4, 0.6, 0.0, 0.1
-				err = nil
-			} else if err != nil && baseLatency > 0 {
-				avg, min, max, loss, jit = baseLatency, baseLatency-0.5, baseLatency+0.5, 0.0, 0.5
-				err = nil
-			}
-			c.AvgRTTMs = math.Round(avg*10) / 10
-			c.MinRTTMs = math.Round(min*10) / 10
-			c.MaxRTTMs = math.Round(max*10) / 10
-			c.PacketLoss = math.Round(loss*10) / 10
-			c.JitterMs = math.Round(jit*10) / 10
-			if err != nil {
-				c.ErrorDetail = err.Error()
-			}
+			cctx, ccancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer ccancel()
 
-		case "fou":
-			targetHost := remotePub
-			if isIran {
-				targetHost = "127.0.0.1"
-			}
-			addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
-			avg, min, max, loss, jit, err := probeTCP(addr, probeCount, timeout)
-			if err != nil {
-				if baseLatency > 0 {
-					avg = baseLatency + float64(c.Port%5)*0.2
+			probeCount := 3
+			timeout := 1500 * time.Millisecond
+
+			switch c.Type {
+			case "gre":
+				avg, min, max, loss, jit, err := probePing(cctx, grePeer, probeCount)
+				if err != nil {
+					// Fallback probe to remote public IP if GRE link down
+					avg, min, max, loss, jit, _ = probePing(cctx, remotePub, probeCount)
+				}
+				if err != nil && isIran {
+					avg, min, max, loss, jit = 0.5, 0.4, 0.6, 0.0, 0.1
+					err = nil
+				} else if err != nil && baseLatency > 0 {
+					avg, min, max, loss, jit = baseLatency, baseLatency-0.5, baseLatency+0.5, 0.0, 0.5
+					err = nil
+				}
+				c.AvgRTTMs = math.Round(avg*10) / 10
+				c.MinRTTMs = math.Round(min*10) / 10
+				c.MaxRTTMs = math.Round(max*10) / 10
+				c.PacketLoss = math.Round(loss*10) / 10
+				c.JitterMs = math.Round(jit*10) / 10
+				if err != nil {
+					c.ErrorDetail = err.Error()
+				}
+
+			case "fou":
+				targetHost := remotePub
+				if isIran {
+					targetHost = "127.0.0.1"
+				}
+				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
+				avg, min, max, loss, jit, err := probeTCP(cctx, addr, probeCount, timeout)
+				if err != nil {
+					if baseLatency > 0 {
+						avg = baseLatency + float64(c.Port%5)*0.2
+						min = avg - 0.5
+						max = avg + 0.8
+						loss = 0.0
+						jit = 0.8
+						err = nil
+					}
+				}
+				c.AvgRTTMs = math.Round(avg*10) / 10
+				c.MinRTTMs = math.Round(min*10) / 10
+				c.MaxRTTMs = math.Round(max*10) / 10
+				c.PacketLoss = math.Round(loss*10) / 10
+				c.JitterMs = math.Round(jit*10) / 10
+				if err != nil {
+					c.ErrorDetail = err.Error()
+				}
+
+			case "wss":
+				targetHost := remotePub
+				if isIran {
+					targetHost = "127.0.0.1"
+				}
+				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
+				avg, min, max, loss, jit, err := probeTLS(cctx, addr, probeCount, timeout)
+				if err != nil {
+					avg, min, max, loss, jit, err = probeTCP(cctx, addr, probeCount, timeout)
+				}
+				if err != nil && isIran {
+					wssSt := getWSSStatus()
+					if wssSt.Running {
+						avg = 1.2
+						min = 0.8
+						max = 1.6
+						loss = 0.0
+						jit = 0.4
+						err = nil
+					}
+				}
+				if err != nil && baseLatency > 0 {
+					avg = baseLatency + 2.0
 					min = avg - 0.5
-					max = avg + 0.8
+					max = avg + 1.2
 					loss = 0.0
-					jit = 0.8
+					jit = 1.0
 					err = nil
 				}
-			}
-			c.AvgRTTMs = math.Round(avg*10) / 10
-			c.MinRTTMs = math.Round(min*10) / 10
-			c.MaxRTTMs = math.Round(max*10) / 10
-			c.PacketLoss = math.Round(loss*10) / 10
-			c.JitterMs = math.Round(jit*10) / 10
-			if err != nil {
-				c.ErrorDetail = err.Error()
-			}
+				c.AvgRTTMs = math.Round(avg*10) / 10
+				c.MinRTTMs = math.Round(min*10) / 10
+				c.MaxRTTMs = math.Round(max*10) / 10
+				c.PacketLoss = math.Round(loss*10) / 10
+				c.JitterMs = math.Round(jit*10) / 10
+				if err != nil {
+					c.ErrorDetail = err.Error()
+				}
 
-		case "wss":
-			targetHost := remotePub
-			if isIran {
-				targetHost = "127.0.0.1"
-			}
-			addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
-			avg, min, max, loss, jit, err := probeTLS(addr, probeCount, timeout)
-			if err != nil {
-				avg, min, max, loss, jit, err = probeTCP(addr, probeCount, timeout)
-			}
-			if err != nil && isIran {
-				wssSt := getWSSStatus()
-				if wssSt.Running {
-					avg = 1.2
-					min = 0.8
-					max = 1.6
+			case "frp_kcp", "frp_quic":
+				targetHost := remotePub
+				if isIran {
+					targetHost = "127.0.0.1"
+				}
+				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
+				avg, min, max, loss, jit, err := probeUDP(cctx, addr, probeCount, timeout)
+				if err != nil && baseLatency > 0 {
+					offset := 0.4
+					if c.Type == "frp_kcp" {
+						offset = 0.2 // KCP ARQ typically has superior stability
+					}
+					avg = baseLatency + offset
+					min = avg - 0.2
+					max = avg + 0.5
 					loss = 0.0
-					jit = 0.4
+					jit = 0.6
 					err = nil
 				}
-			}
-			if err != nil && baseLatency > 0 {
-				avg = baseLatency + 2.0
-				min = avg - 0.5
-				max = avg + 1.2
-				loss = 0.0
-				jit = 1.0
-				err = nil
-			}
-			c.AvgRTTMs = math.Round(avg*10) / 10
-			c.MinRTTMs = math.Round(min*10) / 10
-			c.MaxRTTMs = math.Round(max*10) / 10
-			c.PacketLoss = math.Round(loss*10) / 10
-			c.JitterMs = math.Round(jit*10) / 10
-			if err != nil {
-				c.ErrorDetail = err.Error()
-			}
-
-		case "frp_kcp", "frp_quic":
-			targetHost := remotePub
-			if isIran {
-				targetHost = "127.0.0.1"
-			}
-			addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
-			avg, min, max, loss, jit, err := probeUDP(addr, probeCount, timeout)
-			if err != nil && baseLatency > 0 {
-				offset := 0.4
-				if c.Type == "frp_kcp" {
-					offset = 0.2 // KCP ARQ typically has superior stability
+				c.AvgRTTMs = math.Round(avg*10) / 10
+				c.MinRTTMs = math.Round(min*10) / 10
+				c.MaxRTTMs = math.Round(max*10) / 10
+				c.PacketLoss = math.Round(loss*10) / 10
+				c.JitterMs = math.Round(jit*10) / 10
+				if err != nil {
+					c.ErrorDetail = err.Error()
 				}
-				avg = baseLatency + offset
-				min = avg - 0.2
-				max = avg + 0.5
-				loss = 0.0
-				jit = 0.6
-				err = nil
-			}
-			c.AvgRTTMs = math.Round(avg*10) / 10
-			c.MinRTTMs = math.Round(min*10) / 10
-			c.MaxRTTMs = math.Round(max*10) / 10
-			c.PacketLoss = math.Round(loss*10) / 10
-			c.JitterMs = math.Round(jit*10) / 10
-			if err != nil {
-				c.ErrorDetail = err.Error()
+
+			case "frp_tcp", "frp_ws", "backhaul", "frp":
+				targetHost := remotePub
+				if isIran {
+					targetHost = "127.0.0.1"
+				}
+				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
+				avg, min, max, loss, jit, err := probeTCP(cctx, addr, probeCount, timeout)
+				if err != nil && baseLatency > 0 {
+					avg = baseLatency + 0.8
+					min = avg - 0.3
+					max = avg + 0.9
+					loss = 0.0
+					jit = 0.9
+					err = nil
+				}
+				c.AvgRTTMs = math.Round(avg*10) / 10
+				c.MinRTTMs = math.Round(min*10) / 10
+				c.MaxRTTMs = math.Round(max*10) / 10
+				c.PacketLoss = math.Round(loss*10) / 10
+				c.JitterMs = math.Round(jit*10) / 10
+				if err != nil {
+					c.ErrorDetail = err.Error()
+				}
 			}
 
-		case "frp_tcp", "frp_ws", "backhaul", "frp":
-			targetHost := remotePub
-			if isIran {
-				targetHost = "127.0.0.1"
-			}
-			addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
-			avg, min, max, loss, jit, err := probeTCP(addr, probeCount, timeout)
-			if err != nil && baseLatency > 0 {
-				avg = baseLatency + 0.8
-				min = avg - 0.3
-				max = avg + 0.9
-				loss = 0.0
-				jit = 0.9
-				err = nil
-			}
-			c.AvgRTTMs = math.Round(avg*10) / 10
-			c.MinRTTMs = math.Round(min*10) / 10
-			c.MaxRTTMs = math.Round(max*10) / 10
-			c.PacketLoss = math.Round(loss*10) / 10
-			c.JitterMs = math.Round(jit*10) / 10
-			if err != nil {
-				c.ErrorDetail = err.Error()
-			}
-		}
-
-		c.Score = calculateScore(c.PacketLoss, c.AvgRTTMs, c.JitterMs)
-		c.Status = determineStatus(c.Score, c.PacketLoss)
+			c.Score = calculateScore(c.PacketLoss, c.AvgRTTMs, c.JitterMs)
+			c.Status = determineStatus(c.Score, c.PacketLoss)
+		}(&candidates[i])
 	}
+	wg.Wait()
 
 	// Sort candidates by score descending
 	sort.Slice(candidates, func(i, j int) bool {
@@ -846,7 +904,9 @@ func startAutoPilotMonitor() {
 	for range ticker.C {
 		pcfg := loadPeerConfig()
 		if pcfg.AutoPilotEnabled && pcfg.Role == "master" {
-			_ = runCarrierBenchmark()
+			if !benchmarkRunning.Load() {
+				_ = runCarrierBenchmark()
+			}
 		}
 	}
 }

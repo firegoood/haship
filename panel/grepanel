@@ -39,12 +39,13 @@ for p in sorted(json.load(open(os.environ["PEERS_F"])).get("peers",[]), key=lamb
     echo "http://${ip:-<this-server-ip>}:${port:-7777}/${base}"
     ;;
   password)
-    # reset panel password: stop, delete config, start (prints new password)
-    systemctl stop gre-panel
-    rm -f "$CFG"
-    systemctl start gre-panel
-    sleep 2
-    journalctl -u gre-panel -n 5 --no-pager | grep -i "password" || echo "see: journalctl -u gre-panel"
+    shift || true
+    if [[ -x "$PANEL_BIN" ]]; then
+      exec "$PANEL_BIN" password "$@"
+    else
+      echo "gre-panel binary not found at $PANEL_BIN"
+      exit 1
+    fi
     ;;
   uninstall)
     read -p "Remove gre-panel service + binary? (y/N): " c

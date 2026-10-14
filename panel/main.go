@@ -96,7 +96,79 @@ var (
 
 func cfgPath() string { return filepath.Join(configDir, "panel.json") }
 
-func saveCfg() { _ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600) }
+var (
+	cfgFileModTime time.Time
+	cfgFileMu      sync.RWMutex
+)
+
+func recordLoadedModTime() {
+	if fi, err := os.Stat(cfgPath()); err == nil {
+		cfgFileMu.Lock()
+		cfgFileModTime = fi.ModTime()
+		cfgFileMu.Unlock()
+	}
+}
+
+func reloadConfigIfChanged() {
+	p := cfgPath()
+	fi, err := os.Stat(p)
+	if err != nil {
+		return
+	}
+	cfgFileMu.RLock()
+	lastMod := cfgFileModTime
+	cfgFileMu.RUnlock()
+
+	if !fi.ModTime().After(lastMod) {
+		return
+	}
+
+	cfgFileMu.Lock()
+	defer cfgFileMu.Unlock()
+	if !fi.ModTime().After(cfgFileModTime) {
+		return
+	}
+
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) == 0 {
+		return
+	}
+	var parsed panelConfig
+	if err := json.Unmarshal(data, &parsed); err == nil && strings.TrimSpace(parsed.PassHash) != "" {
+		mu.Lock()
+		cfg.PassHash = parsed.PassHash
+		if strings.TrimSpace(parsed.Username) != "" {
+			cfg.Username = parsed.Username
+		}
+		if parsed.LicenseKey != "" {
+			cfg.LicenseKey = parsed.LicenseKey
+		}
+		mu.Unlock()
+		cfgFileModTime = fi.ModTime()
+		log.Printf("panel credentials reloaded from disk: user=%s", cfg.Username)
+	}
+}
+
+func saveCfg() {
+	_ = saveConfigAtomic(cfg)
+}
+
+func saveConfigAtomic(c panelConfig) error {
+	p := cfgPath()
+	data := mustJSON(c)
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	bak := p + ".bak"
+	_ = os.WriteFile(bak, data, 0600)
+	recordLoadedModTime()
+	return nil
+}
 
 // ---- auto port: never fail install when the HTTP/TLS port is taken ----
 
@@ -174,13 +246,53 @@ func loadOrInit() {
 
 	primaryPath := cfgPath()
 	data, err := os.ReadFile(primaryPath)
-	if err != nil {
+	if err != nil || len(data) == 0 {
+		bakPath := filepath.Join(configDir, "panel.json.bak")
+		if bakData, bakErr := os.ReadFile(bakPath); bakErr == nil && len(bakData) > 0 {
+			data = bakData
+			err = nil
+			log.Printf("recovered config from backup %s", bakPath)
+		}
+	}
+	if err != nil || len(data) == 0 {
 		// Fallback check for config.json if panel.json does not exist
 		altPath := filepath.Join(configDir, "config.json")
 		if altData, altErr := os.ReadFile(altPath); altErr == nil && len(altData) > 0 {
 			data = altData
 			err = nil
 			log.Printf("migrating config from %s to %s", altPath, primaryPath)
+		}
+	}
+
+	var existingBasePath string
+	var existingPort int
+	var existingUser string
+	var existingLicense string
+
+	extractDefaults := func(src []byte) {
+		var raw map[string]any
+		if json.Unmarshal(src, &raw) == nil {
+			if v, ok := raw["base_path"].(string); ok && strings.TrimSpace(v) != "" && existingBasePath == "" {
+				existingBasePath = strings.TrimSpace(v)
+			}
+			if v, ok := raw["port"].(float64); ok && v >= 1 && v <= 65535 && existingPort == 0 {
+				existingPort = int(v)
+			}
+			if v, ok := raw["username"].(string); ok && strings.TrimSpace(v) != "" && existingUser == "" {
+				existingUser = strings.TrimSpace(v)
+			}
+			if v, ok := raw["license_key"].(string); ok && strings.TrimSpace(v) != "" && existingLicense == "" {
+				existingLicense = strings.TrimSpace(v)
+			}
+		}
+	}
+
+	if len(data) > 0 {
+		extractDefaults(data)
+	}
+	if existingBasePath == "" {
+		if bData, bErr := os.ReadFile(filepath.Join(configDir, "panel.json.bak")); bErr == nil {
+			extractDefaults(bData)
 		}
 	}
 
@@ -195,14 +307,19 @@ func loadOrInit() {
 				cfg.Port = 7777
 			}
 			if strings.TrimSpace(cfg.BasePath) == "" {
-				cfg.BasePath = "panel"
+				if existingBasePath != "" {
+					cfg.BasePath = existingBasePath
+				} else {
+					cfg.BasePath = "panel"
+				}
 			}
 			// Test/dev override: fixed password via env (takes effect on restart).
 			if pw := os.Getenv("GRE_PANEL_PASSWORD"); pw != "" {
 				cfg.PassHash = hashPassword(pw)
-				_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
+				saveCfg()
 				log.Printf("panel password updated from GRE_PANEL_PASSWORD environment variable")
 			}
+			recordLoadedModTime()
 			return
 		}
 
@@ -218,19 +335,16 @@ func loadOrInit() {
 			}
 			if passHash != "" {
 				username := "admin"
-				for _, k := range []string{"username", "admin_user", "user"} {
-					if v, ok := raw[k].(string); ok && strings.TrimSpace(v) != "" {
-						username = strings.TrimSpace(v)
-						break
-					}
+				if existingUser != "" {
+					username = existingUser
 				}
 				port := 7777
-				if v, ok := raw["port"].(float64); ok && v >= 1 && v <= 65535 {
-					port = int(v)
+				if existingPort != 0 {
+					port = existingPort
 				}
 				basePath := "panel"
-				if v, ok := raw["base_path"].(string); ok && strings.TrimSpace(v) != "" {
-					basePath = strings.TrimSpace(v)
+				if existingBasePath != "" {
+					basePath = existingBasePath
 				}
 
 				if !strings.HasPrefix(passHash, "argon2id$") && !strings.HasPrefix(passHash, "$argon2id$") && len(passHash) != 64 {
@@ -238,13 +352,15 @@ func loadOrInit() {
 				}
 
 				cfg = panelConfig{
-					Username: username,
-					PassHash: passHash,
-					Port:     port,
-					BasePath: basePath,
+					Username:   username,
+					PassHash:   passHash,
+					Port:       port,
+					BasePath:   basePath,
+					LicenseKey: existingLicense,
 				}
-				_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
-				log.Printf("rescued panel credentials from config (user: %s, port: %d)", cfg.Username, cfg.Port)
+				saveCfg()
+				recordLoadedModTime()
+				log.Printf("rescued panel credentials from config (user: %s, port: %d, base: %s)", cfg.Username, cfg.Port, cfg.BasePath)
 				return
 			}
 		}
@@ -254,18 +370,33 @@ func loadOrInit() {
 	if pass == "" {
 		pass = SecureRandomPassword(16)
 	}
-	cfg = panelConfig{
-		Username: "admin",
-		PassHash: hashPassword(pass),
-		Port:     7777,
-		BasePath: randomBase(12),
+
+	basePath := existingBasePath
+	if basePath == "" {
+		basePath = randomBase(12)
 	}
-	_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
-	// CWE-256: Plaintext passwords are NEVER stored on disk!
-	log.Printf("==================================================================")
-	log.Printf("INITIAL PANEL PASSWORD: %s (user: %s)", pass, cfg.Username)
+	port := 7777
+	if existingPort != 0 {
+		port = existingPort
+	}
+	user := "admin"
+	if existingUser != "" {
+		user = existingUser
+	}
+
+	cfg = panelConfig{
+		Username:   user,
+		PassHash:   hashPassword(pass),
+		Port:       port,
+		BasePath:   basePath,
+		LicenseKey: existingLicense,
+	}
+	saveCfg()
+	recordLoadedModTime()
+	log.Printf("==================================================")
+	log.Printf("INITIAL PANEL PASSWORD: %s (user: %s, base: /%s)", pass, cfg.Username, cfg.BasePath)
 	log.Printf("Please record this password now. Plaintext is not stored on disk.")
-	log.Printf("==================================================================")
+	log.Printf("==================================================")
 }
 
 func mustJSON(v any) []byte {
@@ -283,13 +414,85 @@ func randomBase(n int) string {
 	return string(b)
 }
 
-func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
-		fmt.Println(panelVersion)
-		return
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "1.1.1.1:80")
+	if err != nil {
+		return "127.0.0.1"
 	}
-	if len(os.Args) > 1 && os.Args[1] == "tls-proxy" {
-		os.Exit(tlsProxyCmd(os.Args[2:]))
+	defer conn.Close()
+	localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || localAddr.IP == nil {
+		return "127.0.0.1"
+	}
+	return localAddr.IP.String()
+}
+
+func cliSetPassword(args []string) int {
+	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
+		configDir = v
+	}
+	loadOrInit()
+
+	newPass := ""
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		newPass = strings.TrimSpace(args[0])
+	} else {
+		newPass = SecureRandomPassword(16)
+	}
+
+	if len(newPass) < 8 {
+		fmt.Fprintf(os.Stderr, "Error: password must be at least 8 characters\n")
+		return 1
+	}
+
+	mu.Lock()
+	cfg.PassHash = hashPassword(newPass)
+	saveCfg()
+	mu.Unlock()
+
+	ip := getOutboundIP()
+	fmt.Println("==================================================")
+	fmt.Println("[✔️] Panel password successfully updated!")
+	fmt.Printf("Username:  %s\n", cfg.Username)
+	fmt.Printf("Password:  %s\n", newPass)
+	fmt.Printf("Base Path: /%s (UNCHANGED)\n", cfg.BasePath)
+	fmt.Printf("Login URL: http://%s:%d/%s/\n", ip, cfg.Port, cfg.BasePath)
+	fmt.Println("==================================================")
+	return 0
+}
+
+func cliShowInfo() int {
+	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
+		configDir = v
+	}
+	loadOrInit()
+	ip := getOutboundIP()
+	fmt.Println("==================================================")
+	fmt.Println("Hashem GRE-FRP Web Panel Info")
+	fmt.Printf("Username:  %s\n", cfg.Username)
+	fmt.Printf("Port:      %d\n", cfg.Port)
+	fmt.Printf("Base Path: /%s\n", cfg.BasePath)
+	fmt.Printf("Login URL: http://%s:%d/%s/\n", ip, cfg.Port, cfg.BasePath)
+	fmt.Println("==================================================")
+	return 0
+}
+
+func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Println(panelVersion)
+			return
+		case "--help", "-h", "help":
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy]")
+			return
+		case "tls-proxy":
+			os.Exit(tlsProxyCmd(os.Args[2:]))
+		case "password", "pass", "set-password":
+			os.Exit(cliSetPassword(os.Args[2:]))
+		case "info", "status", "url":
+			os.Exit(cliShowInfo())
+		}
 	}
 	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
 		configDir = v
@@ -308,6 +511,14 @@ func main() {
 	if _, err := rand.Read(nonce[:]); err != nil {
 		log.Fatal(err)
 	}
+
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			reloadConfigIfChanged()
+		}
+	}()
 
 	base := "/" + cfg.BasePath
 	mux := http.NewServeMux()

@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -230,6 +229,7 @@ func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
+	reloadConfigIfChanged()
 	ip := clientIP(r)
 	if checkLocked(ip) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(lockRemaining(ip).Seconds())+1))
@@ -341,7 +341,7 @@ func handlePassword(w http.ResponseWriter, r *http.Request) {
 
 	mu.Lock()
 	cfg.PassHash = hashPassword(targetPass)
-	_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
+	saveCfg()
 	// CWE-256: Plaintext passwords are NEVER stored on disk!
 	if _, err := rand.Read(nonce[:]); err != nil {
 		mu.Unlock()

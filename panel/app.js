@@ -141,7 +141,10 @@ async function api(path, body, method) {
     headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (r.status === 401) { showLogin(); throw new Error('session expired'); }
+  if (r.status === 401 && !path.endsWith('/api/login')) {
+    showLogin();
+    throw new Error('session expired');
+  }
   if (!r.ok) {
     const txt = await r.text();
     try {
@@ -2695,6 +2698,7 @@ $('toggle').addEventListener('click', () => {
 // kinetic grid background (same as Hashem login)
 (function(){
   const CELL_SIZE = 55, INFLUENCE_RADIUS = 260, MAX_WARP = 24;
+  const INFLUENCE_RADIUS_SQ = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
   const DOT_SPACING = 28, LERP_SPEED = 0.08;
   const LINE_BASE = { r: 255, g: 255, b: 255, a: 0.13 };
   const NODE_BASE_RADIUS = 1.8, NODE_ACTIVE_RADIUS = 3.2;
@@ -2707,60 +2711,123 @@ $('toggle').addEventListener('click', () => {
   const canvas = document.getElementById('kineticGrid');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  let W, H, mouse = {x:-9999,y:-9999}, targetMouse = {x:-9999,y:-9999}, ripples = [];
+  let W = 0, H = 0, mouse = {x:-9999,y:-9999}, targetMouse = {x:-9999,y:-9999}, ripples = [];
   const theme = { bg:'#09090b', lineActive:{r:56,g:189,b:248,a:0.9},
     nodeActive:{r:56,g:189,b:248,a:1.0}, glow:'56,189,248', ripple:'56,189,248' };
-  function setSize(){ W = innerWidth; H = innerHeight; canvas.width = W; canvas.height = H;
-    if (mouse.x === -9999) { mouse = {x:W/2,y:H/2}; targetMouse = {x:W/2,y:H/2}; } }
+
+  // Offscreen canvas cache for static background dot grid
+  const bgCanvas = document.createElement('canvas');
+  const bgCtx = bgCanvas.getContext('2d');
+  function renderStaticBg() {
+    bgCanvas.width = W;
+    bgCanvas.height = H;
+    bgCtx.fillStyle = theme.bg;
+    bgCtx.fillRect(0, 0, W, H);
+    bgCtx.fillStyle = 'rgba(255,255,255,0.05)';
+    for (let x = DOT_SPACING/2; x < W; x += DOT_SPACING) {
+      for (let y = DOT_SPACING/2; y < H; y += DOT_SPACING) {
+        bgCtx.beginPath();
+        bgCtx.arc(x, y, 0.7, 0, Math.PI * 2);
+        bgCtx.fill();
+      }
+    }
+  }
+
+  // Pre-allocated reusable grid point and proximity buffers
+  let cols = 0, rows = 0, cellW = 0, cellH = 0;
+  let pts = [], prox = [];
+  function allocateBuffers() {
+    cols = Math.max(2, Math.ceil(W / CELL_SIZE)) + 1;
+    rows = Math.max(2, Math.ceil(H / CELL_SIZE)) + 1;
+    cellW = W / (cols - 1);
+    cellH = H / (rows - 1);
+    pts = new Array(rows);
+    prox = new Array(rows);
+    for (let r = 0; r < rows; r++) {
+      pts[r] = new Array(cols);
+      prox[r] = new Float32Array(cols);
+      for (let c = 0; c < cols; c++) {
+        pts[r][c] = { x: 0, y: 0 };
+      }
+    }
+  }
+
+  function setSize(){
+    W = innerWidth; H = innerHeight;
+    canvas.width = W; canvas.height = H;
+    renderStaticBg();
+    allocateBuffers();
+    if (mouse.x === -9999) { mouse = {x:W/2,y:H/2}; targetMouse = {x:W/2,y:H/2}; }
+  }
   addEventListener('resize', setSize); setSize();
   addEventListener('mousemove', e => { targetMouse.x = e.clientX; targetMouse.y = e.clientY; });
   addEventListener('click', e => { ripples.push({x:e.clientX,y:e.clientY,radius:0,opacity:1,born:performance.now()}); });
-  function getWarpedPoint(gx,gy,col,row,cols,rows){
+
+  function updateWarpedPoint(gx, gy, col, row, targetPt, rowIdx, colIdx){
     const edgeMargin = 1.5;
     const colPin = Math.min(col/edgeMargin,(cols-1-col)/edgeMargin,1);
     const rowPin = Math.min(row/edgeMargin,(rows-1-row)/edgeMargin,1);
     const pinFactor = colPin*colPin*rowPin*rowPin;
-    const dx = gx-mouse.x, dy = gy-mouse.y, dist = Math.sqrt(dx*dx+dy*dy);
-    const proximity = Math.max(0,1-dist/INFLUENCE_RADIUS)*pinFactor;
+
+    const dx = gx - mouse.x, dy = gy - mouse.y;
+    const distSq = dx * dx + dy * dy;
+    let proximity = 0, mx = 0, my = 0;
+
+    if (distSq < INFLUENCE_RADIUS_SQ && distSq > 0 && pinFactor > 0){
+      const dist = Math.sqrt(distSq);
+      const t = dist / INFLUENCE_RADIUS;
+      proximity = (1 - t) * pinFactor;
+      const eased = t < 0.01 ? 0 : (1 - t) * (1 - t) * Math.min(1, dist / 60);
+      const warpAmt = eased * MAX_WARP * pinFactor;
+      const invDist = 1 / dist;
+      mx = -dx * invDist * warpAmt;
+      my = -dy * invDist * warpAmt;
+    }
+
     let rx = 0, ry = 0;
-    for (const r of ripples){
-      const rdx = gx-r.x, rdy = gy-r.y, rdist = Math.sqrt(rdx*rdx+rdy*rdy);
-      const waveWidth = 55, diff = rdist-r.radius;
-      if (Math.abs(diff) < waveWidth){
-        const strength = (1-Math.abs(diff)/waveWidth)*r.opacity*18*pinFactor;
-        const angle = Math.atan2(rdy,rdx), sign = diff < 0 ? -1 : 1;
-        rx += Math.cos(angle)*strength*sign*-1; ry += Math.sin(angle)*strength*sign*-1;
+    const waveWidth = 55;
+    for (let i = 0; i < ripples.length; i++){
+      const r = ripples[i];
+      const rdx = gx - r.x, rdy = gy - r.y;
+      const rdistSq = rdx * rdx + rdy * rdy;
+      const minR = Math.max(0, r.radius - waveWidth);
+      const maxR = r.radius + waveWidth;
+      if (rdistSq >= minR * minR && rdistSq <= maxR * maxR) {
+        const rdist = Math.sqrt(rdistSq);
+        const diff = rdist - r.radius;
+        if (Math.abs(diff) < waveWidth){
+          const strength = (1 - Math.abs(diff) / waveWidth) * r.opacity * 18 * pinFactor;
+          const invRDist = rdist > 0 ? 1 / rdist : 0;
+          const sign = diff < 0 ? 1 : -1;
+          rx += rdx * invRDist * strength * sign;
+          ry += rdy * invRDist * strength * sign;
+        }
       }
     }
-    if (dist < INFLUENCE_RADIUS && dist > 0 && pinFactor > 0){
-      const t = dist/INFLUENCE_RADIUS;
-      const eased = t < 0.01 ? 0 : (1-t)*(1-t)*Math.min(1,dist/60);
-      const warpAmt = eased*MAX_WARP*pinFactor, angle = Math.atan2(dy,dx);
-      return { pt:{x:gx-Math.cos(angle)*warpAmt+rx, y:gy-Math.sin(angle)*warpAmt+ry}, proximity };
-    }
-    return { pt:{x:gx+rx, y:gy+ry}, proximity };
+
+    targetPt.x = gx + mx + rx;
+    targetPt.y = gy + my + ry;
+    prox[rowIdx][colIdx] = proximity;
   }
+
   function draw(now){
-    ctx.clearRect(0,0,W,H); ctx.fillStyle = theme.bg; ctx.fillRect(0,0,W,H);
-    ctx.fillStyle = 'rgba(255,255,255,0.05)';
-    for (let x = DOT_SPACING/2; x < W; x += DOT_SPACING)
-      for (let y = DOT_SPACING/2; y < H; y += DOT_SPACING){
-        ctx.beginPath(); ctx.arc(x,y,0.7,0,Math.PI*2); ctx.fill();
-      }
+    ctx.drawImage(bgCanvas, 0, 0);
+
     for (let i = ripples.length-1; i >= 0; i--){
       const r = ripples[i], age = (now-r.born)/1000;
       r.radius = Math.max(0,age*400); r.opacity = Math.max(0,1-age*1.2);
-      if (r.opacity <= 0) ripples.splice(i,1);
-    }
-    const cols = Math.max(2,Math.ceil(W/CELL_SIZE))+1, rows = Math.max(2,Math.ceil(H/CELL_SIZE))+1;
-    const cellW = W/(cols-1), cellH = H/(rows-1), pts = [], prox = [];
-    for (let row = 0; row < rows; row++){
-      pts[row] = []; prox[row] = [];
-      for (let col = 0; col < cols; col++){
-        const wp = getWarpedPoint(col*cellW,row*cellH,col,row,cols,rows);
-        pts[row][col] = wp.pt; prox[row][col] = wp.proximity;
+      if (r.opacity <= 0) {
+        ripples[i] = ripples[ripples.length - 1];
+        ripples.pop();
       }
     }
+
+    for (let row = 0; row < rows; row++){
+      for (let col = 0; col < cols; col++){
+        updateWarpedPoint(col*cellW, row*cellH, col, row, pts[row][col], row, col);
+      }
+    }
+
     const drawSeg = (p1,p2,pr1,pr2) => {
       const avg = (pr1+pr2)/2, t = avg*avg*(3-2*avg);
       ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y);
@@ -2787,16 +2854,23 @@ $('toggle').addEventListener('click', () => {
         ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2);
         ctx.fillStyle = lerpColor({r:255,g:255,b:255,a:0.2},theme.nodeActive,t); ctx.fill();
       }
-    for (const r of ripples){
+    for (let i = 0; i < ripples.length; i++){
+      const r = ripples[i];
       ctx.beginPath(); ctx.arc(r.x,r.y,Math.max(0,r.radius),0,Math.PI*2);
       ctx.strokeStyle = 'rgba('+theme.ripple+','+(r.opacity*0.28).toFixed(3)+')';
       ctx.lineWidth = 1.5; ctx.stroke();
     }
   }
+
   (function animate(now){
+    if (document.hidden || $('login')?.classList.contains('hidden')) {
+      requestAnimationFrame(animate);
+      return;
+    }
     mouse.x = lerpN(mouse.x,targetMouse.x,LERP_SPEED);
     mouse.y = lerpN(mouse.y,targetMouse.y,LERP_SPEED);
-    draw(now); requestAnimationFrame(animate);
+    draw(now);
+    requestAnimationFrame(animate);
   })(0);
 })();
 $('logoutBtn').onclick = async () => { try { await api('/api/logout', {}); } catch(e){ /* logout best-effort: always fall through to login screen */ } showLogin(); };

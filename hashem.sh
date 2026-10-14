@@ -5747,9 +5747,16 @@ reset_panel_password() {
 
 cli_set_panel_password() {
     local PASS="$1"
-    if [[ ${#PASS} -lt 12 ]]; then
-        echo -e "${RED}[!] Password must be at least 12 characters long (NIST 800-63B).${NC}"
+    if [[ ${#PASS} -lt 8 ]]; then
+        echo -e "${RED}[!] Password must be at least 8 characters long.${NC}"
         return 1
+    fi
+
+    if [[ -x /usr/local/bin/gre-panel ]]; then
+        /usr/local/bin/gre-panel password "$PASS"
+        PANEL_PASS="$PASS"
+        systemctl restart gre-panel 2>/dev/null || true
+        return 0
     fi
 
     local HASH
@@ -5761,19 +5768,34 @@ cli_set_panel_password() {
 
     mkdir -p /etc/gre-panel
     python3 - "$HASH" <<'PYEOF'
-import json, sys
+import json, sys, os
 p = '/etc/gre-panel/panel.json'
+bak = '/etc/gre-panel/panel.json.bak'
+d = {}
 try:
     with open(p) as f:
         d = json.load(f)
 except Exception:
+    try:
+        with open(bak) as f:
+            d = json.load(f)
+    except Exception:
+        pass
+if not d or not isinstance(d, dict):
     d = {"username": "admin", "port": 7777, "base_path": "panel"}
+if "base_path" not in d or not str(d.get("base_path", "")).strip():
+    d["base_path"] = "panel"
 d['pass_hash'] = sys.argv[1]
 with open(p + ".tmp", "w") as f:
     json.dump(d, f, indent=2)
-import os
 os.replace(p + ".tmp", p)
 os.chmod(p, 0o600)
+try:
+    with open(bak, "w") as f:
+        json.dump(d, f, indent=2)
+    os.chmod(bak, 0o600)
+except Exception:
+    pass
 PYEOF
 
     chmod 600 /etc/gre-panel/panel.json 2>/dev/null || true
@@ -5824,14 +5846,34 @@ ensure_panel_pass() {
         return 1
     fi
     python3 - "$HASH" <<'PYEOF'
-import json, sys
+import json, sys, os
 p = '/etc/gre-panel/panel.json'
+bak = '/etc/gre-panel/panel.json.bak'
+d = {}
 try:
-    d = json.load(open(p))
+    with open(p) as f:
+        d = json.load(f)
 except Exception:
+    try:
+        with open(bak) as f:
+            d = json.load(f)
+    except Exception:
+        pass
+if not d or not isinstance(d, dict):
     d = {"username": "admin", "port": 7777, "base_path": "panel"}
+if "base_path" not in d or not str(d.get("base_path", "")).strip():
+    d["base_path"] = "panel"
 d['pass_hash'] = sys.argv[1]
-json.dump(d, open(p, 'w'), indent=2)
+with open(p + ".tmp", "w") as f:
+    json.dump(d, f, indent=2)
+os.replace(p + ".tmp", p)
+os.chmod(p, 0o600)
+try:
+    with open(bak, "w") as f:
+        json.dump(d, f, indent=2)
+    os.chmod(bak, 0o600)
+except Exception:
+    pass
 PYEOF
     chmod 600 /etc/gre-panel/panel.json
     systemctl restart gre-panel 2>/dev/null || true
