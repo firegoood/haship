@@ -5423,7 +5423,7 @@ apply_panel_unit_limits() { # $1=unit file [$2="HIGH MAX"]
     # binary (script updated before the panel) would be killed every 30 s.
     if panel_supports_watchdog; then
         unit_set_directive "$f" "WatchdogSec" "30"
-        unit_set_directive "$f" "NotifyAccess" "main"
+        unit_set_directive "$f" "NotifyAccess" "all"
     else
         sed -i -E '/^(WatchdogSec|NotifyAccess)=/d' "$f"
     fi

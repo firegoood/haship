@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"time"
@@ -39,14 +40,14 @@ func startSdWatchdog(ctx context.Context) {
 	if sdNotifySocket() == "" || os.Getenv("HASHEM_NO_SDNOTIFY") == "1" {
 		return
 	}
-	_ = sdNotify("READY=1")
+	_ = sdNotify(fmt.Sprintf("MAINPID=%d\nREADY=1", os.Getpid()))
 	tk := time.NewTicker(sdWatchdogInterval)
 	go func() {
 		defer tk.Stop()
 		for {
 			select {
 			case <-tk.C:
-				_ = sdNotify("WATCHDOG=1")
+				_ = sdNotify(fmt.Sprintf("MAINPID=%d\nWATCHDOG=1", os.Getpid()))
 			case <-ctx.Done():
 				return
 			}

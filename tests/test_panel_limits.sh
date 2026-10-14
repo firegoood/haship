@@ -51,7 +51,7 @@ printf '\x7fELF...NOTIFY_SOCKET...' > "$SRC/new-panel"
 export PANEL_BIN="$SRC/new-panel"
 apply_panel_unit_limits "$U" "450M 550M"
 for kv in "OOMScoreAdjust=-900" "Nice=-5" "CPUWeight=200" "MemoryHigh=450M" \
-          "MemoryMax=550M" "WatchdogSec=30" "NotifyAccess=main" "LimitNOFILE=1048576" \
+          "MemoryMax=550M" "WatchdogSec=30" "NotifyAccess=all" "LimitNOFILE=1048576" \
           "TasksMax=4096" "StartLimitIntervalSec=0"; do
   n=$(grep -cE "^${kv%%=*}=" "$U")
   [[ "$n" == "1" ]] || { echo "FAIL: $kv appears $n times"; fail=1; }

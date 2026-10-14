@@ -191,10 +191,36 @@ function skel(n) {
   return '<div style="display:grid;gap:8px">' + s + '</div>';
 }
 // tabs (sidebar + mobile drawer)
+function isBagherLicensed() {
+  if (_licenseData && _licenseData.is_valid) {
+    const feats = _licenseData.features;
+    if (!feats || feats.length === 0) return true;
+    for (let i = 0; i < feats.length; i++) {
+      const f = String(feats[i]).toLowerCase();
+      if (f === '*' || f === 'all' || f === 'bagher' || f === 'frp_ssh') return true;
+    }
+  }
+  if (_sshfwdData && (_sshfwdData.licensed_bagher || _sshfwdData.licensed_frp_ssh)) {
+    return true;
+  }
+  return false;
+}
+
 function goTab(name) {
   if (name === 'terminal' && !$('termNav').classList.contains('hidden') && $('tab-terminal').hidden && !termState.ready) { /* allowed: overlay shows connect */ }
   if (name === 'terminal' && $('termNav').classList.contains('hidden')) return; // flag off: tab doesn't exist
   if (name === 'add-peer') { goTab('setup'); const c = $('setupAddPeerStep'); if (c && c.scrollIntoView) c.scrollIntoView({behavior: 'smooth', block: 'start'}); return; }
+  if (name === 'sshfwd' && !isBagherLicensed()) {
+    if (_licenseData === null) {
+      loadLicense().then(() => {
+        if (isBagherLicensed()) goTab('sshfwd');
+        else openBagherLicModal();
+      });
+      return;
+    }
+    openBagherLicModal();
+    return;
+  }
   ['dashboard','tunnel','sshfwd','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
@@ -5863,16 +5889,14 @@ function renderSSHFwd() {
   if (authLine) authLine.value = d.auth_line || '';
 
   // Bagher Premium License Gate & UI blur/lock
-  let savedLic = '';
-  try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
-  const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
+  const isLicensed = isBagherLicensed();
   const bagherContainer = $('bagherCardContainer');
   const bagherLockedBanner = $('bagherLockedBanner');
   const bagherModal = $('bagherLicModal');
   const bagherMachineHash = $('bagherLicMachineHash');
 
-  if (bagherMachineHash && d.machine_hash) {
-    bagherMachineHash.value = d.machine_hash;
+  if (bagherMachineHash && (d.machine_hash || (_licenseData && _licenseData.machine_hash))) {
+    bagherMachineHash.value = d.machine_hash || _licenseData.machine_hash;
   }
 
   if (!isLicensed) {
@@ -5953,8 +5977,17 @@ function openBagherLicModal() {
   _bagherModalDismissed = false;
   const m = $('bagherLicModal');
   if (m) m.hidden = false;
-  if (_sshfwdData && _sshfwdData.machine_hash && $('bagherLicMachineHash')) {
-    $('bagherLicMachineHash').value = _sshfwdData.machine_hash;
+  const hashEl = $('bagherLicMachineHash');
+  if (hashEl) {
+    if (_licenseData && _licenseData.machine_hash) {
+      hashEl.value = _licenseData.machine_hash;
+    } else if (_sshfwdData && _sshfwdData.machine_hash) {
+      hashEl.value = _sshfwdData.machine_hash;
+    } else {
+      api('/api/license').then(d => {
+        if (d && d.machine_hash) hashEl.value = d.machine_hash;
+      }).catch(() => {});
+    }
   }
   const keyEl = $('bagherLicKeyInput');
   if (keyEl && !keyEl.value) {
@@ -5976,6 +6009,18 @@ function cancelBagherLicModal() {
   goTab('dashboard');
 }
 
+function openBagherLicenseSettings() {
+  closeBagherLicModal();
+  goTab('settings');
+  setTimeout(() => {
+    const el = $('licenseKeyInput') || $('licCard');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (el.focus) el.focus();
+    }
+  }, 100);
+}
+
 async function activateBagherLicenseClick() {
   const keyEl = $('bagherLicKeyInput');
   const key = keyEl ? keyEl.value.trim() : '';
@@ -5986,13 +6031,12 @@ async function activateBagherLicenseClick() {
   try {
     const res = await api('/api/license', { key });
     try { localStorage.setItem('hashem_bagher_license', key); } catch (e) {}
-    toastOk('License Activated', 'Bagher Engine premium features unlocked successfully!');
+    toastOk('License Activated', 'Hashem Pro features unlocked successfully!');
     if (keyEl) keyEl.value = '';
-    const m = $('bagherLicModal');
-    if (m) m.hidden = true;
-    _bagherModalDismissed = true;
+    closeBagherLicModal();
     await loadLicense();
     await loadSSHFwd();
+    goTab('sshfwd');
   } catch (err) {
     toastErr('Activation Failed', err.message || String(err));
   }
@@ -6009,30 +6053,22 @@ async function sshfwdToggleClick() {
   const d = _sshfwdData || {};
   const active = !!(d.is_active || d.enabled);
   if (!active) {
-    let savedLic = '';
-    try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
-    let isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
-    if (!isLicensed && savedLic) {
-      try {
-        await api('/api/license', { key: savedLic });
-        isLicensed = true;
-      } catch (e) {}
-    }
+    const isLicensed = isBagherLicensed();
     if (!isLicensed) {
       openBagherLicModal();
-      toastErr('License Required', 'Bagher Engine requires an active premium license.');
+      toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
       return;
     }
   }
   try {
     if (active) {
       await api('/api/sshfwd', { action: 'disable' });
-      toastOk('Bagher Engine', 'Service stopped.');
+      toastOk('Bagher Tunnel', 'Service stopped.');
     } else {
-      const isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh);
+      const isLicensed = isBagherLicensed();
       if (!isLicensed) {
         openBagherLicModal();
-        toastErr('License Required', 'Bagher Engine requires an active premium license.');
+        toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
         return;
       }
       const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
@@ -6051,7 +6087,7 @@ async function sshfwdToggleClick() {
         return;
       }
       await api('/api/sshfwd', { action: 'enable', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
-      toastOk('Bagher Engine', 'Bagher Engine started successfully.');
+      toastOk('Bagher Tunnel', 'Bagher Tunnel started successfully.');
     }
     await loadSSHFwd();
   } catch (err) {
@@ -6061,18 +6097,10 @@ async function sshfwdToggleClick() {
 
 async function bagherIranApplyClick() {
   const d = _sshfwdData || {};
-  let savedLic = '';
-  try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
-  let isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
-  if (!isLicensed && savedLic) {
-    try {
-      await api('/api/license', { key: savedLic });
-      isLicensed = true;
-    } catch (e) {}
-  }
+  const isLicensed = isBagherLicensed();
   if (!isLicensed) {
     openBagherLicModal();
-    toastErr('License Required', 'Bagher Engine requires an active premium license.');
+    toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
     return;
   }
   const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
@@ -6422,6 +6450,7 @@ async function saveBagherQuickEdit() {
 window.openBagherLicModal = openBagherLicModal;
 window.closeBagherLicModal = closeBagherLicModal;
 window.cancelBagherLicModal = cancelBagherLicModal;
+window.openBagherLicenseSettings = openBagherLicenseSettings;
 window.activateBagherLicenseClick = activateBagherLicenseClick;
 window.bagherLicCopyMachineClick = bagherLicCopyMachineClick;
 window.bagherIranApplyClick = bagherIranApplyClick;
@@ -6454,11 +6483,6 @@ window.copyMachineHashClick = copyMachineHashClick;
       if (name === 'settings') loadLicense();
     };
   }
-  try {
-    if (localStorage.getItem('hashem_bagher_license')) {
-      renderLicense({ is_valid: true });
-    }
-  } catch(e) {}
   document.addEventListener('DOMContentLoaded', () => {
     loadLicense();
   });
