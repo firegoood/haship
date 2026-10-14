@@ -33,10 +33,10 @@ for p in sorted(json.load(open(os.environ["PEERS_F"])).get("peers",[]), key=lamb
     ;;
   url)
     if [[ ! -f "$CFG" ]]; then echo "panel not installed (no $CFG)"; exit 1; fi
-    port=$(grep -o '"port": [0-9]*' "$CFG" | grep -o '[0-9]*')
-    base=$(grep -o '"base_path": "[^"]*"' "$CFG" | cut -d'"' -f4)
+    port=$(grep -oE '"port":\s*[0-9]+' "$CFG" | grep -oE '[0-9]+')
+    base=$(grep -oE '"base_path":\s*"[^"]*"' "$CFG" | cut -d'"' -f4)
     ip=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    echo "http://${ip:-<this-server-ip>}:${port:-7777}/${base}"
+    echo "http://${ip:-<this-server-ip>}:${port:-7777}/${base}/"
     ;;
   password)
     shift || true

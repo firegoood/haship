@@ -759,12 +759,16 @@ const I18N = {
 let currentLang = 'en';
 
 function setLanguage(lang) {
-  currentLang = 'en';
-  try { localStorage.setItem('hashem_lang', 'en'); } catch(e) { /* storage blocked */ }
-  document.documentElement.setAttribute('dir', 'ltr');
-  document.documentElement.setAttribute('lang', 'en');
-  document.body.classList.remove('is-rtl');
-  applyTranslations('en');
+  currentLang = (lang === 'fa') ? 'fa' : 'en';
+  try { localStorage.setItem('hashem_lang', currentLang); } catch(e) { /* storage blocked */ }
+  document.documentElement.setAttribute('dir', currentLang === 'fa' ? 'rtl' : 'ltr');
+  document.documentElement.setAttribute('lang', currentLang);
+  if (currentLang === 'fa') {
+    document.body.classList.add('is-rtl');
+  } else {
+    document.body.classList.remove('is-rtl');
+  }
+  applyTranslations(currentLang);
 }
 
 function applyTranslations(lang) {
@@ -3796,28 +3800,6 @@ if (liveSwitchEngineBtn) {
   };
 }
 
-const carrierSavePortsBtn = $('carrierSavePortsBtn');
-if (carrierSavePortsBtn) {
-  carrierSavePortsBtn.onclick = async () => {
-    const val = $('carrierPortsInput') ? $('carrierPortsInput').value : '';
-    const parts = val.split(/[,\s]+/).map(p => parseInt(p, 10)).filter(p => !isNaN(p) && p > 0 && p < 65536);
-    if (parts.length === 0) {
-      toastErr('Invalid ports', 'Enter at least one valid port number (e.g. 443, 55555)');
-      return;
-    }
-    carrierSavePortsBtn.disabled = true;
-    try {
-      const res = await api('/api/carrier', { action: 'set-ports', fou_ports: parts });
-      toastOk('FOU Ports Updated', 'Ports: ' + parts.join(', '));
-      await loadCarrier();
-    } catch (e) {
-      toastErr('Save ports failed', e.message);
-    } finally {
-      carrierSavePortsBtn.disabled = false;
-    }
-  };
-}
-
 const carrierSaveWSSBtn = $('carrierSaveWSSBtn');
 if (carrierSaveWSSBtn) {
   carrierSaveWSSBtn.onclick = async () => {
@@ -5174,7 +5156,7 @@ function palItems() {
   it.push({ g: act, t: tr('pal_donate', 'Support Hashem'), k: 'donate support pdnczone', run: () => window.open('https://www.pdnczone.ir', '_blank', 'noopener,noreferrer') });
   it.push({ g: act, t: tr('pal_logout', 'Log out'), k: 'logout sign out exit', run: () => $('logoutBtn').click() });
   it.push({ g: look, t: tr('pal_theme', 'Toggle dark / light theme'), k: 'theme dark light mode', run: () => $('themeBtn').click() });
-  it.push({ g: look, t: tr('pal_lang', 'Switch language'), k: 'language persian farsi english', run: () => $('langToggleBtn').click() });
+  it.push({ g: look, t: tr('pal_lang', 'Switch language'), k: 'language persian farsi english', run: () => toggleLang() });
   it.push({ g: look, t: tr('pal_sidebar', 'Collapse / expand sidebar'), k: 'sidebar menu collapse', run: () => sbSet(!sbIsCollapsed()) });
   it.push({ g: look, t: tr('pal_density', 'Toggle table density'), k: 'density compact comfortable table', run: () => densSet(document.documentElement.dataset.dens === 'compact' ? 'comfortable' : 'compact') });
   ACCENTS.forEach(([n, c]) => it.push({ g: look, t: tr('pal_accent', 'Accent colour') + ': ' + tr('acc_' + n, n), k: 'accent color colour ' + n, sw: c, run: () => accSet(n) }));
@@ -6093,7 +6075,7 @@ function openBagherLicenseSettings() {
   closeBagherLicModal();
   goTab('settings');
   setTimeout(() => {
-    const el = $('licenseKeyInput') || $('licCard');
+    const el = $('licKeyInput') || $('licenseCard');
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       if (el.focus) el.focus();
