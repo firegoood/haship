@@ -190,13 +190,25 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-PERF-02` | 500 | cannot save performance settings | Disk write failed — check /etc/gre-panel permissions. |
 | `E-PERF-03` | 500 | cannot apply performance settings | Check FRP services and configuration. |
 
-## E-ACCESS-xx — ACCESS
+## E-LIC-xx — LIC
 
 | Code | HTTP | Meaning | What to do |
 | --- | --- | --- | --- |
-| `E-ACCESS-00` | — | access settings changed | Informational: panel port/username/path saved; gre-panel restarts, tunnels unaffected. |
-| `E-ACCESS-01` | 400 | bad access-settings request | Send current_password plus at least one of port, username, base_path. |
-| `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
-| `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
+| `E-LIC-01` | 403 | premium license required for this feature | Activate a valid Premium license key in Settings to unlock this feature. |
+| `E-LIC-02` | 400 | invalid license key format | Check that the complete license string was pasted without extra spaces or line breaks. |
+| `E-LIC-03` | 400 | license key signature invalid | This license token has been tampered with or issued by an unrecognized authority. |
+| `E-LIC-04` | 400 | license key expired | This license has expired. Contact your provider for renewal. |
+| `E-LIC-05` | 400 | license machine id mismatch | This license is bound to a different server. Machine hash does not match. |
 
-Total: 108 codes.
+## E-SSHFWD-xx — SSHFWD
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-SSHFWD-01` | 400 | invalid ssh-forward request | Check required fields (remote host, ports). |
+| `E-SSHFWD-02` | 400 | invalid port list | Provide valid TCP ports between 1 and 65535. |
+| `E-SSHFWD-03` | 500 | failed generating ssh key | Ensure ssh-keygen is installed and permissions are valid. |
+| `E-SSHFWD-04` | 500 | failed starting ssh forward service | Check host journalctl and remote sshd authorized_keys. |
+| `E-SSHFWD-05` | 409 | peer not configured or unreachable | Configure peer link or install public key manually on remote host. |
+| `E-SSHFWD-06` | 500 | failed installing authorized_keys on remote | Ensure remote user authorized_keys is writable. |
+
+Total: 113 codes.

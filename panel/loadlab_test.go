@@ -457,7 +457,6 @@ func TestLoadLab(t *testing.T) {
 
 	tables := map[int][2][]byte{}
 	var rows [][]string
-	var results []labResult
 	for _, sc := range scenarios {
 		tb, ok := tables[sc.ssLines+sc.n*1000000]
 		if !ok {
@@ -474,7 +473,6 @@ func TestLoadLab(t *testing.T) {
 			}
 		}
 		r := runLabCell(t, sc, cell, pingDur, tb[0], tb[1])
-		results = append(results, r)
 		rows = append(rows, r.csvRow())
 		t.Logf("N=%-2d C=%-2d icmp=%-7v ss=%-5d | dash p50/p95/p99=%6.0f/%6.0f/%6.0f ms (n=%d) fleet p95=%5.1f peers p95=%6.0f | snapshot avg/max=%6.0f/%6.0f ms | inflight@end=%d oldest=%.0fms | G %d->%d->%d FD %d->%d->%d heap %.0f->%.0fMB",
 			sc.n, sc.clients, !sc.dropped, sc.ssLines,

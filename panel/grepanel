@@ -33,18 +33,19 @@ for p in sorted(json.load(open(os.environ["PEERS_F"])).get("peers",[]), key=lamb
     ;;
   url)
     if [[ ! -f "$CFG" ]]; then echo "panel not installed (no $CFG)"; exit 1; fi
-    port=$(grep -o '"port": [0-9]*' "$CFG" | grep -o '[0-9]*')
-    base=$(grep -o '"base_path": "[^"]*"' "$CFG" | cut -d'"' -f4)
+    port=$(grep -oE '"port":\s*[0-9]+' "$CFG" | grep -oE '[0-9]+')
+    base=$(grep -oE '"base_path":\s*"[^"]*"' "$CFG" | cut -d'"' -f4)
     ip=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    echo "http://${ip:-<this-server-ip>}:${port:-7777}/${base}"
+    echo "http://${ip:-<this-server-ip>}:${port:-7777}/${base}/"
     ;;
   password)
-    # reset panel password: stop, delete config, start (prints new password)
-    systemctl stop gre-panel
-    rm -f "$CFG"
-    systemctl start gre-panel
-    sleep 2
-    journalctl -u gre-panel -n 5 --no-pager | grep -i "password" || echo "see: journalctl -u gre-panel"
+    shift || true
+    if [[ -x "$PANEL_BIN" ]]; then
+      exec "$PANEL_BIN" password "$@"
+    else
+      echo "gre-panel binary not found at $PANEL_BIN"
+      exit 1
+    fi
     ;;
   uninstall)
     read -p "Remove gre-panel service + binary? (y/N): " c

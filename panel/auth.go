@@ -1,8 +1,9 @@
 package main
 
 // Auth: cookie session + login/logout/password.
-// Session token = sha256(nonce + pass_hash); nonce is generated at startup
-// (see main.go). Changing the password invalidates all sessions.
+// Session tokens are cryptographically random 256-bit values stored server-side
+// in sessions.json with a 24-hour absolute expiry (see session.go/password.go).
+// Changing the password invalidates all sessions.
 
 import (
 	"crypto/rand"
@@ -10,7 +11,6 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,10 +22,18 @@ var (
 	nonce [32]byte
 )
 
+func rotateNonce() {
+	mu.Lock()
+	_, _ = rand.Read(nonce[:])
+	mu.Unlock()
+}
+
 const (
 	loginFailWindow = 15 * time.Minute
 	loginLockoutDur = 15 * time.Minute
 	loginMaxFails   = 5
+	loginUserMaxFails   = 10
+	loginUserLockoutDur = 15 * time.Minute
 	// repeat offenders: every further lockout doubles, up to maxLockoutDur;
 	// strikes are forgotten after strikeDecay without a new lockout.
 	maxLockoutDur = 24 * time.Hour
@@ -42,10 +50,16 @@ type ipAttempts struct {
 	lockedUntil time.Time
 }
 
+type usernameAttempts struct {
+	fails       []time.Time
+	lockedUntil time.Time
+}
+
 var (
 	attemptMu   sync.Mutex
 	attempts    = map[string]*ipAttempts{}
 	lockStrikes = map[string]*lockStrike{}
+	usernameAttemptsMap = map[string]*usernameAttempts{}
 )
 
 // lockoutFor returns the lockout length for the n-th consecutive lockout.
@@ -116,6 +130,15 @@ func checkLocked(ip string) bool {
 	return now.Before(a.lockedUntil)
 }
 
+// ResetAllLockouts clears all failed attempt records and IP lockouts (used on password reset).
+func ResetAllLockouts() {
+	attemptMu.Lock()
+	defer attemptMu.Unlock()
+	attempts = make(map[string]*ipAttempts)
+	lockStrikes = make(map[string]*lockStrike)
+	usernameAttemptsMap = make(map[string]*usernameAttempts)
+}
+
 func recordLoginFailure(ip string) {
 	attemptMu.Lock()
 	now := time.Now()
@@ -150,6 +173,81 @@ func recordLoginSuccess(ip string) {
 	attemptMu.Lock()
 	delete(attempts, ip)
 	delete(lockStrikes, ip)
+	attemptMu.Unlock()
+}
+
+func pruneUsernameAttemptsLocked(now time.Time) {
+	cutoff := now.Add(-loginFailWindow)
+	for u, a := range usernameAttemptsMap {
+		if now.Before(a.lockedUntil) {
+			continue
+		}
+		n := 0
+		for _, t := range a.fails {
+			if t.After(cutoff) {
+				a.fails[n] = t
+				n++
+			}
+		}
+		a.fails = a.fails[:n]
+		if len(a.fails) == 0 {
+			delete(usernameAttemptsMap, u)
+		}
+	}
+}
+
+func checkUsernameLocked(username string) (bool, time.Duration) {
+	if username == "" {
+		return false, 0
+	}
+	attemptMu.Lock()
+	defer attemptMu.Unlock()
+	now := time.Now()
+	pruneUsernameAttemptsLocked(now)
+	a, ok := usernameAttemptsMap[strings.ToLower(username)]
+	if !ok {
+		return false, 0
+	}
+	if now.Before(a.lockedUntil) {
+		return true, time.Until(a.lockedUntil)
+	}
+	return false, 0
+}
+
+func recordUsernameFailure(username string) {
+	if username == "" {
+		return
+	}
+	u := strings.ToLower(username)
+	attemptMu.Lock()
+	now := time.Now()
+	pruneUsernameAttemptsLocked(now)
+	a, ok := usernameAttemptsMap[u]
+	if !ok {
+		a = &usernameAttempts{}
+		usernameAttemptsMap[u] = a
+	}
+	a.fails = append(a.fails, now)
+	shouldLog := false
+	if len(a.fails) >= loginUserMaxFails && (a.lockedUntil.IsZero() || !now.Before(a.lockedUntil)) {
+		a.lockedUntil = now.Add(loginUserLockoutDur)
+		shouldLog = true
+	}
+	attemptMu.Unlock()
+
+	if shouldLog {
+		recordError("E-AUTH-02", "login", "brute-force lockout for user "+username+" (10 failures)")
+		LogSecurityAudit("user_lockout_triggered", username, "unknown", "10 failed attempts within window")
+	}
+}
+
+func recordUsernameSuccess(username string) {
+	if username == "" {
+		return
+	}
+	u := strings.ToLower(username)
+	attemptMu.Lock()
+	delete(usernameAttemptsMap, u)
 	attemptMu.Unlock()
 }
 
@@ -230,6 +328,7 @@ func requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
+	reloadConfigIfChanged()
 	ip := clientIP(r)
 	if checkLocked(ip) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(lockRemaining(ip).Seconds())+1))
@@ -245,9 +344,23 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, "E-AUTH-03", "")
 		return
 	}
+	bodyUser := strings.TrimSpace(body.Username)
+	if locked, rem := checkUsernameLocked(bodyUser); locked {
+		w.Header().Set("Retry-After", strconv.Itoa(int(rem.Seconds())+1))
+		writeAPIError(w, r, "E-AUTH-02", "Too many failed attempts. Temporarily locked.")
+		return
+	}
+	cfgUser := strings.TrimSpace(cfg.Username)
+	if cfgUser == "" {
+		cfgUser = "admin"
+	}
+	userMatches := subtle.ConstantTimeCompare([]byte(bodyUser), []byte(cfgUser)) == 1 ||
+		strings.EqualFold(bodyUser, cfgUser)
+
 	passOK, upgrade := verifyPassword(cfg.PassHash, body.Password)
-	if subtle.ConstantTimeCompare([]byte(body.Username), []byte(cfg.Username)) != 1 || !passOK {
+	if !userMatches || !passOK {
 		recordLoginFailure(ip)
+		recordUsernameFailure(bodyUser)
 		LogSecurityAudit("login_failed", body.Username, ip, "invalid credentials")
 		writeAPIError(w, r, "E-AUTH-02", "")
 		return
@@ -259,12 +372,14 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		if !checkSecondFactor(body.Code) {
 			recordLoginFailure(ip)
+			recordUsernameFailure(bodyUser)
 			LogSecurityAudit("login_failed", body.Username, ip, "bad second factor")
 			writeAPIError(w, r, "E-AUTH-11", "")
 			return
 		}
 	}
 	recordLoginSuccess(ip)
+	recordUsernameSuccess(bodyUser)
 	if upgrade { // transparent migration: legacy SHA-256 / weak argon2 params -> current argon2id
 		mu.Lock()
 		cfg.PassHash = hashPassword(body.Password)
@@ -333,7 +448,7 @@ func handlePassword(w http.ResponseWriter, r *http.Request) {
 
 	mu.Lock()
 	cfg.PassHash = hashPassword(targetPass)
-	_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
+	saveCfg()
 	// CWE-256: Plaintext passwords are NEVER stored on disk!
 	if _, err := rand.Read(nonce[:]); err != nil {
 		mu.Unlock()

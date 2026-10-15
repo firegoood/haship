@@ -221,18 +221,6 @@ func controlSessionIn(all []ssSession, q ctrlQuery, owners map[int]int) ctrlResu
 	return ctrlResult{Linked: true, RTTms: minRTT(hit), Remote: best.RHost}
 }
 
-// controlSession reports whether a foreign client holds an ESTABLISHED TCP
-// session to this hub's control port (or its WSS TLS front, port+2), and the
-// kernel RTT of that session. Thin wrapper for callers that need a fresh read;
-// the snapshot collector uses controlSessionIn on one shared ss parse.
-func controlSession(port int, remotes ...string) (linked bool, rttMs float64) {
-	if port <= 0 {
-		return false, -1
-	}
-	r := controlSessionIn(parseSS(ssEstablished()), ctrlQuery{ID: -1, Port: port, Extra: remotes}, nil)
-	return r.Linked, r.RTTms
-}
-
 // linkedFromSS is the pure helper used by tests.
 func linkedFromSS(out string, ports []int, remotes ...string) bool {
 	return len(sessionsOn(parseSS(out), ports, remotes...)) > 0

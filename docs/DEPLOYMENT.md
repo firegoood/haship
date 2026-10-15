@@ -116,9 +116,14 @@ ufw enable
 | -------- | ----------- | ------- |
 | `GRE_PANEL_PASSWORD` | Ephemeral recovery password override applied on restart | *(none)* |
 | `GRE_PANEL_PORT` | Custom listening port override | `7777` |
-| `GRE_PANEL_DIR` | Configuration directory | `/etc/gre-panel` |
+| `GRE_PANEL_DIR` | Panel configuration directory | `/etc/gre-panel` |
+| `GRE_FRP_DIR` | FRP configuration directory | `/etc/frp` |
+| `GRE_BACKHAUL_DIR` | Backhaul configuration directory | `/etc/backhaul` |
+| `GRE_SYSCTL_CONF` | Path to sysctl configuration file for reverse path filtering | `/etc/sysctl.d/99-hashem-revpath.conf` |
 | `TRUSTED_PROXY_IPS` | Comma-separated trusted reverse proxy IPs and CIDRs | *(empty)* |
 | `GRE_SCRIPT` / `HASHEM_SCRIPT` | Path to installer script | `/usr/local/bin/hashem.sh` |
+| `HASHEM_PPROF` | Enable pprof diagnostic endpoints (`/debug/pprof/`) behind auth | `0` (disabled) |
+| `HASHEM_MIRROR_REPO` | GitHub mirror repository for FRP/Backhaul binary releases | `pdnczone/hashem-frp` |
 
 ---
 

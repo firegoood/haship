@@ -69,6 +69,7 @@ type panelConfig struct {
 	// MetricsToken enables GET /metrics (Prometheus) for scrapers using a
 	// bearer token; empty = endpoint disabled (404).
 	MetricsToken   string   `json:"metrics_token,omitempty"`
+	LicenseKey     string   `json:"license_key,omitempty"`
 	TOTPEnabled    bool     `json:"totp_enabled,omitempty"`
 	TOTPSecret     string   `json:"totp_secret,omitempty"`
 	RecoveryHashes []string `json:"recovery_hashes,omitempty"`
@@ -95,7 +96,100 @@ var (
 
 func cfgPath() string { return filepath.Join(configDir, "panel.json") }
 
-func saveCfg() { _ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600) }
+var (
+	cfgFileModTime time.Time
+	cfgFileMu      sync.RWMutex
+)
+
+func recordLoadedModTime() {
+	if fi, err := os.Stat(cfgPath()); err == nil {
+		cfgFileMu.Lock()
+		cfgFileModTime = fi.ModTime()
+		cfgFileMu.Unlock()
+	}
+}
+
+func reloadConfigIfChanged() {
+	p := cfgPath()
+	fi, err := os.Stat(p)
+	if err != nil {
+		return
+	}
+	cfgFileMu.RLock()
+	lastMod := cfgFileModTime
+	cfgFileMu.RUnlock()
+
+	if !fi.ModTime().After(lastMod) {
+		return
+	}
+
+	cfgFileMu.Lock()
+	defer cfgFileMu.Unlock()
+	if !fi.ModTime().After(cfgFileModTime) {
+		return
+	}
+
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) == 0 {
+		return
+	}
+	var parsed panelConfig
+	if err := json.Unmarshal(data, &parsed); err == nil && strings.TrimSpace(parsed.PassHash) != "" {
+		mu.Lock()
+		cfg.PassHash = parsed.PassHash
+		if strings.TrimSpace(parsed.Username) != "" {
+			cfg.Username = parsed.Username
+		}
+		if parsed.LicenseKey != "" {
+			cfg.LicenseKey = parsed.LicenseKey
+		}
+		mu.Unlock()
+		cfgFileModTime = fi.ModTime()
+		log.Printf("panel credentials reloaded from disk: user=%s", cfg.Username)
+	}
+}
+
+func saveCfg() {
+	_ = saveConfigAtomic(cfg)
+}
+
+func saveConfigAtomic(c panelConfig) error {
+	p := cfgPath()
+	// Prevent accidental credential or config wipe if empty fields passed
+	if existingData, err := os.ReadFile(p); err == nil && len(existingData) > 0 {
+		var prev panelConfig
+		if json.Unmarshal(existingData, &prev) == nil {
+			if strings.TrimSpace(c.PassHash) == "" && strings.TrimSpace(prev.PassHash) != "" {
+				c.PassHash = prev.PassHash
+			}
+			if strings.TrimSpace(c.BasePath) == "" && strings.TrimSpace(prev.BasePath) != "" {
+				c.BasePath = prev.BasePath
+			}
+			if strings.TrimSpace(c.Username) == "" && strings.TrimSpace(prev.Username) != "" {
+				c.Username = prev.Username
+			}
+			if c.Port <= 0 && prev.Port > 0 {
+				c.Port = prev.Port
+			}
+			if strings.TrimSpace(c.LicenseKey) == "" && strings.TrimSpace(prev.LicenseKey) != "" {
+				c.LicenseKey = prev.LicenseKey
+			}
+		}
+	}
+	data := mustJSON(c)
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	bak := p + ".bak"
+	_ = os.WriteFile(bak, data, 0600)
+	recordLoadedModTime()
+	return nil
+}
 
 // ---- auto port: never fail install when the HTTP/TLS port is taken ----
 
@@ -171,32 +265,159 @@ func loadOrInit() {
 		log.Printf("Security migration (CWE-256): deleted legacy plaintext password file %s", legacyPassFile)
 	}
 
-	data, err := os.ReadFile(cfgPath())
-	if err == nil && json.Unmarshal(data, &cfg) == nil && cfg.PassHash != "" {
-		// Test/dev override: fixed password via env (takes effect on restart).
-		if pw := os.Getenv("GRE_PANEL_PASSWORD"); pw != "" {
-			cfg.PassHash = hashPassword(pw)
-			_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
-			log.Printf("panel password updated from GRE_PANEL_PASSWORD environment variable")
+	primaryPath := cfgPath()
+	data, err := os.ReadFile(primaryPath)
+	if err != nil || len(data) == 0 {
+		bakPath := filepath.Join(configDir, "panel.json.bak")
+		if bakData, bakErr := os.ReadFile(bakPath); bakErr == nil && len(bakData) > 0 {
+			data = bakData
+			err = nil
+			log.Printf("recovered config from backup %s", bakPath)
 		}
-		return
 	}
+	if err != nil || len(data) == 0 {
+		// Fallback check for config.json if panel.json does not exist
+		altPath := filepath.Join(configDir, "config.json")
+		if altData, altErr := os.ReadFile(altPath); altErr == nil && len(altData) > 0 {
+			data = altData
+			err = nil
+			log.Printf("migrating config from %s to %s", altPath, primaryPath)
+		}
+	}
+
+	var existingBasePath string
+	var existingPort int
+	var existingUser string
+	var existingLicense string
+
+	extractDefaults := func(src []byte) {
+		var raw map[string]any
+		if json.Unmarshal(src, &raw) == nil {
+			if v, ok := raw["base_path"].(string); ok && strings.TrimSpace(v) != "" && existingBasePath == "" {
+				existingBasePath = strings.TrimSpace(v)
+			}
+			if v, ok := raw["port"].(float64); ok && v >= 1 && v <= 65535 && existingPort == 0 {
+				existingPort = int(v)
+			}
+			if v, ok := raw["username"].(string); ok && strings.TrimSpace(v) != "" && existingUser == "" {
+				existingUser = strings.TrimSpace(v)
+			}
+			if v, ok := raw["license_key"].(string); ok && strings.TrimSpace(v) != "" && existingLicense == "" {
+				existingLicense = strings.TrimSpace(v)
+			}
+		}
+	}
+
+	if len(data) > 0 {
+		extractDefaults(data)
+	}
+	if existingBasePath == "" {
+		if bData, bErr := os.ReadFile(filepath.Join(configDir, "panel.json.bak")); bErr == nil {
+			extractDefaults(bData)
+		}
+	}
+
+	if err == nil && len(data) > 0 {
+		var parsed panelConfig
+		if json.Unmarshal(data, &parsed) == nil && strings.TrimSpace(parsed.PassHash) != "" {
+			cfg = parsed
+			if strings.TrimSpace(cfg.Username) == "" {
+				cfg.Username = "admin"
+			}
+			if cfg.Port <= 0 || cfg.Port > 65535 {
+				cfg.Port = 7777
+			}
+			if strings.TrimSpace(cfg.BasePath) == "" {
+				if existingBasePath != "" {
+					cfg.BasePath = existingBasePath
+				} else {
+					cfg.BasePath = "panel"
+				}
+			}
+			// Test/dev override: fixed password via env (takes effect on restart).
+			if pw := os.Getenv("GRE_PANEL_PASSWORD"); pw != "" {
+				cfg.PassHash = hashPassword(pw)
+				saveCfg()
+				log.Printf("panel password updated from GRE_PANEL_PASSWORD environment variable")
+			}
+			recordLoadedModTime()
+			return
+		}
+
+		// Resilient fallback: rescue credentials if fields differed or minor format issue
+		var raw map[string]any
+		if json.Unmarshal(data, &raw) == nil {
+			passHash := ""
+			for _, k := range []string{"pass_hash", "password", "hash", "admin_pass", "admin_password"} {
+				if v, ok := raw[k].(string); ok && strings.TrimSpace(v) != "" {
+					passHash = strings.TrimSpace(v)
+					break
+				}
+			}
+			if passHash != "" {
+				username := "admin"
+				if existingUser != "" {
+					username = existingUser
+				}
+				port := 7777
+				if existingPort != 0 {
+					port = existingPort
+				}
+				basePath := "panel"
+				if existingBasePath != "" {
+					basePath = existingBasePath
+				}
+
+				if !strings.HasPrefix(passHash, "argon2id$") && !strings.HasPrefix(passHash, "$argon2id$") && len(passHash) != 64 {
+					passHash = hashPassword(passHash)
+				}
+
+				cfg = panelConfig{
+					Username:   username,
+					PassHash:   passHash,
+					Port:       port,
+					BasePath:   basePath,
+					LicenseKey: existingLicense,
+				}
+				saveCfg()
+				recordLoadedModTime()
+				log.Printf("rescued panel credentials from config (user: %s, port: %d, base: %s)", cfg.Username, cfg.Port, cfg.BasePath)
+				return
+			}
+		}
+	}
+
 	pass := os.Getenv("GRE_PANEL_PASSWORD")
 	if pass == "" {
 		pass = SecureRandomPassword(16)
 	}
-	cfg = panelConfig{
-		Username: "admin",
-		PassHash: hashPassword(pass),
-		Port:     7777,
-		BasePath: randomBase(12),
+
+	basePath := existingBasePath
+	if basePath == "" {
+		basePath = randomBase(12)
 	}
-	_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
-	// CWE-256: Plaintext passwords are NEVER stored on disk!
-	log.Printf("==================================================================")
-	log.Printf("INITIAL PANEL PASSWORD: %s (user: %s)", pass, cfg.Username)
+	port := 7777
+	if existingPort != 0 {
+		port = existingPort
+	}
+	user := "admin"
+	if existingUser != "" {
+		user = existingUser
+	}
+
+	cfg = panelConfig{
+		Username:   user,
+		PassHash:   hashPassword(pass),
+		Port:       port,
+		BasePath:   basePath,
+		LicenseKey: existingLicense,
+	}
+	saveCfg()
+	recordLoadedModTime()
+	log.Printf("==================================================")
+	log.Printf("INITIAL PANEL PASSWORD: %s (user: %s, base: /%s)", pass, cfg.Username, cfg.BasePath)
 	log.Printf("Please record this password now. Plaintext is not stored on disk.")
-	log.Printf("==================================================================")
+	log.Printf("==================================================")
 }
 
 func mustJSON(v any) []byte {
@@ -214,13 +435,103 @@ func randomBase(n int) string {
 	return string(b)
 }
 
-func main() {
-	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
-		fmt.Println(panelVersion)
-		return
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "1.1.1.1:80")
+	if err != nil {
+		return "127.0.0.1"
 	}
-	if len(os.Args) > 1 && os.Args[1] == "tls-proxy" {
-		os.Exit(tlsProxyCmd(os.Args[2:]))
+	defer conn.Close()
+	localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || localAddr.IP == nil {
+		return "127.0.0.1"
+	}
+	return localAddr.IP.String()
+}
+
+func cliSetPassword(args []string) int {
+	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
+		configDir = v
+	}
+	loadOrInit()
+
+	newPass := ""
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		newPass = strings.TrimSpace(args[0])
+	} else {
+		newPass = SecureRandomPassword(16)
+	}
+
+	if len(newPass) < 8 {
+		fmt.Fprintf(os.Stderr, "Error: password must be at least 8 characters\n")
+		return 1
+	}
+
+	mu.Lock()
+	cfg.PassHash = hashPassword(newPass)
+	saveCfg()
+	mu.Unlock()
+
+	ResetAllLockouts()
+
+	ip := getOutboundIP()
+	fmt.Println("==================================================")
+	fmt.Println("[✔️] Panel password successfully updated!")
+	fmt.Printf("Username:  %s\n", cfg.Username)
+	fmt.Printf("Password:  %s\n", newPass)
+	fmt.Printf("Base Path: /%s (UNCHANGED)\n", cfg.BasePath)
+	fmt.Printf("Login URL: http://%s:%d/%s/\n", ip, cfg.Port, cfg.BasePath)
+	fmt.Println("==================================================")
+	return 0
+}
+
+func cliShowInfo() int {
+	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
+		configDir = v
+	}
+	loadOrInit()
+	ip := getOutboundIP()
+	fmt.Println("==================================================")
+	fmt.Println("Hashem GRE-FRP Web Panel Info")
+	fmt.Printf("Username:  %s\n", cfg.Username)
+	fmt.Printf("Port:      %d\n", cfg.Port)
+	fmt.Printf("Base Path: /%s\n", cfg.BasePath)
+	fmt.Printf("Login URL: http://%s:%d/%s/\n", ip, cfg.Port, cfg.BasePath)
+	fmt.Println("==================================================")
+	return 0
+}
+func validateConfigDirs() {
+	// Check and create directories if they don't exist, but only warn if we cannot create them.
+	// We don't want to fail the panel if the directories are missing, but we should log.
+	for _, dir := range []string{configDir, frpDir, backhaulDir} {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				log.Printf("WARNING: Failed to create directory %s: %v", dir, err)
+			} else {
+				log.Printf("INFO: Created missing directory %s", dir)
+			}
+		}
+	}
+}
+
+
+func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Println(panelVersion)
+			return
+		case "--help", "-h", "help":
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy | cluster]")
+			return
+		case "tls-proxy":
+			os.Exit(tlsProxyCmd(os.Args[2:]))
+		case "cluster", "mesh":
+			os.Exit(cliCluster(os.Args[2:]))
+		case "password", "pass", "set-password":
+			os.Exit(cliSetPassword(os.Args[2:]))
+		case "info", "status", "url":
+			os.Exit(cliShowInfo())
+		}
 	}
 	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
 		configDir = v
@@ -234,11 +545,27 @@ func main() {
 	if v := os.Getenv("GRE_SYSCTL_CONF"); v != "" {
 		revpathSysctlConf = v
 	}
+	validateConfigDirs()
 	loadOrInit()
 	ensureFreeHTTPPort()
 	if _, err := rand.Read(nonce[:]); err != nil {
 		log.Fatal(err)
 	}
+
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		nonceTicker := time.NewTicker(12 * time.Hour)
+		defer nonceTicker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				reloadConfigIfChanged()
+			case <-nonceTicker.C:
+				rotateNonce()
+			}
+		}
+	}()
 
 	base := "/" + cfg.BasePath
 	mux := http.NewServeMux()
@@ -332,6 +659,20 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/doctor", requireAuth(handleDoctorGet))
 	mux.HandleFunc("POST "+base+"/api/doctor", requireAuth(requireCSRF(handleDoctorPost)))
 
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		curBase := cfg.BasePath
+		mu.Unlock()
+		if curBase == "" {
+			curBase = "panel"
+		}
+		target := "/" + curBase + "/"
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusFound)
+	})
+
 	// Peer-to-peer synchronization & commands
 	mux.HandleFunc("POST "+base+"/api/peer/handshake", requirePeerAuth(handlePeerHandshake))
 	mux.HandleFunc("POST "+base+"/api/peer/apply-carrier", requirePeerAuth(handlePeerApplyCarrier))
@@ -342,6 +683,25 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/peer/rescue-ack", requireRescuePeerAuth(handlePeerRescueAck))
 	mux.HandleFunc("GET "+base+"/api/rescue", requireAuth(handleRescueGet))
 	mux.HandleFunc("POST "+base+"/api/rescue", requireAuth(requireCSRF(handleRescuePost)))
+	mux.HandleFunc("GET "+base+"/api/sshfwd", requireAuth(handleSSHFwdGet))
+	mux.HandleFunc("POST "+base+"/api/sshfwd", requireAuth(requireCSRF(handleSSHFwdPost)))
+
+	// Iran-to-Iran Mesh Cluster endpoints
+	mux.HandleFunc("GET "+base+"/api/cluster/status", requireAuth(handleClusterStatus))
+	mux.HandleFunc("POST "+base+"/api/cluster/config", requireAuth(requireCSRF(handleClusterConfigPost)))
+	mux.HandleFunc("POST "+base+"/api/cluster/nodes/add", requireAuth(requireCSRF(handleClusterNodeAdd)))
+	mux.HandleFunc("POST "+base+"/api/cluster/nodes/delete", requireAuth(requireCSRF(handleClusterNodeDelete)))
+	mux.HandleFunc("POST "+base+"/api/cluster/foreign/add", requireAuth(requireCSRF(handleClusterForeignNodeAdd)))
+	mux.HandleFunc("POST "+base+"/api/cluster/foreign/delete", requireAuth(requireCSRF(handleClusterForeignNodeDelete)))
+	mux.HandleFunc("POST "+base+"/api/cluster/foreign/switch", requireAuth(requireCSRF(handleClusterForeignSwitch)))
+	mux.HandleFunc("POST "+base+"/api/cluster/heartbeat", handleClusterHeartbeat)
+	mux.HandleFunc("POST "+base+"/api/cluster/failover/trigger", requireAuth(requireCSRF(handleClusterFailoverTrigger)))
+	mux.HandleFunc("POST "+base+"/api/cluster/failover/revert", requireAuth(requireCSRF(handleClusterFailoverRevert)))
+	mux.HandleFunc("GET "+base+"/api/bagher", requireAuth(handleSSHFwdGet))
+	mux.HandleFunc("POST "+base+"/api/bagher", requireAuth(requireCSRF(handleSSHFwdPost)))
+	mux.HandleFunc("POST "+base+"/api/peer/sshfwd-install-key", requirePeerAuth(handlePeerSSHFwdInstallKey))
+	mux.HandleFunc("GET "+base+"/api/license", requireAuth(handleLicenseGet))
+	mux.HandleFunc("POST "+base+"/api/license", requireAuth(requireCSRF(handleLicensePost)))
 	mux.HandleFunc("GET "+base+"/api/peer/status", requirePeerAuth(handlePeerStatus))
 	mux.HandleFunc("GET "+base+"/api/peer/config", requireAuth(handlePeerConfigGet))
 	mux.HandleFunc("POST "+base+"/api/peer/config", requireAuth(requireCSRF(handlePeerConfigPost)))
@@ -355,6 +715,7 @@ func main() {
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Printf("gre-panel listening on %s under /%s", addr, cfg.BasePath)
 	histStop := make(chan struct{})
+	loadLicenseFromDisk()
 	startHistoryPersistence(histStop)
 	startUsagePersistence(histStop)
 	startSnapshotCollector(context.Background())
@@ -365,6 +726,8 @@ func main() {
 	go startTrafficRecorder()
 	go startFleetSampler()
 	go startRescueMonitor()
+	go startClusterMonitor()
+	go startNativeAutoPoolWorker()
 	go func() {
 		cc := loadCarrierConfig()
 		if strings.HasPrefix(cc.ActiveCarrier, "wss") {
@@ -456,6 +819,12 @@ func serveAsset(name, ctype string) http.HandlerFunc {
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
+	if authed(r) {
+		if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
+			csrfTok := GenerateCSRFToken(c.Value)
+			http.SetCookie(w, csrfCookie(r, csrfTok, 86400))
+		}
+	}
 	data, err := panelFS.ReadFile("index.html")
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)

@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -81,6 +83,22 @@ func runCmdTimeoutCtx(ctx context.Context, timeout time.Duration, name string, a
 	out, err := runner(ctx, name, args...)
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	recordExec(name, time.Since(start), err, timedOut)
+	if err != nil && !timedOut {
+		var exitCode = -1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+		trimmed := strings.TrimSpace(string(out))
+		if len(trimmed) > 120 {
+			trimmed = trimmed[:120] + "..."
+		}
+		if trimmed != "" {
+			log.Printf("[CMD-ERROR] command %q failed (exit %d): %v | output: %s", name, exitCode, err, trimmed)
+		} else {
+			log.Printf("[CMD-ERROR] command %q failed (exit %d): %v", name, exitCode, err)
+		}
+	}
 	return out, err
 }
 

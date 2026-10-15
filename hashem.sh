@@ -37,9 +37,9 @@ AUTOPOOL_MAX="${AUTOPOOL_MAX:-200}"
 AUTOPOOL_MAXPOOL_MIN="${AUTOPOOL_MAXPOOL_MIN:-60}"
 AUTOPOOL_MAXPOOL_MAX="${AUTOPOOL_MAXPOOL_MAX:-500}"
 AUTOPOOL_LOW_CONNS="${AUTOPOOL_LOW_CONNS:-30}"       # restart frpc only below this many active user conns
-AUTOPOOL_COOLDOWN="${AUTOPOOL_COOLDOWN:-300}"        # min seconds between automatic frpc restarts
+AUTOPOOL_COOLDOWN="${AUTOPOOL_COOLDOWN:-60}"         # min seconds between automatic frpc restarts
 AUTOPOOL_SEVERE_ERRS="${AUTOPOOL_SEVERE_ERRS:-20}"   # pool-full lines per tick that justify a restart under load
-AUTOPOOL_DOWN_QUIET="${AUTOPOOL_DOWN_QUIET:-15}"     # consecutive quiet ticks before scaling down
+AUTOPOOL_DOWN_QUIET="${AUTOPOOL_DOWN_QUIET:-3}"      # consecutive quiet ticks before scaling down
 AUTOPOOL_MIN_FREE_MB="${AUTOPOOL_MIN_FREE_MB:-150}"  # below this free RAM, never scale up
 BACKUP_DIR="/var/backups/hashem"
 
@@ -117,7 +117,7 @@ get_component_status() {
         panel)
             local bin="/usr/local/bin/gre-panel"
             local svc="gre-panel"
-            if [[ ! -f "$bin" && ! -f "/etc/systemd/system/${svc}.service" ]]; then
+            if [[ ! -f "$bin" || ! -f "/etc/systemd/system/${svc}.service" ]]; then
                 echo "NOT_INSTALLED"; return 0
             fi
             if systemctl is-active --quiet "$svc" 2>/dev/null; then
@@ -201,6 +201,27 @@ get_component_status() {
     esac
 }
 
+wait_for_package_manager_lock() {
+    local max_wait=15
+    local waited=0
+    while [[ $waited -lt $max_wait ]]; do
+        if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+           fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+           fuser /var/lib/dpkg/lock >/dev/null 2>&1; then
+            sleep 1
+            waited=$((waited + 1))
+        else
+            break
+        fi
+    done
+    if [[ $waited -ge $max_wait ]]; then
+        fuser -k /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || true
+        fuser -k /var/lib/apt/lists/lock >/dev/null 2>&1 || true
+        fuser -k /var/lib/dpkg/lock >/dev/null 2>&1 || true
+        dpkg --configure -a >/dev/null 2>&1 || true
+    fi
+}
+
 ensure_dependencies_smart() {
     local DEPS_MARKER="/etc/gre-panel/.deps_installed"
     if [[ -f "$DEPS_MARKER" ]] && command -v ip >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && \
@@ -232,13 +253,23 @@ ensure_dependencies_smart() {
     log_msg "installer" "INFO" "Installing missing dependencies: ${uniq_pkgs}"
     
     if command -v apt-get >/dev/null 2>&1; then
+        wait_for_package_manager_lock
         export DEBIAN_FRONTEND=noninteractive
         (timeout 25 apt-get update -qq || true)
         apt-get install -y -qq --no-install-recommends $uniq_pkgs 2>/dev/null || {
-            echo -e "${YELLOW}[!] Warning: apt-get encountered issues installing: ${uniq_pkgs}. Continuing setup.${NC}"
+            dpkg --configure -a 2>/dev/null || true
+            apt-get install -y -qq --no-install-recommends $uniq_pkgs 2>/dev/null || true
         }
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q $uniq_pkgs 2>/dev/null || true
     elif command -v yum >/dev/null 2>&1; then
-        yum install -y -q $uniq_pkgs || true
+        yum install -y -q $uniq_pkgs 2>/dev/null || true
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm $uniq_pkgs 2>/dev/null || true
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install -y $uniq_pkgs 2>/dev/null || true
+    elif command -v apk >/dev/null 2>&1; then
+        apk add --no-cache $uniq_pkgs 2>/dev/null || true
     fi
     mkdir -p /etc/gre-panel
     touch "$DEPS_MARKER" 2>/dev/null || true
@@ -1682,7 +1713,11 @@ get_latest_frp_version() {
     if [[ -n "${FRP_VERSION:-}" && "$FRP_VERSION" != "$DEFAULT_FRP_VERSION" ]]; then
         return 0
     fi
-    LATEST_VER=$(curl -sSL --connect-timeout 3 --max-time 6 "https://api.github.com/repos/fatedier/frp/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    local MIRROR_REPO="${HASHEM_MIRROR_REPO:-pdnczone/hashem-frp}"
+    LATEST_VER=$(curl -sSL --connect-timeout 3 --max-time 6 "https://api.github.com/repos/${MIRROR_REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    if [[ -z "$LATEST_VER" ]]; then
+        LATEST_VER=$(curl -sSL --connect-timeout 3 --max-time 6 "https://api.github.com/repos/fatedier/frp/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    fi
     if [[ -z "$LATEST_VER" ]]; then
         FRP_VERSION="$DEFAULT_FRP_VERSION"
     else
@@ -1690,42 +1725,61 @@ get_latest_frp_version() {
     fi
 }
 
+is_valid_download() {
+    local target="$1"
+    [[ -s "$target" ]] || return 1
+    # Check if file is an HTML error / block page
+    if head -c 256 "$target" 2>/dev/null | grep -qiE "<!doctype|<html|<head|<title|404 not found|403 forbidden|access denied|rate limit"; then
+        return 1
+    fi
+    # If it is a gzip archive, ensure it is a valid gzip
+    if [[ "$target" == *.tar.gz || "$target" == *.tgz ]]; then
+        gzip -t "$target" 2>/dev/null || return 1
+    fi
+    return 0
+}
+
 download_with_fallback() {
     local DEST="$1"
     local URL="$2"
     local TIMEOUT="${3:-45}"
 
-    # If destination already exists and is non-empty, reuse it
-    if [[ -s "$DEST" ]]; then
+    # If destination already exists and is valid, reuse it
+    if is_valid_download "$DEST"; then
         return 0
     fi
+    rm -f "$DEST" 2>/dev/null
 
-    # Try direct URL first (use fast 5s connect-timeout for GitHub since it is often blocked in Iran)
-    local DIRECT_CONNECT_TO=10
+    # Try direct URL first (use fast connect-timeout for GitHub since it is often blocked in Iran)
+    local DIRECT_CONNECT_TO=8
     local DIRECT_MAX_TO="$TIMEOUT"
     if [[ "$URL" == https://github.com/* || "$URL" == https://raw.githubusercontent.com/* ]]; then
         DIRECT_CONNECT_TO=5
-        DIRECT_MAX_TO=8
+        DIRECT_MAX_TO=12
     fi
 
-    if curl -fsSL --connect-timeout "$DIRECT_CONNECT_TO" --max-time "$DIRECT_MAX_TO" -o "$DEST" "$URL" 2>/dev/null && [[ -s "$DEST" ]]; then
+    if curl -fsSL --connect-timeout "$DIRECT_CONNECT_TO" --max-time "$DIRECT_MAX_TO" -o "$DEST" "$URL" 2>/dev/null && is_valid_download "$DEST"; then
         return 0
     fi
+    rm -f "$DEST" 2>/dev/null
 
     # Iran-friendly GitHub proxy mirrors if it is a GitHub URL
     if [[ "$URL" == https://github.com/* || "$URL" == https://raw.githubusercontent.com/* ]]; then
         echo -e "${YELLOW}[*] Direct download timed out / blocked — trying Iran proxy mirror...${NC}"
         local MIRRORS=(
+            "https://mirror.ghproxy.com/${URL}"
             "https://ghproxy.net/${URL}"
+            "https://ghproxy.cc/${URL}"
             "https://gh-proxy.com/${URL}"
             "https://gh.ddlc.top/${URL}"
-            "https://ghproxy.cn/${URL}"
         )
         for M in "${MIRRORS[@]}"; do
-            if curl -fsSL --connect-timeout 6 --max-time 20 -o "$DEST" "$M" 2>/dev/null && [[ -s "$DEST" ]]; then
+            rm -f "$DEST" 2>/dev/null
+            if curl -fsSL --connect-timeout 6 --max-time 30 -o "$DEST" "$M" 2>/dev/null && is_valid_download "$DEST"; then
                 echo -e "${GREEN}[✔️] Download succeeded via mirror: ${M%/*}${NC}"
                 return 0
             fi
+            rm -f "$DEST" 2>/dev/null
         done
     fi
     return 1
@@ -1750,17 +1804,29 @@ install_frp_binaries() {
     TMP_DIR=$(mktemp -d)
     TAR_FILE="frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
 
-    local DOWNLOAD_URL="https://github.com/pdnczone/hashem-panel/releases/download/v${FRP_VERSION}/${TAR_FILE}"
-    if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 30; then
-        DOWNLOAD_URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/${TAR_FILE}"
-        if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 60; then
-            echo -e "${RED}[!] Failed to download FRP from GitHub or mirrors.${NC}"
-            rm -rf "$TMP_DIR"
-            return 1
+    local MIRROR_REPO="${HASHEM_MIRROR_REPO:-pdnczone/hashem-frp}"
+    local DOWNLOAD_URL="https://github.com/${MIRROR_REPO}/releases/download/v${FRP_VERSION}/${TAR_FILE}"
+    if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 45; then
+        local FALLBACK_VER="0.61.1"
+        local FALLBACK_TAR="frp_${FALLBACK_VER}_linux_${FRP_ARCH}.tar.gz"
+        local FALLBACK_MIRROR_URL="https://github.com/${MIRROR_REPO}/releases/download/v${FALLBACK_VER}/${FALLBACK_TAR}"
+        local FALLBACK_UPSTREAM_URL="https://github.com/fatedier/frp/releases/download/v${FALLBACK_VER}/${FALLBACK_TAR}"
+        echo -e "${YELLOW}[*] Retrying with stable FRP v${FALLBACK_VER} from mirror...${NC}"
+        if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$FALLBACK_MIRROR_URL" 45; then
+            echo -e "${YELLOW}[*] Retrying with upstream FRP...${NC}"
+            if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$FALLBACK_UPSTREAM_URL" 45; then
+                echo -e "${RED}[!] Failed to download FRP from mirror, upstream, or proxies.${NC}"
+                rm -rf "$TMP_DIR"
+                return 1
+            fi
         fi
     fi
 
-    tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR"
+    if ! tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR" 2>/dev/null; then
+        echo -e "${RED}[!] Corrupted FRP archive downloaded.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
     local FOUND_FRPS FOUND_FRPC
     FOUND_FRPS=$(find "$TMP_DIR" -type f -name "frps" 2>/dev/null | head -1)
     FOUND_FRPC=$(find "$TMP_DIR" -type f -name "frpc" 2>/dev/null | head -1)
@@ -1799,17 +1865,18 @@ install_backhaul_binaries() {
     TMP_DIR=$(mktemp -d)
     local TAR_FILE="backhaul_linux_${BH_ARCH}.tar.gz"
 
-    local DOWNLOAD_URL="https://github.com/pdnczone/hashem-panel/releases/download/${BH_VER}/${TAR_FILE}"
-    if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 30; then
-        DOWNLOAD_URL="https://github.com/Musixal/Backhaul/releases/download/${BH_VER}/${TAR_FILE}"
-        if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 60; then
-            echo -e "${RED}[!] Failed to download Backhaul from GitHub or mirrors.${NC}"
-            rm -rf "$TMP_DIR"
-            return 1
-        fi
+    local DOWNLOAD_URL="https://github.com/Musixal/Backhaul/releases/download/${BH_VER}/${TAR_FILE}"
+    if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 45; then
+        echo -e "${RED}[!] Failed to download Backhaul from GitHub or mirrors.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
     fi
 
-    tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR"
+    if ! tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR" 2>/dev/null; then
+        echo -e "${RED}[!] Corrupted Backhaul archive downloaded.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
     if [[ -f "${TMP_DIR}/backhaul" ]]; then
         cp "${TMP_DIR}/backhaul" "$INSTALL_DIR/" 2>/dev/null
     else
@@ -2648,8 +2715,8 @@ quicBindPort = ${QUIC_PORT}
 auth.method = "token"
 auth.token = "${TOKEN}"
 $(perf_tcpmux_lines)
-transport.tcpKeepalive = 30
-transport.heartbeatTimeout = 90
+transport.tcpKeepalive = 15
+transport.heartbeatTimeout = 45
 transport.maxPoolCount = ${MAX_POOL}
 EOF
     cat <<EOF > /etc/systemd/system/frps.service
@@ -2662,8 +2729,9 @@ Wants=network-online.target
 Type=simple
 User=root
 Restart=always
-RestartSec=3s
-StartLimitIntervalSec=0
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity
@@ -2847,10 +2915,10 @@ auth.token = "${TOKEN}"
 loginFailExit = false
 transport.protocol = "${FRP_TRANSPORT}"
 $(perf_tcpmux_lines)
-transport.heartbeatInterval = 30
-transport.heartbeatTimeout = 90
-transport.dialServerTimeout = 15
-transport.dialServerKeepalive = 30
+transport.heartbeatInterval = 15
+transport.heartbeatTimeout = 45
+transport.dialServerTimeout = 10
+transport.dialServerKeepalive = 15
 transport.poolCount = ${EFF_POOL}
 
 EOF
@@ -2900,8 +2968,9 @@ Wants=network-online.target
 Type=simple
 User=root
 Restart=always
-RestartSec=3s
-StartLimitIntervalSec=0
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity
@@ -3473,8 +3542,8 @@ bindPort = ${BIND_PORT}
 auth.method = "token"
 auth.token = "${TOKEN}"
 $(perf_tcpmux_lines)
-transport.tcpKeepalive = 30
-transport.heartbeatTimeout = 90
+transport.tcpKeepalive = 15
+transport.heartbeatTimeout = 45
 transport.maxPoolCount = ${MAX_POOL}
 EOF
     local SVC="frps${SUF}"
@@ -3488,8 +3557,9 @@ Wants=network-online.target
 Type=simple
 User=root
 Restart=always
-RestartSec=3s
-StartLimitIntervalSec=0
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity
@@ -5423,7 +5493,7 @@ apply_panel_unit_limits() { # $1=unit file [$2="HIGH MAX"]
     # binary (script updated before the panel) would be killed every 30 s.
     if panel_supports_watchdog; then
         unit_set_directive "$f" "WatchdogSec" "30"
-        unit_set_directive "$f" "NotifyAccess" "main"
+        unit_set_directive "$f" "NotifyAccess" "all"
     else
         sed -i -E '/^(WatchdogSec|NotifyAccess)=/d' "$f"
     fi
@@ -5681,10 +5751,6 @@ EOF
     sleep 2
 
     if systemctl is-active --quiet gre-panel; then
-        if [[ -z "$PANEL_PASS" ]]; then
-            NEWPASS=$(journalctl -u gre-panel -n 30 --no-pager 2>/dev/null | grep -o 'INITIAL PANEL PASSWORD: [^ ]*' | tail -1 | awk '{print $4}')
-            [[ -n "$NEWPASS" ]] && PANEL_PASS="$NEWPASS"
-        fi
         echo -e "${GREEN}[✔️] Panel installed and running.${NC}"
         # full credentials right here — no need to open another menu
         echo ""
@@ -5702,24 +5768,27 @@ EOF
 }
 
 show_panel_url() {
-    if [[ ! -f /etc/gre-panel/panel.json ]]; then
+    local cfg="/etc/gre-panel/panel.json"
+    if [[ ! -f "$cfg" && -f /etc/gre-panel/config.json ]]; then
+        cfg="/etc/gre-panel/config.json"
+    fi
+    if [[ ! -f "$cfg" ]]; then
         echo -e "${YELLOW}Panel is not installed on this server (no /etc/gre-panel/panel.json). Run Setup first.${NC}"
         return 1
     fi
     local port base user
-    port=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*')
-    base=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
-    user=$(grep -o '"username": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
+    port=$(grep -o '"port": *[0-9]*' "$cfg" 2>/dev/null | grep -o '[0-9]*')
+    base=$(grep -o '"base_path": *"[^"]*"' "$cfg" 2>/dev/null | cut -d'"' -f4)
+    user=$(grep -o '"username": *"[^"]*"' "$cfg" 2>/dev/null | cut -d'"' -f4)
     port=${port:-7777}
     user=${user:-admin}
-    ensure_panel_pass
     MYIP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
     echo -e "${GREEN}Panel URL:  ${CYAN}http://${MYIP:-<this-server-ip>}:${port}/${base}${NC}"
     echo -e "${GREEN}Username:   ${CYAN}${user}${NC}"
     if [[ -n "$PANEL_PASS" ]]; then
         echo -e "${GREEN}Password:   ${CYAN}${PANEL_PASS}${NC} ${YELLOW}(Please record this password now!)${NC}"
     else
-        echo -e "${GREEN}Password:   ${YELLOW}(hashed in panel.json — reset anytime via: ${CYAN}hashem reset-password${YELLOW})${NC}"
+        echo -e "${GREEN}Password:   ${YELLOW}(unchanged — your existing password is kept. Reset anytime: ${CYAN}hashem pass${YELLOW})${NC}"
     fi
 }
 
@@ -5730,15 +5799,15 @@ reset_panel_password() {
     echo -e "${CYAN}             RESET HASHEM WEB PANEL PASSWORD                  ${NC}"
     echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${YELLOW}Enter new password for user 'admin' (minimum 12 chars).${NC}"
+    echo -e "${YELLOW}Enter new password for user 'admin' (minimum 8 chars).${NC}"
     echo -e "${YELLOW}Or press Enter to auto-generate a secure random password.${NC}"
     echo ""
     read -p "New Password: " USER_NEW_PASS
     if [[ -z "$USER_NEW_PASS" ]]; then
-        USER_NEW_PASS=$(tr -dc 'A-Za-z0-9!@#$%' </dev/urandom | head -c 16)
+        USER_NEW_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)
     else
-        if [[ ${#USER_NEW_PASS} -lt 12 ]]; then
-            echo -e "${RED}[!] Password must be at least 12 characters long (NIST 800-63B).${NC}"
+        if [[ ${#USER_NEW_PASS} -lt 8 ]]; then
+            echo -e "${RED}[!] Password must be at least 8 characters long.${NC}"
             return 1
         fi
     fi
@@ -5748,9 +5817,16 @@ reset_panel_password() {
 
 cli_set_panel_password() {
     local PASS="$1"
-    if [[ ${#PASS} -lt 12 ]]; then
-        echo -e "${RED}[!] Password must be at least 12 characters long (NIST 800-63B).${NC}"
+    if [[ ${#PASS} -lt 8 ]]; then
+        echo -e "${RED}[!] Password must be at least 8 characters long.${NC}"
         return 1
+    fi
+
+    if [[ -x /usr/local/bin/gre-panel ]]; then
+        /usr/local/bin/gre-panel password "$PASS"
+        PANEL_PASS="$PASS"
+        systemctl restart gre-panel 2>/dev/null || true
+        return 0
     fi
 
     local HASH
@@ -5762,19 +5838,34 @@ cli_set_panel_password() {
 
     mkdir -p /etc/gre-panel
     python3 - "$HASH" <<'PYEOF'
-import json, sys
+import json, sys, os
 p = '/etc/gre-panel/panel.json'
+bak = '/etc/gre-panel/panel.json.bak'
+d = {}
 try:
     with open(p) as f:
         d = json.load(f)
 except Exception:
+    try:
+        with open(bak) as f:
+            d = json.load(f)
+    except Exception:
+        pass
+if not d or not isinstance(d, dict):
     d = {"username": "admin", "port": 7777, "base_path": "panel"}
+if "base_path" not in d or not str(d.get("base_path", "")).strip():
+    d["base_path"] = "panel"
 d['pass_hash'] = sys.argv[1]
 with open(p + ".tmp", "w") as f:
     json.dump(d, f, indent=2)
-import os
 os.replace(p + ".tmp", p)
 os.chmod(p, 0o600)
+try:
+    with open(bak, "w") as f:
+        json.dump(d, f, indent=2)
+    os.chmod(bak, 0o600)
+except Exception:
+    pass
 PYEOF
 
 
@@ -5953,26 +6044,81 @@ ensure_backup_key() {
 # make sure panel config exists. Passwords are never stored as plaintext on disk (CWE-256).
 ensure_panel_pass() {
     ensure_backup_key
+    # Migrate legacy config.json to panel.json if needed
+    if [[ ! -f /etc/gre-panel/panel.json && -f /etc/gre-panel/config.json ]]; then
+        cp -a /etc/gre-panel/config.json /etc/gre-panel/panel.json 2>/dev/null || true
+    fi
     if [[ -f /etc/gre-panel/panel.json ]]; then
-        return 0
+        if grep -Eq '"(pass_hash|password)" *: *"[^"]+"' /etc/gre-panel/panel.json 2>/dev/null; then
+            return 0
+        fi
     fi
     echo -e "${YELLOW}[*] No panel config found — generating initial credentials...${NC}"
     local NEWPASS HASH
-    NEWPASS=$(tr -dc 'A-Za-z0-9!@#$%' </dev/urandom | head -c 16)
+    # Ask for password if running interactively
+    if [[ -t 0 && "${DEBIAN_FRONTEND:-}" != "noninteractive" ]]; then
+        echo ""
+        echo -e "${CYAN}=== Web Panel Password Setup ===${NC}"
+        echo -e "${YELLOW}Enter custom panel password (minimum 8 characters), or press Enter for auto-generated:${NC}"
+        read -r USER_PASS
+        if [[ -n "$USER_PASS" ]]; then
+            while [[ ${#USER_PASS} -lt 8 ]]; do
+                echo -e "${RED}[!] Password must be at least 8 characters long.${NC}"
+                read -r -p "Password (min 8 chars): " USER_PASS
+                [[ -z "$USER_PASS" ]] && break
+            done
+        fi
+        if [[ -n "$USER_PASS" ]]; then
+            NEWPASS="$USER_PASS"
+        else
+            NEWPASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)
+        fi
+    else
+        NEWPASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)
+    fi
+    # Use panel binary to hash and save password with argon2id if available
+    if [[ -x /usr/local/bin/gre-panel ]]; then
+        /usr/local/bin/gre-panel password "$NEWPASS" >/dev/null 2>&1 || true
+        PANEL_PASS="$NEWPASS"
+        systemctl restart gre-panel 2>/dev/null || true
+        echo -e "${GREEN}[✔️] Initial password configured: ${CYAN}${NEWPASS}${NC}"
+        echo -e "${YELLOW}[!] NOTE: Passwords are not saved in plaintext on disk (CWE-256). Record it now!${NC}"
+        return 0
+    fi
     HASH=$(echo -n "$NEWPASS" | sha256sum | awk '{print $1}')
     if [[ -z "$HASH" ]] || ! command -v python3 >/dev/null 2>&1; then
         echo -e "${RED}[!] Cannot initialize panel config (need sha256sum + python3).${NC}"
         return 1
     fi
     python3 - "$HASH" <<'PYEOF'
-import json, sys
+import json, sys, os
 p = '/etc/gre-panel/panel.json'
+bak = '/etc/gre-panel/panel.json.bak'
+d = {}
 try:
-    d = json.load(open(p))
+    with open(p) as f:
+        d = json.load(f)
 except Exception:
+    try:
+        with open(bak) as f:
+            d = json.load(f)
+    except Exception:
+        pass
+if not d or not isinstance(d, dict):
     d = {"username": "admin", "port": 7777, "base_path": "panel"}
+if "base_path" not in d or not str(d.get("base_path", "")).strip():
+    d["base_path"] = "panel"
 d['pass_hash'] = sys.argv[1]
-json.dump(d, open(p, 'w'), indent=2)
+with open(p + ".tmp", "w") as f:
+    json.dump(d, f, indent=2)
+os.replace(p + ".tmp", p)
+os.chmod(p, 0o600)
+try:
+    with open(bak, "w") as f:
+        json.dump(d, f, indent=2)
+    os.chmod(bak, 0o600)
+except Exception:
+    pass
 PYEOF
     chmod 600 /etc/gre-panel/panel.json
     systemctl restart gre-panel 2>/dev/null || true
@@ -7195,6 +7341,10 @@ remove_legacy_units() {
         echo -e "${GREEN}[✔️] Removed obsolete unit ${name}.service${NC}"
         removed=1
     done
+    if [[ -L "${dir}/multi-user.target.wants/gre-panel.service" && ! -f "${dir}/gre-panel.service" ]]; then
+        rm -f "${dir}/multi-user.target.wants/gre-panel.service"
+        removed=1
+    fi
     (( removed )) && { systemctl daemon-reload >/dev/null 2>&1 || true; }
     return 0
 }
@@ -7444,6 +7594,27 @@ EOF
     echo -e "${GREEN}${BOLD}     HASHEM REVERSE TUNNEL & WEB PANEL MANAGER (Iran <-> Int)${NC}"
     echo -e "${CYAN}     Layer 3 GRE / FRP / Backhaul Reverse Relay & Web Panel${NC}"
     echo -e "${CYAN}==============================================================${NC}"
+
+    local ROLE="Unconfigured"
+    if [[ -f "/etc/frp/frps.toml" || -f "/etc/frp/frps.ini" || -f "/etc/backhaul/config.toml" ]]; then
+        ROLE="IRAN HUB"
+    elif [[ -f "/etc/frp/frpc.toml" || -f "/etc/frp/frpc.ini" ]]; then
+        ROLE="FOREIGN SPOKE"
+    fi
+    local TUN_STAT="${RED}Inactive${NC}"
+    if tunnel_present 2>/dev/null; then
+        TUN_STAT="${GREEN}Active${NC}"
+    fi
+    local PNL_STAT="${RED}Stopped${NC}"
+    if systemctl is-active --quiet gre-panel 2>/dev/null; then
+        local P_PORT P_PATH PUB_IP
+        P_PORT=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*' || echo "7777")
+        P_PATH=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4 || echo "")
+        PUB_IP=$(get_public_ip 2>/dev/null || echo "127.0.0.1")
+        PNL_STAT="${GREEN}Running${NC} (${CYAN}http://${PUB_IP}:${P_PORT}${P_PATH}/${NC})"
+    fi
+    echo -e " ${BOLD}Role:${NC} ${YELLOW}${ROLE}${NC} | ${BOLD}Tunnel:${NC} ${TUN_STAT} | ${BOLD}Panel:${NC} ${PNL_STAT}"
+    echo -e "${CYAN}==============================================================${NC}"
 }
 
 menu_tunnel() {
@@ -7460,9 +7631,10 @@ menu_tunnel() {
         echo "  7) Tunnel Health Status & GRE Ping Test"
         echo "  8) Restart All Tunnel Services"
         echo "  9) Teardown All Tunnels (Panel remains active)"
+        echo "  10) Bagher Engine [PRO] (Hybrid Stealth Tunnel)"
         echo "  0) Back to Main Menu"
         echo ""
-        read -p "Select an option [0-9]: " T_OPT
+        read -p "Select an option [0-10]: " T_OPT
         case "$T_OPT" in
             1)
                 echo "Select tunnel protocol for Iran:"
@@ -7518,11 +7690,63 @@ menu_tunnel() {
             7) check_status; pause_prompt ;;
             8) restart_all; pause_prompt ;;
             9) remove_tunnel; pause_prompt ;;
+            10) menu_sshfwd; pause_prompt ;;
             0) return 0 ;;
             *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
         esac
     done
 }
+
+menu_bagher() {
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}--- BAGHER ENGINE [PRO] (Hybrid Stealth Tunnel) ---${NC}"
+        cli_bagher status
+        echo ""
+        echo "  1) Enable Bagher Engine (Stealth Hybrid Pool)"
+        echo "  2) Disable Bagher Engine"
+        echo "  3) Start Bagher Engine Service"
+        echo "  4) Stop Bagher Engine Service"
+        echo "  5) Restart Bagher Engine Service"
+        echo "  6) View Bagher Service Logs"
+        echo "  7) Generate Key & Show Foreign authorized_keys Line"
+        echo "  8) Clear Conflicting DNAT Rules"
+        echo "  0) Back"
+        echo ""
+        read -p "Select an option [0-8]: " SF_OPT
+        case "$SF_OPT" in
+            1)
+                local R_IP R_PORTS R_PORT R_POOL R_MODE
+                read -p "Enter Remote Host (Foreign IP): " R_IP
+                read -p "Enter Remote SSH Port [22]: " R_PORT
+                R_PORT=${R_PORT:-22}
+                read -p "Enter Ports to forward [443, 8443, 1020, 1030, 1040]: " R_PORTS
+                R_PORTS=${R_PORTS:-"443, 8443, 1020, 1030, 1040"}
+                read -p "Mode (1: Bagher Hybrid Pool [PRO], 2: Direct SSH [Free]) [1]: " R_MODE
+                if [[ "$R_MODE" == "2" ]]; then
+                    cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode direct
+                else
+                    read -p "Enter Pool Count [5]: " R_POOL
+                    R_POOL=${R_POOL:-5}
+                    cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode bagher --pool-count "$R_POOL"
+                fi
+                pause_prompt
+                ;;
+            2) cli_bagher disable; pause_prompt ;;
+            3) cli_bagher start; pause_prompt ;;
+            4) cli_bagher stop; pause_prompt ;;
+            5) cli_bagher restart; pause_prompt ;;
+            6) cli_bagher logs; pause_prompt ;;
+            7) cli_bagher gen-key; pause_prompt ;;
+            8) cli_bagher clear-dnat; pause_prompt ;;
+            0) return 0 ;;
+            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+menu_sshfwd() { menu_bagher "$@"; }
 
 menu_panel() {
     while true; do
@@ -7789,32 +8013,167 @@ menu_modified_backhaul() {
     fi
 }
 
+menu_quick_setup() {
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}=== 🚀 QUICK TUNNEL SETUP ===${NC}"
+        echo ""
+        echo "  1) Setup Iran Server (Create Key & Bundle)"
+        echo "  2) Setup Foreign Server via Bundle"
+        echo "  3) Setup Backhaul Tunnel (TCPMux, ICMP, TUN)"
+        echo "  0) Back to Main Menu"
+        echo ""
+        read -p "Select an option [0-3]: " QS_OPT
+        case "$QS_OPT" in
+            1) setup_iran_server; pause_prompt ;;
+            2) setup_foreign_server; pause_prompt ;;
+            3) menu_modified_backhaul ;;
+            0|q) return 0 ;;
+            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+menu_cluster() {
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}=== ⚖️ MULTI-FOREIGN CLUSTER & LOAD BALANCER ===${NC}"
+        echo ""
+        if command -v gre-panel >/dev/null 2>&1; then
+            gre-panel cluster status 2>/dev/null || cli_cluster status
+        else
+            cli_cluster status
+        fi
+        echo ""
+        echo "  1) View Foreign Cluster Pool & Latency / Weights"
+        echo "  2) Add Foreign Server to Cluster"
+        echo "  3) Remove Foreign Server from Cluster"
+        echo "  4) Switch Active Foreign Server"
+        echo "  5) Change Balancing Strategy"
+        echo "  6) Revert Failover / Clear Balancing Rules"
+        echo "  0) Back to Main Menu"
+        echo ""
+        read -p "Select an option [0-6]: " CL_OPT
+        case "$CL_OPT" in
+            1)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Foreign Node Pool & Health Status ===${NC}"
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster status
+                else
+                    cli_cluster status
+                fi
+                pause_prompt
+                ;;
+            2)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Add Foreign Server to Cluster ===${NC}"
+                read -p "Foreign Server Name (e.g. kharej-de-1): " FN_NAME
+                [[ -z "$FN_NAME" ]] && { echo -e "${RED}[!] Name cannot be empty.${NC}"; pause_prompt; continue; }
+                read -p "Foreign Public IP: " FN_IP
+                [[ -z "$FN_IP" ]] && { echo -e "${RED}[!] IP cannot be empty.${NC}"; pause_prompt; continue; }
+                read -p "Tunnel Port [default 7000]: " FN_PORT
+                FN_PORT="${FN_PORT:-7000}"
+                read -p "Traffic Weight (1-100) [default 1]: " FN_WEIGHT
+                FN_WEIGHT="${FN_WEIGHT:-1}"
+                read -p "Protocol [gre/wss, default gre]: " FN_PROTO
+                FN_PROTO="${FN_PROTO:-gre}"
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster add-foreign "$FN_NAME" "$FN_IP" "$FN_PORT" "$FN_WEIGHT" "$FN_PROTO"
+                else
+                    echo -e "${YELLOW}[*] Panel binary not found. Please install gre-panel.${NC}"
+                fi
+                pause_prompt
+                ;;
+            3)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Remove Foreign Server from Cluster ===${NC}"
+                read -p "Enter Foreign Server Name or ID to remove: " FN_DEL
+                [[ -z "$FN_DEL" ]] && { echo -e "${RED}[!] ID/Name cannot be empty.${NC}"; pause_prompt; continue; }
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster del-foreign "$FN_DEL"
+                fi
+                pause_prompt
+                ;;
+            4)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Switch Active Foreign Server ===${NC}"
+                read -p "Enter Foreign Server Name or ID to activate: " FN_SW
+                [[ -z "$FN_SW" ]] && { echo -e "${RED}[!] ID/Name cannot be empty.${NC}"; pause_prompt; continue; }
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster switch-foreign "$FN_SW"
+                fi
+                pause_prompt
+                ;;
+            5)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Change Balancing Strategy ===${NC}"
+                echo "  1) Weighted Round Robin (WRR - Proportional Distribution)"
+                echo "  2) Automatic Failover (Backup on Outage)"
+                echo "  3) Lowest Latency (Dynamic Lowest Ping)"
+                read -p "Select strategy [1-3]: " STRAT_OPT
+                case "$STRAT_OPT" in
+                    1) gre-panel cluster set-mode "wrr" 2>/dev/null || true ;;
+                    2) gre-panel cluster set-mode "failover" 2>/dev/null || true ;;
+                    3) gre-panel cluster set-mode "lowest_latency" 2>/dev/null || true ;;
+                    *) echo -e "${RED}[!] Invalid choice.${NC}" ;;
+                esac
+                pause_prompt
+                ;;
+            6)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Reverting Failover Rules ===${NC}"
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster revert
+                else
+                    cli_cluster revert
+                fi
+                pause_prompt
+                ;;
+            0|q) return 0 ;;
+            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
 menu_loop() {
     trap 'echo -e "\n\n${CYAN}[*] Exiting Hashem Manager. Goodbye!${NC}"; exit 0' INT
     while true; do
         clear
         show_banner
         echo ""
-        echo "MAIN MENU"
-        echo "  1) Tunnel Management (GRE + FRP / Multi-Peer)"
-        echo "  2) Modified Backhaul (IPX, ICMP, anytls, xtcpmux, TUN)"
-        echo "  3) Web Panel & Domain"
-        echo "  4) Performance & Security"
-        echo "  5) Diagnostics & Backup"
-        echo "  6) Maintenance & Update"
-        echo "  7) Uninstallation"
-        echo "  0) Exit"
+        echo -e "${BOLD}MAIN MENU${NC}"
+        echo "  1) 🚀 Quick Tunnel Setup (Iran / Foreign)"
+        echo "  2) 🌐 Tunnel Management"
+        echo "  3) ⚖️ Multi-Foreign Cluster & Load Balancer"
+        echo "  4) 🥷 Bagher Pro Stealth Hybrid Engine"
+        echo "  5) ⚡ Auto-Pool & Performance Tuning"
+        echo "  6) 🖥️ Web Panel Credentials & SSL"
+        echo "  7) 🩺 Diagnostics, Doctor & Benchmark"
+        echo "  8) 📦 Backup & System Maintenance"
+        echo "  9) 🗑️ Uninstall Hashem"
+        echo "  0) 🚪 Exit"
         echo ""
-        read -p "Select an option [0-7]: " MAIN_OPT
+        read -p "Select an option [0-9]: " MAIN_OPT
         case "$MAIN_OPT" in
-            1) menu_tunnel ;;
-            2) menu_modified_backhaul ;;
-            3) menu_panel ;;
-            4) menu_optimization ;;
-            5) menu_diagnostics_backup ;;
-            6) menu_maintenance ;;
-            7) menu_uninstall ;;
-            0|8|exit|q)
+            1) menu_quick_setup ;;
+            2) menu_tunnel ;;
+            3) menu_cluster ;;
+            4) menu_bagher ;;
+            5) menu_perf ;;
+            6) menu_panel ;;
+            7) menu_diagnostics_backup ;;
+            8) menu_maintenance ;;
+            9) menu_uninstall ;;
+            0|exit|q)
                 echo -e "${CYAN}Exiting Hashem Manager. Goodbye!${NC}"
                 exit 0
                 ;;
@@ -7836,9 +8195,7 @@ main_menu() {
 usage_cli() {
     cat <<EOF
 Usage:
-  hashem                                    # first run: auto-install (deps + FRP + panel) & show credentials
-                                            # after install: show panel credentials & exit
-  hashem menu                               # interactive management menu (all options)
+  hashem                                    # open interactive management menu (or auto-install on 1st run)
   hashem setup-iran    --local-pub IP --remote-pub IP [--frp-port N] [--local-gre IP] [--peer-gre IP] [--token T] [--force]
   hashem setup-foreign --local-pub IP --remote-pub IP [--frp-port N] --token T --ports "443, 2083" [--local-gre IP] [--peer-gre IP] [--force]
                        # ... or: hashem setup-foreign --bundle hsh1_... / bh1_... / gh1_...
@@ -7855,6 +8212,7 @@ Usage:
   hashem logs | restart | panel-tls [domain] [email] | panel-tls-custom <cert> <key> | panel-tls-ip [IP]   # (also: bash hashem.sh ...)
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
+  hashem ssh-fwd [status|enable|disable|gen-key|clear-dnat] # SSH port forward carrier
   hashem dial [status|auto|gre|public]         # foreign side: reach the Iran hub over GRE, its public IP, or auto (GRE if it works)
   hashem perf status|enc on|off|comp on|off|tcpmux on|off|autopool on|off|status|tick|pool|apply
   hashem watchdog on|off|status|test|tick      # tunnel watchdog monitoring & alerts
@@ -8142,8 +8500,32 @@ cli_setup_gre_backhaul_foreign() {
     setup_gre_backhaul_foreign_server_noninteractive "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$TOKEN" "$LOCAL_GRE" "$PEER_GRE" "$TRANSPORT"
 }
 
-# ---- Auto-install: first-run installs everything, shows credentials, exits ----
+render_install_progress() {
+    local percent="$1"
+    local desc="$2"
+    local width=28
+    local filled=$(( percent * width / 100 ))
+    local empty=$(( width - filled ))
+    local bar=""
+    local i
+    for ((i=0; i<filled; i++)); do bar="${bar}█"; done
+    for ((i=0; i<empty; i++)); do bar="${bar}░"; done
+
+    if [[ -t 1 ]]; then
+        printf "\r\033[K${CYAN}[${GREEN}%s${CYAN}] %3d%%  ${YELLOW}%-40s${NC}" "$bar" "$percent" "$desc"
+        if [[ "$percent" -ge 100 ]]; then
+            echo ""
+        fi
+    else
+        echo "[${percent}%] ${desc}" >> "$INSTALL_LOG" 2>&1
+    fi
+}
+
+# ---- Auto-install: smart automated first-run installation with single progress bar ----
 auto_install_and_show() {
+    INSTALL_LOG="/tmp/hashem_install.log"
+    echo "=== Hashem Smart Installer started: $(date) ===" > "$INSTALL_LOG"
+
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║                                                              ║${NC}"
@@ -8154,20 +8536,62 @@ auto_install_and_show() {
     echo -e "${CYAN}║${NC}   ${GREEN}██║  ██║██║  ██║███████║██║  ██║███████╗██║ ╚═╝ ██║${NC}       ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   ${GREEN}╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝${NC}       ${CYAN}║${NC}"
     echo -e "${CYAN}║                                                              ║${NC}"
-    echo -e "${CYAN}║${NC}        ${YELLOW}GRE + FRP Reverse Tunnel — Auto Installer${NC}             ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}        ${YELLOW}Smart Automated Installer & Self-Diagnostics${NC}           ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
-    echo -e "${CYAN}[1/3]${NC} ${GREEN}Installing system dependencies...${NC}"
-    ensure_dependencies_smart
+    render_install_progress 5 "Checking environment & architecture..."
+    detect_arch >> "$INSTALL_LOG" 2>&1 || true
+    mkdir -p /etc/gre-panel "$CONFIG_DIR" >> "$INSTALL_LOG" 2>&1 || true
 
-    echo ""
-    echo -e "${CYAN}[2/3]${NC} ${GREEN}Installing FRP binaries (frps + frpc)...${NC}"
-    install_frp_binaries
+    render_install_progress 20 "Installing system dependencies..."
+    ensure_dependencies_smart >> "$INSTALL_LOG" 2>&1
 
-    echo ""
-    echo -e "${CYAN}[3/3]${NC} ${GREEN}Installing Hashem Web Panel...${NC}"
-    install_panel
+    render_install_progress 45 "Downloading FRP tunnel binaries..."
+    install_frp_binaries "all" >> "$INSTALL_LOG" 2>&1 || {
+        install_frp_binaries "all" >> "$INSTALL_LOG" 2>&1 || true
+    }
+
+    render_install_progress 70 "Installing Web Panel & core assets..."
+    install_panel >> "$INSTALL_LOG" 2>&1 || {
+        install_panel >> "$INSTALL_LOG" 2>&1 || true
+    }
+
+    render_install_progress 88 "Configuring systemd service & port..."
+    if is_port_in_use 7777; then
+        local OCCUPIER
+        OCCUPIER=$(lsof -i :7777 -sTCP:LISTEN -t 2>/dev/null || ss -tulpn "sport = :7777" 2>/dev/null || true)
+        if ! echo "$OCCUPIER" | grep -qi "gre-panel"; then
+            local CANDIDATE_PORT=7778
+            while is_port_in_use "$CANDIDATE_PORT" && [[ "$CANDIDATE_PORT" -lt 7800 ]]; do
+                CANDIDATE_PORT=$((CANDIDATE_PORT + 1))
+            done
+            if [[ -f "/etc/gre-panel/panel.json" ]]; then
+                sed -i "s/\"port\": *[0-9]*/\"port\": ${CANDIDATE_PORT}/" /etc/gre-panel/panel.json 2>/dev/null || true
+            fi
+        fi
+    fi
+    ensure_panel_pass >> "$INSTALL_LOG" 2>&1 || true
+
+    render_install_progress 95 "Starting Web Panel & validating health..."
+    systemctl daemon-reload >> "$INSTALL_LOG" 2>&1 || true
+    systemctl enable gre-panel >> "$INSTALL_LOG" 2>&1 || true
+    systemctl restart gre-panel >> "$INSTALL_LOG" 2>&1 || true
+
+    local P_OK=0
+    for i in {1..5}; do
+        if systemctl is-active --quiet gre-panel 2>/dev/null; then
+            P_OK=1
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ "$P_OK" -eq 1 ]]; then
+        render_install_progress 100 "Installation completed successfully!"
+    else
+        render_install_progress 100 "Installation complete (Service restarting)"
+    fi
 
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
@@ -8175,15 +8599,27 @@ auto_install_and_show() {
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
     show_panel_url
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${CYAN}║${NC}  ${YELLOW}Next steps:${NC}                                                ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  • Open the panel URL above in your browser                ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  • Login and setup your tunnel from the web panel           ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  • Run ${GREEN}hashem${NC} for the interactive management menu          ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  • Run ${GREEN}hashem --help${NC} for CLI commands                      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  ${YELLOW}Quick Access:${NC}                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  • Open the Web Panel link above in your browser            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  • Run ${GREEN}hashem${NC} anytime to open the terminal management menu   ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  • Detailed installation log: ${CYAN}/tmp/hashem_install.log${NC}        ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${GREEN}${BOLD}DNC MADE THIS${NC}"
     echo ""
+
+    if [[ -t 0 ]]; then
+        read -p "Would you like to open the management menu now? [Y/n]: " ENTER_MENU
+        ENTER_MENU="${ENTER_MENU:-Y}"
+        case "$ENTER_MENU" in
+            [Yy]*|"")
+                main_menu
+                ;;
+            *)
+                echo -e "${GREEN}[✔️] All done! You can open the menu anytime by typing: ${CYAN}hashem${NC}\n"
+                ;;
+        esac
+    fi
 }
 
 # ---- show_credentials_and_exit: pretty credentials banner for already-installed panel ----
@@ -8227,6 +8663,546 @@ cli_carrier() {
         status|*)
             echo "Active Carrier: $(carrier_get_active)"
             echo "Mode: $(carrier_get_mode)"
+            ;;
+    esac
+}
+
+cli_bagher() {
+    local SUB="${1:-status}"
+    case "$SUB" in
+        status)
+            echo -e "${CYAN}=== Hashem Bagher Engine [PRO] Status ===${NC}"
+            local SVC_ACT="inactive"
+            if systemctl is-active hashem-bagher.service >/dev/null 2>&1; then
+                SVC_ACT="${GREEN}active (running)${NC} [hashem-bagher.service]"
+            elif systemctl is-active hashem-ssh-fwd.service >/dev/null 2>&1; then
+                SVC_ACT="${GREEN}active (running)${NC} [legacy: hashem-ssh-fwd.service]"
+            else
+                SVC_ACT="${YELLOW}inactive${NC}"
+            fi
+            echo -e "Bagher Service:     $SVC_ACT"
+
+            local FRPC_ACT="inactive"
+            if systemctl is-active hashem-bagher-frpc.service >/dev/null 2>&1; then
+                FRPC_ACT="${GREEN}active (running)${NC} [Foreign client: hashem-bagher-frpc.service]"
+            fi
+            if [[ "$FRPC_ACT" != "inactive" ]]; then
+                echo -e "Bagher Client (Ext): $FRPC_ACT"
+            fi
+
+            local FRPS_ACT="inactive"
+            if systemctl is-active hashem-bagher-frps.service >/dev/null 2>&1; then
+                FRPS_ACT="${GREEN}active (running)${NC} [hashem-bagher-frps.service]"
+            elif systemctl is-active hashem-ssh-frps.service >/dev/null 2>&1; then
+                FRPS_ACT="${GREEN}active (running)${NC} [legacy: hashem-ssh-frps.service]"
+            else
+                FRPS_ACT="${YELLOW}inactive${NC}"
+            fi
+            echo -e "Bagher FRP Engine:  $FRPS_ACT"
+
+            # Check FRP dashboard traffic if available
+            local DASH_INFO
+            DASH_INFO=$(curl -s -u admin:bagher-dash-local http://127.0.0.1:55401/api/serverinfo 2>/dev/null || true)
+            if [[ -n "$DASH_INFO" && "$DASH_INFO" == *"totalTrafficIn"* ]]; then
+                local RX=$(echo "$DASH_INFO" | grep -o '"totalTrafficIn":[0-9]*' | cut -d':' -f2)
+                local TX=$(echo "$DASH_INFO" | grep -o '"totalTrafficOut":[0-9]*' | cut -d':' -f2)
+                local CONNS=$(echo "$DASH_INFO" | grep -o '"curConns":[0-9]*' | cut -d':' -f2)
+                local CLIENTS=$(echo "$DASH_INFO" | grep -o '"clientCounts":[0-9]*' | cut -d':' -f2)
+                echo -e "\n${CYAN}Live Traffic & Connection Metrics:${NC}"
+                echo -e "  Tunnel State:     ${GREEN}Connected${NC} (Clients: $CLIENTS, Cur Conns: $CONNS)"
+                echo -e "  Traffic RX:       $RX bytes"
+                echo -e "  Traffic TX:       $TX bytes"
+            fi
+
+            if [ -f /etc/gre-panel/sshfwd.json ]; then
+                echo -e "\nConfiguration (/etc/gre-panel/sshfwd.json):"
+                cat /etc/gre-panel/sshfwd.json | grep -E "mode|remote_host|ports|pool_count|frp_bind_port|enabled" || true
+            fi
+            echo -e "\nListening Ports:"
+            for p in 443 8443 1020 1030 1040; do
+                if ss -tlnp 2>/dev/null | grep -q ":$p "; then
+                    echo -e "  Port $p: ${GREEN}Listening${NC}"
+                else
+                    echo -e "  Port $p: ${RED}Not Listening${NC}"
+                fi
+            done
+            if nft list table inet hashem_dnat >/dev/null 2>&1; then
+                echo -e "${RED}[!] Conflict: table inet hashem_dnat is active. Run 'hashem bagher clear-dnat'${NC}"
+            fi
+            ;;
+        enable)
+            shift
+            local REMOTE_HOST="" PORTS="443, 8443, 1020, 1030, 1040" SSH_PORT="22" USER="root" MODE="bagher" POOL_COUNT="25" FRP_PORT="55400"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --remote-host|--remote-pub|-r) REMOTE_HOST="$2"; shift 2 ;;
+                    --mode|-m) MODE="$2"; shift 2 ;;
+                    --ports|-p) PORTS="$2"; shift 2 ;;
+                    --pool-count) POOL_COUNT="$2"; shift 2 ;;
+                    --frp-port) FRP_PORT="$2"; shift 2 ;;
+                    --ssh-port) SSH_PORT="$2"; shift 2 ;;
+                    --user|-u) USER="$2"; shift 2 ;;
+                    *) shift ;;
+                esac
+            done
+            if [[ -z "$REMOTE_HOST" ]]; then
+                echo -e "${RED}[!] --remote-host <IP> is required.${NC}"
+                return 1
+            fi
+            echo -e "${CYAN}[*] Clearing conflicting DNAT...${NC}"
+            systemctl disable --now hashem-rescue-dnat.service >/dev/null 2>&1 || true
+            nft delete table inet hashem_dnat >/dev/null 2>&1 || true
+            echo -e "${CYAN}[*] Ensuring SSH keypair...${NC}"
+            mkdir -p /root/.ssh
+            if [[ ! -f /root/.ssh/hashem-fwd ]]; then
+                ssh-keygen -t ed25519 -N "" -f /root/.ssh/hashem-fwd -C "hashem-ssh-carrier" >/dev/null 2>&1
+            fi
+            local PUBKEY=$(cat /root/.ssh/hashem-fwd.pub)
+            IFS=',' read -ra PORT_ARR <<< "$PORTS"
+
+            local PORT_OPT=""
+            [[ "$SSH_PORT" != "22" && -n "$SSH_PORT" ]] && PORT_OPT="-p $SSH_PORT"
+
+            systemctl disable --now hashem-ssh-fwd.service hashem-ssh-frps.service >/dev/null 2>&1 || true
+
+            if [[ "$MODE" == "bagher" || "$MODE" == "frp_ssh" ]]; then
+                echo -e "${CYAN}[*] Configuring Bagher Engine [PRO] (poolCount=${POOL_COUNT}, frpPort=${FRP_PORT})...${NC}"
+                mkdir -p /etc/gre-panel/bagher
+                cat <<EOF > /etc/gre-panel/bagher/frps.toml
+bindAddr = "127.0.0.1"
+bindPort = ${FRP_PORT}
+proxyBindAddr = "0.0.0.0"
+auth.token = "hashem-bagher-sec"
+transport.tcpMux = false
+EOF
+                cat <<EOF > /etc/systemd/system/hashem-bagher-frps.service
+[Unit]
+Description=Hashem Bagher Engine FRP Server (Iran)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frps -c /etc/gre-panel/bagher/frps.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+                cat <<EOF > /etc/systemd/system/hashem-bagher.service
+[Unit]
+Description=Hashem Bagher Engine Carrier (Reverse SSH tunnel)
+After=network-online.target hashem-bagher-frps.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -i /root/.ssh/hashem-fwd -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -o TCPKeepAlive=yes -o Ciphers=aes128-gcm@openssh.com,chacha20-poly1305@openssh.com -R 127.0.0.1:${FRP_PORT}:127.0.0.1:${FRP_PORT} ${PORT_OPT} ${USER}@${REMOTE_HOST}
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                systemctl daemon-reload
+                systemctl enable --now hashem-bagher-frps.service
+                systemctl enable --now hashem-bagher.service
+                echo -e "${GREEN}[✔] Bagher Engine [PRO] started and enabled.${NC}"
+
+                echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
+                echo -e "restrict,port-forwarding,permitlisten=\"127.0.0.1:${FRP_PORT}\" ${PUBKEY}\n"
+
+                echo -e "${CYAN}=== Foreign Client Setup Snippet (Run on Foreign Server) ===${NC}"
+                local PROXY_CFG=""
+                for p in "${PORT_ARR[@]}"; do
+                    p=$(echo "$p" | tr -d ' ')
+                    [[ -n "$p" ]] && PROXY_CFG="${PROXY_CFG}\n[[proxies]]\nname = \"p$p\"\ntype = \"tcp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = $p\nremotePort = $p\n"
+                done
+                cat <<EOF
+mkdir -p /etc/gre-panel/bagher && cat > /etc/gre-panel/bagher/frpc.toml <<'EOF_FRPC'
+serverAddr = "127.0.0.1"
+serverPort = ${FRP_PORT}
+auth.token = "hashem-bagher-sec"
+transport.tcpMux = false
+transport.poolCount = ${POOL_COUNT}
+$(echo -e "$PROXY_CFG")
+EOF_FRPC
+cat > /etc/systemd/system/hashem-bagher-frpc.service <<'EOF_SVC'
+[Unit]
+Description=Hashem Bagher Engine Client (Foreign)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/bagher/frpc.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF_SVC
+systemctl daemon-reload && systemctl enable --now hashem-bagher-frpc.service
+EOF
+            else
+                local FWD_ARGS=""
+                for p in "${PORT_ARR[@]}"; do
+                    p=$(echo "$p" | tr -d ' ')
+                    [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L 0.0.0.0:$p:127.0.0.1:$p"
+                done
+                systemctl disable --now hashem-bagher-frps.service >/dev/null 2>&1 || true
+                cat <<EOF > /etc/systemd/system/hashem-bagher.service
+[Unit]
+Description=Hashem Bagher Engine Carrier (Direct SSH tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -N -i /root/.ssh/hashem-fwd -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new ${PORT_OPT} ${FWD_ARGS} ${USER}@${REMOTE_HOST}
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                systemctl daemon-reload
+                systemctl enable --now hashem-bagher.service
+                echo -e "${GREEN}[✔] Direct SSH Forward carrier service started and enabled.${NC}"
+
+                echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
+                local PERMITS=""
+                for p in "${PORT_ARR[@]}"; do
+                    p=$(echo "$p" | tr -d ' ')
+                    [[ -n "$p" ]] && PERMITS="${PERMITS}permitopen=\"127.0.0.1:$p\","
+                done
+                PERMITS=${PERMITS%,}
+                echo -e "restrict,port-forwarding,${PERMITS} ${PUBKEY}\n"
+            fi
+            ;;
+        disable)
+            systemctl disable --now hashem-bagher.service >/dev/null 2>&1 || true
+            systemctl disable --now hashem-bagher-frps.service >/dev/null 2>&1 || true
+            systemctl disable --now hashem-ssh-fwd.service >/dev/null 2>&1 || true
+            systemctl disable --now hashem-ssh-frps.service >/dev/null 2>&1 || true
+            echo -e "${YELLOW}[*] Bagher Engine service disabled.${NC}"
+            ;;
+        start)
+            systemctl start hashem-bagher.service 2>/dev/null || systemctl start hashem-ssh-fwd.service 2>/dev/null || true
+            systemctl start hashem-bagher-frps.service 2>/dev/null || true
+            echo -e "${GREEN}[✔] Bagher Engine service started.${NC}"
+            ;;
+        stop)
+            systemctl stop hashem-bagher.service 2>/dev/null || true
+            systemctl stop hashem-ssh-fwd.service 2>/dev/null || true
+            systemctl stop hashem-bagher-frps.service 2>/dev/null || true
+            echo -e "${YELLOW}[*] Bagher Engine service stopped.${NC}"
+            ;;
+        restart)
+            systemctl restart hashem-bagher.service 2>/dev/null || systemctl restart hashem-ssh-fwd.service 2>/dev/null || true
+            systemctl restart hashem-bagher-frps.service 2>/dev/null || true
+            echo -e "${GREEN}[✔] Bagher Engine service restarted.${NC}"
+            ;;
+        logs)
+            journalctl -u hashem-bagher.service -u hashem-ssh-fwd.service -n 50 --no-pager
+            ;;
+        gen-key)
+            mkdir -p /root/.ssh
+            if [[ ! -f /root/.ssh/hashem-fwd ]]; then
+                ssh-keygen -t ed25519 -N "" -f /root/.ssh/hashem-fwd -C "hashem-ssh-carrier" >/dev/null 2>&1
+            fi
+            echo -e "${GREEN}Public Key (/root/.ssh/hashem-fwd.pub):${NC}"
+            cat /root/.ssh/hashem-fwd.pub
+            ;;
+        clear-dnat)
+            systemctl disable --now hashem-rescue-dnat.service >/dev/null 2>&1 || true
+            nft delete table inet hashem_dnat >/dev/null 2>&1 || true
+            echo -e "${GREEN}[✔] hashem_dnat cleared from nftables.${NC}"
+            ;;
+        bundle)
+            mkdir -p /root/.ssh
+            if [[ ! -f /root/.ssh/hashem-fwd ]]; then
+                ssh-keygen -t ed25519 -N "" -f /root/.ssh/hashem-fwd -C "hashem-ssh-carrier" >/dev/null 2>&1
+            fi
+            local PUBKEY=$(cat /root/.ssh/hashem-fwd.pub)
+            local MY_IP
+            MY_IP=$(curl -s -4 https://api.ipify.org || curl -s -4 https://ifconfig.me || hostname -I | awk '{print $1}')
+            local JSON_PAYLOAD
+            JSON_PAYLOAD=$(printf '{"v":1,"role":"foreign","iran_pub":"%s","frp_port":55400,"ports":[443,8443,1020,1030,1040],"token":"hashem-bagher-sec","pool_count":25,"ssh_pub_key":"%s","ssh_port":22,"ts":%d}' "$MY_IP" "$PUBKEY" "$(date +%s)")
+            local B64
+            B64=$(printf "%s" "$JSON_PAYLOAD" | base64 | tr -d '\n\r ')
+            echo -e "${GREEN}BAGHER:${B64}${NC}"
+            ;;
+        apply-bundle)
+            shift
+            local BUNDLE="$1"
+            if [[ -z "$BUNDLE" ]]; then
+                echo -e "${RED}[!] Usage: hashem bagher apply-bundle BAGHER:...${NC}"
+                return 1
+            fi
+            if [[ "$BUNDLE" != BAGHER:* ]]; then
+                echo -e "${RED}[!] Invalid bundle format. Must start with BAGHER:${NC}"
+                return 1
+            fi
+            local B64="${BUNDLE#BAGHER:}"
+            local DECODED
+            DECODED=$(printf "%s" "$B64" | base64 -d 2>/dev/null || true)
+            if [[ -z "$DECODED" ]]; then
+                echo -e "${RED}[!] Failed decoding Base64 bundle payload.${NC}"
+                return 1
+            fi
+            local PUBKEY=$(echo "$DECODED" | grep -o '"ssh_pub_key":"[^"]*"' | cut -d'"' -f4)
+            local FRP_PORT=$(echo "$DECODED" | grep -o '"frp_port":[0-9]*' | cut -d':' -f2)
+            local POOL_COUNT=$(echo "$DECODED" | grep -o '"pool_count":[0-9]*' | cut -d':' -f2)
+            FRP_PORT="${FRP_PORT:-55400}"
+            POOL_COUNT="${POOL_COUNT:-25}"
+            if [[ -z "$PUBKEY" ]]; then
+                echo -e "${RED}[!] Bundle missing ssh_pub_key.${NC}"
+                return 1
+            fi
+            echo -e "${CYAN}[*] Injecting SSH public key to /root/.ssh/authorized_keys...${NC}"
+            mkdir -p /root/.ssh
+            touch /root/.ssh/authorized_keys
+            chmod 600 /root/.ssh/authorized_keys
+            # Remove old key if present, append restricted line
+            local CLEAN_PUB=$(echo "$PUBKEY" | awk '{print $2}')
+            sed -i "/$CLEAN_PUB/d" /root/.ssh/authorized_keys 2>/dev/null || true
+            local AUTH_LINE="restrict,port-forwarding,permitopen=\"127.0.0.1:${FRP_PORT}\",permitopen=\"127.0.0.1:443\",permitopen=\"127.0.0.1:8443\",permitopen=\"127.0.0.1:1020\",permitopen=\"127.0.0.1:1030\",permitopen=\"127.0.0.1:1040\" $PUBKEY"
+            echo "$AUTH_LINE" >> /root/.ssh/authorized_keys
+
+            echo -e "${CYAN}[*] Writing /etc/gre-panel/bagher/frpc.toml...${NC}"
+            mkdir -p /etc/gre-panel/bagher
+            cat <<EOF > /etc/gre-panel/bagher/frpc.toml
+serverAddr = "127.0.0.1"
+serverPort = ${FRP_PORT}
+auth.token = "hashem-bagher-sec"
+transport.tcpMux = false
+transport.poolCount = ${POOL_COUNT}
+loginFailExit = false
+
+webServer.addr = "127.0.0.1"
+webServer.port = $((FRP_PORT + 2))
+webServer.user = "admin"
+webServer.password = "bagher-dash-local"
+
+[[proxies]]
+name = "p443"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 443
+remotePort = 443
+
+[[proxies]]
+name = "p8443"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8443
+remotePort = 8443
+
+[[proxies]]
+name = "p1020"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 1020
+remotePort = 1020
+
+[[proxies]]
+name = "p1030"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 1030
+remotePort = 1030
+
+[[proxies]]
+name = "p1040"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 1040
+remotePort = 1040
+EOF
+
+            echo -e "${CYAN}[*] Enabling and starting hashem-bagher-frpc.service...${NC}"
+            cat <<'EOF' > /etc/systemd/system/hashem-bagher-frpc.service
+[Unit]
+Description=Hashem Bagher Engine client (Foreign)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frpc -c /etc/gre-panel/bagher/frpc.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload
+            systemctl enable --now hashem-bagher-frpc.service
+            echo -e "${GREEN}[✔] Bagher Engine client successfully started on Foreign server!${NC}"
+            ;;
+        *)
+            echo "Usage: hashem bagher [status|bundle|apply-bundle <bundle>|enable --remote-host IP [--mode bagher|direct] [--pool-count 25] [--frp-port 55400] [--ports \"...\"]|disable|start|stop|restart|logs|gen-key|clear-dnat]"
+            return 1
+            ;;
+    esac
+}
+
+cli_sshfwd() { cli_bagher "$@"; }
+
+cli_license() {
+    local SUB="${1:-status}"
+    local CONF_DIR="/etc/gre-panel"
+    local LIC_FILE="${CONF_DIR}/license.key"
+
+    local RAW_ID=""
+    if [[ -f /etc/machine-id ]]; then
+        RAW_ID=$(tr -d '[:space:]' < /etc/machine-id)
+    elif [[ -f /var/lib/dbus/machine-id ]]; then
+        RAW_ID=$(tr -d '[:space:]' < /var/lib/dbus/machine-id)
+    fi
+    local M_HASH=""
+    if [[ -n "$RAW_ID" ]]; then
+        M_HASH=$(printf "hashem-lic-v1:%s" "$RAW_ID" | sha256sum | awk '{print substr($1,1,32)}')
+    fi
+
+    case "$SUB" in
+        status)
+            echo -e "${CYAN}=== Hashem License Status ===${NC}"
+            echo -e "Hardware Fingerprint: ${YELLOW}${M_HASH:-UNKNOWN}${NC}"
+            if [[ -f "$LIC_FILE" && -s "$LIC_FILE" ]]; then
+                echo -e "License Key File:     ${GREEN}${LIC_FILE} (Present)${NC}"
+                local JSON_OUT
+                JSON_OUT=$(curl -sk -m 2 http://127.0.0.1:7777/api/license 2>/dev/null || true)
+                if [[ -n "$JSON_OUT" ]] && command -v jq >/dev/null 2>&1; then
+                    local VALID=$(echo "$JSON_OUT" | jq -r '.is_valid // false')
+                    local CUST=$(echo "$JSON_OUT" | jq -r '.customer // "N/A"')
+                    local EXP=$(echo "$JSON_OUT" | jq -r '.expires_human // "N/A"')
+                    local REM=$(echo "$JSON_OUT" | jq -r '.days_remaining // "N/A"')
+                    local FEAT=$(echo "$JSON_OUT" | jq -r '.features // [] | join(", ")')
+                    if [[ "$VALID" == "true" ]]; then
+                        echo -e "Status:               ${GREEN}ACTIVE (PREMIUM)${NC}"
+                        echo -e "Customer:             ${GREEN}${CUST}${NC}"
+                        echo -e "Expires:              ${GREEN}${EXP} (${REM} days left)${NC}"
+                        echo -e "Features:             ${GREEN}${FEAT}${NC}"
+                    else
+                        local ERR=$(echo "$JSON_OUT" | jq -r '.error // "Invalid/Expired"')
+                        echo -e "Status:               ${RED}INVALID (${ERR})${NC}"
+                    fi
+                else
+                    echo -e "Status:               ${YELLOW}Installed (Check Web UI or restart panel)${NC}"
+                fi
+            else
+                echo -e "Status:               ${YELLOW}FREE EDITION (No license installed)${NC}"
+                echo -e "To activate:          ${CYAN}hashem license activate <KEY>${NC}"
+            fi
+            ;;
+        machine-id|id|fingerprint)
+            echo -e "Machine ID:   ${RAW_ID}"
+            echo -e "Machine Hash: ${M_HASH}"
+            ;;
+        activate)
+            shift
+            local KEY="${1:-}"
+            if [[ -z "$KEY" ]]; then
+                echo -e "${RED}[!] Error: Please provide license key string.${NC}"
+                echo -e "Usage: hashem license activate <KEY>"
+                return 1
+            fi
+            mkdir -p "$CONF_DIR"
+            echo -n "$KEY" > "$LIC_FILE"
+            chmod 600 "$LIC_FILE"
+            echo -e "${GREEN}[✔️] License key written to ${LIC_FILE}.${NC}"
+            if systemctl is-active --quiet gre-panel.service 2>/dev/null; then
+                systemctl restart gre-panel.service 2>/dev/null || true
+                echo -e "${GREEN}[✔️] Restarted gre-panel to apply license.${NC}"
+            fi
+            cli_license status
+            ;;
+        deactivate|remove)
+            if [[ -f "$LIC_FILE" ]]; then
+                rm -f "$LIC_FILE"
+                echo -e "${GREEN}[✔️] License removed. Reverted to Free edition.${NC}"
+                if systemctl is-active --quiet gre-panel.service 2>/dev/null; then
+                    systemctl restart gre-panel.service 2>/dev/null || true
+                fi
+            else
+                echo -e "${YELLOW}[*] No license key installed.${NC}"
+            fi
+            ;;
+        *)
+            echo "Usage: hashem license [status|machine-id|activate <KEY>|deactivate]"
+            ;;
+    esac
+}
+
+cli_cluster() {
+    local SUB="${1:-status}"
+    local CONF_FILE="/etc/gre-panel/cluster.json"
+
+    case "$SUB" in
+        status)
+            echo -e "${CYAN}=== Hashem Iran Mesh Cluster Status ===${NC}"
+            if [[ ! -f "$CONF_FILE" ]]; then
+                echo -e "Cluster Mesh:     ${YELLOW}Not Initialized (No config at $CONF_FILE)${NC}"
+                return 0
+            fi
+
+            if command -v jq >/dev/null 2>&1; then
+                local EN
+                EN=$(jq -r '.enabled // false' "$CONF_FILE")
+                local NODE_ID
+                NODE_ID=$(jq -r '.node_id // "N/A"' "$CONF_FILE")
+                local PUB_IP
+                PUB_IP=$(jq -r '.public_ip // "N/A"' "$CONF_FILE")
+                local AUTO_FO
+                AUTO_FO=$(jq -r '.auto_failover // false' "$CONF_FILE")
+                local ACT_FO
+                ACT_FO=$(jq -r '.active_failover // false' "$CONF_FILE")
+                local FO_TGT
+                FO_TGT=$(jq -r '.failover_target // "None"' "$CONF_FILE")
+                local PEER_CNT
+                PEER_CNT=$(jq -r '.nodes | length // 0' "$CONF_FILE")
+
+                echo -e "Mesh Enabled:     $([[ "$EN" == "true" ]] && echo -e "${GREEN}YES${NC}" || echo -e "${YELLOW}NO${NC}")"
+                echo -e "Node ID:          ${GREEN}${NODE_ID}${NC}"
+                echo -e "Public IP:        ${GREEN}${PUB_IP}${NC}"
+                echo -e "Auto-Failover:    $([[ "$AUTO_FO" == "true" ]] && echo -e "${GREEN}Enabled${NC}" || echo -e "${YELLOW}Disabled${NC}")"
+                echo -e "Failover State:   $([[ "$ACT_FO" == "true" ]] && echo -e "${RED}ACTIVE (Rerouted to ${FO_TGT})${NC}" || echo -e "${GREEN}NORMAL (Local)${NC}")"
+                echo -e "Connected Peers:  ${CYAN}${PEER_CNT}${NC}"
+            else
+                cat "$CONF_FILE"
+            fi
+            ;;
+        peers)
+            echo -e "${CYAN}=== Connected Iran Peers ===${NC}"
+            if [[ ! -f "$CONF_FILE" ]] || ! command -v jq >/dev/null 2>&1; then
+                echo "No peers configured or jq missing."
+                return 0
+            fi
+            jq -r '.nodes[] | "\(.id)\t\(.name)\t\(.public_ip)\tHealth:\(.is_healthy)\tTunnel:\(.tunnel_status)"' "$CONF_FILE" 2>/dev/null || echo "No peers."
+            ;;
+        revert)
+            echo -e "${CYAN}[*] Reverting failover iptables rules...${NC}"
+            iptables -t nat -S PREROUTING 2>/dev/null | grep -E 'HASHEM-CLUSTER-FAILOVER|hashem_cluster' | while read -r line; do
+                local rule="${line#-A }"
+                # shellcheck disable=SC2086
+                iptables -t nat -D $rule 2>/dev/null || true
+            done
+            if [[ -f "$CONF_FILE" ]] && command -v jq >/dev/null 2>&1; then
+                local tmp
+                tmp=$(jq '.active_failover = false | .failover_target = ""' "$CONF_FILE")
+                echo "$tmp" > "$CONF_FILE"
+            fi
+            echo -e "${GREEN}[✔️] Failover rules removed and state reverted to local tunnel.${NC}"
+            ;;
+        *)
+            echo "Usage: hashem cluster {status|peers|revert}"
             ;;
     esac
 }
@@ -8283,6 +9259,9 @@ if [[ $# -gt 0 ]]; then
         panel-tls-ip) shift; panel_tls_ip "${1:-}" ;;
         panel-remove-domain|panel-tls-remove) panel_tls_remove ;;
         carrier) shift; cli_carrier "$@" ;;
+        bagher|hashem-bagher|ssh-fwd|sshfwd) shift; cli_bagher "$@" ;;
+        license|lic) shift; cli_license "$@" ;;
+        cluster|mesh) shift; cli_cluster "$@" ;;
         carrier-kernel-init) carrier_init_kernel ;;
         dial) shift; cli_dial "$@" ;;
         dial-select) dial_reselect >/dev/null 2>&1; exit 0 ;;
@@ -8306,10 +9285,7 @@ if [[ $# -gt 0 ]]; then
         uninstall)
             if [[ "${2:-}" == "--force" ]]; then uninstall_all_force; else uninstall_all; fi ;;
         show-panel-url) show_panel_url ;;
-        panel-port) shift; cli_panel_port "${1:-}" ;;
-        panel-user) shift; cli_panel_user "${1:-}" ;;
-        panel-path) shift; cli_panel_path "${1:-}" ;;
-        password|reset-password|reset-pass)
+        pass|password|reset-password|reset-pass)
             shift
             if [[ -n "${1:-}" ]]; then
                 cli_set_panel_password "$1"
@@ -8333,18 +9309,26 @@ case "$PANEL_STATUS" in
         exit 0
         ;;
     RUNNING)
-        # Already installed and healthy — show credentials and exit
-        show_credentials_and_exit
-        exit 0
+        # Already installed and healthy — open interactive menu if in terminal, else show credentials
+        if [[ -t 0 ]]; then
+            main_menu
+        else
+            show_credentials_and_exit
+            exit 0
+        fi
         ;;
     STOPPED)
-        # Installed but stopped — start it, show credentials, exit
+        # Installed but stopped — start it
         echo -e "${YELLOW}[*] Panel is installed but stopped. Starting...${NC}"
         systemctl start gre-panel 2>/dev/null || true
         sleep 2
         if systemctl is-active --quiet gre-panel 2>/dev/null; then
-            show_credentials_and_exit
-            exit 0
+            if [[ -t 0 ]]; then
+                main_menu
+            else
+                show_credentials_and_exit
+                exit 0
+            fi
         else
             echo -e "${RED}[!] Failed to start panel — entering interactive menu for troubleshooting.${NC}"
             main_menu
@@ -8366,8 +9350,12 @@ case "$PANEL_STATUS" in
                 sleep 2
                 if systemctl is-active --quiet gre-panel; then
                     echo -e "${GREEN}[✔️] Panel repaired and running!${NC}"
-                    show_credentials_and_exit
-                    exit 0
+                    if [[ -t 0 ]]; then
+                        main_menu
+                    else
+                        show_credentials_and_exit
+                        exit 0
+                    fi
                 else
                     echo -e "${RED}[!] Repair failed. Reinstalling...${NC}"
                     backup_configs "panel_broken"

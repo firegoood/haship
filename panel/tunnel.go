@@ -371,18 +371,6 @@ func peerPingTarget(peerID int) string {
 	return localStatus().GrePeer
 }
 
-// livePeers inspects every registered peer with a fresh synchronous read (one
-// batch of host commands, ICMP inline). Polling handlers must use the shared
-// snapshot instead (snapshot.go); this is the collector's building block.
-func livePeers() []peerLive {
-	defer func(t time.Time) { recordSampler("livePeers", time.Since(t)) }(time.Now())
-	recs := loadPeers()
-	if len(recs) == 0 {
-		return nil
-	}
-	return livePeersFrom(directView(recs), recs)
-}
-
 // livePeersFrom derives every peer's live state from an already collected host
 // view; it runs no commands itself.
 func livePeersFrom(v *hostView, recs []peerRecord) []peerLive {
@@ -1032,8 +1020,8 @@ func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 bindPort = %d
 auth.method = "token"
 auth.token = %q
-%stransport.tcpKeepalive = 30
-transport.heartbeatTimeout = 90
+%stransport.tcpKeepalive = 15
+transport.heartbeatTimeout = 45
 transport.maxPoolCount = %d
 `, port, token, tcpMuxTomlLines(), maxPool)
 			if err := writeEngineFile(frpDir, "frps.toml", frpsToml); err != nil {
@@ -1099,10 +1087,10 @@ auth.method = "token"
 auth.token = %q
 loginFailExit = false
 transport.protocol = %q
-%stransport.heartbeatInterval = 30
-transport.heartbeatTimeout = 90
-transport.dialServerTimeout = 15
-transport.dialServerKeepalive = 30
+%stransport.heartbeatInterval = 15
+transport.heartbeatTimeout = 45
+transport.dialServerTimeout = 10
+transport.dialServerKeepalive = 15
 transport.poolCount = %d
 `, peerGre, effPort, token, frpProto, tcpMuxTomlLines(), pool))
 

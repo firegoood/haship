@@ -570,7 +570,7 @@ func runInstaller(b setupRequest, ports []int, rawPorts []string) (string, strin
 	// script before shelling out so the user does not hit E-INSTALL-02.
 	ensureFreshScript(script)
 	token := ""
-	args := []string{}
+	var args []string
 
 	switch b.Engine {
 	case "backhaul":

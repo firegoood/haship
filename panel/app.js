@@ -2,6 +2,7 @@ const BASE = document.documentElement.dataset.base || '';
 const at = p => BASE + p;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const escapeHtml = esc;
 
 function toast(msg) { toastMsg('info', String(msg)); }
 function toastOk(title, sub) { toastMsg('ok', title, sub); }
@@ -34,6 +35,9 @@ function toastMsg(kind, title, sub) {
 // ---- Error surfacing: console.warn + deduplicated, rate-limited toast (language-aware) ----
 const _errSeen = new Map();
 let _errLastToast = 0;
+var _licenseData = null;
+var _sshfwdData = null;
+var _clusterData = null;
 function reportErr(ctx, err) {
   const msg = (err && err.message) ? err.message : String(err == null ? '' : err);
   console.warn('[hashem] ' + ctx + ' failed:', err);
@@ -141,7 +145,10 @@ async function api(path, body, method) {
     headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (r.status === 401) { showLogin(); throw new Error('session expired'); }
+  if (r.status === 401 && !path.endsWith('/api/login')) {
+    showLogin();
+    throw new Error('session expired');
+  }
   if (!r.ok) {
     const txt = await r.text();
     try {
@@ -191,11 +198,48 @@ function skel(n) {
   return '<div style="display:grid;gap:8px">' + s + '</div>';
 }
 // tabs (sidebar + mobile drawer)
+function isBagherLicensed() {
+  if (_licenseData && _licenseData.is_valid) {
+    const feats = _licenseData.features;
+    if (!feats || feats.length === 0) return true;
+    for (let i = 0; i < feats.length; i++) {
+      const f = String(feats[i]).toLowerCase();
+      if (f === '*' || f === 'all' || f === 'bagher' || f === 'frp_ssh') return true;
+    }
+  }
+  if (_sshfwdData && (_sshfwdData.licensed_bagher || _sshfwdData.licensed_frp_ssh)) {
+    return true;
+  }
+  return false;
+}
+
 function goTab(name) {
   if (name === 'terminal' && !$('termNav').classList.contains('hidden') && $('tab-terminal').hidden && !termState.ready) { /* allowed: overlay shows connect */ }
   if (name === 'terminal' && $('termNav').classList.contains('hidden')) return; // flag off: tab doesn't exist
   if (name === 'add-peer') { goTab('setup'); const c = $('setupAddPeerStep'); if (c && c.scrollIntoView) c.scrollIntoView({behavior: 'smooth', block: 'start'}); return; }
-  ['dashboard','tunnel','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  if (name === 'sshfwd' && !isBagherLicensed()) {
+    if (_licenseData === null) {
+      loadLicense().then(() => {
+        if (isBagherLicensed()) goTab('sshfwd');
+        else openBagherLicModal();
+      });
+      return;
+    }
+    openBagherLicModal();
+    return;
+  }
+  if (name === 'cluster' && !isBagherLicensed()) {
+    if (_licenseData === null) {
+      loadLicense().then(() => {
+        if (isBagherLicensed()) goTab('cluster');
+        else openBagherLicModal();
+      });
+      return;
+    }
+    openBagherLicModal();
+    return;
+  }
+  ['dashboard','tunnel','sshfwd','cluster','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -205,6 +249,12 @@ function goTab(name) {
   document.querySelectorAll('.sidebar-nav [data-tab]').forEach(markTab);
   const dr = $('drawerNav');
   if (dr) dr.querySelectorAll('[data-tab]').forEach(markTab);
+  if (name === 'sshfwd') {
+    loadSSHFwd();
+  }
+  if (name === 'cluster') {
+    loadClusterStatus();
+  }
   if (name === 'perf') { loadPerf(); loadCarrier(); }
   if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); }
   if (name === 'watchdog') loadWatchdog();
@@ -213,6 +263,7 @@ function goTab(name) {
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
   if (name === 'terminal') termOnShow();
+  if (name === 'settings' || name === 'sshfwd') loadLicense();
   if (name === 'dashboard') {
     // tab was hidden: the rAF loop stopped itself; resume it without replaying
     // the draw-in animation (refreshDash() also redraws within 5s anyway).
@@ -309,10 +360,9 @@ const I18N = {
   en: {
     nav_dashboard: "Dashboard",
     nav_tunnel: "Tunnel",
-    usage_title: "Traffic usage (kept 7 days)",
-    usage_hint: "Saved on disk every minute, so it survives restarts, updates and reboots. Per foreign server, plus the hub total.",
-    usage_empty: "No traffic recorded yet. It appears here after the first minute of traffic.",
-    usage_total: "Hub total", usage_server: "Server", usage_in: "Received", usage_out: "Sent", usage_sum: "Total",
+    nav_sshfwd: "Bagher",
+    nav_bagher: "Bagher",
+    nav_cluster: "Cluster",
     nav_setup: "Setup",
     nav_logs: "Logs",
     nav_perf: "Performance",
@@ -731,451 +781,435 @@ const I18N = {
     carrier_switch_confirm: "Switch both Iran & Foreign servers to carrier \"{id}\"?"
   },
   fa: {
-    nav_dashboard: "داشبورد",
-    nav_tunnel: "تونل",
-    usage_title: "مصرف ترافیک (۷ روز نگهداری)",
-    usage_hint: "هر دقیقه روی دیسک ذخیره می‌شود؛ با ری‌استارت، آپدیت و ری‌بوت پاک نمی‌شود. به تفکیک هر سرور خارج و جمع کل هاب.",
-    usage_empty: "هنوز ترافیکی ثبت نشده. بعد از اولین دقیقه ترافیک اینجا نمایش داده می‌شود.",
-    usage_total: "جمع کل هاب", usage_server: "سرور", usage_in: "دریافتی", usage_out: "ارسالی", usage_sum: "مجموع",
-    nav_setup: "راه‌اندازی (Setup)",
-    nav_logs: "گزارش‌ها (Logs)",
-    nav_perf: "عملکرد سیستم",
+    nav_dashboard: "Dashboard",
+    nav_tunnel: "Tunnel",
+    nav_sshfwd: "Bagher",
+    nav_bagher: "Bagher",
+    nav_cluster: "Cluster",
+    nav_setup: "Setup",
+    nav_logs: "Logs",
+    nav_perf: "Performance",
     perf_mux_title: "TCP Multiplexing (transport.tcpMux)",
-    perf_mux_hint: "همه‌ی اتصال‌های کاربران را داخل «یک» اتصال TCP بین frpc و frps جمع می‌کند. روی GRE اندازه‌گیری شد: سرعت تونل را تقریباً نصف می‌کند (فنلاند ۴۶۰ در برابر ۱۰۱۰ Mbit). پیش‌فرض خاموش است (حداکثر سرعت). باید روی هاب ایران و «همه» سرورهای خارج یکسان باشد، وگرنه frpc لاگین نمی‌شود.",
-    nav_watchdog: "دیده‌بان و زمان‌بندی",
-    nav_doctor: "عیب‌یابی شبکه",
-    nav_benchmark: "بنچمارک کیفیت",
-    nav_update: "به‌روزرسانی",
-    upd_channel: "کانال به‌روزرسانی",
-    upd_channel_stable: "پایدار",
-    upd_channel_dev: "توسعه (Dev)",
-    upd_dev_warn: "کانال Dev: نسخه‌های آزمایشی که ممکن است خراب شوند. برای تونل‌های واقعی استفاده نکنید.",
+    perf_mux_hint: "Packs every user stream into ONE TCP connection between frpc and frps. Measured over GRE it roughly halves tunnel throughput (e.g. 460 vs 1010 Mbit on Finland). Default is OFF (max speed). It must be identical on the Iran hub AND every foreign server, otherwise frpc cannot log in.",
+    nav_watchdog: "Watchdog",
+    nav_doctor: "Diagnostics",
+    nav_benchmark: "Benchmark",
+    nav_update: "Update",
+    upd_channel: "Update channel",
+    upd_channel_stable: "Stable",
+    upd_channel_dev: "Dev",
+    upd_dev_warn: "Dev channel: test builds, may break. Not for production tunnels.",
     upd_dev_badge: "DEV",
-    nav_settings: "تنظیمات",
-    tls_custom_title: "استفاده از گواهی خودتان",
-    tls_ip_title: "HTTPS روی IP همین سرور (self-signed)",
-    tls_ip_hint: "دامنه لازم نیست. پنل خودش مرجع می‌سازد، برای IP گواهی ۸۲۵ روزه صادر می‌کند و HTTPS سرو می‌دهد. فایل CA را یک بار در مرورگر/سیستم نصب کنید تا هشدار ندهد. Regenerate فقط گواهی سرور را عوض می‌کند؛ CA معتبر می‌ماند.",
-    tls_custom_hint: "گواهی + کلید را بچسبانید، هر دو فایل را آپلود کنید، یا مسیر فایل‌های روی سرور را بدهید. قبل از نصب اعتبارسنجی می‌شود؛ گواهی قبلی به‌عنوان بکاپ می‌ماند.",
-    acc_title: "دسترسی پنل (پورت / ورود / آدرس)",
-    acc_hint: "تغییر هر کدام فقط وب‌سرویس پنل را ری‌استارت می‌کند — تونل‌ها وصل می‌مانند. بعد از ذخیره، پنل را با آدرس جدید باز کنید.",
-    acc_user: "نام کاربری ورود", acc_port: "پورت HTTP (۱ تا ۶۵۵۳۵)", acc_base: "مسیر آدرس (بعد از IP:port/…)",
-    acc_pass: "رمز فعلی (تأیید)", acc_save: "ذخیره و ری‌استارت پنل",
-    nav_terminal: "ترمینال",
-    sec_overview: "نمای کلی",
-    sec_tunnel: "مدیریت تونل",
-    sec_system: "سیستم و نظارت",
-    theme: "تغییر تم",
-    logout: "خروج",
-    refresh: "بازخوانی",
-    kpi_traffic: "ترافیک و سرعت",
-    kpi_status: "وضعیت تونل",
-    kpi_links: "لینک‌ها (⁦GRE / FRP⁩)",
-    kpi_latency: "تاخیر (پینگ)",
-    kpi_cpu: "پردازنده (CPU)",
-    kpi_ram: "حافظه (RAM)",
-    kpi_disk: "دیسک",
-    kpi_conns: "اتصالات فعال / آپ‌تایم",
-    details: "جزئیات فنی",
-    chart_traffic_title: "نرخ ترافیک عبوری تونل",
-    chart_traffic_sub: "سرعت لحظه‌ای دانلود و آپلود بر بستر تونل در طول زمان",
-    chart_activity_title: "فعالیت تونل و اتصالات زنده",
-    chart_activity_sub: "تعداد کانکشن‌های فعال همزمان و استریم سشن‌ها",
-    download: "دانلود",
-    upload: "آپلود",
+    nav_settings: "Settings",
+    nav_terminal: "Terminal",
+    sec_overview: "Overview",
+    sec_tunnel: "Tunnel",
+    sec_system: "System",
+    theme: "Theme",
+    logout: "Logout",
+    refresh: "Refresh",
+    kpi_traffic: "Traffic & Speed",
+    kpi_status: "Tunnel Status",
+    kpi_links: "Links (GRE / FRP)",
+    kpi_latency: "Latency",
+    kpi_cpu: "CPU",
+    kpi_ram: "RAM",
+    kpi_disk: "Disk",
+    kpi_conns: "Uptime / Conns",
+    details: "Details",
+    chart_traffic_title: "Tunnel Traffic Throughput",
+    chart_traffic_sub: "Real-time download and upload speeds over time",
+    chart_activity_title: "Tunnel Activity & Connections",
+    chart_activity_sub: "Active concurrent connections and session stream over time",
+    download: "Download",
+    upload: "Upload",
 
     // General
-    status_active: "فعال",
-    status_down: "قطع",
-    status_healthy: "سالم",
-    status_connected: "متصل",
-    status_disconnected: "قطع شده",
-    status_unreachable: "غیرقابل دسترس",
-    status_running: "در حال اجرا",
-    status_stopped: "متوقف شده",
-    status_error: "خطا",
-    actions: "عملیات",
-    confirm: "تایید",
-    apply: "اعمال",
-    copy: "کپی",
-    copied: "کپی شد!",
-    remove: "حذف",
-    restart: "راه‌اندازی مجدد",
-    ping: "پینگ",
-    bundle: "باندل",
-    show_bundle: "نمایش باندل",
-    copy_bundle: "کپی باندل",
-    test: "تست",
-    switch: "سوییچ",
-    current: "فعلی",
-    loading: "در حال بارگذاری…",
-    save_settings: "ذخیره تنظیمات",
+    status_active: "Active",
+    status_down: "Down",
+    status_healthy: "Healthy",
+    status_connected: "Connected",
+    status_disconnected: "Disconnected",
+    status_unreachable: "Unreachable",
+    status_running: "Running",
+    status_stopped: "Stopped",
+    status_error: "Error",
+    actions: "Actions",
+    confirm: "Confirm",
+    apply: "Apply",
+    copy: "Copy",
+    copied: "Copied!",
+    remove: "Remove",
+    restart: "Restart",
+    ping: "Ping",
+    bundle: "Bundle",
+    show_bundle: "Show Bundle",
+    copy_bundle: "Copy Bundle",
+    test: "Test",
+    switch: "Switch",
+    current: "Current",
+    loading: "Loading…",
+    save_settings: "Save Settings",
 
     // Dashboard Details & Cards
-    card_server_title: "مشخصات سرور و نقش",
-    card_gre_title: "تونل کرنلی GRE",
-    card_frp_title: "رله FRP و ترافیک",
-    card_peers_title: "لیست تونل‌های پیر (Peers)",
-    lbl_public_ip: "آی‌پی عمومی",
-    lbl_role: "نقش سرور",
-    lbl_forwarded_ports: "پورت‌های فوروارد شده",
-    lbl_gre_local: "آی‌پی محلی GRE",
-    lbl_gre_peer: "آی‌پی مقصد GRE",
-    lbl_gre_interface: "اینترفیس شبکه",
-    lbl_frp_status: "وضعیت FRP",
-    lbl_control_port: "پورت کنترل",
-    lbl_bind_port: "پورت بایند",
-    lbl_tunnel_ports: "پورت‌های معکوس",
-    lbl_uptime_since: "زمان فعالیت",
-    lbl_peer_name: "نام سرور",
-    lbl_peer_id: "شناسه",
-    lbl_peer_foreign_ip: "آی‌پی سرور خارج",
-    lbl_peer_ports: "پورت‌ها",
-    lbl_peer_latency: "تاخیر (پینگ)",
+    card_server_title: "Server & Role",
+    card_gre_title: "GRE Kernel Tunnel",
+    card_frp_title: "FRP Relay & Traffic",
+    card_peers_title: "Peer Tunnels",
+    lbl_public_ip: "Public IP",
+    lbl_role: "Role",
+    lbl_forwarded_ports: "Forwarded Ports",
+    lbl_gre_local: "Local GRE IP",
+    lbl_gre_peer: "Peer GRE IP",
+    lbl_gre_interface: "Interface",
+    lbl_frp_status: "Status",
+    lbl_control_port: "Control Port",
+    lbl_bind_port: "Bind Port",
+    lbl_tunnel_ports: "Tunnel Ports",
+    lbl_uptime_since: "Active Since",
+    lbl_peer_name: "Name",
+    lbl_peer_id: "ID",
+    lbl_peer_foreign_ip: "Foreign IP",
+    lbl_peer_ports: "Ports",
+    lbl_peer_latency: "Ping Latency",
 
     // Tunnel Tab
-    tun_title: "توپولوژی و وضعیت تونل‌ها",
-    tun_sub: "متریک‌های زنده لینک، وضعیت ارتباط پیرها و سلامت اینترفیس‌ها",
-    tun_main_card: "لینک اصلی (هاب ایران / سرور ۱)",
-    tun_add_peer_btn: "+ اتصال سرور جدید خارج",
-    tun_view_bundle_btn: "📦 مشاهده رشته باندل ستاپ",
+    tun_title: "Tunnel Topology & Status",
+    tun_sub: "Live link metrics, peer inventory, and interface health",
+    tun_main_card: "Main Link (Hub / Spoke 1)",
+    tun_add_peer_btn: "+ Connect Another Server",
+    tun_view_bundle_btn: "📦 View Setup Bundle",
 
     // Setup Tab
-    setup_title: "راه‌اندازی سریع — تونل ⁦GRE + FRP⁩",
-    setup_sub: "دو سرور، یک تونل پایدار. ابتدا مشخصات را روی سرور ایران ثبت کنید و سپس رشته باندل تولیدشده را در سرور خارج وارد نمایید.",
-    setup_step1: "۱. هم‌اکنون روی کدام سرور هستید؟",
-    setup_role_iran: "سرور ایران — کاربران به این سرور وصل می‌شوند",
-    setup_role_foreign: "سرور خارج — سرویس‌ها و فیلترشکن اینجا اجرا می‌شوند",
-    setup_step2_engine: "۲. انتخاب موتور تونل",
-    setup_eng_frp: "🚀 تونل ⁦GRE + FRP⁩",
-    setup_eng_grebh: "⚡ تونل ⁦GRE + Backhaul⁩",
-    setup_eng_bh: "🌐 تونل مستقیم Backhaul (بدون GRE)",
-    setup_step3_params: "۳. پارامترهای اتصال",
-    setup_local_pub: "آی‌پی عمومی ایران (خودکار / قابل ویرایش)",
-    setup_remote_pub: "آی‌پی عمومی سرور خارج",
-    setup_local_gre: "آی‌پی داخلی ایران (Local GRE)",
-    setup_peer_gre: "آی‌پی داخلی خارج (Peer GRE)",
-    setup_ctrl_port: "پورت بایند / کنترل FRP",
-    setup_transport: "پروتکل انتقالی (Transport Protocol)",
-    setup_forward_ports: "پورت‌های فوروارد شده (تکی، بازه، یا نگاشت)",
-    setup_step4_token: "۴. توکن امنیتی و اعمال",
-    setup_apply_btn: "اعمال و راه‌اندازی تونل",
-    setup_unlock_btn: "باز کردن قفل جهت جایگزینی",
-    setup_relock_btn: "قفل بماند",
-    setup_bundle_title: "📦 رشته باندل ستاپ (جهت درج در سرور خارج)",
-    setup_foreign_step2: "۲. اتصال به ایران (با استفاده از باندل)",
-    setup_bundle_paste_lbl: "رشته باندل یا توکن راه‌اندازی (دریافتی از ایران)",
-    setup_bundle_paste_ph: "رشته باندل hsh1_...، bh1_... یا gh1_... را اینجا قرار دهید",
-    setup_join_btn: "اتصال و برقراری تونل با ایران",
-    setup_foreign_step3: "۳. تنظیمات دستی پیشرفته (اختیاری)",
-    setup_add_peer_title: "➕ اتصال یک سرور خارجی دیگر (بدون قطع تونل قبلی)",
-    setup_peer_name_lbl: "نام یا برچسب سرور جدید",
-    setup_add_tunnel_btn: "افزودن و اتصال تونل جدید",
+    setup_title: "Quick setup — GRE + FRP tunnel",
+    setup_sub: "Two servers, one tunnel. Answer on this machine; the Iran side gives you a token to paste on the Foreign side.",
+    setup_step1: "1. Which server am I on right now?",
+    setup_role_iran: "Iran — users connect here",
+    setup_role_foreign: "Foreign — service runs here",
+    setup_step2_engine: "2. Tunnel Engine",
+    setup_eng_frp: "🚀 GRE + FRP",
+    setup_eng_grebh: "⚡ GRE + Backhaul",
+    setup_eng_bh: "🌐 Backhaul (No-GRE)",
+    setup_step3_params: "3. Connection Parameters",
+    setup_local_pub: "Iran public IP (auto, editable)",
+    setup_remote_pub: "Remote public IP (the other server)",
+    setup_local_gre: "Local GRE IP",
+    setup_peer_gre: "Peer GRE IP",
+    setup_ctrl_port: "Control / Bind port",
+    setup_transport: "Transport Protocol",
+    setup_forward_ports: "Forwarded Ports (single, ranges, mappings)",
+    setup_step4_token: "4. Token & apply",
+    setup_apply_btn: "Apply setup",
+    setup_unlock_btn: "Unlock to replace",
+    setup_relock_btn: "Keep locked",
+    setup_bundle_title: "📦 Setup Bundle (Copy to Foreign server)",
+    setup_foreign_step2: "2. Join tunnel (from Iran bundle)",
+    setup_bundle_paste_lbl: "Setup bundle or token (from Iran side)",
+    setup_bundle_paste_ph: "paste hsh1_..., bh1_..., or gh1_... bundle",
+    setup_join_btn: "Connect to Iran",
+    setup_foreign_step3: "3. Advanced (optional)",
+    setup_add_peer_title: "➕ Connect another foreign server",
+    setup_peer_name_lbl: "Name (label for this tunnel)",
+    setup_add_tunnel_btn: "Add tunnel",
 
     // Performance & Tuning Tab
-    perf_status_pool: "استخر اتصال کاری (⁦frpc / frps⁩)",
-    perf_status_decision: "تصمیم Auto Pool",
+    perf_status_pool: "Work-conn pool (frpc / frps)",
+    perf_status_decision: "Auto Pool decision",
     perf_mode_auto: "Auto Pool",
-    perf_mode_manual: "دستی",
-    perf_ap_title: "Auto Pool (اتصال‌های کاری FRP)",
-    perf_ap_sub: "اندازه poolCount در frpc و maxPoolCount در frps را بر اساس خطاهای پر شدن استخر، تعداد اتصال‌های فعال، CPU و رم آزاد تنظیم می‌کند. افزایش سریع، کاهش آهسته؛ فقط frpc ری‌استارت می‌شود و فقط وقتی کاربران کمی وصل‌اند.",
-    perf_ap_toggle: "Auto Pool (پیشنهادی)",
-    perf_ap_toggle_hint: "در حالت خاموش، مقادیر دستی زیر دقیقاً همان‌طور که وارد شده در frpc.toml و frps.toml نوشته می‌شوند.",
-    perf_ap_last_decision: "آخرین تصمیم",
-    perf_ap_errors: "خطاهای پر بودن استخر (آخرین بررسی)",
-    perf_ap_last_restart: "آخرین ری‌استارت frpc",
-    perf_ap_frps_note: "maxPoolCount در frps.toml افزایش یافت؛ برای اعمال آن، frps را در زمان کم‌ترافیک ری‌استارت کنید.",
-    perf_ap_saved: "Auto Pool به‌روز شد",
-    perf_ap_on_msg: "استخر هر دقیقه به‌صورت خودکار تنظیم می‌شود.",
-    perf_ap_off_msg: "مقادیر دستی پس از «ذخیره و اعمال» فعال می‌شوند.",
-    perf_pool_count: "تعداد استخر کلاینت (frpc Pool Count)",
-    perf_pool_sub: "تعداد اتصال‌های کاری از پیش بازشده در سرورهای خارج.",
-    perf_max_pool: "حداکثر سقف استخر سرور (frps Max Pool)",
-    perf_max_sub: "سقف اتصال‌های کاری در سرور ایران (همیشه حداقل ۱٫۵ برابر poolCount).",
-    perf_save_tuning: "💾 ذخیره و اعمال ظرفیت",
-    perf_carrier_title: "مدیریت کریرها و کپسوله‌سازی UDP (FOU)",
-    perf_carrier_save: "ذخیره حالت کریر",
+    perf_mode_manual: "Manual",
+    perf_ap_title: "Auto Pool (FRP work connections)",
+    perf_ap_sub: "Sizes frpc poolCount and frps maxPoolCount from pool-full errors, active connections, CPU and free RAM. Scales up fast, scales down slowly, restarts only frpc and only when few users are connected.",
+    perf_ap_toggle: "Auto Pool (recommended)",
+    perf_ap_toggle_hint: "When off, the manual values below are written to frpc.toml / frps.toml as typed.",
+    perf_ap_last_decision: "Last decision",
+    perf_ap_errors: "Pool-full errors (last tick)",
+    perf_ap_last_restart: "Last frpc restart",
+    perf_ap_frps_note: "maxPoolCount was raised in frps.toml; restart frps during a quiet period to apply it.",
+    perf_ap_saved: "Auto Pool updated",
+    perf_ap_on_msg: "Pool is resized automatically every minute.",
+    perf_ap_off_msg: "Manual values apply after Save & Apply.",
+    perf_pool_count: "Client Pool Count (frpc)",
+    perf_pool_sub: "Pre-opened work connections on foreign spokes.",
+    perf_max_pool: "Max Pool Count (frps)",
+    perf_max_sub: "Server-side maximum work connection headroom (always at least 1.5 × poolCount).",
+    perf_save_tuning: "💾 Save & Apply Capacity",
+    perf_carrier_title: "Carrier & UDP Encapsulation (FOU)",
+    perf_carrier_save: "Save Mode",
 
     // Watchdog
-    wd_title: "دیده‌بان سلامت تونل (Watchdog)",
-    wd_hint: "بررسی خودکار پینگ GRE و وضعیت سرویس‌ها در هر ۱ دقیقه. ارسال هشدارهای آنی تلگرام و ری‌استارت اختیاری در صورت قطعی مکرر.",
-    wd_autorestart_label: "ری‌استارت خودکار در صورت قطعی",
-    wd_autorestart_sub: "(پیش‌فرض خاموش برای جلوگیری از پرش مصرف پردازنده؛ فقط هشدار)",
-    wd_health: "سلامت تونل",
-    wd_fails: "خطاهای متوالی",
-    wd_last_check: "آخرین بررسی",
-    wd_restart_title: "زمان‌بندی ری‌استارت دوره‌ای تونل (Scheduler)",
-    wd_restart_hint: "بازنشانی خودکار و نرم اینترفیس‌های تونل و سرویس‌های FRP/Backhaul در بازه‌های زمانی معین بدون قطعی وب‌پنل یا از دست رفتن تنظیمات.",
-    wd_restart_interval: "بازه زمانی ری‌استارت",
-    wd_restart_save: "ذخیره زمان‌بندی",
-    wd_restart_now: "ری‌استارت اکنون تونل",
-    wd_tg_title: "هشدارهای تلگرام",
-    wd_tg_hint: "دریافت نوتیفیکیشن آنی تلگرام هنگام قطعی یا وصل مجدد تونل. توکن ربات به صورت ایمن نگهداری می‌شود.",
-    wd_tg_token: "توکن ربات تلگرام",
-    wd_tg_chat: "شناسه چت (Chat ID)",
-    wd_tg_route: "مسیر ارسال تلگرام",
-    wd_tg_save: "ذخیره تنظیمات تلگرام",
-    wd_tg_test: "ارسال پیام تست",
-    wd_backup_title: "پشتیبان‌گیری رمزنگاری‌شده (Backup)",
-    wd_backup_hint: "پشتیبان‌گیری کامل از فایل‌های کانفیگ، تنظیمات، رجیستری پیرها و سرویس‌ها با رمزنگاری AES-256.",
-    wd_backup_now: "ایجاد نسخه پشتیبان اکنون",
-    wd_backup_sched: "زمان‌بندی پشتیبان‌گیری",
-    wd_backup_save: "ذخیره زمان‌بندی",
-    wd_events_title: "لاگ وقایع دیده‌بان",
+    wd_title: "Tunnel Watchdog",
+    wd_hint: "Monitors GRE ping and FRP service every 1 minute. Sends Telegram alerts and optional auto-restart after consecutive failures.",
+    wd_autorestart_label: "Auto-Restart on Failure",
+    wd_autorestart_sub: "(Disabled by default to prevent CPU spike storms; alerts only)",
+    wd_health: "Tunnel Health",
+    wd_fails: "Consecutive Fails",
+    wd_last_check: "Last Check",
+    wd_restart_title: "Tunnel Auto-Restart Schedule",
+    wd_restart_hint: "Periodically refreshes the tunnel interfaces and restarts FRP/Backhaul relay services gracefully without interrupting the web panel or losing configuration.",
+    wd_restart_interval: "Restart Interval",
+    wd_restart_save: "Save Schedule",
+    wd_restart_now: "Restart Tunnel Now",
+    wd_tg_title: "Telegram Alerts",
+    wd_tg_hint: "Receive instant Telegram notifications when the tunnel drops or recovers. Middle of bot token is never exposed.",
+    wd_tg_token: "Bot Token",
+    wd_tg_chat: "Chat ID",
+    wd_tg_route: "Telegram Route",
+    wd_tg_save: "Save Telegram Settings",
+    wd_tg_test: "Test Alert",
+    wd_backup_title: "Encrypted Backups",
+    wd_backup_hint: "Full backup of FRP tomls, panel settings, peers registry, and systemd units encrypted with OpenSSL AES-256-CBC keyed from your panel password.",
+    wd_backup_now: "Create Backup Now",
+    wd_backup_sched: "Backup Schedule",
+    wd_backup_save: "Save Schedule",
+    wd_events_title: "Watchdog Event Log",
 
     // Benchmark Tab
-    bench_title: "بنچمارک کیفیت مسیر و سوییچ هوشمند",
-    bench_peer_link_title: "ارتباط میان‌پنلی دوطرفه (Peer Link)",
-    bench_peer_link_sub: "همگام‌سازی لحظه‌ای وضعیت بین سرور ایران (Master) و سرور خارج (Worker).",
-    bench_peer_test_btn: "تست اتصال ارتباطی",
-    bench_peer_cfg_btn: "پیکربندی لینک ارتباطی",
-    bench_failover_title: "سوییچ خودکار در زمان اختلال (Failover)",
-    bench_failover_sub: "پیش‌فرض خاموش. تا زمانی که اپراتور تایید نکند، سوییچ خودکار رخ نمی‌دهد.",
-    bench_failover_toggle: "فعال‌سازی سوییچ خودکار مسیر (Auto-Switching)",
-    bench_failover_threshold: "آستانه پکت‌لاس جهت سوییچ (%)",
-    bench_failover_save: "ذخیره سیاست فیل‌اور",
-    bench_leaderboard_title: "جدول لیدربورد و کیفیت پروتکل‌ها",
-    bench_run_btn: "اجرای بنچمارک پروتکل‌ها",
-    bench_tbl_rank: "مسیر و پروتکل",
-    bench_tbl_trans: "ترنسپورت",
-    bench_tbl_port: "پورت",
-    bench_tbl_rtt: "تاخیر رفت‌وبرگشت (RTT)",
-    bench_tbl_loss: "درصد پکت‌لاس",
-    bench_tbl_jitter: "نوسان (Jitter)",
-    bench_tbl_score: "امتیاز کیفیت",
-    bench_tbl_status: "وضعیت",
-    bench_tbl_action: "عملیات / سوییچ",
+    bench_title: "Carrier Benchmark & Auto-Pilot",
+    bench_peer_link_title: "Inter-Panel Link (Peer)",
+    bench_peer_link_sub: "Master/Worker dual-path synchronization with remote panel.",
+    bench_peer_test_btn: "Test Connection",
+    bench_peer_cfg_btn: "Configure Link",
+    bench_failover_title: "Automatic Failover",
+    bench_failover_sub: "Strictly OFF by default. When OFF, the tunnel never switches automatically.",
+    bench_failover_toggle: "Enable Automatic Failover (Auto-Switching)",
+    bench_failover_threshold: "Packet Loss Trigger Threshold (%)",
+    bench_failover_save: "Save Failover Policy",
+    bench_leaderboard_title: "Carrier Performance Leaderboard",
+    bench_run_btn: "Run Carrier Benchmark",
+    bench_tbl_rank: "Carrier & Route",
+    bench_tbl_trans: "Transport",
+    bench_tbl_port: "Port",
+    bench_tbl_rtt: "Latency (RTT)",
+    bench_tbl_loss: "Packet Loss",
+    bench_tbl_jitter: "Jitter",
+    bench_tbl_score: "Quality Score",
+    bench_tbl_status: "Status",
+    bench_tbl_action: "Action",
 
     // Diagnostics / Doctor Tab
-    doc_title: "پزشک شبکه و عیب‌یابی جامع تونل",
-    doc_sub: "تست‌های خودکار پکت‌های MTU، بررسی جدول روتینگ، ماژول‌های کرنل و باز بودن پورت‌ها",
-    doc_run_btn: "اجرای عیب‌یابی کامل",
-    doc_fix_btn: "تعمیر و بهینه‌سازی خودکار",
-    doc_fix_box_btn: "رفع خودکار مشکلات شناسایی‌شده",
-    doc_issues_title: "مشکلات و راهکارهای پیشنهادی",
+    doc_title: "Network Doctor & Diagnostic Suite",
+    doc_sub: "Automated end-to-end path tests, MTU probe, socket exhaustion check, and routing health",
+    doc_run_btn: "Run Full Diagnostics",
+    doc_fix_btn: "Quick Repair & Optimize",
+    doc_fix_box_btn: "Auto-Fix Detected Issues",
+    doc_issues_title: "Issues & Recommendations",
 
     // Logs Tab
-    logs_title: "لاگ‌ها و گزارش‌های سیستمی",
-    logs_sub: "مشاهده بلادرنگ وقایع سرویس‌های FRP، اینترفیس‌های GRE و رویدادهای دیده‌بان",
-    logs_svc_label: "سرویس هدف",
-    logs_lines_label: "تعداد خطوط",
-    logs_refresh_btn: "بازخوانی لاگ‌ها",
-    logs_copy_btn: "کپی لاگ‌ها",
+    logs_title: "System & Tunnel Service Logs",
+    logs_sub: "Real-time journal logs for FRP services, GRE interfaces, and watchdog events",
+    logs_svc_label: "Service",
+    logs_lines_label: "Lines",
+    logs_refresh_btn: "Refresh Logs",
+    logs_copy_btn: "Copy Logs",
 
     // Settings & Update Tab
-    settings_title: "امنیت پنل و تغییر رمز عبور",
-    settings_cur_pass: "رمز عبور فعلی پنل",
-    settings_new_pass: "رمز عبور جدید پنل",
-    settings_change_btn: "تغییر و ذخیره رمز عبور",
-    update_title: "بروزرسانی پنل و هسته‌های ارتباطی",
-    update_current: "نسخه نصب‌شده فعلی",
-    update_check_btn: "بررسی نسخه‌های جدید",
+    settings_title: "Panel Security & Password",
+    settings_cur_pass: "Current panel password",
+    settings_new_pass: "New panel password",
+    settings_change_btn: "Change Password",
+    update_title: "Panel update",
+    update_current: "Installed version",
+    update_check_btn: "Check for updates",
 
     // Terminal Tab
-    term_title: "کنسول وب ترمینال لینوکس (PTY)",
-    term_connect: "اتصال به ترمینال",
-    term_clear: "پاک کردن صفحه",
+    term_title: "Interactive Web Console (PTY)",
+    term_connect: "Connect Terminal",
+    term_clear: "Clear Screen",
 
     // Right Sidebar & Modals
-    login_sub: "ورود با نام کاربری و رمز عبور",
-    login_user_ph: "نام کاربری",
-    login_pass_ph: "رمز عبور",
-    login_signin: "ورود به پنل",
-    rs_header: "جریان زنده وقایع و لاگ‌ها",
-    rsc_title: "نجات اتصال", rsc_remote: "سرور قابل‌دسترس (سروری که می‌تواند به این سرور وصل شود)", rsc_ports: "پورت‌هایی که وصل شوند (TCP و UDP)",
-    rsc_code: "کد نجات از سرور بلاک‌شده", rsc_ban_t: "این سرور نمی‌تواند به سرور مقابل وصل شود",
-    rsc_ban_d: "پینگ جواب می‌دهد ولی همه‌ی اتصال‌های TCP در مسیر قطع می‌شوند. با یک کلیک جهت اتصال برعکس می‌شود.", rsc_ban_go: "درستش کن",
-    rsc_idle_ok: "مشکلی دیده نشد. اگر سرور مقابل پینگ می‌گیرد ولی اتصال‌ها timeout می‌شوند، این ابزار جهت را خودکار برعکس می‌کند.",
-    rsc_idle_warn: "بلاک یک‌طرفه پیدا شد: پینگ کار می‌کند ولی TCP قطع می‌شود. برای برعکس‌کردن جهت، نجات را فعال کنید.",
-    rsc_b_off: "خاموش", rsc_b_susp: "بلاک پیدا شد", rsc_b_on: "فعال", rsc_b_on_auto: "فعال (خودکار)", rsc_b_wait: "در انتظار سرور مقابل", rsc_b_lift: "بلاک برداشته شد",
-    rsc_check: "بررسی الان", rsc_enable: "فعال‌کردن نجات", rsc_join: "اتصال با کد", rsc_apply: "اعمال کد", rsc_disable: "غیرفعال و حذف",
-    rsc_cancel: "انصراف", rsc_getcode: "نمایش کد نجات", rsc_copy: "کپی کد", rsc_nocfg: "فایل‌های frp روی این سرور نیست. اول hashem update را اجرا کنید.",
-    rsc_origin: "این سرور طرف بلاک‌شده است. {n} پورت از طریق {ip} فوروارد می‌شود.", rsc_origin_auto: "بلاک یک‌طرفه تشخیص داده شد: اتصال به صورت خودکار از طریق {ip} برقرار شد ({n} پورت فوروارد شده).", rsc_entry: "این سرور ورودی است. {n} پورت اینجا سرو و به {ip} تونل می‌شود.", rsc_entry_auto: "این سرور به صورت خودکار به عنوان ورودی برای {ip} فعال شد ({n} پورت تونل شده).",
-    rsc_skipped: "رد شد (مشغول یا رزرو): {p}", rsc_conn: "لینک کنترلی", rsc_conn_ok: "وصل است", rsc_conn_no: "هنوز وصل نشده",
-    rsc_svc: "سرویس‌ها", rsc_direct: "فوروارد هسته (سرعت کامل)", rsc_relay: "رله FRP (مسیر فیلترشده)", rsc_auto: "اگر دو پنل جفت شده باشند، پنل مقابل ظرف چند دقیقه خودش این را برمی‌دارد. در غیر این صورت از کد استفاده کنید.",
-    rsc_lift: "مسیر مستقیم دوباره کار می‌کند. می‌توانید نجات را غیرفعال کنید و از تونل عادی استفاده کنید.",
-    rsc_confirm_t: "نجات اتصال فعال شود؟", rsc_confirm_b: "سه سرویس کوچک اینجا اجرا می‌شود و یک پورت کنترلی فایروال‌شده باز می‌شود. فقط سرور قابل‌دسترس اجازه‌ی استفاده دارد. با یک کلیک همه چیز حذف می‌شود.",
-    rsc_dis_t: "نجات حذف شود؟", rsc_dis_b: "پورت‌های فوروارد روی سرور ورودی تا بالا آمدن تونل عادی کار نمی‌کنند.",
-    rsc_probe_ok: "سرور مقابل در دسترس است", rsc_probe_block: "بلاک یک‌طرفه تأیید شد", rsc_probe_down: "سرور مقابل در دسترس نیست (قطعی، نه بلاک)", rsc_probe_svc: "سرور مقابل در دسترس است ولی پنلش گوش نمی‌دهد",
-    rsc_done: "نجات فعال شد", rsc_removed: "نجات حذف شد", rsc_copied: "کپی شد",
-    pal_open: "جستجو و دستورها", pal_search: "جستجو", pal_title: "پالت دستورها", pal_ph: "جستجوی صفحه‌ها و کارها…",
-    pal_nav: "حرکت", pal_run: "اجرا", pal_close: "بستن", pal_none: "موردی پیدا نشد", pal_go: "رفتن به", pal_act: "کارها", pal_look: "ظاهر",
-    pal_refresh: "تازه‌سازی داده‌ها", pal_theme: "تغییر تم تیره / روشن", pal_lang: "تغییر زبان", pal_stream: "نمایش / بستن جریان زنده وقایع",
-    pal_sidebar: "جمع / باز کردن منوی کناری", pal_density: "تغییر تراکم جدول‌ها", pal_diag: "اجرای عیب‌یابی", pal_donate: "حمایت از هاشم", pal_logout: "خروج",
-    pal_accent: "رنگ اصلی",
-    sb_collapse: "جمع کردن منو", sb_expand: "باز کردن منو",
-    tbl_filter: "فیلتر خطاها…", tbl_shown: "{n} از {t} نمایش داده می‌شود",
-    dens_title: "تراکم جدول", dens_comfy: "راحت", dens_compact: "فشرده",
-    onb_title: "به هاشم خوش آمدید", onb_sub: "هنوز تونلی ندارید. با سه قدم راه می‌افتد.",
-    onb_s1: "نقش این سرور را انتخاب کنید", onb_s1d: "هاب ایران (سرور) یا سرور خارجی (کلاینت) از تب راه‌اندازی.",
-    onb_s2: "سرور مقابل را وصل کنید", onb_s2d: "تونل را بسازید و بسته‌ی اتصال را در سرور دیگر وارد کنید.",
-    onb_s3: "بررسی و بهینه‌سازی", onb_s3d: "عیب‌یابی را اجرا کنید، بعد در تب تونل «بهینه‌سازی» را بزنید.",
-    onb_go: "باز کردن راه‌اندازی", onb_later: "فعلاً نه", onb_dismiss: "بستن",
-    badge_tunnel: "{n} تونل نیاز به توجه دارد", badge_doctor: "{n} مورد در عیب‌یابی",
-    fleet_title: "سلامت سرورها",
-    fleet_all_ok: "همه‌ی سرورها سالم‌اند",
-    fleet_some: "{n} از {t} سرور نیاز به توجه دارد",
-    fleet_all_down: "همه‌ی سرورها قطع هستند",
-    fleet_meta: "به‌روزرسانی {time} · نمونه‌گیری هر {s} ثانیه · یک ساعت اخیر",
-    fleet_hub: "هاب ایران",
-    fleet_healthy: "سالم",
-    fleet_degraded: "ناقص",
-    fleet_down: "قطع",
-    fleet_avg: "میانگین",
-    fleet_loss: "افت",
-    fleet_uptime: "آپتایم",
-    fleet_nodata: "در حال جمع‌آوری داده…",
-    fleet_frp_only: "فقط FRP",
-    fleet_icmp_filtered: "ICMP فیلتر است",
-    fleet_session_up: "نشست برقرار",
-    fleet_updated: "به‌روز شد",
-    fleet_ago: "پیش",
-    dial_title: "مسیر اتصال به هاب ایران", dial_hint: "این سرور از چه مسیری به ایران وصل شود: IP داخلی GRE، مستقیم به IP عمومی هاب، یا خودکار (اگر GRE کار می‌کند همان، وگرنه IP عمومی).", dial_auto: "خودکار", dial_gre: "IP داخلی GRE", dial_public: "IP عمومی", dial_public_btn: "IP عمومی ایران",
-    fleet_topo_aria: "نقشه‌ی تونل: {hub} متصل به {n} سرور",
-    fleet_ring_aria: "{h} از {t} سرور سالم",
-    rs_hide_aria: "بستن جریان زنده وقایع",
-    rs_hidden_toast: "جریان زنده وقایع بسته شد",
-    rs_hidden_sub: "از بخش لاگ‌ها ← جریان زنده وقایع دوباره بازش کنید",
-    rs_restore_hint: "پنل کناری با آخرین رویدادها. فقط روی صفحه‌های عریض (۱۲۰۰ پیکسل به بالا).",
-    rs_btn_hide: "بستن",
-    rs_btn_show: "نمایش",
-    sup_title: "تونل‌تان پایدار است؟",
-    sup_body: "هاشم رایگان است و با دست یک توسعه‌دهنده ساخته شده. اگر اتصال شما را سرپا نگه داشته، با یک دونیت کوچک به ادامه‌ی توسعه‌اش کمک کنید.",
-    sup_donate: "دونیت",
-    sup_later: "بعداً",
-    sup_snooze: "۳۰ روز یادآوری نکن",
-    sup_card_title: "حمایت از هاشم",
-    sup_card_hint: "هاشم رایگان است. اگر برایتان مفید بوده، هر زمان می‌توانید از توسعه‌اش حمایت کنید.",
-    appear_title: "ظاهر پنل",
-    appear_hint: "رنگ اصلی را انتخاب کنید. همه‌ی رنگ‌ها برای تم تیره و روشن از نظر کنتراست بررسی شده‌اند.",
-    appear_aria: "رنگ اصلی",
-    acc_blue: "آبی", acc_indigo: "نیلی", acc_violet: "بنفش", acc_rose: "صورتی", acc_emerald: "زمردی", acc_teal: "فیروزه‌ای", acc_orange: "نارنجی",
-    rs_waiting: "در انتظار دریافت لاگ‌های سیستمی...",
-    edit_tunnel_title: "ویرایش مشخصات تونل",
-    edit_tunnel_sub: "تغییر پارامترها، پروتکل کریر یا پورت‌های فوروارد شده. تغییرات بلافاصله اعمال می‌شوند.",
-    carrier_title: "انتخاب و مدیریت کریر (Carrier)",
-    save_carrier: "ذخیره حالت",
-    connect_iran: "اتصال به سرور ایران",
-    reverse_ports: "پورت‌های معکوس (تکی، رنج یا نگاشت)",
-    disabled: "غیرفعال",
-    enabled: "فعال",
-    save: "ذخیره",
-    cancel: "انصراف",
-    close: "بستن",
-    x002: "ایران",
-    x003: "خارج",
-    x004: "[ فعال ] سوییچ خودکار",
-    x005: "[ خاموش ] حالت دستی",
-    x006: "پایدار / بدون پکت‌لاس",
-    x007: "موتور تونل",
-    x008: "کریر و فیل‌اور",
-    x009: "کریر فعال",
-    x010: "سیاست سوییچ",
-    x011: "عیب‌یابی",
-    x012: "تونل فعال",
-    x013: "مشاهده کارت کامل در تب تونل",
-    x014: "تمام آزمون‌های سلامت شبکه بدون گلوگاه پاس شدند. ارتباط در بالاترین سطح کارایی قرار دارد.",
-    x015: "پیشنهاد: برای رفع خودکار گلوگاه‌ها و بهینه‌سازی دکمه مقابل را بزنید.",
-    x016: "رفع خودکار مشکلات شناسایی‌شده",
-    x017: "در حال ارزیابی… (MTU و پینگ)",
-    x018: "عیب‌یابی تکمیل شد",
-    x019: "امتیاز سلامت",
-    x020: "خطا در عیب‌یابی",
-    x021: "اجرای عیب‌یابی کامل",
-    x022: "اعمال بهینه‌سازی و تعمیر خودکار؟",
-    x023: "این عملیات الگوریتم TCP BBR را فعال کرده، MSS Clamping را در کرنل اعمال می‌کند، فورواردینگ IP را فعال، لیمیت سرویس‌های FRP را ارتقا داده و در صورت لزوم لینک تونل را بازیابی می‌کند.",
-    x024: "شروع تعمیر و بهینه‌سازی",
-    x025: "در حال اعمال تعمیر…",
-    x026: "در حال اعمال…",
-    x027: "تعمیر و بهینه‌سازی انجام شد",
-    x028: "تنظیمات شبکه و هسته سیستم بهینه‌سازی شد",
-    x029: "خطا در تعمیر",
-    x030: "تعمیر و بهینه‌سازی خودکار",
-    x031: "پروتکل فعال تونل",
-    x032: "کمترین تاخیر ثبت‌شده",
-    x033: "لینک بدون پکت‌لاس",
-    x034: "پکت‌لاس کاندیدای برتر",
-    x035: "آخرین سنجش",
-    x036: "پروتکل و کریر فعال",
-    x037: "هیچ‌وقت",
-    x038: "هنوز بنچمارکی ثبت نشده است. روی «اجرای بنچمارک پروتکل‌ها» کلیک کنید.",
-    x039: "سالم",
-    x040: "مطلوب",
-    x041: "هشدار",
-    x042: "قطع",
-    x043: "کرنل ۴۷",
-    x044: "فعال",
-    x045: "پیشنهادی",
-    x046: "فعلی",
-    x047: "سوییچ",
-    x048: "در حال سنجش پروتکل‌ها...",
-    x049: "آغاز بنچمارک پروتکل‌ها",
-    x050: "در حال ارزیابی تاخیر و پکت‌لاس ترنسپورت‌ها...",
-    x051: "بنچمارک تکمیل شد",
-    x052: "پروتکل برتر",
-    x053: "خطا در بنچمارک",
-    x054: "در حال اعمال پروتکل...",
-    x055: "پروتکل با موفقیت اعمال شد",
-    x056: "خطا در اعمال پروتکل",
-    err_generic: "درخواست ناموفق بود",
-    state_retry: "تلاش دوباره",
-    state_error_title: "بارگذاری داده ناموفق بود",
-    rs_empty_title: "هنوز لاگی نیست",
-    rs_waiting_sys: "در حال دریافت لاگ‌های سیستمی...",
-    empty_bench_title: "هنوز بنچمارکی ثبت نشده",
-    empty_bench_msg: "برای مقایسه پروتکل‌ها یک بنچمارک اجرا کنید.",
-    empty_peers_title: "هنوز تونل همتایی وجود ندارد",
-    empty_peers_msg: "از بخش راه‌اندازی یک سرور خارج دیگر اضافه کنید.",
-    empty_logs_title: "خطی برای نمایش نیست",
-    empty_logs_msg: "هنوز چیزی برای این سرویس ثبت نشده است.",
-    empty_errors_title: "بدون خطای پنل",
-    empty_errors_msg: "همه‌چیز سالم است — هر خطا همراه با کد آن اینجا ثبت می‌شود.",
-    aria_close: "بستن",
-    aria_menu: "منو",
-    aria_main_nav: "ناوبری اصلی",
-    aria_toggle_visibility: "نمایش/پنهان‌سازی",
-    aria_copy: "کپی",
-    aria_edit_ports: "ویرایش پورت‌ها",
-    aria_close_search: "بستن جستجو",
-    aria_close_proxy: "بستن پیکربندی پراکسی",
-    aria_font_smaller: "فونت کوچک‌تر",
-    aria_font_larger: "فونت بزرگ‌تر",
-    aria_fullscreen: "تمام‌صفحه",
-    err_status: "به‌روزرسانی ناموفق بود",
-    err_dashboard: "به‌روزرسانی داشبورد ناموفق بود",
-    err_carrier: "وضعیت کریر دریافت نشد",
-    err_peers: "بارگذاری همتاها ناموفق بود",
-    err_setup: "بارگذاری پیش‌فرض‌های راه‌اندازی ناموفق بود",
-    err_logs: "بارگذاری لاگ‌ها ناموفق بود",
-    err_errors: "بارگذاری تاریخچه خطاها ناموفق بود",
-    err_rslogs: "جریان زنده لاگ در دسترس نیست",
-    err_benchmark: "بارگذاری بنچمارک ناموفق بود",
-    err_peerlink: "وضعیت لینک همتا دریافت نشد",
-    err_bundle: "دریافت بسته ناموفق بود",
-    err_retry: "تلاش دوباره ناموفق بود",
-    carrier_switch_confirm: "آیا از تغییر پروتکل و سوییچ تونل به «{id}» اطمینان دارید؟"
+    login_sub: "Sign in with your username and password",
+    login_user_ph: "Username",
+    login_pass_ph: "Password",
+    login_signin: "Sign in",
+    rs_header: "Live Activity Stream",
+    rsc_title: "Connectivity Rescue", rsc_remote: "Reachable server (the one that can connect to this server)", rsc_ports: "Ports to connect (TCP + UDP)",
+    rsc_code: "Rescue code from the blocked server", rsc_ban_t: "This server cannot connect to its peer",
+    rsc_ban_d: "Ping works but every TCP connection is dropped on the way. A one-click fix reverses the connection direction.", rsc_ban_go: "Fix it",
+    rsc_idle_ok: "No problem detected. If a peer can ping you but connections time out, this tool reverses the direction automatically.",
+    rsc_idle_warn: "A one-way block was detected: ping works but TCP is dropped. Enable Rescue to reverse the direction.",
+    rsc_b_off: "Off", rsc_b_susp: "Block detected", rsc_b_on: "Active", rsc_b_on_auto: "Active (Auto)", rsc_b_wait: "Waiting for peer", rsc_b_lift: "Block lifted",
+    rsc_check: "Check now", rsc_enable: "Enable Rescue", rsc_join: "Join with code", rsc_apply: "Apply code", rsc_disable: "Disable and remove",
+    rsc_cancel: "Cancel", rsc_getcode: "Show rescue code", rsc_copy: "Copy code", rsc_nocfg: "frp binaries are missing on this server. Run hashem update first.",
+    rsc_origin: "This server is the blocked side. {n} port(s) are forwarded through {ip}.", rsc_origin_auto: "One-way block detected: connectivity automatically established through {ip} ({n} ports forwarded).", rsc_entry: "This server is the entry. {n} port(s) are served here and tunnelled to {ip}.", rsc_entry_auto: "This server is acting as the entry for {ip} ({n} ports tunnelled).",
+    rsc_skipped: "Skipped (busy or reserved): {p}", rsc_conn: "Control link", rsc_conn_ok: "connected", rsc_conn_no: "not connected yet",
+    rsc_svc: "Services", rsc_direct: "Kernel forward (full speed)", rsc_relay: "FRP relay (filtered path)", rsc_auto: "The other panel picks this up by itself within a few minutes if the two panels are paired. Otherwise use the code.",
+    rsc_lift: "The direct route works again. You can disable Rescue and use the normal tunnel.",
+    rsc_confirm_t: "Enable Connectivity Rescue?", rsc_confirm_b: "This starts three small services here and opens one firewalled control port. The reachable server is the only host allowed to use it. You can remove everything with one click.",
+    rsc_dis_t: "Remove Rescue?", rsc_dis_b: "The forwarded ports on the entry server stop working until the normal tunnel is up.",
+    rsc_probe_ok: "Peer reachable", rsc_probe_block: "One-way block confirmed", rsc_probe_down: "Peer unreachable (outage, not a block)", rsc_probe_svc: "Peer reachable but its panel is not listening",
+    rsc_done: "Rescue enabled", rsc_removed: "Rescue removed", rsc_copied: "Copied",
+    pal_open: "Search and commands", pal_search: "Search", pal_title: "Command palette", pal_ph: "Search pages and actions…",
+    pal_nav: "navigate", pal_run: "run", pal_close: "close", pal_none: "Nothing matches", pal_go: "Go to", pal_act: "Actions", pal_look: "Appearance",
+    pal_refresh: "Refresh data", pal_theme: "Toggle dark / light theme", pal_lang: "Switch language", pal_stream: "Show / hide Live Activity Stream",
+    pal_sidebar: "Collapse / expand sidebar", pal_density: "Toggle table density", pal_diag: "Run diagnostics", pal_donate: "Support Hashem", pal_logout: "Log out",
+    pal_accent: "Accent colour",
+    sb_collapse: "Collapse sidebar", sb_expand: "Expand sidebar",
+    tbl_filter: "Filter errors…", tbl_shown: "{n} of {t} shown",
+    dens_title: "Table density", dens_comfy: "Comfortable", dens_compact: "Compact",
+    onb_title: "Welcome to Hashem", onb_sub: "No tunnel yet. Three steps and you are live.",
+    onb_s1: "Choose this server's role", onb_s1d: "Iran hub (server) or foreign server (client) from the Setup tab.",
+    onb_s2: "Link the other server", onb_s2d: "Create the tunnel and paste the connection bundle on the other side.",
+    onb_s3: "Verify and optimise", onb_s3d: "Run Diagnostics, then Optimize in the Tunnel tab.",
+    onb_go: "Open Setup", onb_later: "Not now", onb_dismiss: "Dismiss",
+    badge_tunnel: "{n} tunnel(s) need attention", badge_doctor: "{n} diagnostic issue(s)",
+    fleet_title: "Fleet health",
+    fleet_all_ok: "All servers healthy",
+    fleet_some: "{n} of {t} servers need attention",
+    fleet_all_down: "All servers are down",
+    fleet_meta: "Updated {time} · sampled every {s}s · last hour",
+    fleet_hub: "Iran hub",
+    fleet_healthy: "Healthy",
+    fleet_degraded: "Degraded",
+    fleet_down: "Down",
+    fleet_avg: "Avg",
+    fleet_loss: "Loss",
+    fleet_uptime: "Uptime",
+    fleet_nodata: "Collecting data…",
+    fleet_frp_only: "FRP only",
+    fleet_icmp_filtered: "ICMP filtered",
+    fleet_session_up: "session up",
+    fleet_updated: "updated",
+    fleet_ago: "ago",
+    dial_title: "Route to the Iran hub", dial_hint: "How this server reaches Iran: over the GRE inner IP, directly to the hub's public IP, or Auto (GRE when it works, public IP otherwise).", dial_auto: "Auto", dial_gre: "GRE inner IP", dial_public: "Public IP", dial_public_btn: "Iran public IP",
+    fleet_topo_aria: "Tunnel topology: {hub} connected to {n} servers",
+    fleet_ring_aria: "{h} of {t} servers healthy",
+    rs_hide_aria: "Hide live activity stream",
+    rs_hidden_toast: "Live Activity Stream hidden",
+    rs_hidden_sub: "Bring it back from Logs → Live Activity Stream",
+    rs_restore_hint: "Side panel with the latest events. Wide screens (1200px+) only.",
+    rs_btn_hide: "Hide",
+    rs_btn_show: "Show",
+    sup_title: "Enjoying a stable tunnel?",
+    sup_body: "Hashem is free and built by one developer. If it keeps your connection alive, a small donation helps keep it improving.",
+    sup_donate: "Donate",
+    sup_later: "Maybe later",
+    sup_snooze: "Don't remind me for 30 days",
+    sup_card_title: "Support Hashem",
+    sup_card_hint: "Hashem is free. If it helps you, you can support its development any time.",
+    appear_title: "Appearance",
+    appear_hint: "Pick an accent colour. Every preset is contrast-checked for both dark and light themes.",
+    appear_aria: "Accent colour",
+    acc_blue: "Blue", acc_indigo: "Indigo", acc_violet: "Violet", acc_rose: "Rose", acc_emerald: "Emerald", acc_teal: "Teal", acc_orange: "Orange",
+    rs_waiting: "Waiting for logs...",
+    edit_tunnel_title: "Edit Tunnel",
+    edit_tunnel_sub: "Modify tunnel parameters, carrier protocol, or forwarded ports. Changes apply immediately.",
+    carrier_title: "Carrier Selection / Policy",
+    save_carrier: "Save Mode",
+    connect_iran: "Connect to Iran",
+    reverse_ports: "Reverse ports (ranges & mappings allowed)",
+    disabled: "Disabled",
+    enabled: "Enabled",
+    save: "Save",
+    cancel: "Cancel",
+    close: "Close",
+    x002: "Iran",
+    x003: "Foreign",
+    x004: "[ ON ] Auto-Switching",
+    x005: "[ OFF ] Manual Mode",
+    x006: "Stable / Zero Drops",
+    x007: "Engine",
+    x008: "Carrier & Failover",
+    x009: "Active Carrier",
+    x010: "Failover Policy",
+    x011: "Diagnostics",
+    x012: "tunnel up",
+    x013: "Open full card in Tunnel tab",
+    x014: "All diagnostic tests passed with zero bottlenecks. Connection is operating at peak performance.",
+    x015: "Recommendation: Run automated repair to resolve bottlenecks and optimize parameters.",
+    x016: "Auto-Fix Detected Issues",
+    x017: "Diagnosing… (sweep MTU & ping)",
+    x018: "Diagnostics complete",
+    x019: "Health score",
+    x020: "Diagnostics failed",
+    x021: "Run Diagnostics",
+    x022: "Apply Automated Optimizations?",
+    x023: "This will enable TCP BBR, configure MSS clamping, ensure IPv4 forwarding, tune FRP concurrency limits, and restore tunnel interface connectivity.",
+    x024: "Repair & Optimize",
+    x025: "Applying fixes…",
+    x026: "Applying…",
+    x027: "Optimizations applied",
+    x028: "System stack optimized",
+    x029: "Fix failed",
+    x030: "Quick Repair & Optimize",
+    x031: "Active route",
+    x032: "Best round-trip",
+    x033: "Zero loss link",
+    x034: "Packet drop rate",
+    x035: "Last benchmark",
+    x036: "candidates probed",
+    x037: "None",
+    x038: "No benchmark metrics yet. Click \"Run Carrier Benchmark\".",
+    x039: "Healthy",
+    x040: "Good",
+    x041: "Warning",
+    x042: "Down",
+    x043: "Raw 47",
+    x044: "ACTIVE",
+    x045: "BEST",
+    x046: "Current",
+    x047: "Switch",
+    x048: "Probing carriers...",
+    x049: "Benchmarking carriers",
+    x050: "Probing GRE, WSS, TCP, KCP, QUIC, and WS...",
+    x051: "Benchmark Complete",
+    x052: "Best Carrier",
+    x053: "Benchmark failed",
+    x054: "Applying carrier",
+    x055: "Carrier Applied",
+    x056: "Apply failed",
+    err_generic: "Request failed",
+    state_retry: "Retry",
+    state_error_title: "Could not load data",
+    rs_empty_title: "No log lines yet",
+    rs_waiting_sys: "Waiting for system logs...",
+    empty_bench_title: "No benchmark metrics yet",
+    empty_bench_msg: "Run a carrier benchmark to compare protocols.",
+    empty_peers_title: "No peer tunnels yet",
+    empty_peers_msg: "Add one from Setup → Add another foreign server.",
+    empty_logs_title: "No log lines",
+    empty_logs_msg: "Nothing to show for this service yet.",
+    empty_errors_title: "No panel errors",
+    empty_errors_msg: "Clean run — every failure will appear here with its code.",
+    aria_close: "Close",
+    aria_menu: "Menu",
+    aria_main_nav: "Main navigation",
+    aria_toggle_visibility: "Toggle visibility",
+    aria_copy: "Copy",
+    aria_edit_ports: "Edit ports",
+    aria_close_search: "Close search",
+    aria_close_proxy: "Close proxy configuration",
+    aria_font_smaller: "Smaller font",
+    aria_font_larger: "Larger font",
+    aria_fullscreen: "Fullscreen",
+    err_status: "Refresh failed",
+    err_dashboard: "Dashboard refresh failed",
+    err_carrier: "Carrier status failed",
+    err_peers: "Peers load failed",
+    err_setup: "Setup defaults failed",
+    err_logs: "Logs load failed",
+    err_errors: "Error history failed",
+    err_rslogs: "Live log stream failed",
+    err_benchmark: "Benchmark load failed",
+    err_peerlink: "Peer link status failed",
+    err_bundle: "Bundle lookup failed",
+    err_retry: "Retry failed",
+    carrier_switch_confirm: "Switch both Iran & Foreign servers to carrier \"{id}\"?"
   }
 };
 
 let currentLang = 'en';
 
 function setLanguage(lang) {
-  currentLang = lang;
-  try { localStorage.setItem('hashem_lang', lang); } catch(e) { /* storage blocked: language just won't persist */ }
-  const isFa = lang === 'fa';
-  document.documentElement.setAttribute('dir', isFa ? 'rtl' : 'ltr');
-  document.documentElement.setAttribute('lang', lang);
-  document.body.classList.toggle('is-rtl', isFa);
-  
-  const b = $('langToggleBtn');
-  if (b) {
-    b.innerHTML = isFa ? '<span id="langFlag">🇬🇧</span> <span id="langTxt">English</span>' : '<span id="langFlag">🇮🇷</span> <span id="langTxt">فارسی</span>';
+  currentLang = (lang === 'fa') ? 'fa' : 'en';
+  try { localStorage.setItem('hashem_lang', currentLang); } catch(e) { /* storage blocked */ }
+  document.documentElement.setAttribute('dir', currentLang === 'fa' ? 'rtl' : 'ltr');
+  document.documentElement.setAttribute('lang', currentLang);
+  if (currentLang === 'fa') {
+    document.body.classList.add('is-rtl');
+  } else {
+    document.body.classList.remove('is-rtl');
   }
-  const bm = $('langToggleBtnM');
-  if (bm) {
-    bm.innerHTML = isFa ? '🇬🇧 English' : '🇮🇷 فارسی';
-  }
-  
-  applyTranslations(lang);
+  applyTranslations(currentLang);
 }
 
 function applyTranslations(lang) {
@@ -1307,12 +1341,57 @@ function renderPeers(peers) {
   if (!box) return;
   tunPeerCache = peers || null;
   try { renderTunChips(window._lastLocal || null); } catch(_){ /* chips are cosmetic; cards still render */ }
+  const b = (_sshfwdData || (window._lastDash && window._lastDash.bagher) || window._lastBagher || {});
+  const bagherUp = !!(b.is_active || b.enabled || b.connected);
+  const bagherHasCfg = !!(bagherUp || b.has_config || (b.remote_host && b.remote_host.length) || (Array.isArray(b.ports) && b.ports.length));
+  
+  let bagherCardHtml = '';
+  if (bagherHasCfg) {
+    const fwdPorts = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
+    const roleLabel = b.role === 'foreign' ? 'Foreign Client' : 'Iran Hub';
+    bagherCardHtml = `<div class="tunnel-card peer-card u-peer-card-wide" id="peer-card-bagher" style="border:1px solid rgba(16,185,129,0.3); background:linear-gradient(135deg, rgba(15,23,42,0.85) 0%, rgba(6,78,59,0.2) 100%);">
+      <div class="tc-header u-flex-wrap-gap8">
+        <div class="u-flex-center-gap10">
+          <span class="status-indicator ${bagherUp ? 'active' : 'offline'}"><span class="dot"></span></span>
+          <b class="u-fs-16-tx">Bagher Tunnel</b>
+          <span class="qs-hint mono">#stealth</span>
+          <span class="badge" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700">🟢 Bagher Engine</span>
+          <span class="badge" style="background:rgba(255,255,255,0.06);color:var(--mu);font-size:12px">${esc(roleLabel)}</span>
+          <span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'active' : 'inactive'}</span>
+        </div>
+      </div>
+      <div class="det-grid">
+        <div class="det-card">
+          <div class="det-card-head">${ICO_SRV} <span>Bagher Node</span></div>
+          <div class="det-row"><span class="det-k">Foreign Endpoint</span><span class="det-v mono">${esc(b.remote_host || '—')}</span></div>
+          <div class="det-row"><span class="det-k">Role</span><span class="det-v mono">${esc(roleLabel)}</span></div>
+          <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(fwdPorts)}</span></div>
+        </div>
+        <div class="det-card">
+          <div class="det-card-head">⚡ <span>Link Status</span></div>
+          <div class="det-row"><span class="det-k">Status</span><span class="det-v"><span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'Running' : 'Stopped'}</span></span></div>
+          <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono" style="color:#38bdf8">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : (bagherUp ? 'Optimal' : '—')}</span></div>
+          <div class="det-row"><span class="det-k">Services</span><span class="det-v mono">${esc(b.active_services || (bagherUp ? 'frps, frpc, ssh-fwd' : 'none'))}</span></div>
+        </div>
+      </div>
+      <div class="tc-acts u-flex-gap-8 u-mt-4">
+        <button class="hashem-btn hashem-btn-secondary" onclick="openBagherQuickEdit()">✏️ Quick Edit</button>
+        <button class="hashem-btn hashem-btn-secondary" onclick="goTab('sshfwd')">⚙️ Manage</button>
+        <button class="hashem-btn hashem-btn-danger" onclick="cleanBagherTunnelClick()">🗑️ Clean</button>
+      </div>
+    </div>`;
+  }
+
   if (!peers || !peers.length) {
-    box.innerHTML = '<div class="u-col-full">' + stateEmpty({ title: tr('empty_peers_title', 'No peer tunnels yet'), msg: tr('empty_peers_msg', 'Add one from Setup → Add another foreign server.'), icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>' }) + '</div>';
+    if (bagherCardHtml) {
+      box.innerHTML = bagherCardHtml;
+    } else {
+      box.innerHTML = '<div class="u-col-full">' + stateEmpty({ title: tr('empty_peers_title', 'No peer tunnels yet'), msg: tr('empty_peers_msg', 'Add one from Setup → Add another foreign server.'), icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>' }) + '</div>';
+    }
     return;
   }
   const stBadge = (ok, label) => `<span class="badge ${ok ? 'ok' : 'err'}"><span class="dot"></span>${esc(label)}</span>`;
-  box.innerHTML = peers.map(p => {
+  box.innerHTML = bagherCardHtml + peers.map(p => {
     const up = !!(p.gre_up || p.frp_up);
     const nm = p.name || ('peer-' + p.id);
     const traffic = (p.rx != null && p.tx != null)
@@ -1687,11 +1766,16 @@ function drawChart(hist, isDown) {
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i-1], b = pts[i];
     const dt = (b.t - a.t) || 1;
-    if (a.down == null || b.down == null || a.up == null || b.up == null) { series.push(null); continue; }
-    let dd = (b.down - a.down) / dt, du = (b.up - a.up) / dt;
-    if (dd < 0 || du < 0) { series.push(null); continue; } // counter reset
-    let dtot = a.total != null && b.total != null ? (b.total - a.total) / dt : (dd + du);
-    if (dtot < 0) dtot = 0;
+    const aDown = a.down != null ? a.down : 0;
+    const bDown = b.down != null ? b.down : 0;
+    const aUp = a.up != null ? a.up : 0;
+    const bUp = b.up != null ? b.up : 0;
+    let dd = (bDown - aDown) / dt, du = (bUp - aUp) / dt;
+    if (dd < 0 || du < 0) { dd = Math.max(0, dd); du = Math.max(0, du); }
+    let aTot = a.total != null ? a.total : (aDown + aUp);
+    let bTot = b.total != null ? b.total : (bDown + bUp);
+    let dtot = (bTot - aTot) / dt;
+    if (dtot < 0) dtot = dd + du;
     series.push({t: b.t, down: dd, up: du, total: dtot, conns: b.conns || 0});
   }
   cv._series = series;
@@ -2088,21 +2172,40 @@ async function refreshDash() {
     const nPeers = d.peer_count || 0;
     { const g0 = $('dashGrid'); if (g0) g0.classList.remove('dash-loading'); }
     const multi = nPeers > 0;
-    const statusText = d.health ? (d.health === 'HEALTHY' ? 'Healthy' : (d.health === 'DEGRADED' ? 'Degraded' : 'Down')) : (on ? 'Online' : 'Offline');
-    const statusColor = d.health ? (d.health === 'HEALTHY' ? 'var(--ok)' : (d.health === 'DEGRADED' ? 'var(--wr)' : 'var(--er)')) : (on ? 'var(--ok)' : 'var(--er)');
+    const bObj = d.bagher || {};
+    window._lastBagher = bObj;
+    const bagherUp = !!(bObj.is_active || bObj.enabled || bObj.connected);
+    let statusText = d.health ? (d.health === 'HEALTHY' ? 'Healthy' : (d.health === 'DEGRADED' ? 'Degraded' : 'Down')) : (on ? 'Online' : 'Offline');
+    let statusColor = d.health ? (d.health === 'HEALTHY' ? 'var(--ok)' : (d.health === 'DEGRADED' ? 'var(--wr)' : 'var(--er)')) : (on ? 'var(--ok)' : 'var(--er)');
+    if (bagherUp && (statusText === 'Down' || statusText === 'Offline')) {
+      statusText = 'Healthy';
+      statusColor = 'var(--ok)';
+    }
     set('kpiStatus', statusText);
     const kpiStatus = $('kpiStatus'); if (kpiStatus) kpiStatus.style.color = statusColor;
-    set('kpiStatusSub', (multi ? nPeers + ' tunnel' + (nPeers > 1 ? 's' : '') + ' · ' : '') + (d.role || 'unknown role') + ' · ' + (d.checked ? 'checked ' + String(d.checked).slice(11, 19) + ' UTC' : ''));
+    set('kpiStatusSub', (multi ? nPeers + ' tunnel' + (nPeers > 1 ? 's' : '') + ' · ' : (bagherUp && !nPeers ? 'Bagher tunnel · ' : '')) + (d.role || 'unknown role') + ' · ' + (d.checked ? 'checked ' + String(d.checked).slice(11, 19) + ' UTC' : ''));
     const g = d.gre || {}, f = d.frp || {};
     const peers = d.peers || [];
     const kpiLinks = $('kpiLinks');
     if (multi) {
       // multi-peer: count legs up
       const greUp = peers.filter(p => p.gre_up).length, frpUp = peers.filter(p => p.frp_up).length;
-      if (kpiLinks) kpiLinks.innerHTML = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE ' + greUp + '/' + nPeers + '</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP ' + frpUp + '/' + nPeers + '</span>';
+      let multiLinks = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE ' + greUp + '/' + nPeers + '</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP ' + frpUp + '/' + nPeers + '</span>';
+      if (bagherUp) {
+        multiLinks += ' <span class="badge ok" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700"><span class="dot"></span>Bagher</span>';
+      }
+      if (kpiLinks) kpiLinks.innerHTML = multiLinks;
     } else {
       const greUp = !!g.exists, frpUp = !!f.up;
-      if (kpiLinks) kpiLinks.innerHTML = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP</span>';
+      let linksHtml = '';
+      if (bagherUp) {
+        linksHtml += '<span class="badge ok" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700"><span class="dot"></span>Bagher</span>';
+      }
+      if (greUp || frpUp || !bagherUp) {
+        if (linksHtml) linksHtml += ' ';
+        linksHtml += '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP</span>';
+      }
+      if (kpiLinks) kpiLinks.innerHTML = linksHtml;
     }
     if (multi) {
       // multi-peer: best ping across legs, sub lists per-peer names
@@ -2112,15 +2215,30 @@ async function refreshDash() {
       set('kpiPing', best != null ? Math.round(best) + 'ms' : NA);
       setHTML('kpiPingSub', best == null ? 'no answer' : best < 80 ? '<span class="badge ok"><span class="dot"></span>Optimal</span>' : best < 200 ? '<span class="badge ok"><span class="dot"></span>Good</span>' : '<span class="badge warn"><span class="dot"></span>High</span>');
     } else {
-      set('kpiLinksSub', (f.svc || 'no frp') + ((f.proxies || []).length ? ' · ' + f.proxies.length + ' proxies' : '') + ' · ' + (g.inner || 'no gre ip'));
+      if (bagherUp && !g.exists && !f.up) {
+        set('kpiLinksSub', 'Bagher stealth tunnel · ' + ((bObj.ports || []).length ? bObj.ports.length + ' forwarded ports' : 'active link') + ' · ' + (bObj.remote_host || 'connected'));
+      } else {
+        set('kpiLinksSub', (f.svc || 'no frp') + ((f.proxies || []).length ? ' · ' + f.proxies.length + ' proxies' : '') + ' · ' + (g.inner || 'no gre ip'));
+      }
       const ms = d.ping_ok && d.ping ? parseFloat(d.ping) : (d.health_state === 'healthy' && d.latency_ms >= 0 ? d.latency_ms : null);
-      set('kpiPing', d.ping_ok && d.ping ? d.ping : (ms != null ? Math.round(ms) + 'ms' : NA));
-      setHTML('kpiPingSub', (ms == null ? 'no answer' : ms < 80 ? '<span class="badge ok"><span class="dot"></span>Optimal</span>' : ms < 200 ? '<span class="badge ok"><span class="dot"></span>Good</span>' : '<span class="badge warn"><span class="dot"></span>High</span>') + (d.icmp_filtered ? icmpChip() : ''));
+      if (ms != null) {
+        set('kpiPing', d.ping_ok && d.ping ? d.ping : (Math.round(ms) + 'ms'));
+        setHTML('kpiPingSub', (ms < 80 ? '<span class="badge ok"><span class="dot"></span>Optimal</span>' : ms < 200 ? '<span class="badge ok"><span class="dot"></span>Good</span>' : '<span class="badge warn"><span class="dot"></span>High</span>') + (d.icmp_filtered ? icmpChip() : ''));
+      } else if (bagherUp && typeof bObj.latency_ms === 'number' && bObj.latency_ms > 0) {
+        set('kpiPing', Math.round(bObj.latency_ms) + 'ms');
+        setHTML('kpiPingSub', '<span class="badge ok"><span class="dot"></span>Optimal</span>');
+      } else {
+        set('kpiPing', NA);
+        setHTML('kpiPingSub', 'no answer');
+      }
     }
     const t = d.traffic || {};
     set('kpiTraffic', fmtBytes(t.total));
-    let rtUp = '—', rtDown = '—';
-    if (d.history && d.history.length >= 2) {
+    let rtUp = '0.0 B/s', rtDown = '0.0 B/s';
+    if (t.speed_up != null && t.speed_down != null) {
+      rtUp = fmtRate(t.speed_up);
+      rtDown = fmtRate(t.speed_down);
+    } else if (d.history && d.history.length >= 2) {
       const b = d.history[d.history.length - 1];
       const a = d.history[d.history.length - 2];
       const dt = (b.t - a.t) || 1;
@@ -2139,6 +2257,63 @@ async function refreshDash() {
       badge.classList.toggle('is-paused', paused);
       const txt = badge.querySelector('.live-txt');
       if (txt) txt.textContent = paused ? 'PAUSED' : 'LIVE';
+    }
+
+    const b = d.bagher || {};
+    const bagherActive = !!(b.is_active || b.enabled);
+    const dashBagherCard = $('dashBagherCard');
+    const tunBagherCard = $('tunnelBagherCard');
+    if (dashBagherCard) {
+      if (bagherActive) {
+        dashBagherCard.classList.remove('hidden');
+        const roleStr = b.role === 'foreign' ? 'Foreign Server' : 'Iran Server';
+        set('dashBagherRoleSub', 'Stealth Hybrid Tunnel · Role: ' + roleStr);
+        set('dashBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal');
+        const tp = b.throughput || {};
+        const rx = tp.rx_bytes_sec || b.rx_bytes_sec || 0;
+        const tx = tp.tx_bytes_sec || b.tx_bytes_sec || 0;
+        set('dashBagherRate', '↓ ' + fmtRate(rx) + ' · ↑ ' + fmtRate(tx));
+        set('dashBagherForeign', b.remote_host || '—');
+        const portsStr = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
+        set('dashBagherPorts', portsStr);
+        const bBadge = $('dashBagherStatusBadge');
+        if (bBadge) {
+          if (b.connected) {
+            bBadge.className = 'badge ok';
+            set('dashBagherStatusText', 'Connected');
+          } else {
+            bBadge.className = 'badge warn';
+            set('dashBagherStatusText', 'Waiting for Peer');
+          }
+        }
+      } else {
+        dashBagherCard.classList.add('hidden');
+      }
+    }
+    // Bagher Card in Tunnels: ONLY display when Bagher is ACTUALLY ACTIVE
+    if (tunBagherCard) {
+      if (bagherActive) {
+        tunBagherCard.classList.remove('hidden');
+        set('tunBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal');
+        set('tunBagherForeign', b.remote_host || '—');
+        const portsStr = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
+        set('tunBagherPorts', portsStr);
+        const tp = b.throughput || {};
+        const tot = tp.total_bytes || b.total_bytes || 0;
+        set('tunBagherTotal', fmtBytes(tot));
+        const tbBadge = $('tunBagherStatusBadge');
+        if (tbBadge) {
+          if (b.connected) {
+            tbBadge.className = 'badge ok';
+            set('tunBagherStatusText', 'Connected');
+          } else {
+            tbBadge.className = 'badge warn';
+            set('tunBagherStatusText', 'Waiting for Peer');
+          }
+        }
+      } else {
+        tunBagherCard.classList.add('hidden');
+      }
     }
     // Chart hover tooltip (read-only; data source untouched).
     const cv = $('trafficChart');
@@ -2673,11 +2848,11 @@ function updateTransportSelect(selId, eng) {
   const cur = el.value;
   if (eng === 'frp') {
     el.innerHTML = `
-      <option value="tcp">TCP Multiplexed (Default / استاندارد)</option>
-      <option value="kcp">KCP ARQ UDP (Anti-Loss / ضد پکت‌لاس)</option>
-      <option value="quic">QUIC UDP Stream (High-Speed / پرسرعت)</option>
-      <option value="websocket">WebSocket (HTTP Upgrade / عبور اختلال)</option>
-      <option value="wss">WSS TLS (Obfuscated / پوشش امنیتی کامل)</option>
+      <option value="tcp">TCP Multiplexed (Default)</option>
+      <option value="kcp">KCP ARQ UDP (Anti-Loss)</option>
+      <option value="quic">QUIC UDP Stream (High-Speed)</option>
+      <option value="websocket">WebSocket (HTTP Upgrade)</option>
+      <option value="wss">WSS TLS (Obfuscated)</option>
     `;
     if (['tcp', 'kcp', 'quic', 'websocket', 'wss'].includes(cur)) el.value = cur;
     else el.value = 'tcp';
@@ -2965,6 +3140,7 @@ $('toggle').addEventListener('click', () => {
 // kinetic grid background (same as Hashem login)
 (function(){
   const CELL_SIZE = 55, INFLUENCE_RADIUS = 260, MAX_WARP = 24;
+  const INFLUENCE_RADIUS_SQ = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
   const DOT_SPACING = 28, LERP_SPEED = 0.08;
   const LINE_BASE = { r: 255, g: 255, b: 255, a: 0.13 };
   const NODE_BASE_RADIUS = 1.8, NODE_ACTIVE_RADIUS = 3.2;
@@ -2977,60 +3153,123 @@ $('toggle').addEventListener('click', () => {
   const canvas = document.getElementById('kineticGrid');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  let W, H, mouse = {x:-9999,y:-9999}, targetMouse = {x:-9999,y:-9999}, ripples = [];
+  let W = 0, H = 0, mouse = {x:-9999,y:-9999}, targetMouse = {x:-9999,y:-9999}, ripples = [];
   const theme = { bg:'#09090b', lineActive:{r:56,g:189,b:248,a:0.9},
     nodeActive:{r:56,g:189,b:248,a:1.0}, glow:'56,189,248', ripple:'56,189,248' };
-  function setSize(){ W = innerWidth; H = innerHeight; canvas.width = W; canvas.height = H;
-    if (mouse.x === -9999) { mouse = {x:W/2,y:H/2}; targetMouse = {x:W/2,y:H/2}; } }
+
+  // Offscreen canvas cache for static background dot grid
+  const bgCanvas = document.createElement('canvas');
+  const bgCtx = bgCanvas.getContext('2d');
+  function renderStaticBg() {
+    bgCanvas.width = W;
+    bgCanvas.height = H;
+    bgCtx.fillStyle = theme.bg;
+    bgCtx.fillRect(0, 0, W, H);
+    bgCtx.fillStyle = 'rgba(255,255,255,0.05)';
+    for (let x = DOT_SPACING/2; x < W; x += DOT_SPACING) {
+      for (let y = DOT_SPACING/2; y < H; y += DOT_SPACING) {
+        bgCtx.beginPath();
+        bgCtx.arc(x, y, 0.7, 0, Math.PI * 2);
+        bgCtx.fill();
+      }
+    }
+  }
+
+  // Pre-allocated reusable grid point and proximity buffers
+  let cols = 0, rows = 0, cellW = 0, cellH = 0;
+  let pts = [], prox = [];
+  function allocateBuffers() {
+    cols = Math.max(2, Math.ceil(W / CELL_SIZE)) + 1;
+    rows = Math.max(2, Math.ceil(H / CELL_SIZE)) + 1;
+    cellW = W / (cols - 1);
+    cellH = H / (rows - 1);
+    pts = new Array(rows);
+    prox = new Array(rows);
+    for (let r = 0; r < rows; r++) {
+      pts[r] = new Array(cols);
+      prox[r] = new Float32Array(cols);
+      for (let c = 0; c < cols; c++) {
+        pts[r][c] = { x: 0, y: 0 };
+      }
+    }
+  }
+
+  function setSize(){
+    W = innerWidth; H = innerHeight;
+    canvas.width = W; canvas.height = H;
+    renderStaticBg();
+    allocateBuffers();
+    if (mouse.x === -9999) { mouse = {x:W/2,y:H/2}; targetMouse = {x:W/2,y:H/2}; }
+  }
   addEventListener('resize', setSize); setSize();
   addEventListener('mousemove', e => { targetMouse.x = e.clientX; targetMouse.y = e.clientY; });
   addEventListener('click', e => { ripples.push({x:e.clientX,y:e.clientY,radius:0,opacity:1,born:performance.now()}); });
-  function getWarpedPoint(gx,gy,col,row,cols,rows){
+
+  function updateWarpedPoint(gx, gy, col, row, targetPt, rowIdx, colIdx){
     const edgeMargin = 1.5;
     const colPin = Math.min(col/edgeMargin,(cols-1-col)/edgeMargin,1);
     const rowPin = Math.min(row/edgeMargin,(rows-1-row)/edgeMargin,1);
     const pinFactor = colPin*colPin*rowPin*rowPin;
-    const dx = gx-mouse.x, dy = gy-mouse.y, dist = Math.sqrt(dx*dx+dy*dy);
-    const proximity = Math.max(0,1-dist/INFLUENCE_RADIUS)*pinFactor;
+
+    const dx = gx - mouse.x, dy = gy - mouse.y;
+    const distSq = dx * dx + dy * dy;
+    let proximity = 0, mx = 0, my = 0;
+
+    if (distSq < INFLUENCE_RADIUS_SQ && distSq > 0 && pinFactor > 0){
+      const dist = Math.sqrt(distSq);
+      const t = dist / INFLUENCE_RADIUS;
+      proximity = (1 - t) * pinFactor;
+      const eased = t < 0.01 ? 0 : (1 - t) * (1 - t) * Math.min(1, dist / 60);
+      const warpAmt = eased * MAX_WARP * pinFactor;
+      const invDist = 1 / dist;
+      mx = -dx * invDist * warpAmt;
+      my = -dy * invDist * warpAmt;
+    }
+
     let rx = 0, ry = 0;
-    for (const r of ripples){
-      const rdx = gx-r.x, rdy = gy-r.y, rdist = Math.sqrt(rdx*rdx+rdy*rdy);
-      const waveWidth = 55, diff = rdist-r.radius;
-      if (Math.abs(diff) < waveWidth){
-        const strength = (1-Math.abs(diff)/waveWidth)*r.opacity*18*pinFactor;
-        const angle = Math.atan2(rdy,rdx), sign = diff < 0 ? -1 : 1;
-        rx += Math.cos(angle)*strength*sign*-1; ry += Math.sin(angle)*strength*sign*-1;
+    const waveWidth = 55;
+    for (let i = 0; i < ripples.length; i++){
+      const r = ripples[i];
+      const rdx = gx - r.x, rdy = gy - r.y;
+      const rdistSq = rdx * rdx + rdy * rdy;
+      const minR = Math.max(0, r.radius - waveWidth);
+      const maxR = r.radius + waveWidth;
+      if (rdistSq >= minR * minR && rdistSq <= maxR * maxR) {
+        const rdist = Math.sqrt(rdistSq);
+        const diff = rdist - r.radius;
+        if (Math.abs(diff) < waveWidth){
+          const strength = (1 - Math.abs(diff) / waveWidth) * r.opacity * 18 * pinFactor;
+          const invRDist = rdist > 0 ? 1 / rdist : 0;
+          const sign = diff < 0 ? 1 : -1;
+          rx += rdx * invRDist * strength * sign;
+          ry += rdy * invRDist * strength * sign;
+        }
       }
     }
-    if (dist < INFLUENCE_RADIUS && dist > 0 && pinFactor > 0){
-      const t = dist/INFLUENCE_RADIUS;
-      const eased = t < 0.01 ? 0 : (1-t)*(1-t)*Math.min(1,dist/60);
-      const warpAmt = eased*MAX_WARP*pinFactor, angle = Math.atan2(dy,dx);
-      return { pt:{x:gx-Math.cos(angle)*warpAmt+rx, y:gy-Math.sin(angle)*warpAmt+ry}, proximity };
-    }
-    return { pt:{x:gx+rx, y:gy+ry}, proximity };
+
+    targetPt.x = gx + mx + rx;
+    targetPt.y = gy + my + ry;
+    prox[rowIdx][colIdx] = proximity;
   }
+
   function draw(now){
-    ctx.clearRect(0,0,W,H); ctx.fillStyle = theme.bg; ctx.fillRect(0,0,W,H);
-    ctx.fillStyle = 'rgba(255,255,255,0.05)';
-    for (let x = DOT_SPACING/2; x < W; x += DOT_SPACING)
-      for (let y = DOT_SPACING/2; y < H; y += DOT_SPACING){
-        ctx.beginPath(); ctx.arc(x,y,0.7,0,Math.PI*2); ctx.fill();
-      }
+    ctx.drawImage(bgCanvas, 0, 0);
+
     for (let i = ripples.length-1; i >= 0; i--){
       const r = ripples[i], age = (now-r.born)/1000;
       r.radius = Math.max(0,age*400); r.opacity = Math.max(0,1-age*1.2);
-      if (r.opacity <= 0) ripples.splice(i,1);
-    }
-    const cols = Math.max(2,Math.ceil(W/CELL_SIZE))+1, rows = Math.max(2,Math.ceil(H/CELL_SIZE))+1;
-    const cellW = W/(cols-1), cellH = H/(rows-1), pts = [], prox = [];
-    for (let row = 0; row < rows; row++){
-      pts[row] = []; prox[row] = [];
-      for (let col = 0; col < cols; col++){
-        const wp = getWarpedPoint(col*cellW,row*cellH,col,row,cols,rows);
-        pts[row][col] = wp.pt; prox[row][col] = wp.proximity;
+      if (r.opacity <= 0) {
+        ripples[i] = ripples[ripples.length - 1];
+        ripples.pop();
       }
     }
+
+    for (let row = 0; row < rows; row++){
+      for (let col = 0; col < cols; col++){
+        updateWarpedPoint(col*cellW, row*cellH, col, row, pts[row][col], row, col);
+      }
+    }
+
     const drawSeg = (p1,p2,pr1,pr2) => {
       const avg = (pr1+pr2)/2, t = avg*avg*(3-2*avg);
       ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y);
@@ -3057,16 +3296,23 @@ $('toggle').addEventListener('click', () => {
         ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2);
         ctx.fillStyle = lerpColor({r:255,g:255,b:255,a:0.2},theme.nodeActive,t); ctx.fill();
       }
-    for (const r of ripples){
+    for (let i = 0; i < ripples.length; i++){
+      const r = ripples[i];
       ctx.beginPath(); ctx.arc(r.x,r.y,Math.max(0,r.radius),0,Math.PI*2);
       ctx.strokeStyle = 'rgba('+theme.ripple+','+(r.opacity*0.28).toFixed(3)+')';
       ctx.lineWidth = 1.5; ctx.stroke();
     }
   }
+
   (function animate(now){
+    if (document.hidden || $('login')?.classList.contains('hidden')) {
+      requestAnimationFrame(animate);
+      return;
+    }
     mouse.x = lerpN(mouse.x,targetMouse.x,LERP_SPEED);
     mouse.y = lerpN(mouse.y,targetMouse.y,LERP_SPEED);
-    draw(now); requestAnimationFrame(animate);
+    draw(now);
+    requestAnimationFrame(animate);
   })(0);
 })();
 $('logoutBtn').onclick = async () => { try { await api('/api/logout', {}); } catch(e){ /* logout best-effort: always fall through to login screen */ } showLogin(); };
@@ -3927,10 +4173,6 @@ async function loadCarrier() {
       cms.innerHTML = opts.map(o => `<option value="${o.v}" ${o.v === curActive ? 'selected' : ''}>${o.t}</option>`).join('');
     }
 
-    if ($('carrierPortsInput') && document.activeElement !== $('carrierPortsInput')) {
-      $('carrierPortsInput').value = (curPorts && curPorts.length > 0) ? curPorts.join(', ') : '443, 55555';
-    }
-
     if ($('carrierWSSPortInput') && s.wss_port && document.activeElement !== $('carrierWSSPortInput')) {
       $('carrierWSSPortInput').value = s.wss_port;
     }
@@ -4048,28 +4290,6 @@ if (liveSwitchEngineBtn) {
     } finally {
       liveSwitchEngineBtn.disabled = false;
       liveSwitchEngineBtn.textContent = oldTxt;
-    }
-  };
-}
-
-const carrierSavePortsBtn = $('carrierSavePortsBtn');
-if (carrierSavePortsBtn) {
-  carrierSavePortsBtn.onclick = async () => {
-    const val = $('carrierPortsInput') ? $('carrierPortsInput').value : '';
-    const parts = val.split(/[,\s]+/).map(p => parseInt(p, 10)).filter(p => !isNaN(p) && p > 0 && p < 65536);
-    if (parts.length === 0) {
-      toastErr('Invalid ports', 'Enter at least one valid port number (e.g. 443, 55555)');
-      return;
-    }
-    carrierSavePortsBtn.disabled = true;
-    try {
-      const res = await api('/api/carrier', { action: 'set-ports', fou_ports: parts });
-      toastOk('FOU Ports Updated', 'Ports: ' + parts.join(', '));
-      await loadCarrier();
-    } catch (e) {
-      toastErr('Save ports failed', e.message);
-    } finally {
-      carrierSavePortsBtn.disabled = false;
     }
   };
 }
@@ -5466,7 +5686,9 @@ function uiObserve(s) {
   navBadge('tunnel', bad, (anyDown || (!peers.length && bad)) ? 'err' : 'warn', 'badge_tunnel');
   // onboarding: only when nothing is configured at all
   // `role` is always populated (it has a default), so it cannot signal "configured".
-  const empty = !peers.length && !(L.gre && L.gre.exists) && !L.frp_up;
+  const bObj = (_sshfwdData || (window._lastDash && window._lastDash.bagher) || window._lastBagher || {});
+  const bagherConfigured = !!(bObj.is_active || bObj.enabled || bObj.connected || bObj.has_config || (bObj.remote_host && bObj.remote_host.length) || (Array.isArray(bObj.ports) && bObj.ports.length));
+  const empty = !peers.length && !(L.gre && L.gre.exists) && !L.frp_up && !bagherConfigured;
   let dismissed = false; try { dismissed = localStorage.getItem('hashem_onb_done') === '1'; } catch (e) { /* storage blocked */ }
   const c = $('onbCard'); if (c) c.hidden = !empty || dismissed;
 }
@@ -5546,7 +5768,7 @@ function palItems() {
   it.push({ g: act, t: tr('pal_donate', 'Support Hashem'), k: 'donate support pdnczone', run: () => window.open('https://www.pdnczone.ir', '_blank', 'noopener,noreferrer') });
   it.push({ g: act, t: tr('pal_logout', 'Log out'), k: 'logout sign out exit', run: () => $('logoutBtn').click() });
   it.push({ g: look, t: tr('pal_theme', 'Toggle dark / light theme'), k: 'theme dark light mode', run: () => $('themeBtn').click() });
-  it.push({ g: look, t: tr('pal_lang', 'Switch language'), k: 'language persian farsi english', run: () => $('langToggleBtn').click() });
+  it.push({ g: look, t: tr('pal_lang', 'Switch language'), k: 'language persian farsi english', run: () => toggleLang() });
   it.push({ g: look, t: tr('pal_sidebar', 'Collapse / expand sidebar'), k: 'sidebar menu collapse', run: () => sbSet(!sbIsCollapsed()) });
   it.push({ g: look, t: tr('pal_density', 'Toggle table density'), k: 'density compact comfortable table', run: () => densSet(document.documentElement.dataset.dens === 'compact' ? 'comfortable' : 'compact') });
   ACCENTS.forEach(([n, c]) => it.push({ g: look, t: tr('pal_accent', 'Accent colour') + ': ' + tr('acc_' + n, n), k: 'accent color colour ' + n, sw: c, run: () => accSet(n) }));
@@ -5910,7 +6132,22 @@ async function loadBenchmark(forceRun = false) {
   if (_tb && !(benchData && benchData.metrics && benchData.metrics.length)) _tb.innerHTML = '<tr><td colspan="10">' + skel(3) + '</td></tr>';
   try {
     if (forceRun) {
-      benchData = await api('/api/benchmark/run');
+      const targetHost = ($('benchTargetHost') ? $('benchTargetHost').value.trim() : '');
+      const targetRole = ($('benchTargetRole') ? $('benchTargetRole').value : 'iran');
+      const frpPort = parseInt($('benchFrpPort') ? $('benchFrpPort').value : 7000) || 7000;
+      const wssPort = parseInt($('benchWssPort') ? $('benchWssPort').value : 8443) || 8443;
+      const backhaulPort = parseInt($('benchBackhaulPort') ? $('benchBackhaulPort').value : 3080) || 3080;
+      const bagherPort = parseInt($('benchBagherPort') ? $('benchBagherPort').value : 22) || 22;
+
+      const payload = {
+        target_host: targetHost,
+        target_role: targetRole,
+        frp_port: frpPort,
+        wss_port: wssPort,
+        backhaul_port: backhaulPort,
+        bagher_port: bagherPort
+      };
+      benchData = await api('/api/benchmark/run', payload);
     } else {
       benchData = await api('/api/benchmark');
     }
@@ -5923,6 +6160,23 @@ async function loadBenchmark(forceRun = false) {
     peerData = await api('/api/peer/status');
   } catch (err) {
     reportErr('peerlink', err);
+  }
+
+  // Auto-detect target IP if empty and known from config or peer
+  const hostInput = $('benchTargetHost');
+  if (hostInput && !hostInput.value.trim()) {
+    if (peerData && peerData.peer_url) {
+      try {
+        const u = new URL(peerData.peer_url.startsWith('http') ? peerData.peer_url : 'http://' + peerData.peer_url);
+        if (u.hostname) {
+          hostInput.value = u.hostname;
+          if ($('benchAutoDetectBadge')) $('benchAutoDetectBadge').style.display = 'inline-block';
+        }
+      } catch (_) {}
+    } else if (benchData && benchData.target_host) {
+      hostInput.value = benchData.target_host;
+      if ($('benchAutoDetectBadge')) $('benchAutoDetectBadge').style.display = 'inline-block';
+    }
   }
 
   renderBenchmark(benchData, peerData);
@@ -5938,9 +6192,9 @@ function renderBenchmark(bench, peer) {
     const badge = $('peerLinkBadge');
     if (badge) {
       badge.className = 'badge ' + (isConn ? 'ok' : 'err');
-      badge.textContent = isConn ? 'Connected' : (peer.peer_url ? 'Unreachable' : 'Unpaired');
+      badge.textContent = isConn ? 'Connected' : (peer.peer_url ? 'Unreachable' : 'Not configured');
     }
-    if ($('peerRoleVal')) $('peerRoleVal').textContent = (peer.role === 'master' ? 'Master (Iran)' : 'Worker (Kharej)');
+    if ($('peerRoleVal')) $('peerRoleVal').textContent = (peer.role === 'master' ? 'Master (Iran)' : 'Worker (Foreign)');
     if ($('peerUrlVal')) $('peerUrlVal').textContent = peer.peer_url || '—';
     if ($('peerInternalVal')) $('peerInternalVal').textContent = peer.internal_ip || '—';
     if ($('peerLatencyVal')) $('peerLatencyVal').textContent = (peer.latency_ms > 0 ? peer.latency_ms.toFixed(1) + ' ms' : '—');
@@ -5952,7 +6206,7 @@ function renderBenchmark(bench, peer) {
     if ($('autoPilotBadge')) {
       const b = $('autoPilotBadge');
       b.className = 'badge ' + (peer.autopilot ? 'warn' : 'dim');
-      b.textContent = peer.autopilot ? '[ ON ] Auto-Switching' : '[ OFF ] Manual Mode';
+      b.textContent = peer.autopilot ? '[ ON ] Auto Switch' : '[ OFF ] Manual';
     }
   }
 
@@ -5964,22 +6218,46 @@ function renderBenchmark(bench, peer) {
     const winnerName = winner ? (winner.name || winner.id).replace(/\s*\(.*?\)/, '') : '—';
     const activeName = active ? (active.name || active.id).replace(/\s*\(.*?\)/, '') : '—';
 
+    // Winner Banner Showcase
+    const winnerBanner = $('benchWinnerBanner');
+    if (winner && winnerBanner) {
+      winnerBanner.classList.remove('hidden');
+      if ($('benchWinnerTitle')) $('benchWinnerTitle').textContent = winner.name || winner.id;
+      if ($('benchWinnerScore')) $('benchWinnerScore').textContent = `${winner.score} / 100`;
+      if ($('benchWinnerBadge')) {
+        const wb = $('benchWinnerBadge');
+        wb.className = 'badge ' + (winner.status === 'healthy' ? 'ok' : (winner.status === 'good' ? 'info' : 'warn'));
+        wb.textContent = winner.status === 'healthy' ? '⚡ Highest Stability' : (winner.status === 'good' ? '🟢 Good Quality' : '⚠️ Conditional');
+      }
+      if ($('benchWinnerDesc')) {
+        const rttTxt = winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} ms RTT` : 'Fast response';
+        $('benchWinnerDesc').textContent = `Based on live test, this protocol with packet loss ${winner.packet_loss}% and ${rttTxt} offers the best throughput for bypassing filtering and network disruption.`;
+      }
+      const applyBtn = $('benchApplyWinnerBtn');
+      if (applyBtn) {
+        applyBtn.onclick = () => smartApplyOrSetupCarrier(winner.id, winner.name);
+      }
+    } else if (winnerBanner) {
+      winnerBanner.classList.add('hidden');
+    }
+
     if ($('benchStatWinner')) $('benchStatWinner').textContent = winnerName;
-    if ($('benchStatWinnerSub')) $('benchStatWinnerSub').textContent = winner ? `Score: ${winner.score}/100 · ${winner.avg_rtt_ms} ms` : 'Top candidate';
+    if ($('benchStatWinnerSub')) $('benchStatWinnerSub').textContent = winner ? `Score: ${winner.score}/100 · ${winner.avg_rtt_ms} ms` : 'Top Recommendation';
     if ($('benchStatActive')) $('benchStatActive').textContent = activeName;
-    if ($('benchStatActiveSub')) $('benchStatActiveSub').textContent = tr('x031', "Active route");
+    if ($('benchStatActiveSub')) $('benchStatActiveSub').textContent = 'Active Network Carrier';
     if ($('benchStatMinRtt')) $('benchStatMinRtt').textContent = minRtt > 0 ? `${minRtt.toFixed(1)} ms` : (winner && winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} ms` : '—');
-    if ($('benchStatMinRttSub')) $('benchStatMinRttSub').textContent = tr('x032', "Best round-trip");
+    if ($('benchStatMinRttSub')) $('benchStatMinRttSub').textContent = 'Minimum Round Trip Time';
     if ($('benchStatLoss')) $('benchStatLoss').textContent = winner ? `${winner.packet_loss}%` : '0%';
-    if ($('benchStatLossSub')) $('benchStatLossSub').textContent = (winner && winner.packet_loss === 0) ? (tr('x033', "Zero loss link")) : (tr('x034', "Packet drop rate"));
+    if ($('benchStatLossSub')) $('benchStatLossSub').textContent = (winner && winner.packet_loss === 0) ? 'No Packet Loss' : 'Best Carrier Packet Loss';
 
     if ($('benchMetaSub')) {
-      $('benchMetaSub').textContent = `${tr('x035', "Last benchmark")}: ${bench.timestamp || '—'} · ${bench.metrics.length} ${tr('x036', "candidates probed")}`;
+      const tgt = bench.target_host ? `to ${bench.target_host}` : '';
+      $('benchMetaSub').textContent = `Last benchmark: ${bench.timestamp || '—'} · Tested ${bench.metrics.length} carriers ${tgt}`;
     }
   }
 
   if (bench && bench.auto_pilot) {
-    if ($('autoPilotLastVal')) $('autoPilotLastVal').textContent = bench.auto_pilot.last_triggered || (tr('x037', "None"));
+    if ($('autoPilotLastVal')) $('autoPilotLastVal').textContent = bench.auto_pilot.last_triggered || 'None';
     if ($('autoPilotCountVal')) $('autoPilotCountVal').textContent = bench.auto_pilot.trigger_count || 0;
   }
 
@@ -5988,7 +6266,7 @@ function renderBenchmark(bench, peer) {
   if (!tbody) return;
 
   if (!bench || !bench.metrics || bench.metrics.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: tr('empty_bench_title', 'No benchmark metrics yet'), msg: tr('empty_bench_msg', 'Run a carrier benchmark to compare protocols.'), actionKey: 'runbench', actionLabel: tr('bench_run_btn', 'Run Carrier Benchmark'), compact: true })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: 'No benchmark run yet', msg: 'Enter foreign server address and click Run Smart Benchmark.', actionKey: 'runbench', actionLabel: '⚡ Run Smart Benchmark', compact: true })}</td></tr>`;
     return;
   }
 
@@ -6001,16 +6279,16 @@ function renderBenchmark(bench, peer) {
     let statusLabel = m.status;
     if (m.status === 'healthy') {
       statusClass = 'ok';
-      statusLabel = tr('x039', "Healthy");
+      statusLabel = 'Excellent';
     } else if (m.status === 'good') {
       statusClass = 'info';
-      statusLabel = tr('x040', "Good");
+      statusLabel = 'Good';
     } else if (m.status === 'warning') {
       statusClass = 'warn';
-      statusLabel = tr('x041', "Warning");
+      statusLabel = 'Lossy';
     } else if (m.status === 'critical' || m.status === 'down') {
       statusClass = 'err';
-      statusLabel = tr('x042', "Down");
+      statusLabel = 'Down';
     }
 
     let lossClass = 'ok';
@@ -6023,38 +6301,40 @@ function renderBenchmark(bench, peer) {
     const cleanName = (m.name || m.id).replace(/\s*\(.*?\)/, '');
     const cleanSub = m.name && m.name.includes('(') ? m.name.match(/\((.*?)\)/)[1] : '';
 
-    const portStr = m.port > 0 ? m.port : (tr('x043', "Raw 47"));
+    const portStr = m.port > 0 ? m.port : 'Raw 47';
 
     // Protocol badge styling
-    let protoPill = `<span class="bench-proto-pill dim">${esc(m.type.toUpperCase())}</span>`;
+    let protoPill = `<span class="bench-proto-pill dim">${esc((m.type || '').toUpperCase())}</span>`;
     const tLower = (m.type || '').toLowerCase();
-    if (tLower === 'gre') {
-      protoPill = `<span class="bench-proto-pill u-pill-sky">GRE KERNEL</span>`;
+    if (tLower === 'gre' || tLower === 'direct') {
+      protoPill = `<span class="bench-proto-pill u-pill-sky">GRE DIRECT</span>`;
     } else if (tLower === 'frp_tcp') {
-      protoPill = `<span class="bench-proto-pill" style="background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)">TCP MUX</span>`;
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)">FRP TCP</span>`;
     } else if (tLower === 'frp_kcp') {
-      protoPill = `<span class="bench-proto-pill" style="background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)">KCP ARQ</span>`;
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)">FRP KCP</span>`;
     } else if (tLower === 'frp_quic') {
-      protoPill = `<span class="bench-proto-pill u-pill-violet">QUIC UDP</span>`;
-    } else if (tLower === 'frp_ws') {
+      protoPill = `<span class="bench-proto-pill u-pill-violet">FRP QUIC</span>`;
+    } else if (tLower === 'frp_ws' || tLower === 'websocket') {
       protoPill = `<span class="bench-proto-pill" style="background:rgba(20,184,166,0.15);color:#2dd4bf;border:1px solid rgba(20,184,166,0.3)">WEBSOCKET</span>`;
-    } else if (tLower === 'wss') {
+    } else if (tLower === 'frp_wss' || tLower === 'wss') {
       protoPill = `<span class="bench-proto-pill" style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3)">WSS TLS</span>`;
     } else if (tLower.includes('backhaul')) {
       protoPill = `<span class="bench-proto-pill info">BACKHAUL</span>`;
+    } else if (tLower.includes('ssh') || tLower.includes('bagher')) {
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(236,72,153,0.15);color:#f472b6;border:1px solid rgba(236,72,153,0.3)">BAGHER SSH</span>`;
     }
 
     const rowBg = isActive
       ? 'background:rgba(56,189,248,0.06);'
-      : (isWinner ? 'background:rgba(16,185,129,0.03);' : '');
+      : (isWinner ? 'background:rgba(16,185,129,0.04);' : '');
 
     html += `<tr class="${isActive ? 'row-active' : ''}" style="${rowBg}">
       <td style="text-align:center;width:44px;">${rankBadge}</td>
       <td>
         <div class="u-flex-center-gap8">
           <strong style="color:var(--tx);font-size:13.5px;">${esc(cleanName)}</strong>
-          ${isActive ? `<span class="badge ok" style="font-size:12px;padding:2px 6px;">${tr('x044', "ACTIVE")}</span>` : ''}
-          ${isWinner ? `<span class="badge info" style="font-size:12px;padding:2px 6px;">${tr('x045', "BEST")}</span>` : ''}
+          ${isActive ? `<span class="badge ok" style="font-size:12px;padding:2px 6px;">Active</span>` : ''}
+          ${isWinner ? `<span class="badge info" style="font-size:12px;padding:2px 6px;">Recommended</span>` : ''}
         </div>
         ${cleanSub ? `<div style="font-size:12px;color:var(--mu);margin-top:2px;">${esc(cleanSub)}</div>` : ''}
       </td>
@@ -6073,8 +6353,8 @@ function renderBenchmark(bench, peer) {
       </td>
       <td><span class="badge ${statusClass} u-fs-12">${esc(statusLabel)}</span></td>
       <td>
-        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs" disabled style="opacity:0.65;font-weight:600;padding:5px 12px;">${tr('x046', "Current")}</button>` :
-          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="applyCarrierClick('${esc(m.id)}')">${tr('x047', "Switch")}</button>`}
+        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs" disabled style="opacity:0.65;font-weight:600;padding:5px 12px;">Current Carrier</button>` :
+          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="smartApplyOrSetupCarrier('${esc(m.id)}', '${esc(m.name || m.id)}')">${isWinner ? '🚀 Top Pick' : 'Switch'}</button>`}
       </td>
     </tr>`;
   });
@@ -6084,46 +6364,125 @@ function renderBenchmark(bench, peer) {
 
 async function runBenchmarkClick() {
   if (benchRunning) return;
+  const targetHost = ($('benchTargetHost') ? $('benchTargetHost').value.trim() : '');
+  const isConn = peerData && peerData.is_connected;
+  
+  if (!targetHost && !isConn) {
+    toastWarn('Enter Destination', 'Please enter foreign server IP or domain name before benchmarking.');
+    if ($('benchTargetHost')) $('benchTargetHost').focus();
+    return;
+  }
+
   benchRunning = true;
   const btn = $('benchRunBtn');
   const txt = $('benchRunBtnTxt');
   if (btn) btn.disabled = true;
-  if (txt) txt.textContent = tr('x048', "Probing carriers...");
-  toast(tr('x049', "Benchmarking carriers"), tr('x050', "Probing GRE, WSS, TCP, KCP, QUIC, and WS..."));
+  if (txt) txt.textContent = 'Benchmarking carriers...';
+  toast('Running Benchmark', 'Probing all Hashem carriers concurrently...');
 
   try {
     await loadBenchmark(true);
-    toastOk(tr('x051', "Benchmark Complete"), `${tr('x052', "Best Carrier")}: ${benchData ? (benchData.best_carrier || '—') : '—'}`);
+    toastOk('Benchmark Complete', `Best Carrier: ${benchData ? (benchData.best_carrier_name || benchData.best_carrier || '—') : '—'}`);
   } catch (err) {
-    toastErr(tr('x053', "Benchmark failed"), err.message || err);
+    toastErr('Benchmark failed', err.message || err);
   } finally {
     benchRunning = false;
     if (btn) btn.disabled = false;
-    if (txt) txt.textContent = tr('bench_run_btn', 'Run Carrier Benchmark');
+    if (txt) txt.textContent = '⚡ Run Carrier Benchmark';
   }
+}
+
+async function smartApplyOrSetupCarrier(carrierId, carrierName) {
+  const cleanName = carrierName || carrierId;
+  const targetHost = ($('benchTargetHost') ? $('benchTargetHost').value.trim() : '');
+  const isConn = peerData && peerData.is_connected;
+
+  // Case 1: Servers are already paired & active -> instant carrier switch with confirmation modal
+  if (isConn) {
+    entConfirm({
+      title: 'Switch to Best Carrier',
+      msg: `Switch both Iran and Foreign servers to carrier "${esc(cleanName)}"?`,
+      okText: 'Confirm Switch',
+      cancelText: 'Cancel',
+      danger: false
+    }, async () => {
+      toast('Applying Carrier', `${cleanName}...`);
+      try {
+        const res = await api('/api/benchmark/apply', { carrier: carrierId });
+        toastOk('Carrier Applied', res.detail || `Active carrier switched to ${cleanName}.`);
+        await loadBenchmark();
+      } catch (err) {
+        toastErr('Apply failed', err.message || err);
+      }
+    });
+    return;
+  }
+
+  // Case 2: Pre-connection benchmark -> smart navigate to setup and pre-fill fields
+  toastOk('Carrier Selected', `Opening setup for recommended carrier ${cleanName}...`);
+
+  // If Bagher (SSH forward) selected
+  if (carrierId.startsWith('bagher') || carrierId === 'sshfwd') {
+    if (typeof goTab === 'function') goTab('sshfwd');
+    if (targetHost) {
+      if ($('sshfwdRemoteHost')) $('sshfwdRemoteHost').value = targetHost;
+      if ($('bagherQuickRemoteHost')) $('bagherQuickRemoteHost').value = targetHost;
+    }
+    toast('Bagher Setup', 'Fill server credentials in Bagher tab and apply.');
+    return;
+  }
+
+  // Quick Setup tab navigation
+  if (typeof goTab === 'function') goTab('setup');
+
+  // Pre-fill target host in setup
+  if (targetHost && $('sRemotePub')) {
+    $('sRemotePub').value = targetHost;
+  }
+
+  // Set appropriate engine & transport
+  if (carrierId.startsWith('backhaul')) {
+    const bhBtn = $('engBh');
+    if (bhBtn) bhBtn.click();
+  } else if (carrierId === 'direct') {
+    const greBtn = $('engGreFrp');
+    if (greBtn) greBtn.click();
+    const trans = $('sTransport');
+    if (trans) trans.value = 'tcp';
+  } else if (carrierId.startsWith('frp:')) {
+    const greBtn = $('engGreFrp');
+    if (greBtn) greBtn.click();
+    const trans = $('sTransport');
+    const sub = carrierId.replace('frp:', '');
+    if (trans) {
+      if (sub === 'kcp') trans.value = 'kcp';
+      else if (sub === 'quic') trans.value = 'quic';
+      else if (sub === 'ws' || sub === 'websocket') trans.value = 'websocket';
+      else if (sub === 'wss') trans.value = 'wss';
+      else trans.value = 'tcp';
+    }
+  } else if (carrierId.startsWith('wss')) {
+    const greBtn = $('engGreFrp');
+    if (greBtn) greBtn.click();
+    const trans = $('sTransport');
+    if (trans) trans.value = 'wss';
+  }
+
+  toast('Carrier Configured', `Config loaded for ${cleanName}. Apply when ready.`);
 }
 
 async function applyCarrierClick(carrierId) {
-  const confirmMsg = tr('carrier_switch_confirm', 'Switch both Iran & Foreign servers to carrier "{id}"?').replace('{id}', carrierId);
-  if (!confirm(confirmMsg)) return;
-  toast(tr('x054', "Applying carrier"), `${carrierId}...`);
-  try {
-    const res = await api('/api/benchmark/apply', { carrier: carrierId });
-    toastOk(tr('x055', "Carrier Applied"), res.detail || `Active carrier is now ${carrierId}`);
-    await loadBenchmark();
-  } catch (err) {
-    toastErr(tr('x056', "Apply failed"), err.message || err);
-  }
+  smartApplyOrSetupCarrier(carrierId);
 }
 
 async function testPeerLinkClick() {
-  toast('Testing link', 'Sending probe to peer...');
+  toast('Testing Peer Link', 'Sending probe to peer panel...');
   try {
     const res = await api('/api/peer/config', { action: 'test' });
     if (res.reachable) {
-      toastOk('Peer reachable', `Round-trip latency: ${res.latency_ms.toFixed(1)} ms`);
+      toastOk('Peer Connected', `RTT: ${res.latency_ms.toFixed(1)} ms`);
     } else {
-      toastWarn('Peer unreachable', 'Could not establish connection to remote peer.');
+      toastWarn('Peer Unreachable', 'Could not reach remote panel web endpoint.');
     }
     await loadBenchmark();
   } catch (err) {
@@ -6139,10 +6498,10 @@ async function saveAutoPilotClick() {
   setBtnLoading(btn, true, 'Saving…');
   try {
     await api('/api/benchmark/autopilot', { enabled: enabled, threshold: thresh });
-    toastOk('Failover Policy Saved', enabled ? `Automatic Failover is now ON (threshold: ${thresh}%)` : 'Automatic Failover is OFF (Manual Mode)');
+    toastOk('Failover Policy Saved', enabled ? `Auto failover enabled (Threshold: ${thresh}%)` : 'Auto failover disabled (Manual mode)');
     await loadBenchmark();
   } catch (err) {
-    toastErr('Failed to save Failover Policy', err.message || err);
+    toastErr('Failed to save failover policy', err.message || err);
   } finally {
     setBtnLoading(btn, false);
   }
@@ -6174,11 +6533,11 @@ async function savePeerConfigClick() {
     const payload = { role, peer_url: url, internal_ip: internal };
     if (secret) payload.peer_secret = secret;
     await api('/api/peer/config', payload);
-    toastOk('Peer Config Saved', 'Remote link configuration updated.');
+    toastOk('Peer Config Saved', 'Remote panel link updated.');
     closePeerConfig();
     await loadBenchmark();
   } catch (err) {
-    toastErr('Save failed', err.message || err);
+    toastErr('Failed to save peer config', err.message || err);
   }
 }
 
@@ -6191,4 +6550,1286 @@ async function savePeerConfigClick() {
   on('peerConfigCloseBtn', 'click', closePeerConfig);
   on('cfgPeerSaveBtn', 'click', savePeerConfigClick);
   on('autoPilotSaveBtn', 'click', saveAutoPilotClick);
+
+  // Role buttons
+  const iranBtn = $('benchRoleIranBtn');
+  const forBtn = $('benchRoleForeignBtn');
+  const roleInput = $('benchTargetRole');
+  const roleHint = $('benchRoleHint');
+  const hostLabel = document.querySelector('label[for="benchTargetHost"] span');
+
+  if (iranBtn && forBtn && roleInput) {
+    iranBtn.addEventListener('click', () => {
+      iranBtn.classList.add('active');
+      iranBtn.setAttribute('aria-pressed', 'true');
+      forBtn.classList.remove('active');
+      forBtn.setAttribute('aria-pressed', 'false');
+      roleInput.value = 'iran';
+      if (roleHint) roleHint.textContent = 'On Iran server, enter foreign server address to probe all 7 protocols outwards.';
+      if (hostLabel) hostLabel.textContent = 'Foreign Server Public IP or Domain (Destination)';
+    });
+
+    forBtn.addEventListener('click', () => {
+      forBtn.classList.add('active');
+      forBtn.setAttribute('aria-pressed', 'true');
+      iranBtn.classList.remove('active');
+      iranBtn.setAttribute('aria-pressed', 'false');
+      roleInput.value = 'foreign';
+      if (roleHint) roleHint.textContent = 'On foreign server, enter Iran server address to probe inbound connectivity.';
+      if (hostLabel) hostLabel.textContent = 'Iran Server Public IP or Domain (Destination)';
+    });
+  }
+
+  // Advanced options accordion
+  const advToggle = $('benchAdvToggle');
+  const advWrap = $('benchAdvWrap');
+  const advChevron = $('benchAdvChevron');
+  if (advToggle && advWrap) {
+    advToggle.addEventListener('click', () => {
+      advWrap.classList.toggle('hidden');
+      if (advChevron) {
+        advChevron.textContent = advWrap.classList.contains('hidden') ? '▼ Expand' : '▲ Collapse';
+      }
+    });
+  }
 })();
+
+// Expose on window for inline handlers
+window.loadBenchmark = loadBenchmark;
+window.runBenchmarkClick = runBenchmarkClick;
+window.applyCarrierClick = applyCarrierClick;
+window.smartApplyOrSetupCarrier = smartApplyOrSetupCarrier;
+window.testPeerLinkClick = testPeerLinkClick;
+window.saveAutoPilotClick = saveAutoPilotClick;
+window.openPeerConfig = openPeerConfig;
+window.closePeerConfig = closePeerConfig;
+window.savePeerConfigClick = savePeerConfigClick;
+
+// ---------- SSH Forward Carrier (tab-sshfwd) ----------
+_sshfwdData = null;
+
+let lastBagherBytesRx = 0, lastBagherBytesTx = 0, lastBagherTime = 0;
+function formatSpeedRate(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s';
+  const k = 1024;
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  const i = Math.min(Math.floor(Math.log(bytesPerSec) / Math.log(k)), sizes.length - 1);
+  return (bytesPerSec / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+}
+
+async function loadSSHFwd() {
+  try {
+    _sshfwdData = await api('/api/sshfwd');
+    renderSSHFwd();
+  } catch (err) {
+    reportErr('sshfwd', err);
+  }
+}
+
+let _bagherUserPickedRole = null;
+
+function setBagherRole(role) {
+  _bagherUserPickedRole = role;
+  const iran = role === 'iran';
+  if ($('bagherRoleIran')) $('bagherRoleIran').setAttribute('aria-pressed', iran ? 'true' : 'false');
+  if ($('bagherRoleForeign')) $('bagherRoleForeign').setAttribute('aria-pressed', !iran ? 'true' : 'false');
+  if ($('bagherRoleInput')) $('bagherRoleInput').value = role;
+  if ($('bagherIranWrap')) $('bagherIranWrap').hidden = !iran;
+  if ($('bagherForeignWrap')) $('bagherForeignWrap').hidden = iran;
+  if ($('bagherActiveRoleBadge')) {
+    $('bagherActiveRoleBadge').textContent = 'Role: ' + (iran ? 'Iran Server' : 'Foreign Server');
+  }
+  if ($('bagherRoleHint')) {
+    $('bagherRoleHint').textContent = iran
+      ? 'Iran server receives inbound user traffic, listens on forwarded ports, and securely multiplexes to the Foreign server.'
+      : 'Foreign server runs outbound proxy/services, terminates stealth multiplexed tunnels, and processes traffic.';
+  }
+}
+
+function renderSSHFwd() {
+  const d = _sshfwdData || {};
+  const active = !!(d.is_active || d.enabled);
+  const badge = $('sshfwdStatusBadge');
+  const toggleBtn = $('sshfwdToggleBtn');
+
+  if (badge) {
+    badge.className = 'badge ' + (active ? 'ok' : 'info');
+    badge.textContent = active ? (d.connected ? 'Active' : 'Standby / Ready') : 'Inactive';
+  }
+  if (toggleBtn) {
+    toggleBtn.textContent = active ? 'Disable' : 'Enable';
+    toggleBtn.className = 'hashem-btn ' + (active ? 'hashem-btn-danger' : 'hashem-btn-primary');
+  }
+
+  // Server role rendering
+  const serverRole = d.role === 'foreign' ? 'foreign' : 'iran';
+  if (!_bagherUserPickedRole) {
+    setBagherRole(serverRole);
+  } else {
+    setBagherRole(_bagherUserPickedRole);
+  }
+
+  const iranApplyBtn = $('bagherIranApplyBtn');
+  const iranStopBtn = $('bagherIranStopBtn');
+  const foreignConnectBtn = $('bagherForeignConnectBtn');
+  const foreignStopBtn = $('bagherForeignStopBtn');
+
+  if (active) {
+    if (iranApplyBtn) iranApplyBtn.textContent = '🔄 Update Iran Server & Re-issue Bundle';
+    if (iranStopBtn) iranStopBtn.classList.remove('hidden');
+    if (foreignConnectBtn) foreignConnectBtn.textContent = '🔄 Update Foreign Connection';
+    if (foreignStopBtn) foreignStopBtn.classList.remove('hidden');
+  } else {
+    if (iranApplyBtn) iranApplyBtn.textContent = '🚀 Initialize Iran Server & Issue Bundle';
+    if (iranStopBtn) iranStopBtn.classList.add('hidden');
+    if (foreignConnectBtn) foreignConnectBtn.textContent = '⚡ Connect to Iran & Start Foreign Tunnel';
+    if (foreignStopBtn) foreignStopBtn.classList.add('hidden');
+  }
+
+  // Live health & metrics
+  const connBadge = $('bagherConnBadge');
+  if (connBadge) {
+    if (d.connected) {
+      connBadge.className = 'badge ok';
+      connBadge.textContent = 'Connected (Online)';
+      connBadge.style.background = '#10b981';
+      connBadge.style.color = '#fff';
+    } else if (active) {
+      connBadge.className = 'badge warn';
+      connBadge.textContent = d.role === 'foreign' ? 'Connecting to Iran...' : 'Ready (Waiting for Peer)';
+      connBadge.style.background = '#f59e0b';
+      connBadge.style.color = '#000';
+    } else {
+      connBadge.className = 'badge info';
+      connBadge.textContent = 'Inactive (Offline)';
+      connBadge.style.background = 'rgba(255,255,255,0.1)';
+      connBadge.style.color = '';
+    }
+  }
+  if ($('bagherRoleTxt')) {
+    $('bagherRoleTxt').textContent = 'Role: ' + (d.role === 'foreign' ? 'Foreign Server' : 'Iran Server');
+  }
+  if ($('bagherLatencyVal')) {
+    $('bagherLatencyVal').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : '—';
+  }
+  if ($('bagherLivePing')) {
+    if (active) {
+      $('bagherLivePing').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : 'Optimal';
+    } else {
+      $('bagherLivePing').textContent = 'Standby';
+    }
+  }
+  if ($('bagherTrafficTotal')) {
+    $('bagherTrafficTotal').textContent = d.total_formatted || '0 B';
+  }
+  if ($('bagherTrafficUpDown')) {
+    $('bagherTrafficUpDown').textContent = `↓ ${d.rx_formatted || '0 B'}  ↑ ${d.tx_formatted || '0 B'}`;
+  }
+  const now = Date.now();
+  let rxSpeedStr = '0 B/s', txSpeedStr = '0 B/s';
+  const curRx = typeof d.rx_bytes === 'number' ? d.rx_bytes : 0;
+  const curTx = typeof d.tx_bytes === 'number' ? d.tx_bytes : 0;
+  if (lastBagherTime && now > lastBagherTime) {
+    const deltaSec = (now - lastBagherTime) / 1000;
+    if (deltaSec >= 0.5) {
+      if (curRx >= lastBagherBytesRx) rxSpeedStr = formatSpeedRate((curRx - lastBagherBytesRx) / deltaSec);
+      if (curTx >= lastBagherBytesTx) txSpeedStr = formatSpeedRate((curTx - lastBagherBytesTx) / deltaSec);
+    }
+  }
+  lastBagherBytesRx = curRx;
+  lastBagherBytesTx = curTx;
+  lastBagherTime = now;
+
+  if ($('bagherLiveSpeed')) {
+    $('bagherLiveSpeed').textContent = `↓ ${rxSpeedStr}  ↑ ${txSpeedStr}`;
+  }
+  if ($('bagherLiveTotal')) {
+    $('bagherLiveTotal').textContent = d.total_formatted || '0 B';
+  }
+  if ($('bagherLiveSockets')) {
+    if (active) {
+      $('bagherLiveSockets').textContent = (d.pool_count || 25) + ' Active';
+    } else {
+      $('bagherLiveSockets').textContent = `0 Active (Pool: ${d.pool_count || 25})`;
+    }
+  }
+  if ($('bagherConnsVal')) {
+    $('bagherConnsVal').textContent = String(d.cur_conns || 0);
+  }
+  if ($('bagherBundleText')) {
+    $('bagherBundleText').value = d.bundle || '';
+  }
+
+  // Inputs: do not force default values; keep empty placeholders unless saved
+  if ($('sshfwdRemoteHost') && !$('sshfwdRemoteHost').value && d.remote_host) $('sshfwdRemoteHost').value = d.remote_host;
+  if ($('sshfwdRemoteUser') && !$('sshfwdRemoteUser').value && d.remote_user) $('sshfwdRemoteUser').value = d.remote_user;
+  if ($('sshfwdRemotePort') && !$('sshfwdRemotePort').value && d.remote_ssh_port > 0) $('sshfwdRemotePort').value = d.remote_ssh_port;
+  if ($('sshfwdPorts') && !$('sshfwdPorts').value && Array.isArray(d.ports) && d.ports.length > 0) $('sshfwdPorts').value = d.ports.join(', ');
+
+  const modeEl = $('sshfwdMode');
+  if (modeEl) modeEl.value = 'bagher';
+  if ($('sshfwdPoolCount') && !$('sshfwdPoolCount').value && d.pool_count > 0) $('sshfwdPoolCount').value = d.pool_count;
+  if ($('sshfwdFRPPort') && !$('sshfwdFRPPort').value && d.frp_bind_port > 0) $('sshfwdFRPPort').value = d.frp_bind_port;
+
+  const foreignCmd = $('sshfwdForeignCmd');
+  if (foreignCmd) foreignCmd.value = d.foreign_setup_cmd || '';
+
+  const authLine = $('sshfwdAuthLine');
+  if (authLine) authLine.value = d.auth_line || '';
+
+  const isLicensed = isBagherLicensed();
+  const bagherContainer = $('bagherCardContainer');
+  const bagherLockedBanner = $('bagherLockedBanner');
+  const bagherModal = $('bagherLicModal');
+  const bagherMachineHash = $('bagherLicMachineHash');
+
+  if (bagherMachineHash && (d.machine_hash || (_licenseData && _licenseData.machine_hash))) {
+    bagherMachineHash.value = d.machine_hash || _licenseData.machine_hash;
+  }
+
+  if (!isLicensed) {
+    if (bagherContainer) {
+      bagherContainer.style.filter = 'blur(10px)';
+      bagherContainer.style.pointerEvents = 'none';
+      bagherContainer.style.opacity = '0.2';
+      bagherContainer.style.userSelect = 'none';
+    }
+    if (bagherLockedBanner) {
+      bagherLockedBanner.classList.remove('hidden');
+    }
+    const navLock = $('bagherNavLock');
+    if (navLock) navLock.classList.remove('hidden');
+    const curTab = (typeof state !== 'undefined' && state && state.tab) ? state.tab : '';
+    if (curTab === 'sshfwd' && bagherModal && bagherModal.hidden && !_bagherModalDismissed) {
+      bagherModal.hidden = false;
+    }
+  } else {
+    _bagherModalDismissed = true;
+    const navLock = $('bagherNavLock');
+    if (navLock) navLock.classList.add('hidden');
+    if (bagherContainer) {
+      bagherContainer.style.filter = '';
+      bagherContainer.style.pointerEvents = '';
+      bagherContainer.style.opacity = '';
+      bagherContainer.style.userSelect = '';
+    }
+    if (bagherLockedBanner) {
+      bagherLockedBanner.classList.add('hidden');
+    }
+    if (bagherModal) {
+      bagherModal.hidden = true;
+    }
+  }
+}
+
+// Universal Clipboard Copy with legacy execCommand and prompt fallbacks
+function copyTextSafe(text, title, msg) {
+  if (!text) {
+    toastErr('Copy Error', 'No text to copy.');
+    return;
+  }
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      ta.setAttribute('readonly', '');
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, 999999);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        toastOk(title || 'Copied', msg || 'Copied to clipboard successfully.');
+        return;
+      }
+    } catch (e) {
+      console.warn('execCommand copy failed:', e);
+    }
+    window.prompt('Copy with Ctrl+C:', text);
+  };
+
+  if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    navigator.clipboard.writeText(text).then(() => {
+      toastOk(title || 'Copied', msg || 'Copied to clipboard successfully.');
+    }).catch(err => {
+      console.warn('clipboard.writeText failed, using fallback:', err);
+      fallback();
+    });
+  } else {
+    fallback();
+  }
+}
+
+let _bagherModalDismissed = false;
+
+function openBagherLicModal() {
+  _bagherModalDismissed = false;
+  const m = $('bagherLicModal');
+  if (m) m.hidden = false;
+  const hashEl = $('bagherLicMachineHash');
+  if (hashEl) {
+    if (_licenseData && _licenseData.machine_hash) {
+      hashEl.value = _licenseData.machine_hash;
+    } else if (_sshfwdData && _sshfwdData.machine_hash) {
+      hashEl.value = _sshfwdData.machine_hash;
+    } else {
+      api('/api/license').then(d => {
+        if (d && d.machine_hash) hashEl.value = d.machine_hash;
+      }).catch(() => {});
+    }
+  }
+  const keyEl = $('bagherLicKeyInput');
+  if (keyEl && !keyEl.value) {
+    try {
+      const saved = localStorage.getItem('hashem_bagher_license');
+      if (saved) keyEl.value = saved;
+    } catch (e) {}
+  }
+}
+
+function closeBagherLicModal() {
+  _bagherModalDismissed = true;
+  const m = $('bagherLicModal');
+  if (m) m.hidden = true;
+}
+
+function cancelBagherLicModal() {
+  closeBagherLicModal();
+  goTab('dashboard');
+}
+
+function openBagherLicenseSettings() {
+  closeBagherLicModal();
+  goTab('settings');
+  setTimeout(() => {
+    const el = $('licKeyInput') || $('licenseCard');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (el.focus) el.focus();
+    }
+  }, 100);
+}
+
+async function activateBagherLicenseClick() {
+  const keyEl = $('bagherLicKeyInput');
+  const key = keyEl ? keyEl.value.trim() : '';
+  if (!key) {
+    toastErr('Empty Key', 'Please enter a valid license key.');
+    return;
+  }
+  try {
+    const res = await api('/api/license', { key });
+    try { localStorage.setItem('hashem_bagher_license', key); } catch (e) {}
+    toastOk('License Activated', 'Hashem Pro features unlocked successfully!');
+    if (keyEl) keyEl.value = '';
+    closeBagherLicModal();
+    await loadLicense();
+    await loadSSHFwd();
+    goTab('sshfwd');
+  } catch (err) {
+    toastErr('Activation Failed', err.message || String(err));
+  }
+}
+
+function bagherLicCopyMachineClick() {
+  const t = $('bagherLicMachineHash');
+  if (t && t.value) {
+    copyTextSafe(t.value, 'Copied', 'Server machine hash copied to clipboard.');
+  }
+}
+
+async function sshfwdToggleClick() {
+  const d = _sshfwdData || {};
+  const active = !!(d.is_active || d.enabled);
+  if (!active) {
+    const isLicensed = isBagherLicensed();
+    if (!isLicensed) {
+      openBagherLicModal();
+      toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
+      return;
+    }
+  }
+  try {
+    if (active) {
+      await api('/api/sshfwd', { action: 'disable' });
+      toastOk('Bagher Tunnel', 'Service stopped.');
+    } else {
+      const isLicensed = isBagherLicensed();
+      if (!isLicensed) {
+        openBagherLicModal();
+        toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
+        return;
+      }
+      const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
+      const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() || 'root' : 'root';
+      const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '', 10) || 22;
+      const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
+      const mode = 'bagher';
+      const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
+      const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
+      if (!remote_host) {
+        toastErr('Foreign IP Required', 'Please enter the Foreign server IP address.');
+        return;
+      }
+      if (!ports) {
+        toastErr('Forwarded Ports Required', 'Please specify at least one port to forward (e.g. 443, 8443).');
+        return;
+      }
+      await api('/api/sshfwd', { action: 'enable', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
+      toastOk('Bagher Tunnel', 'Bagher Tunnel started successfully.');
+    }
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('Operation Failed', err.message || err);
+  }
+}
+
+async function bagherIranApplyClick() {
+  const d = _sshfwdData || {};
+  const isLicensed = isBagherLicensed();
+  if (!isLicensed) {
+    openBagherLicModal();
+    toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
+    return;
+  }
+  const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
+  const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
+  if (!remote_host) {
+    toastErr('Foreign IP Required', 'Please enter the Foreign server IP address.');
+    if ($('sshfwdRemoteHost')) $('sshfwdRemoteHost').focus();
+    return;
+  }
+  if (!ports) {
+    toastErr('Forwarded Ports Required', 'Please specify at least one port to forward (e.g. 443, 8443).');
+    if ($('sshfwdPorts')) $('sshfwdPorts').focus();
+    return;
+  }
+  const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() || 'root' : 'root';
+  const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '', 10) || 22;
+  const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
+  const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
+
+  try {
+    toastOk('Initializing...', 'Configuring Iran service and generating connection bundle...');
+    const res = await api('/api/sshfwd', {
+      action: 'enable',
+      mode: 'bagher',
+      role: 'iran',
+      remote_host,
+      remote_user,
+      ssh_port,
+      ports,
+      pool_count,
+      frp_bind_port
+    });
+    if (res && res.bundle && $('bagherBundleText')) {
+      $('bagherBundleText').value = res.bundle;
+    }
+    toastOk('Iran Server Ready', 'Iran service active. Connection bundle generated in Step 3.');
+    await loadSSHFwd();
+    if ($('bagherIranBundleCard')) {
+      $('bagherIranBundleCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  } catch (err) {
+    toastErr('Iran Setup Failed', err.message || err);
+  }
+}
+
+async function bagherForeignConnectClick() {
+  const d = _sshfwdData || {};
+  let savedLic = '';
+  try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
+  let isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
+  if (!isLicensed && savedLic) {
+    try {
+      await api('/api/license', { key: savedLic });
+      isLicensed = true;
+    } catch (e) {}
+  }
+  if (!isLicensed) {
+    openBagherLicModal();
+    toastErr('License Required', 'Bagher Engine requires an active premium license.');
+    return;
+  }
+  const input = $('bagherPasteBundleInput');
+  const bundle = input ? input.value.trim() : '';
+  if (!bundle) {
+    toastErr('Empty Bundle', 'Please paste the connection bundle received from the Iran server.');
+    if (input) input.focus();
+    return;
+  }
+  try {
+    toastOk('Connecting...', 'Applying configuration and connecting Foreign server to Iran...');
+    const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle });
+    toastOk('Foreign Connected', res.message || 'Foreign server connected to Iran successfully!');
+    if (input) input.value = '';
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('Connection Failed', err.message || String(err));
+  }
+}
+
+async function bagherStopTunnelClick() {
+  try {
+    toastOk('Stopping...', 'Stopping Bagher tunnel services...');
+    await api('/api/sshfwd', { action: 'disable' });
+    toastOk('Tunnel Stopped', 'Bagher tunnel service disabled successfully.');
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('Failed to Stop Tunnel', err.message || err);
+  }
+}
+
+async function cleanBagherTunnelClick() {
+  const ok = await entConfirm('Purge Bagher Tunnel', 'Clean and purge Bagher Tunnel?\n\nThis will stop and remove all Bagher systemd services (frps, frpc, ssh-fwd), delete systemd service units, remove generated frp configs, clear firewall rules, and reset the tunnel to initial state. The SSH keypair is preserved.', 'Purge Services');
+  if (!ok) return;
+  try {
+    toastOk('Cleaning Tunnel', 'Purging Bagher services and configuration...');
+    const res = await api('/api/sshfwd', { action: 'clean' });
+    if (res && res.status === 'ok') {
+      toastOk('Tunnel Cleaned', 'Bagher tunnel has been completely reset.');
+      const bText = $('bagherBundleText'); if (bText) bText.value = '';
+      const bPast = $('bagherPasteBundleInput'); if (bPast) bPast.value = '';
+      await loadSSHFwd();
+      if (typeof refreshDash === 'function') await refreshDash();
+      if (typeof refreshTunnel === 'function') await refreshTunnel();
+    } else {
+      toastErr('Clean Failed', res ? res.message : 'Unknown error');
+    }
+  } catch (err) {
+    toastErr('Clean Error', err.message || err);
+  }
+}
+
+function bagherCopyBundleClick() {
+  const t = $('bagherBundleText');
+  const val = t ? t.value.trim() : '';
+  if (!val) {
+    toastErr('No Bundle', 'Please fill in Step 2 and click "Initialize Iran Server" first.');
+    return;
+  }
+  copyTextSafe(val, 'Bundle Copied', 'Bagher connection bundle copied to clipboard. Paste into Foreign server panel.');
+}
+
+async function sshfwdApplyClick() {
+  await bagherIranApplyClick();
+}
+
+async function bagherApplyBundleClick() {
+  await bagherForeignConnectClick();
+}
+
+(function initSSHFwdEvents() {
+  function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
+  on('bagherRoleIran', 'click', () => setBagherRole('iran'));
+  on('bagherRoleForeign', 'click', () => setBagherRole('foreign'));
+  on('bagherIranApplyBtn', 'click', bagherIranApplyClick);
+  on('bagherIranStopBtn', 'click', bagherStopTunnelClick);
+  on('bagherIranCleanBtn', 'click', cleanBagherTunnelClick);
+  on('bagherForeignConnectBtn', 'click', bagherForeignConnectClick);
+  on('bagherForeignStopBtn', 'click', bagherStopTunnelClick);
+  on('bagherForeignCleanBtn', 'click', cleanBagherTunnelClick);
+  on('sshfwdClearDnatBtn', 'click', sshfwdClearDnatClick);
+  on('sshfwdCopyAuthBtn', 'click', sshfwdCopyAuthClick);
+  on('sshfwdCopyForeignBtn', 'click', sshfwdCopyForeignClick);
+  on('bagherCopyBundleBtn', 'click', bagherCopyBundleClick);
+
+  // License Modal events
+  on('bagherLicModalClose', 'click', closeBagherLicModal);
+  on('bagherLicCancelBtn', 'click', cancelBagherLicModal);
+  on('bagherLicSubmitBtn', 'click', activateBagherLicenseClick);
+  on('bagherLicCopyMachineBtn', 'click', bagherLicCopyMachineClick);
+  on('bagherOpenLicModalBtn', 'click', openBagherLicModal);
+
+  // Auto-select text on click
+  ['bagherBundleText', 'sshfwdForeignCmd', 'sshfwdAuthLine', 'bagherLicMachineHash'].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener('click', () => { el.select(); });
+  });
+
+  // Periodic poll when on sshfwd tab
+  setInterval(() => {
+    const tab = $('tab-sshfwd');
+    if (tab && !tab.hidden && document.visibilityState === 'visible') {
+      loadSSHFwd();
+    }
+  }, 3500);
+})();
+
+/* --- License & Premium Feature Management --- */
+_licenseData = null;
+
+async function loadLicense() {
+  try {
+    let d = await api('/api/license');
+    if (!d || !d.is_valid) {
+      let saved = null;
+      try { saved = localStorage.getItem('hashem_bagher_license'); } catch (e) {}
+      if (saved && saved.trim()) {
+        try {
+          const autoRes = await api('/api/license', { key: saved.trim() });
+          if (autoRes && autoRes.status === 'ok') {
+            d = await api('/api/license');
+          }
+        } catch (e) {}
+      }
+    }
+    _licenseData = d;
+    renderLicense(d);
+  } catch (err) {
+    console.warn('Failed loading license:', err);
+  }
+}
+
+function renderLicense(d) {
+  if (!d) return;
+  if ($('licMachineHash')) $('licMachineHash').value = d.machine_hash || '';
+
+  const badge = $('licBadge');
+  const details = $('licActiveDetails');
+  const deactBtn = $('licDeactivateBtn');
+  const brandEls = document.querySelectorAll('.sidebar-brand .brand-name, .drawer-head .brand-name, #sidebarBrandName, #drawerBrandName');
+
+  if (d.is_valid) {
+    brandEls.forEach(el => {
+      el.innerHTML = 'Hashem <span class="badge" style="background:linear-gradient(135deg, #f59e0b, #ec4899); color:#fff; font-size:10px; font-weight:800; padding:2px 7px; border-radius:12px; letter-spacing:0.05em; vertical-align:middle; margin-left:6px; box-shadow:0 2px 8px rgba(245,158,11,0.4);">PRO</span>';
+    });
+    if (badge) {
+      badge.textContent = 'PREMIUM (Active)';
+      badge.style.background = '#10b981';
+      badge.style.color = '#fff';
+    }
+    if (details) details.classList.remove('hidden');
+    if (deactBtn) deactBtn.classList.remove('hidden');
+
+    if ($('licCustomerRow')) $('licCustomerRow').textContent = 'Customer: ' + (d.customer || '-');
+    if ($('licExpiresRow')) {
+      const expStr = d.expires_human || '-';
+      const daysStr = d.days_remaining >= 0 ? ` (${d.days_remaining} days left)` : ' (Lifetime)';
+      $('licExpiresRow').textContent = 'Expires: ' + expStr + daysStr;
+    }
+    if ($('licFeaturesRow')) {
+      $('licFeaturesRow').textContent = 'Unlocked Features: ' + (d.features && d.features.length ? d.features.join(', ') : 'All');
+    }
+    if ($('bagherLockedBanner')) $('bagherLockedBanner').classList.add('hidden');
+  } else {
+    brandEls.forEach(el => {
+      el.textContent = 'Hashem';
+    });
+    if (badge) {
+      badge.textContent = 'FREE EDITION';
+      badge.style.background = 'rgba(255,255,255,0.1)';
+      badge.style.color = '';
+    }
+    if (details) details.classList.add('hidden');
+    if (deactBtn) deactBtn.classList.add('hidden');
+    if ($('bagherLockedBanner') && $('sshfwdMode') && ($('sshfwdMode').value === 'bagher' || $('sshfwdMode').value === 'frp_ssh')) {
+      $('bagherLockedBanner').classList.remove('hidden');
+    }
+  }
+}
+
+async function activateLicenseClick() {
+  const keyEl = $('licKeyInput');
+  const key = keyEl ? keyEl.value.trim() : '';
+  if (!key) {
+    toastErr('Missing Key', 'Paste a valid license key string first.');
+    return;
+  }
+  try {
+    const res = await api('/api/license', { key });
+    try { localStorage.setItem('hashem_bagher_license', key); } catch (e) {}
+    toastOk('License Activated', 'Premium features unlocked for ' + (res.customer || 'this server') + '!');
+    if (keyEl) keyEl.value = '';
+    await loadLicense();
+    if (typeof loadSSHFwd === 'function') await loadSSHFwd();
+  } catch (err) {
+    toastErr('Activation Failed', err.message || String(err));
+  }
+}
+
+async function deactivateLicenseClick() {
+  if (!await entConfirm('Deactivate License', 'Deactivate and remove current license? Premium features will lock.', 'Deactivate')) return;
+  try {
+    await api('/api/license', { key: '' });
+    try { localStorage.removeItem('hashem_bagher_license'); } catch (e) {}
+    toastOk('License Removed', 'Reverted to Free edition.');
+    await loadLicense();
+    if (typeof loadSSHFwd === 'function') await loadSSHFwd();
+  } catch (err) {
+    toastErr('Failed', String(err));
+  }
+}
+
+function copyMachineHashClick() {
+  const el = $('licMachineHash');
+  if (el && el.value) {
+    copyTextSafe(el.value, 'Copied', 'Hardware machine hash copied to clipboard.');
+  }
+}
+
+function openBagherQuickEdit() {
+  const d = _sshfwdData || {};
+  if ($('bagherQuickRemoteHost')) $('bagherQuickRemoteHost').value = d.remote_host || ($('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value : '');
+  if ($('bagherQuickPorts')) {
+    const p = Array.isArray(d.ports) ? d.ports.join(', ') : (d.ports || ($('sshfwdPorts') ? $('sshfwdPorts').value : ''));
+    $('bagherQuickPorts').value = p;
+  }
+  if ($('bagherQuickPoolCount')) $('bagherQuickPoolCount').value = d.pool_count || 25;
+  if ($('bagherQuickBindPort')) $('bagherQuickBindPort').value = d.frp_bind_port || 55400;
+  const warn = $('bagherQuickEditWarn');
+  if (warn) { warn.textContent = ''; warn.classList.add('hidden'); }
+  const m = $('bagherQuickEditModal');
+  if (m) m.hidden = false;
+}
+
+function closeBagherQuickEdit() {
+  const m = $('bagherQuickEditModal');
+  if (m) m.hidden = true;
+}
+
+async function saveBagherQuickEdit() {
+  const remote_host = $('bagherQuickRemoteHost') ? $('bagherQuickRemoteHost').value.trim() : '';
+  const ports = $('bagherQuickPorts') ? $('bagherQuickPorts').value.trim() : '';
+  const pool_count = parseInt($('bagherQuickPoolCount') ? $('bagherQuickPoolCount').value : '', 10) || 25;
+  const frp_bind_port = parseInt($('bagherQuickBindPort') ? $('bagherQuickBindPort').value : '', 10) || 55400;
+  const warn = $('bagherQuickEditWarn');
+
+  if (!remote_host) {
+    if (warn) { warn.textContent = 'Please enter a valid Foreign Server IP / Host.'; warn.classList.remove('hidden'); }
+    return;
+  }
+  if (!ports) {
+    if (warn) { warn.textContent = 'Please specify at least one forwarded port.'; warn.classList.remove('hidden'); }
+    return;
+  }
+  if (warn) warn.classList.add('hidden');
+
+  try {
+    toastOk('Updating...', 'Applying Bagher tunnel changes...');
+    const res = await api('/api/sshfwd', {
+      action: 'enable',
+      mode: 'bagher',
+      role: 'iran',
+      remote_host,
+      remote_user: 'root',
+      ssh_port: 22,
+      ports,
+      pool_count,
+      frp_bind_port
+    });
+    if (res && res.bundle && $('bagherBundleText')) {
+      $('bagherBundleText').value = res.bundle;
+    }
+    toastOk('Bagher Updated', 'Tunnel settings updated and applied successfully!');
+    closeBagherQuickEdit();
+    if (typeof loadSSHFwd === 'function') await loadSSHFwd();
+    if (typeof pollDashboard === 'function') await pollDashboard();
+  } catch (err) {
+    if (warn) { warn.textContent = err.message || String(err); warn.classList.remove('hidden'); }
+    toastErr('Update Failed', err.message || String(err));
+  }
+}
+
+window.openBagherLicModal = openBagherLicModal;
+window.closeBagherLicModal = closeBagherLicModal;
+window.cancelBagherLicModal = cancelBagherLicModal;
+window.openBagherLicenseSettings = openBagherLicenseSettings;
+window.activateBagherLicenseClick = activateBagherLicenseClick;
+window.bagherLicCopyMachineClick = bagherLicCopyMachineClick;
+window.bagherIranApplyClick = bagherIranApplyClick;
+window.bagherForeignConnectClick = bagherForeignConnectClick;
+window.bagherStopTunnelClick = bagherStopTunnelClick;
+window.bagherCopyBundleClick = bagherCopyBundleClick;
+window.cleanBagherTunnelClick = cleanBagherTunnelClick;
+window.openBagherQuickEdit = openBagherQuickEdit;
+window.closeBagherQuickEdit = closeBagherQuickEdit;
+window.saveBagherQuickEdit = saveBagherQuickEdit;
+window.setBagherRole = setBagherRole;
+window.sshfwdClearDnatClick = sshfwdClearDnatClick;
+window.sshfwdCopyForeignClick = sshfwdCopyForeignClick;
+window.sshfwdCopyAuthClick = sshfwdCopyAuthClick;
+window.activateLicenseClick = activateLicenseClick;
+window.deactivateLicenseClick = deactivateLicenseClick;
+window.copyMachineHashClick = copyMachineHashClick;
+
+(function initLicenseEvents() {
+  function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
+  on('licActivateBtn', 'click', activateLicenseClick);
+  on('licDeactivateBtn', 'click', deactivateLicenseClick);
+  on('licCopyMachineBtn', 'click', copyMachineHashClick);
+
+  const origTabSwitch = window.switchTab;
+  if (typeof origTabSwitch === 'function') {
+    window.switchTab = function(name) {
+      origTabSwitch(name);
+      if (name === 'settings') loadLicense();
+    };
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    loadLicense();
+  });
+  setTimeout(loadLicense, 500);
+})();
+
+// ==========================================
+// Iran Mesh Cluster & High Availability
+// ==========================================
+_clusterData = null;
+
+async function loadClusterStatus() {
+  try {
+    const res = await api('/api/cluster/status');
+    _clusterData = res;
+    renderClusterUI(res);
+  } catch (err) {
+    if (err && err.message && (err.message.includes('402') || err.message.includes('Payment Required'))) {
+      const banner = $('clusterLockedBanner');
+      const card = $('clusterCardContainer');
+      if (banner) banner.classList.remove('hidden');
+      if (card) card.classList.add('hidden');
+      return;
+    }
+    toastMsg('err', 'Failed to load cluster status: ' + (err.message || err));
+  }
+}
+
+function renderClusterUI(data) {
+  const banner = $('clusterLockedBanner');
+  const card = $('clusterCardContainer');
+  if (!data || !data.licensed) {
+    if (banner) banner.classList.remove('hidden');
+    if (card) card.classList.add('hidden');
+    return;
+  }
+  if (banner) banner.classList.add('hidden');
+  if (card) card.classList.remove('hidden');
+
+  // Status Badge
+  const badge = $('clusterStatusBadge');
+  if (badge) {
+    if (!data.enabled) {
+      badge.className = 'badge info';
+      badge.textContent = 'Disabled';
+    } else if (data.active_failover) {
+      badge.className = 'badge warn';
+      badge.textContent = 'Failover Active';
+    } else {
+      badge.className = 'badge ok';
+      badge.textContent = 'Healthy & Mesh Active';
+    }
+  }
+
+  // Live Gauges
+  if ($('clusterLocalNodeID')) $('clusterLocalNodeID').textContent = data.node_id || '--';
+  if ($('clusterLocalIP')) $('clusterLocalIP').textContent = data.public_ip || '--';
+
+  const tStatusEl = $('clusterLocalTunnelStatus');
+  if (tStatusEl) {
+    const isUp = (data.tunnel_status || 'UP').toUpperCase() === 'UP';
+    tStatusEl.innerHTML = `<span class="badge ${isUp ? 'ok' : 'err'}">${isUp ? 'UP (Healthy)' : 'DOWN (Failed)'}</span>`;
+  }
+
+  const actRouteEl = $('clusterActiveRouting');
+  if (actRouteEl) {
+    if (data.active_failover && data.failover_target) {
+      actRouteEl.innerHTML = `<span style="color:#f87171;">Rerouted \u2192 ${data.failover_target}</span>`;
+    } else {
+      actRouteEl.innerHTML = `<span style="color:#34d399;">Local Tunnel (Direct)</span>`;
+    }
+  }
+
+  // Failover Alert Banner
+  const foBar = $('clusterFailoverBar');
+  const foText = $('clusterFailoverBarText');
+  if (foBar) {
+    if (data.active_failover) {
+      foBar.classList.remove('hidden');
+      if (foText) {
+        foText.textContent = `Foreign tunnel down. All client traffic on forwarded ports is rerouted to peer ${data.failover_target}.`;
+      }
+    } else {
+      foBar.classList.add('hidden');
+    }
+  }
+
+  // Foreign Nodes List (Kharej Pool)
+  const foreignNodes = Array.isArray(data.foreign_nodes) ? data.foreign_nodes : Object.values(data.foreign_nodes || {});
+  if ($('clusterForeignCount')) $('clusterForeignCount').textContent = foreignNodes.length;
+  const fContainer = $('clusterForeignList');
+  if (fContainer) {
+    if (foreignNodes.length === 0) {
+      fContainer.innerHTML = `
+        <div style="grid-column:1/-1; text-align:center; padding:24px 16px; background:rgba(0,0,0,0.25); border:1px dashed rgba(2,132,199,0.25); border-radius:10px;">
+          <div style="font-size:22px; margin-bottom:6px;">🌐</div>
+          <div style="font-weight:700; color:#cbd5e1; font-size:13px; margin-bottom:4px;">No Foreign Exit Servers Configured</div>
+          <div style="font-size:12px; color:#94a3b8; max-width:440px; margin:0 auto 10px auto;">
+            Add your foreign servers here to monitor latency, auto-failover, or manually switch exit paths.
+          </div>
+          <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddForeignModal()" style="font-size:11px; padding:5px 14px; background:#0284c7; border-color:#0284c7;">
+            + Add Foreign Exit Server
+          </button>
+        </div>`;
+    } else {
+      let fhtml = '';
+      foreignNodes.forEach(fn => {
+        const isActive = (fn.id === data.active_foreign) || !!fn.is_active;
+        const isHealthy = !!fn.is_healthy;
+        const latency = fn.latency_ms ? `${fn.latency_ms.toFixed(1)} ms` : '--';
+
+        fhtml += `
+          <div style="background:rgba(15,23,42,0.7); border:1px solid ${isActive ? '#0284c7' : 'rgba(2,132,199,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                <div>
+                  <div style="font-weight:700; color:#f8fafc; font-size:14px; display:flex; align-items:center; gap:6px;">
+                    <span>🌐</span> ${esc(fn.name || fn.id)}
+                  </div>
+                  <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${esc(fn.id)}</div>
+                </div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  ${isActive ? `<span class="badge info" style="font-size:9px; font-weight:800; background:#0284c7; color:#fff;">ACTIVE</span>` : ''}
+                  <span class="badge ${isHealthy ? 'ok' : 'err'}" style="font-size:10px; font-weight:700;">${isHealthy ? 'UP' : 'DOWN'}</span>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
+                <div>
+                  <span style="color:#94a3b8;">Public IP:</span>
+                  <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${esc(fn.public_ip || '--')}</div>
+                </div>
+                <div>
+                  <span style="color:#94a3b8;">Port / Proto:</span>
+                  <div style="font-family:monospace; color:#38bdf8; font-weight:600;">${fn.tunnel_port || 55354} / ${(fn.protocol || 'wss').toUpperCase()}</div>
+                </div>
+                <div>
+                  <span style="color:#94a3b8;">Weight (WRR):</span>
+                  <div style="font-family:monospace; color:#a855f7; font-weight:600;">${fn.weight || 1}</div>
+                </div>
+                <div>
+                  <span style="color:#94a3b8;">TCP Latency:</span>
+                  <div style="font-family:monospace; color:#34d399; font-weight:600;">${latency}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
+              ${isActive
+                ? `<span style="font-size:11px; color:#38bdf8; font-weight:700;">✓ In Use</span>`
+                : `<button class="hashem-btn" onclick="switchClusterForeign('${esc(fn.id)}')" style="font-size:11px; padding:4px 10px; background:rgba(2,132,199,0.2); border-color:#0284c7; color:#38bdf8;">Switch to This</button>`
+              }
+              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign('${esc(fn.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove foreign node">&#128465;</button>
+            </div>
+          </div>
+        `;
+      });
+      fContainer.innerHTML = fhtml;
+    }
+  }
+
+  // Nodes List
+  const nodes = Array.isArray(data.nodes) ? data.nodes : Object.values(data.nodes || {});
+  if ($('clusterNodeCount')) $('clusterNodeCount').textContent = nodes.length;
+
+  const container = $('clusterNodesList');
+  if (!container) return;
+
+  if (nodes.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column:1/-1; text-align:center; padding:32px 16px; background:rgba(0,0,0,0.25); border:1px dashed rgba(168,85,247,0.25); border-radius:10px;">
+        <div style="font-size:24px; margin-bottom:8px;">📡</div>
+        <div style="font-weight:700; color:#cbd5e1; font-size:14px; margin-bottom:4px;">No Peer Iran Servers Configured</div>
+        <div style="font-size:12px; color:#94a3b8; max-width:440px; margin:0 auto 12px auto;">
+          Connect at least one additional Iran server to establish a resilient intra-Iran failover mesh.
+        </div>
+        <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddNodeModal()" style="font-size:12px; padding:6px 16px; background:#7c3aed; border-color:#7c3aed;">
+          + Add First Peer Node
+        </button>
+      </div>`;
+    return;
+  }
+
+  let html = '';
+  nodes.forEach(node => {
+    const isHealthy = !!node.is_healthy;
+    const isFailing = !!node.is_failing;
+    const tunnelUp = (node.tunnel_status || 'UP').toUpperCase() === 'UP';
+    const latency = node.ping_ms ? `${node.ping_ms.toFixed(1)} ms` : '--';
+    const lastSeen = node.last_seen ? new Date(node.last_seen * 1000).toLocaleTimeString() : 'Never';
+
+    let statusBadgeClass = 'ok';
+    let statusText = 'HEALTHY';
+    if (!isHealthy) {
+      statusBadgeClass = 'err';
+      statusText = 'OFFLINE';
+    } else if (isFailing || !tunnelUp) {
+      statusBadgeClass = 'warn';
+      statusText = 'TUNNEL DOWN';
+    }
+
+    const isCurrentFailoverTarget = data.active_failover && data.failover_target === node.id;
+
+    html += `
+      <div style="background:rgba(15,23,42,0.7); border:1px solid ${isCurrentFailoverTarget ? '#ef4444' : 'rgba(168,85,247,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+            <div>
+              <div style="font-weight:700; color:#f8fafc; font-size:14px; display:flex; align-items:center; gap:6px;">
+                <span>🇮🇷</span> ${esc(node.name || node.id)}
+              </div>
+              <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${esc(node.id)}</div>
+            </div>
+            <span class="badge ${statusBadgeClass}" style="font-size:10px; font-weight:700;">${statusText}</span>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
+            <div>
+              <span style="color:#94a3b8;">Public IP:</span>
+              <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${esc(node.public_ip || '--')}</div>
+            </div>
+            <div>
+              <span style="color:#94a3b8;">Peer Ping:</span>
+              <div style="font-family:monospace; color:#38bdf8; font-weight:600;">${latency}</div>
+            </div>
+            <div>
+              <span style="color:#94a3b8;">Kharej Tunnel:</span>
+              <div style="font-weight:600; color:${tunnelUp ? '#34d399' : '#f87171'};">${tunnelUp ? 'UP' : 'DOWN'}</div>
+            </div>
+            <div>
+              <span style="color:#94a3b8;">Last Heartbeat:</span>
+              <div style="color:#cbd5e1;">${lastSeen}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
+          ${isCurrentFailoverTarget
+            ? `<button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="font-size:11px; padding:4px 10px;">Revert Reroute</button>`
+            : `<button class="hashem-btn" onclick="triggerClusterFailover('${esc(node.id)}')" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:11px; padding:4px 10px; background:rgba(124,58,237,0.2); border-color:#7c3aed; color:#c084fc;">\u2192 Failover Here</button>`
+          }
+          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode('${esc(node.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove peer">&#128465;</button>
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
+function openClusterAddNodeModal() {
+  $('clusterPeerID').value = '';
+  $('clusterPeerName').value = '';
+  $('clusterPeerAPI').value = '';
+  $('clusterPeerIP').value = '';
+  $('clusterNodeModal').hidden = false;
+}
+
+function closeClusterAddNodeModal() {
+  $('clusterNodeModal').hidden = true;
+}
+
+async function submitClusterAddNode() {
+  const id = ($('clusterPeerID').value || '').trim();
+  const name = ($('clusterPeerName').value || '').trim();
+  const api_url = ($('clusterPeerAPI').value || '').trim();
+  const public_ip = ($('clusterPeerIP').value || '').trim();
+
+  if (!id || !api_url) {
+    toastMsg('err', 'Node ID and Panel Base URL are required');
+    return;
+  }
+
+  try {
+    await api('/api/cluster/nodes/add', { id, name, api_url, public_ip });
+    toastMsg('ok', 'Peer node added and verified');
+    closeClusterAddNodeModal();
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to add node: ' + (err.message || err));
+  }
+}
+
+async function deleteClusterNode(id) {
+  if (!await entConfirm('Delete Peer Node', `Are you sure you want to remove peer node "${id}" from the cluster?`, 'Delete Node')) return;
+  try {
+    await api('/api/cluster/nodes/delete', { id });
+    toastMsg('ok', 'Peer node removed');
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to delete node: ' + (err.message || err));
+  }
+}
+
+function openClusterConfigModal() {
+  if (!_clusterData) return;
+  $('clusterCfgEnabled').checked = !!_clusterData.enabled;
+  $('clusterCfgAutoFailover').checked = !!_clusterData.auto_failover;
+  if ($('clusterCfgBalancingMode')) {
+    $('clusterCfgBalancingMode').value = _clusterData.balancing_mode || 'wrr';
+  }
+  $('clusterCfgNodeID').value = _clusterData.node_id || '';
+  $('clusterCfgSecret').value = _clusterData.cluster_secret || '';
+  $('clusterCfgPorts').value = (_clusterData.service_ports || []).join(', ');
+  $('clusterConfigModal').hidden = false;
+}
+
+function closeClusterConfigModal() {
+  $('clusterConfigModal').hidden = true;
+}
+
+function generateClusterSecret() {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_';
+  let sec = '';
+  const arr = new Uint8Array(32);
+  window.crypto.getRandomValues(arr);
+  arr.forEach(b => { sec += chars[b % chars.length]; });
+  $('clusterCfgSecret').value = sec;
+}
+
+async function submitClusterConfig() {
+  const enabled = $('clusterCfgEnabled').checked;
+  const auto_failover = $('clusterCfgAutoFailover').checked;
+  const balancing_mode = ($('clusterCfgBalancingMode') ? $('clusterCfgBalancingMode').value : 'wrr') || 'wrr';
+  const node_id = ($('clusterCfgNodeID').value || '').trim();
+  const cluster_secret = ($('clusterCfgSecret').value || '').trim();
+  const rawPorts = ($('clusterCfgPorts').value || '').split(',');
+  const service_ports = [];
+  rawPorts.forEach(p => {
+    const n = parseInt(p.trim(), 10);
+    if (!isNaN(n) && n > 0 && n <= 65535) service_ports.push(n);
+  });
+
+  try {
+    await api('/api/cluster/config', {
+      enabled,
+      auto_failover,
+      balancing_mode,
+      node_id,
+      cluster_secret,
+      service_ports
+    });
+    toastMsg('ok', 'Cluster configuration updated');
+    closeClusterConfigModal();
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to save configuration: ' + (err.message || err));
+  }
+}
+
+async function triggerClusterFailover(targetId) {
+  if (!await entConfirm('Trigger Failover', `Manual failover: Reroute all client traffic to peer "${targetId}"?`, 'Reroute Traffic')) return;
+  try {
+    await api('/api/cluster/failover/trigger', { target_id: targetId });
+    toastMsg('ok', `Failover active: Traffic rerouted to ${targetId}`);
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failover failed: ' + (err.message || err));
+  }
+}
+
+async function revertClusterFailover() {
+  if (!await entConfirm('Revert Failover', 'Revert failover: Restore traffic routing to the local tunnel?', 'Restore Local')) return;
+  try {
+    await api('/api/cluster/failover/revert', {});
+    toastMsg('ok', 'Failover reverted: Local routing restored');
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Revert failed: ' + (err.message || err));
+  }
+}
+
+function openClusterAddForeignModal() {
+  $('clusterForeignID').value = '';
+  $('clusterForeignName').value = '';
+  $('clusterForeignIP').value = '';
+  $('clusterForeignPort').value = '55354';
+  $('clusterForeignProtocol').value = 'wss';
+  if ($('clusterForeignWeight')) $('clusterForeignWeight').value = '1';
+  if ($('clusterForeignTargetPorts')) $('clusterForeignTargetPorts').value = '';
+  $('clusterForeignModal').hidden = false;
+}
+
+function closeClusterAddForeignModal() {
+  $('clusterForeignModal').hidden = true;
+}
+
+async function submitClusterAddForeign() {
+  const id = ($('clusterForeignID').value || '').trim();
+  const name = ($('clusterForeignName').value || '').trim();
+  const public_ip = ($('clusterForeignIP').value || '').trim();
+  const tunnel_port = parseInt(($('clusterForeignPort').value || '55354').trim(), 10) || 55354;
+  const protocol = ($('clusterForeignProtocol').value || 'wss').trim();
+  const weight = parseInt(($('clusterForeignWeight') ? $('clusterForeignWeight').value : '1') || '1', 10) || 1;
+
+  const rawTargetPorts = ($('clusterForeignTargetPorts') ? $('clusterForeignTargetPorts').value : '').trim();
+  const target_ports = {};
+  if (rawTargetPorts) {
+    rawTargetPorts.split(',').forEach(part => {
+      const pair = part.trim().split(':');
+      if (pair.length === 2) {
+        const src = parseInt(pair[0].trim(), 10);
+        const dst = parseInt(pair[1].trim(), 10);
+        if (!isNaN(src) && !isNaN(dst) && src > 0 && dst > 0) {
+          target_ports[src] = dst;
+        }
+      }
+    });
+  }
+
+  if (!id || !public_ip) {
+    toastMsg('err', 'Node ID and Public IP are required');
+    return;
+  }
+
+  try {
+    await api('/api/cluster/foreign/add', { id, name, public_ip, tunnel_port, protocol, weight, target_ports });
+    toastMsg('ok', 'Foreign exit node added to pool');
+    closeClusterAddForeignModal();
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to add foreign node: ' + (err.message || err));
+  }
+}
+
+async function deleteClusterForeign(id) {
+  if (!await entConfirm('Remove Foreign Node', `Remove foreign exit node "${id}" from the pool?`, 'Remove Node')) return;
+  try {
+    await api('/api/cluster/foreign/delete', { id });
+    toastMsg('ok', 'Foreign exit node removed');
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to remove foreign node: ' + (err.message || err));
+  }
+}
+
+async function switchClusterForeign(targetId) {
+  if (!await entConfirm('Switch Exit Tunnel', `Switch active exit tunnel to "${targetId}"?`, 'Switch Active')) return;
+  try {
+    await api('/api/cluster/foreign/switch', { target_id: targetId });
+    toastMsg('ok', `Active foreign exit switched to ${targetId}`);
+    loadClusterStatus();
+  } catch (err) {
+    toastMsg('err', 'Failed to switch foreign node: ' + (err.message || err));
+  }
+}
+
+window.loadClusterStatus = loadClusterStatus;
+window.openClusterAddNodeModal = openClusterAddNodeModal;
+window.closeClusterAddNodeModal = closeClusterAddNodeModal;
+window.submitClusterAddNode = submitClusterAddNode;
+window.deleteClusterNode = deleteClusterNode;
+window.openClusterAddForeignModal = openClusterAddForeignModal;
+window.closeClusterAddForeignModal = closeClusterAddForeignModal;
+window.submitClusterAddForeign = submitClusterAddForeign;
+window.deleteClusterForeign = deleteClusterForeign;
+window.switchClusterForeign = switchClusterForeign;
+window.openClusterConfigModal = openClusterConfigModal;
+window.closeClusterConfigModal = closeClusterConfigModal;
+window.generateClusterSecret = generateClusterSecret;
+window.submitClusterConfig = submitClusterConfig;
+window.triggerClusterFailover = triggerClusterFailover;
+window.revertClusterFailover = revertClusterFailover;

@@ -137,12 +137,14 @@ download_and_extract_backhaul() {
     esac
     local TMP_DIR=$(mktemp -d)
     local TAR="backhaul_linux_${BH_ARCH}.tar.gz"
-    local URL="https://github.com/pdnczone/hashem-panel/releases/download/v0.7.2/${TAR}"
+    local URL="https://github.com/Musixal/Backhaul/releases/download/v0.7.2/${TAR}"
     local OK=0
-    for DL in "$URL" "https://ghproxy.net/${URL}" "https://gh-proxy.com/${URL}" "https://gh.ddlc.top/${URL}" "https://ghproxy.cn/${URL}"; do
-        if curl -fsSL --connect-timeout 8 --max-time 60 -o "${TMP_DIR}/${TAR}" "$DL" 2>/dev/null && [[ -s "${TMP_DIR}/${TAR}" ]]; then
+    for DL in "$URL" "https://mirror.ghproxy.com/${URL}" "https://ghproxy.net/${URL}" "https://ghproxy.cc/${URL}" "https://gh-proxy.com/${URL}" "https://gh.ddlc.top/${URL}"; do
+        rm -f "${TMP_DIR}/${TAR}" 2>/dev/null
+        if curl -fsSL --connect-timeout 8 --max-time 60 -o "${TMP_DIR}/${TAR}" "$DL" 2>/dev/null && [[ -s "${TMP_DIR}/${TAR}" ]] && gzip -t "${TMP_DIR}/${TAR}" 2>/dev/null; then
             OK=1; break
         fi
+        rm -f "${TMP_DIR}/${TAR}" 2>/dev/null
     done
 
     if [[ $OK -eq 1 ]]; then

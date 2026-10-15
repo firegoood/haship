@@ -240,3 +240,89 @@ func TestPerfAPIEndpoints(t *testing.T) {
 		t.Fatalf("expected 400 for invalid action, got %d", rr.Code)
 	}
 }
+
+func TestCalculateOptimalPool(t *testing.T) {
+	cases := []struct {
+		conns       int
+		wantPool    int
+		wantMinMaxP int
+	}{
+		{0, 3, 15},
+		{2, 3, 15},
+		{5, 5, 25},
+		{20, 8, 45},
+		{50, 15, 60},
+		{100, 25, 90},
+		{200, 60, 250},
+	}
+
+	for _, tc := range cases {
+		p, mp := calculateOptimalPool(tc.conns)
+		if p != tc.wantPool {
+			t.Errorf("calculateOptimalPool(%d): got pool %d, want %d", tc.conns, p, tc.wantPool)
+		}
+		if mp < tc.wantMinMaxP {
+			t.Errorf("calculateOptimalPool(%d): got maxPool %d, want at least %d", tc.conns, mp, tc.wantMinMaxP)
+		}
+		if need := (p*3 + 1) / 2; mp < need {
+			t.Errorf("calculateOptimalPool(%d): maxPool %d < 1.5x pool (%d)", tc.conns, mp, need)
+		}
+	}
+}
+
+func TestUpdateFrpcPoolCountInToml(t *testing.T) {
+	tmpDir := t.TempDir()
+	tomlPath := filepath.Join(tmpDir, "frpc.toml")
+
+	initial := `serverAddr = "10.10.10.2"
+serverPort = 7000
+transport.poolCount = 20
+
+[[proxies]]
+name = "tcp_443"
+`
+	if err := os.WriteFile(tomlPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := updateFrpcPoolCountInToml(tomlPath, 5); err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "transport.poolCount = 5") {
+		t.Fatalf("expected transport.poolCount = 5, got:\n%s", content)
+	}
+	if strings.Contains(content, "transport.poolCount = 20") {
+		t.Fatalf("old pool count survived:\n%s", content)
+	}
+}
+
+func TestAutoPoolStatePersistence(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldConfigDir := configDir
+	configDir = tmpDir
+	defer func() { configDir = oldConfigDir }()
+
+	st := autoPoolState{
+		Pool:         5,
+		MaxPool:      25,
+		AppliedPool:  5,
+		ActiveConns:  3,
+		LastDecision: "scale_down",
+		LastReason:   "quiet ticks",
+	}
+
+	if err := saveAutoPoolState(st); err != nil {
+		t.Fatalf("failed to save auto pool state: %v", err)
+	}
+
+	loaded := loadAutoPoolState()
+	if loaded.Pool != 5 || loaded.MaxPool != 25 || loaded.LastDecision != "scale_down" {
+		t.Fatalf("loaded state mismatch: %+v", loaded)
+	}
+}
