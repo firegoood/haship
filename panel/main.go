@@ -499,6 +499,20 @@ func cliShowInfo() int {
 	fmt.Println("==================================================")
 	return 0
 }
+func validateConfigDirs() {
+	// Check and create directories if they don't exist, but only warn if we cannot create them.
+	// We don't want to fail the panel if the directories are missing, but we should log.
+	for _, dir := range []string{configDir, frpDir, backhaulDir} {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				log.Printf("WARNING: Failed to create directory %s: %v", dir, err)
+			} else {
+				log.Printf("INFO: Created missing directory %s", dir)
+			}
+		}
+	}
+}
+
 
 func main() {
 	if len(os.Args) > 1 {
@@ -531,6 +545,7 @@ func main() {
 	if v := os.Getenv("GRE_SYSCTL_CONF"); v != "" {
 		revpathSysctlConf = v
 	}
+	validateConfigDirs()
 	loadOrInit()
 	ensureFreeHTTPPort()
 	if _, err := rand.Read(nonce[:]); err != nil {

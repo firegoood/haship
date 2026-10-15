@@ -9,6 +9,7 @@ func resetLockoutState() {
 	attemptMu.Lock()
 	attempts = map[string]*ipAttempts{}
 	lockStrikes = map[string]*lockStrike{}
+	usernameAttemptsMap = map[string]*usernameAttempts{}
 	attemptMu.Unlock()
 }
 
@@ -80,5 +81,39 @@ func TestOldStrikesDecay(t *testing.T) {
 	}
 	if got := lockRemaining(ip); got > loginLockoutDur {
 		t.Errorf("stale strikes must decay, lock is %v", got)
+	}
+}
+
+func TestUsernameLockout(t *testing.T) {
+	resetLockoutState()
+	user := "admin"
+
+	for i := 0; i < loginUserMaxFails-1; i++ {
+		recordUsernameFailure(user)
+	}
+	if locked, _ := checkUsernameLocked(user); locked {
+		t.Fatalf("user should not be locked after %d attempts", loginUserMaxFails-1)
+	}
+
+	recordUsernameFailure(user)
+	if locked, rem := checkUsernameLocked(user); !locked || rem <= 0 {
+		t.Fatalf("user must be locked after %d attempts", loginUserMaxFails)
+	}
+
+	recordUsernameSuccess(user)
+	if locked, _ := checkUsernameLocked(user); locked {
+		t.Fatalf("user lock should be cleared after successful login")
+	}
+
+	// Lock again and verify ResetAllLockouts
+	for i := 0; i < loginUserMaxFails; i++ {
+		recordUsernameFailure(user)
+	}
+	if locked, _ := checkUsernameLocked(user); !locked {
+		t.Fatalf("user must be locked after %d attempts", loginUserMaxFails)
+	}
+	ResetAllLockouts()
+	if locked, _ := checkUsernameLocked(user); locked {
+		t.Fatalf("ResetAllLockouts must clear user locks")
 	}
 }
