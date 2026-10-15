@@ -39,6 +39,13 @@ var (
 	sshFwdMu sync.Mutex
 )
 
+func defaultSSHFwdKeyPath() string {
+	if os.Geteuid() != 0 || strings.Contains(configDir, "gre-panel-test-") {
+		return filepath.Join(configDir, "hashem-fwd")
+	}
+	return "/root/.ssh/hashem-fwd"
+}
+
 func defaultSSHFwdConfig() SSHFwdConfig {
 	return SSHFwdConfig{
 		Role:                "iran",
@@ -46,7 +53,7 @@ func defaultSSHFwdConfig() SSHFwdConfig {
 		RemoteHost:          "",
 		RemoteUser:          "root",
 		RemoteSSHPort:       22,
-		KeyPath:             "/root/.ssh/hashem-fwd",
+		KeyPath:             defaultSSHFwdKeyPath(),
 		Ports:               []int{},
 		BindAddr:            "0.0.0.0",
 		FRPBindPort:         55400,
@@ -77,8 +84,8 @@ func loadSSHFwdConfigLocked() SSHFwdConfig {
 	if cfg.RemoteSSHPort <= 0 {
 		cfg.RemoteSSHPort = 22
 	}
-	if cfg.KeyPath == "" {
-		cfg.KeyPath = "/root/.ssh/hashem-fwd"
+	if cfg.KeyPath == "" || (os.Geteuid() != 0 && strings.HasPrefix(cfg.KeyPath, "/root")) {
+		cfg.KeyPath = defaultSSHFwdKeyPath()
 	}
 	if cfg.Ports == nil {
 		cfg.Ports = []int{}
@@ -112,17 +119,21 @@ func saveSSHFwdConfigLocked(cfg SSHFwdConfig) error {
 
 // ensureSSHFwdKey generates an ed25519 keypair if not present.
 func ensureSSHFwdKey(keyPath string) (pubKey string, err error) {
-	if keyPath == "" {
-		keyPath = "/root/.ssh/hashem-fwd"
+	if keyPath == "" || (os.Geteuid() != 0 && strings.HasPrefix(keyPath, "/root")) {
+		keyPath = defaultSSHFwdKeyPath()
 	}
 	pubPath := keyPath + ".pub"
 	if _, statErr := os.Stat(keyPath); os.IsNotExist(statErr) {
 		if err := os.MkdirAll(filepath.Dir(keyPath), 0700); err != nil {
-			return "", err
+			keyPath = filepath.Join(configDir, "hashem-fwd")
+			pubPath = keyPath + ".pub"
+			_ = os.MkdirAll(filepath.Dir(keyPath), 0700)
 		}
-		out, err := runCmd("ssh-keygen", "-t", "ed25519", "-N", "", "-f", keyPath, "-C", "hashem-bagher-carrier")
-		if err != nil {
-			return "", fmt.Errorf("ssh-keygen failed: %v (%s)", err, strings.TrimSpace(out))
+		if _, statErr2 := os.Stat(keyPath); os.IsNotExist(statErr2) {
+			out, err := runCmd("ssh-keygen", "-t", "ed25519", "-N", "", "-f", keyPath, "-C", "hashem-bagher-carrier")
+			if err != nil {
+				return "", fmt.Errorf("ssh-keygen failed: %v (%s)", err, strings.TrimSpace(out))
+			}
 		}
 	}
 	b, err := os.ReadFile(pubPath)

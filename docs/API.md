@@ -31,6 +31,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/alerts` | session | `handleAlertsGet` |
 | `POST` | `/api/alerts` | session + CSRF | `handleAlertsPost` |
 | `GET` | `/api/audit` | session | `handleAuditGet` |
+| `GET` | `/api/bagher` | session | `handleSSHFwdGet` |
+| `POST` | `/api/bagher` | session + CSRF | `handleSSHFwdPost` |
 | `GET` | `/api/benchmark` | session | `handleBenchmarkGet` |
 | `POST` | `/api/benchmark/apply` | session + CSRF | `handleBenchmarkApply` |
 | `POST` | `/api/benchmark/autopilot` | session + CSRF | `handleBenchmarkAutoPilot` |
@@ -38,6 +40,16 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/carrier` | session | `handleCarrierGet` |
 | `POST` | `/api/carrier` | session + CSRF | `handleCarrierPost` |
 | `GET` | `/api/carrier/advice` | session | `handleCarrierAdvice` |
+| `POST` | `/api/cluster/config` | session + CSRF | `handleClusterConfigPost` |
+| `POST` | `/api/cluster/failover/revert` | session + CSRF | `handleClusterFailoverRevert` |
+| `POST` | `/api/cluster/failover/trigger` | session + CSRF | `handleClusterFailoverTrigger` |
+| `POST` | `/api/cluster/foreign/add` | session + CSRF | `handleClusterForeignNodeAdd` |
+| `POST` | `/api/cluster/foreign/delete` | session + CSRF | `handleClusterForeignNodeDelete` |
+| `POST` | `/api/cluster/foreign/switch` | session + CSRF | `handleClusterForeignSwitch` |
+| `POST` | `/api/cluster/heartbeat` | none | `handleClusterHeartbeat` |
+| `POST` | `/api/cluster/nodes/add` | session + CSRF | `handleClusterNodeAdd` |
+| `POST` | `/api/cluster/nodes/delete` | session + CSRF | `handleClusterNodeDelete` |
+| `GET` | `/api/cluster/status` | session | `handleClusterStatus` |
 | `GET` | `/api/dashboard` | session | `handleDashboard` |
 | `GET` | `/api/dial` | session | `handleDialGet` |
 | `POST` | `/api/dial` | session + CSRF | `handleDialPost` |
@@ -47,6 +59,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/fleet` | session | `handleFleet` |
 | `GET` | `/api/health` | none | `handleHealth` |
 | `GET` | `/api/history` | session | `handleHistoryGet` |
+| `GET` | `/api/license` | session | `handleLicenseGet` |
+| `POST` | `/api/license` | session + CSRF | `handleLicensePost` |
 | `POST` | `/api/login` | none | `handleLogin` |
 | `POST` | `/api/logout` | none | `handleLogout` |
 | `GET` | `/api/logs` | session | `handleLogs` |
@@ -112,4 +126,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 88 routes.
+Total: 102 routes.

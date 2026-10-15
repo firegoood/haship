@@ -350,7 +350,7 @@ func greTrafficFrom(devData string) map[string]any {
 				continue
 			}
 			ifname := strings.TrimSpace(strings.Split(line, ":")[0])
-			if primIf != "" {
+			if primIf != "" && strings.Contains(devData, primIf+":") {
 				if ifname != primIf {
 					continue
 				}

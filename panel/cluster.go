@@ -28,8 +28,8 @@ type ClusterConfig struct {
 	PublicIP       string                 `json:"public_ip"`
 	ServicePorts   []int                  `json:"service_ports"`
 	BalancingMode  string                 `json:"balancing_mode"` // "wrr" (weighted round-robin), "failover", "lowest_latency"
-	Nodes          map[string]ClusterNode `json:"nodes"`         // Peer Iran Hubs (P2P mesh)
-	ForeignNodes   map[string]ForeignNode `json:"foreign_nodes"` // Foreign Exit Nodes Pool
+	Nodes          map[string]ClusterNode `json:"nodes"`          // Peer Iran Hubs (P2P mesh)
+	ForeignNodes   map[string]ForeignNode `json:"foreign_nodes"`  // Foreign Exit Nodes Pool
 	ActiveForeign  string                 `json:"active_foreign,omitempty"`
 	AutoFailover   bool                   `json:"auto_failover"`
 	ActiveFailover string                 `json:"active_failover,omitempty"` // Target NodeID if currently redirected
@@ -39,17 +39,17 @@ type ClusterConfig struct {
 
 // ForeignNode represents an exit foreign server in the cluster pool.
 type ForeignNode struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	PublicIP    string            `json:"public_ip"`
-	TunnelPort  int               `json:"tunnel_port"`
-	TargetPorts map[int]int       `json:"target_ports,omitempty"` // Map local service port -> foreign target port (if custom)
-	Weight      int               `json:"weight"`                 // Weight for WRR (default: 1)
-	Protocol    string            `json:"protocol"`               // "gre", "wss", "bagher"
-	IsActive    bool              `json:"is_active"`
-	IsHealthy   bool              `json:"is_healthy"`
-	LatencyMs   float64           `json:"latency_ms"`
-	LastProbe   time.Time         `json:"last_probe"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	PublicIP    string      `json:"public_ip"`
+	TunnelPort  int         `json:"tunnel_port"`
+	TargetPorts map[int]int `json:"target_ports,omitempty"` // Map local service port -> foreign target port (if custom)
+	Weight      int         `json:"weight"`                 // Weight for WRR (default: 1)
+	Protocol    string      `json:"protocol"`               // "gre", "wss", "bagher"
+	IsActive    bool        `json:"is_active"`
+	IsHealthy   bool        `json:"is_healthy"`
+	LatencyMs   float64     `json:"latency_ms"`
+	LastProbe   time.Time   `json:"last_probe"`
 }
 
 // ClusterNode represents a remote Iran hub peer in the cluster.
@@ -77,10 +77,10 @@ type ClusterHeartbeatPayload struct {
 }
 
 var (
-	clusterMu           sync.RWMutex
-	clusterCache        *ClusterConfig
-	clusterClient       = &http.Client{Timeout: 3 * time.Second}
-	consecutiveFailures int
+	clusterMu            sync.RWMutex
+	clusterCache         *ClusterConfig
+	clusterClient        = &http.Client{Timeout: 3 * time.Second}
+	consecutiveFailures  int
 	consecutiveSuccesses int
 )
 
@@ -253,13 +253,13 @@ func handleClusterConfigPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Enabled       *bool   `json:"enabled"`
-		NodeID        string  `json:"node_id"`
-		ClusterSecret string  `json:"cluster_secret"`
-		PublicIP      string  `json:"public_ip"`
-		ServicePorts  []int   `json:"service_ports"`
-		BalancingMode string  `json:"balancing_mode"`
-		AutoFailover  *bool   `json:"auto_failover"`
+		Enabled       *bool  `json:"enabled"`
+		NodeID        string `json:"node_id"`
+		ClusterSecret string `json:"cluster_secret"`
+		PublicIP      string `json:"public_ip"`
+		ServicePorts  []int  `json:"service_ports"`
+		BalancingMode string `json:"balancing_mode"`
+		AutoFailover  *bool  `json:"auto_failover"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1090,15 +1090,15 @@ func cliCluster(args []string) int {
 		}
 		id := fmt.Sprintf("fn_%d", time.Now().UnixNano()%100000)
 		cfg.ForeignNodes[id] = ForeignNode{
-			ID:          id,
-			Name:        name,
-			PublicIP:    ip,
-			TunnelPort:  port,
-			Weight:      weight,
-			Protocol:    proto,
-			IsActive:    len(cfg.ForeignNodes) == 0,
-			IsHealthy:   true,
-			LastProbe:   time.Now(),
+			ID:         id,
+			Name:       name,
+			PublicIP:   ip,
+			TunnelPort: port,
+			Weight:     weight,
+			Protocol:   proto,
+			IsActive:   len(cfg.ForeignNodes) == 0,
+			IsHealthy:  true,
+			LastProbe:  time.Now(),
 		}
 		if cfg.ActiveForeign == "" {
 			cfg.ActiveForeign = id

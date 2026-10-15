@@ -188,6 +188,16 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-PERF-02` | 500 | cannot save performance settings | Disk write failed — check /etc/gre-panel permissions. |
 | `E-PERF-03` | 500 | cannot apply performance settings | Check FRP services and configuration. |
 
+## E-LIC-xx — LIC
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-LIC-01` | 403 | premium license required for this feature | Activate a valid Premium license key in Settings to unlock this feature. |
+| `E-LIC-02` | 400 | invalid license key format | Check that the complete license string was pasted without extra spaces or line breaks. |
+| `E-LIC-03` | 400 | license key signature invalid | This license token has been tampered with or issued by an unrecognized authority. |
+| `E-LIC-04` | 400 | license key expired | This license has expired. Contact your provider for renewal. |
+| `E-LIC-05` | 400 | license machine id mismatch | This license is bound to a different server. Machine hash does not match. |
+
 ## E-SSHFWD-xx — SSHFWD
 
 | Code | HTTP | Meaning | What to do |
@@ -199,4 +209,4 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-SSHFWD-05` | 409 | peer not configured or unreachable | Configure peer link or install public key manually on remote host. |
 | `E-SSHFWD-06` | 500 | failed installing authorized_keys on remote | Ensure remote user authorized_keys is writable. |
 
-Total: 108 codes.
+Total: 113 codes.

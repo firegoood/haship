@@ -31,12 +31,12 @@ WATCHDOG_FILE="${PANEL_CONFIG_DIR}/watchdog.json"
 PERF_FILE="${PANEL_CONFIG_DIR}/perf.json"
 CARRIER_FILE="${PANEL_CONFIG_DIR}/carrier.json"
 AUTO_POOL_STATE="${PANEL_CONFIG_DIR}/auto_pool.json"
-# Auto Pool tuning (env-overridable): frpc poolCount 3..200, frps maxPoolCount 15..500 (also RAM-capped)
-AUTOPOOL_MIN="${AUTOPOOL_MIN:-3}"
+# Auto Pool tuning (env-overridable): frpc poolCount 20..200, frps maxPoolCount 60..500 (also RAM-capped)
+AUTOPOOL_MIN="${AUTOPOOL_MIN:-20}"
 AUTOPOOL_MAX="${AUTOPOOL_MAX:-200}"
-AUTOPOOL_MAXPOOL_MIN="${AUTOPOOL_MAXPOOL_MIN:-15}"
+AUTOPOOL_MAXPOOL_MIN="${AUTOPOOL_MAXPOOL_MIN:-60}"
 AUTOPOOL_MAXPOOL_MAX="${AUTOPOOL_MAXPOOL_MAX:-500}"
-AUTOPOOL_LOW_CONNS="${AUTOPOOL_LOW_CONNS:-10}"       # restart frpc only below this many active user conns
+AUTOPOOL_LOW_CONNS="${AUTOPOOL_LOW_CONNS:-30}"       # restart frpc only below this many active user conns
 AUTOPOOL_COOLDOWN="${AUTOPOOL_COOLDOWN:-60}"         # min seconds between automatic frpc restarts
 AUTOPOOL_SEVERE_ERRS="${AUTOPOOL_SEVERE_ERRS:-20}"   # pool-full lines per tick that justify a restart under load
 AUTOPOOL_DOWN_QUIET="${AUTOPOOL_DOWN_QUIET:-3}"      # consecutive quiet ticks before scaling down
@@ -1721,42 +1721,61 @@ get_latest_frp_version() {
     fi
 }
 
+is_valid_download() {
+    local target="$1"
+    [[ -s "$target" ]] || return 1
+    # Check if file is an HTML error / block page
+    if head -c 256 "$target" 2>/dev/null | grep -qiE "<!doctype|<html|<head|<title|404 not found|403 forbidden|access denied|rate limit"; then
+        return 1
+    fi
+    # If it is a gzip archive, ensure it is a valid gzip
+    if [[ "$target" == *.tar.gz || "$target" == *.tgz ]]; then
+        gzip -t "$target" 2>/dev/null || return 1
+    fi
+    return 0
+}
+
 download_with_fallback() {
     local DEST="$1"
     local URL="$2"
     local TIMEOUT="${3:-45}"
 
-    # If destination already exists and is non-empty, reuse it
-    if [[ -s "$DEST" ]]; then
+    # If destination already exists and is valid, reuse it
+    if is_valid_download "$DEST"; then
         return 0
     fi
+    rm -f "$DEST" 2>/dev/null
 
-    # Try direct URL first (use fast 5s connect-timeout for GitHub since it is often blocked in Iran)
-    local DIRECT_CONNECT_TO=10
+    # Try direct URL first (use fast connect-timeout for GitHub since it is often blocked in Iran)
+    local DIRECT_CONNECT_TO=8
     local DIRECT_MAX_TO="$TIMEOUT"
     if [[ "$URL" == https://github.com/* || "$URL" == https://raw.githubusercontent.com/* ]]; then
         DIRECT_CONNECT_TO=5
-        DIRECT_MAX_TO=8
+        DIRECT_MAX_TO=12
     fi
 
-    if curl -fsSL --connect-timeout "$DIRECT_CONNECT_TO" --max-time "$DIRECT_MAX_TO" -o "$DEST" "$URL" 2>/dev/null && [[ -s "$DEST" ]]; then
+    if curl -fsSL --connect-timeout "$DIRECT_CONNECT_TO" --max-time "$DIRECT_MAX_TO" -o "$DEST" "$URL" 2>/dev/null && is_valid_download "$DEST"; then
         return 0
     fi
+    rm -f "$DEST" 2>/dev/null
 
     # Iran-friendly GitHub proxy mirrors if it is a GitHub URL
     if [[ "$URL" == https://github.com/* || "$URL" == https://raw.githubusercontent.com/* ]]; then
         echo -e "${YELLOW}[*] Direct download timed out / blocked — trying Iran proxy mirror...${NC}"
         local MIRRORS=(
+            "https://mirror.ghproxy.com/${URL}"
             "https://ghproxy.net/${URL}"
+            "https://ghproxy.cc/${URL}"
             "https://gh-proxy.com/${URL}"
             "https://gh.ddlc.top/${URL}"
-            "https://ghproxy.cn/${URL}"
         )
         for M in "${MIRRORS[@]}"; do
-            if curl -fsSL --connect-timeout 6 --max-time 20 -o "$DEST" "$M" 2>/dev/null && [[ -s "$DEST" ]]; then
+            rm -f "$DEST" 2>/dev/null
+            if curl -fsSL --connect-timeout 6 --max-time 30 -o "$DEST" "$M" 2>/dev/null && is_valid_download "$DEST"; then
                 echo -e "${GREEN}[✔️] Download succeeded via mirror: ${M%/*}${NC}"
                 return 0
             fi
+            rm -f "$DEST" 2>/dev/null
         done
     fi
     return 1
@@ -1781,17 +1800,24 @@ install_frp_binaries() {
     TMP_DIR=$(mktemp -d)
     TAR_FILE="frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
 
-    local DOWNLOAD_URL="https://github.com/pdnczone/hashem-panel/releases/download/v${FRP_VERSION}/${TAR_FILE}"
-    if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 30; then
-        DOWNLOAD_URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/${TAR_FILE}"
-        if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 60; then
+    local DOWNLOAD_URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/${TAR_FILE}"
+    if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 45; then
+        local FALLBACK_VER="0.61.1"
+        local FALLBACK_TAR="frp_${FALLBACK_VER}_linux_${FRP_ARCH}.tar.gz"
+        local FALLBACK_URL="https://github.com/fatedier/frp/releases/download/v${FALLBACK_VER}/${FALLBACK_TAR}"
+        echo -e "${YELLOW}[*] Retrying with stable FRP v${FALLBACK_VER}...${NC}"
+        if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$FALLBACK_URL" 45; then
             echo -e "${RED}[!] Failed to download FRP from GitHub or mirrors.${NC}"
             rm -rf "$TMP_DIR"
             return 1
         fi
     fi
 
-    tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR"
+    if ! tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR" 2>/dev/null; then
+        echo -e "${RED}[!] Corrupted FRP archive downloaded.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
     local FOUND_FRPS FOUND_FRPC
     FOUND_FRPS=$(find "$TMP_DIR" -type f -name "frps" 2>/dev/null | head -1)
     FOUND_FRPC=$(find "$TMP_DIR" -type f -name "frpc" 2>/dev/null | head -1)
@@ -1830,17 +1856,18 @@ install_backhaul_binaries() {
     TMP_DIR=$(mktemp -d)
     local TAR_FILE="backhaul_linux_${BH_ARCH}.tar.gz"
 
-    local DOWNLOAD_URL="https://github.com/pdnczone/hashem-panel/releases/download/${BH_VER}/${TAR_FILE}"
-    if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 30; then
-        DOWNLOAD_URL="https://github.com/Musixal/Backhaul/releases/download/${BH_VER}/${TAR_FILE}"
-        if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 60; then
-            echo -e "${RED}[!] Failed to download Backhaul from GitHub or mirrors.${NC}"
-            rm -rf "$TMP_DIR"
-            return 1
-        fi
+    local DOWNLOAD_URL="https://github.com/Musixal/Backhaul/releases/download/${BH_VER}/${TAR_FILE}"
+    if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 45; then
+        echo -e "${RED}[!] Failed to download Backhaul from GitHub or mirrors.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
     fi
 
-    tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR"
+    if ! tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR" 2>/dev/null; then
+        echo -e "${RED}[!] Corrupted Backhaul archive downloaded.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
     if [[ -f "${TMP_DIR}/backhaul" ]]; then
         cp "${TMP_DIR}/backhaul" "$INSTALL_DIR/" 2>/dev/null
     else

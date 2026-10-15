@@ -482,4 +482,3 @@ func TestCliClusterCommands(t *testing.T) {
 		t.Fatalf("expected 0 foreign nodes after deletion, got %d", len(cfg.ForeignNodes))
 	}
 }
-
