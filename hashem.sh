@@ -1713,7 +1713,11 @@ get_latest_frp_version() {
     if [[ -n "${FRP_VERSION:-}" && "$FRP_VERSION" != "$DEFAULT_FRP_VERSION" ]]; then
         return 0
     fi
-    LATEST_VER=$(curl -sSL --connect-timeout 3 --max-time 6 "https://api.github.com/repos/fatedier/frp/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    local MIRROR_REPO="${HASHEM_MIRROR_REPO:-pdnczone/hashem-frp}"
+    LATEST_VER=$(curl -sSL --connect-timeout 3 --max-time 6 "https://api.github.com/repos/${MIRROR_REPO}/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    if [[ -z "$LATEST_VER" ]]; then
+        LATEST_VER=$(curl -sSL --connect-timeout 3 --max-time 6 "https://api.github.com/repos/fatedier/frp/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    fi
     if [[ -z "$LATEST_VER" ]]; then
         FRP_VERSION="$DEFAULT_FRP_VERSION"
     else
@@ -1800,16 +1804,21 @@ install_frp_binaries() {
     TMP_DIR=$(mktemp -d)
     TAR_FILE="frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"
 
-    local DOWNLOAD_URL="https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/${TAR_FILE}"
+    local MIRROR_REPO="${HASHEM_MIRROR_REPO:-pdnczone/hashem-frp}"
+    local DOWNLOAD_URL="https://github.com/${MIRROR_REPO}/releases/download/v${FRP_VERSION}/${TAR_FILE}"
     if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$DOWNLOAD_URL" 45; then
         local FALLBACK_VER="0.61.1"
         local FALLBACK_TAR="frp_${FALLBACK_VER}_linux_${FRP_ARCH}.tar.gz"
-        local FALLBACK_URL="https://github.com/fatedier/frp/releases/download/v${FALLBACK_VER}/${FALLBACK_TAR}"
-        echo -e "${YELLOW}[*] Retrying with stable FRP v${FALLBACK_VER}...${NC}"
-        if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$FALLBACK_URL" 45; then
-            echo -e "${RED}[!] Failed to download FRP from GitHub or mirrors.${NC}"
-            rm -rf "$TMP_DIR"
-            return 1
+        local FALLBACK_MIRROR_URL="https://github.com/${MIRROR_REPO}/releases/download/v${FALLBACK_VER}/${FALLBACK_TAR}"
+        local FALLBACK_UPSTREAM_URL="https://github.com/fatedier/frp/releases/download/v${FALLBACK_VER}/${FALLBACK_TAR}"
+        echo -e "${YELLOW}[*] Retrying with stable FRP v${FALLBACK_VER} from mirror...${NC}"
+        if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$FALLBACK_MIRROR_URL" 45; then
+            echo -e "${YELLOW}[*] Retrying with upstream FRP...${NC}"
+            if ! download_with_fallback "${TMP_DIR}/${TAR_FILE}" "$FALLBACK_UPSTREAM_URL" 45; then
+                echo -e "${RED}[!] Failed to download FRP from mirror, upstream, or proxies.${NC}"
+                rm -rf "$TMP_DIR"
+                return 1
+            fi
         fi
     fi
 
