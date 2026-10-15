@@ -38,14 +38,17 @@ type CarrierMetric struct {
 }
 
 type BenchmarkReport struct {
-	Timestamp      string          `json:"timestamp"`
-	DurationSec    float64         `json:"duration_sec"`
-	PeerURL        string          `json:"peer_url"`
-	PeerInternalIP string          `json:"peer_internal_ip"`
-	ActiveCarrier  string          `json:"active_carrier"`
-	BestCarrier    string          `json:"best_carrier"`
-	AutoPilot      AutoPilotStatus `json:"auto_pilot"`
-	Metrics        []CarrierMetric `json:"metrics"`
+	Timestamp       string          `json:"timestamp"`
+	DurationSec     float64         `json:"duration_sec"`
+	TargetHost      string          `json:"target_host,omitempty"`
+	TargetRole      string          `json:"target_role,omitempty"`
+	PeerURL         string          `json:"peer_url"`
+	PeerInternalIP  string          `json:"peer_internal_ip"`
+	ActiveCarrier   string          `json:"active_carrier"`
+	BestCarrier     string          `json:"best_carrier"`
+	BestCarrierName string          `json:"best_carrier_name,omitempty"`
+	AutoPilot       AutoPilotStatus `json:"auto_pilot"`
+	Metrics         []CarrierMetric `json:"metrics"`
 }
 
 type AutoPilotStatus struct {
@@ -53,6 +56,15 @@ type AutoPilotStatus struct {
 	ThresholdLoss float64 `json:"threshold_loss"`
 	LastTriggered string  `json:"last_triggered"`
 	TriggerCount  int     `json:"trigger_count"`
+}
+
+type BenchmarkRunRequest struct {
+	TargetHost   string `json:"target_host,omitempty"`
+	TargetRole   string `json:"target_role,omitempty"`
+	FrpPort      int    `json:"frp_port,omitempty"`
+	WssPort      int    `json:"wss_port,omitempty"`
+	SshPort      int    `json:"ssh_port,omitempty"`
+	BackhaulPort int    `json:"backhaul_port,omitempty"`
 }
 
 type BenchmarkApplyRequest struct {
@@ -382,8 +394,12 @@ func probePing(ctx context.Context, host string, count int) (avgRTT, minRTT, max
 	return avgRTT, minRTT, maxRTT, loss, jitter, nil
 }
 
+func isLoopbackOrLocal(host string) bool {
+	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
 // runCarrierBenchmark probes all candidate carrier models and evaluates performance.
-func runCarrierBenchmark() *BenchmarkReport {
+func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 	if !benchmarkRunning.CompareAndSwap(false, true) {
 		benchmarkMu.RLock()
 		rep := lastBenchmarkReport
@@ -421,6 +437,61 @@ func runCarrierBenchmark() *BenchmarkReport {
 			remotePub = clean
 		}
 	}
+
+	targetRole := localSt.Role
+	if targetRole == "" {
+		targetRole = "iran"
+	}
+
+	controlPort := localSt.FrpPort
+	if controlPort <= 0 {
+		controlPort = localSt.BindPort
+	}
+	if controlPort <= 0 {
+		controlPort = 7000
+	}
+
+	wssPort := carrierCfg.WSSPort
+	if wssPort <= 0 {
+		wssPort = 8443
+	}
+
+	sshPort := 22
+	backhaulPort := 3080
+
+	if len(customReq) > 0 {
+		req := customReq[0]
+		if req.TargetRole != "" {
+			targetRole = req.TargetRole
+		}
+		if req.TargetHost != "" {
+			clean := strings.TrimSpace(req.TargetHost)
+			clean = strings.TrimPrefix(clean, "http://")
+			clean = strings.TrimPrefix(clean, "https://")
+			if host, _, err := net.SplitHostPort(clean); err == nil {
+				clean = host
+			}
+			if idx := strings.Index(clean, "/"); idx != -1 {
+				clean = clean[:idx]
+			}
+			if clean != "" {
+				remotePub = clean
+			}
+		}
+		if req.FrpPort > 0 {
+			controlPort = req.FrpPort
+		}
+		if req.WssPort > 0 {
+			wssPort = req.WssPort
+		}
+		if req.SshPort > 0 {
+			sshPort = req.SshPort
+		}
+		if req.BackhaulPort > 0 {
+			backhaulPort = req.BackhaulPort
+		}
+	}
+
 	if remotePub == "" {
 		remotePub = "127.0.0.1"
 	}
@@ -433,17 +504,9 @@ func runCarrierBenchmark() *BenchmarkReport {
 		grePeer = "10.10.10.1"
 	}
 
-	fouPort1 := carrierCfg.FOUPort1
-	if fouPort1 <= 0 {
-		fouPort1 = 443
-	}
-	fouPort2 := carrierCfg.FOUPort2
-	if fouPort2 <= 0 {
-		fouPort2 = 55555
-	}
-	wssPort := carrierCfg.WSSPort
-	if wssPort <= 0 {
-		wssPort = 8443
+	quicPort := controlPort + 1
+	if quicPort > 65535 {
+		quicPort = controlPort - 1
 	}
 
 	candidates := []CarrierMetric{
@@ -454,100 +517,51 @@ func runCarrierBenchmark() *BenchmarkReport {
 			Port:     0,
 			IsActive: activeCarrier == "direct",
 		},
+		{
+			ID:       "frp:tcp",
+			Name:     fmt.Sprintf("FRP TCP Multiplexed (Port %d)", controlPort),
+			Type:     "frp_tcp",
+			Port:     controlPort,
+			IsActive: strings.Contains(activeCarrier, "tcp") || activeCarrier == "frp",
+		},
+		{
+			ID:       "frp:kcp",
+			Name:     fmt.Sprintf("FRP KCP (UDP ARQ Anti-Loss %d)", controlPort),
+			Type:     "frp_kcp",
+			Port:     controlPort,
+			IsActive: strings.Contains(activeCarrier, "kcp"),
+		},
+		{
+			ID:       "frp:quic",
+			Name:     fmt.Sprintf("FRP QUIC (UDP Stream %d)", quicPort),
+			Type:     "frp_quic",
+			Port:     quicPort,
+			IsActive: strings.Contains(activeCarrier, "quic"),
+		},
+		{
+			ID:       fmt.Sprintf("wss:%d", wssPort),
+			Name:     fmt.Sprintf("FRP / Obfuscated WSS (TLS %d)", wssPort),
+			Type:     "wss",
+			Port:     wssPort,
+			IsActive: strings.HasPrefix(activeCarrier, "wss"),
+		},
+		{
+			ID:       fmt.Sprintf("backhaul:%d", backhaulPort),
+			Name:     fmt.Sprintf("Backhaul Transport (Port %d)", backhaulPort),
+			Type:     "backhaul",
+			Port:     backhaulPort,
+			IsActive: strings.Contains(activeCarrier, "backhaul"),
+		},
+		{
+			ID:       fmt.Sprintf("bagher:%d", sshPort),
+			Name:     fmt.Sprintf("Bagher Pro (SSH Tunnel %d)", sshPort),
+			Type:     "bagher",
+			Port:     sshPort,
+			IsActive: strings.Contains(activeCarrier, "bagher") || strings.Contains(activeCarrier, "ssh"),
+		},
 	}
 
-	// Add FRP Transport Suite Candidates
-	controlPort := localSt.FrpPort
-	if controlPort <= 0 {
-		controlPort = localSt.BindPort
-	}
-	if controlPort <= 0 {
-		controlPort = 7000
-	}
-	quicPort := controlPort + 1
-	if quicPort > 65535 {
-		quicPort = controlPort - 1
-	}
-
-	isBackhaulEngine := strings.Contains(localSt.TunnelEngine, "backhaul") || localSt.TunnelType == "backhaul" || strings.Contains(localSt.Engine, "backhaul") || strings.HasPrefix(localSt.FrpSvc, "backhaul")
-	if _, err := os.Stat(filepath.Join(configDir, "server.toml")); err == nil {
-		isBackhaulEngine = true
-	} else if _, err := os.Stat(filepath.Join(configDir, "client.toml")); err == nil {
-		isBackhaulEngine = true
-	}
-
-	if !isBackhaulEngine {
-		candidates = append(candidates,
-			CarrierMetric{
-				ID:       "frp:tcp",
-				Name:     fmt.Sprintf("FRP TCP Multiplexed (Port %d)", controlPort),
-				Type:     "frp_tcp",
-				Port:     controlPort,
-				IsActive: strings.Contains(activeCarrier, "tcp") || activeCarrier == "frp",
-			},
-			CarrierMetric{
-				ID:       "frp:kcp",
-				Name:     fmt.Sprintf("FRP KCP (UDP ARQ Anti-Loss %d)", controlPort),
-				Type:     "frp_kcp",
-				Port:     controlPort,
-				IsActive: strings.Contains(activeCarrier, "kcp"),
-			},
-			CarrierMetric{
-				ID:       "frp:quic",
-				Name:     fmt.Sprintf("FRP QUIC (UDP Stream %d)", quicPort),
-				Type:     "frp_quic",
-				Port:     quicPort,
-				IsActive: strings.Contains(activeCarrier, "quic"),
-			},
-			CarrierMetric{
-				ID:       "frp:ws",
-				Name:     fmt.Sprintf("FRP WebSocket (HTTP Upgrade %d)", controlPort),
-				Type:     "frp_ws",
-				Port:     controlPort,
-				IsActive: strings.Contains(activeCarrier, "ws") && !strings.Contains(activeCarrier, "wss"),
-			},
-			CarrierMetric{
-				ID:       fmt.Sprintf("wss:%d", wssPort),
-				Name:     fmt.Sprintf("FRP / Obfuscated WSS (TLS %d)", wssPort),
-				Type:     "wss",
-				Port:     wssPort,
-				IsActive: strings.HasPrefix(activeCarrier, "wss"),
-			},
-		)
-	} else {
-		candidates = append(candidates,
-			CarrierMetric{
-				ID:       fmt.Sprintf("backhaul:%d", controlPort),
-				Name:     fmt.Sprintf("Backhaul Control (TCP %d)", controlPort),
-				Type:     "backhaul",
-				Port:     controlPort,
-				IsActive: isBackhaulEngine,
-			},
-			CarrierMetric{
-				ID:       fmt.Sprintf("wss:%d", wssPort),
-				Name:     fmt.Sprintf("Obfuscated WSS (TLS %d)", wssPort),
-				Type:     "wss",
-				Port:     wssPort,
-				IsActive: strings.HasPrefix(activeCarrier, "wss"),
-			},
-		)
-	}
-
-	// Add Backhaul proxy ports if available
-	for _, p := range localSt.Ports {
-		if p > 0 && p != localSt.FrpPort && isBackhaulEngine {
-			candidates = append(candidates, CarrierMetric{
-				ID:       fmt.Sprintf("backhaul_proxy:%d", p),
-				Name:     fmt.Sprintf("Backhaul Proxy (Port %d)", p),
-				Type:     "backhaul",
-				Port:     p,
-				IsActive: isBackhaulEngine,
-			})
-			break // include primary reverse proxy port
-		}
-	}
-
-	isIran := strings.Contains(strings.ToLower(localSt.Role), "iran")
+	isIran := strings.Contains(strings.ToLower(targetRole), "iran")
 	baseLatency := peerCfg.LatencyMs
 	if baseLatency <= 0 {
 		pctx, pcancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -564,7 +578,7 @@ func runCarrierBenchmark() *BenchmarkReport {
 			}
 		}
 	}
-	if baseLatency <= 0 && isIran {
+	if baseLatency <= 0 && isIran && isLoopbackOrLocal(remotePub) {
 		baseLatency = 1.0
 	}
 
@@ -591,10 +605,10 @@ func runCarrierBenchmark() *BenchmarkReport {
 					// Fallback probe to remote public IP if GRE link down
 					avg, min, max, loss, jit, _ = probePing(cctx, remotePub, probeCount)
 				}
-				if err != nil && isIran {
+				if err != nil && isLoopbackOrLocal(remotePub) && isIran {
 					avg, min, max, loss, jit = 0.5, 0.4, 0.6, 0.0, 0.1
 					err = nil
-				} else if err != nil && baseLatency > 0 {
+				} else if err != nil && isLoopbackOrLocal(remotePub) && baseLatency > 0 {
 					avg, min, max, loss, jit = baseLatency, baseLatency-0.5, baseLatency+0.5, 0.0, 0.5
 					err = nil
 				}
@@ -607,43 +621,14 @@ func runCarrierBenchmark() *BenchmarkReport {
 					c.ErrorDetail = err.Error()
 				}
 
-			case "fou":
-				targetHost := remotePub
-				if isIran {
-					targetHost = "127.0.0.1"
-				}
-				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
-				avg, min, max, loss, jit, err := probeTCP(cctx, addr, probeCount, timeout)
-				if err != nil {
-					if baseLatency > 0 {
-						avg = baseLatency + float64(c.Port%5)*0.2
-						min = avg - 0.5
-						max = avg + 0.8
-						loss = 0.0
-						jit = 0.8
-						err = nil
-					}
-				}
-				c.AvgRTTMs = math.Round(avg*10) / 10
-				c.MinRTTMs = math.Round(min*10) / 10
-				c.MaxRTTMs = math.Round(max*10) / 10
-				c.PacketLoss = math.Round(loss*10) / 10
-				c.JitterMs = math.Round(jit*10) / 10
-				if err != nil {
-					c.ErrorDetail = err.Error()
-				}
-
 			case "wss":
 				targetHost := remotePub
-				if isIran {
-					targetHost = "127.0.0.1"
-				}
 				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
 				avg, min, max, loss, jit, err := probeTLS(cctx, addr, probeCount, timeout)
 				if err != nil {
 					avg, min, max, loss, jit, err = probeTCP(cctx, addr, probeCount, timeout)
 				}
-				if err != nil && isIran {
+				if err != nil && isLoopbackOrLocal(targetHost) && isIran {
 					wssSt := getWSSStatus()
 					if wssSt.Running {
 						avg = 1.2
@@ -654,7 +639,7 @@ func runCarrierBenchmark() *BenchmarkReport {
 						err = nil
 					}
 				}
-				if err != nil && baseLatency > 0 {
+				if err != nil && isLoopbackOrLocal(targetHost) && baseLatency > 0 {
 					avg = baseLatency + 2.0
 					min = avg - 0.5
 					max = avg + 1.2
@@ -673,12 +658,9 @@ func runCarrierBenchmark() *BenchmarkReport {
 
 			case "frp_kcp", "frp_quic":
 				targetHost := remotePub
-				if isIran {
-					targetHost = "127.0.0.1"
-				}
 				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
 				avg, min, max, loss, jit, err := probeUDP(cctx, addr, probeCount, timeout)
-				if err != nil && baseLatency > 0 {
+				if err != nil && isLoopbackOrLocal(targetHost) && baseLatency > 0 {
 					offset := 0.4
 					if c.Type == "frp_kcp" {
 						offset = 0.2 // KCP ARQ typically has superior stability
@@ -699,14 +681,11 @@ func runCarrierBenchmark() *BenchmarkReport {
 					c.ErrorDetail = err.Error()
 				}
 
-			case "frp_tcp", "frp_ws", "backhaul", "frp":
+			case "frp_tcp", "frp_ws", "backhaul", "frp", "bagher":
 				targetHost := remotePub
-				if isIran {
-					targetHost = "127.0.0.1"
-				}
 				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
 				avg, min, max, loss, jit, err := probeTCP(cctx, addr, probeCount, timeout)
-				if err != nil && baseLatency > 0 {
+				if err != nil && isLoopbackOrLocal(targetHost) && baseLatency > 0 {
 					avg = baseLatency + 0.8
 					min = avg - 0.3
 					max = avg + 0.9
@@ -735,13 +714,15 @@ func runCarrierBenchmark() *BenchmarkReport {
 		return candidates[i].Score > candidates[j].Score
 	})
 
-	// Determine best recommended carrier (must be an applicable GRE carrier, FRP transport, or backhaul)
+	// Determine best recommended carrier
 	bestCarrier := ""
+	bestCarrierName := ""
 	for i := range candidates {
 		id := candidates[i].ID
-		if id == "direct" || strings.HasPrefix(id, "wss:") || strings.HasPrefix(id, "frp:") || strings.HasPrefix(id, "backhaul:") {
-			if bestCarrier == "" && candidates[i].Score >= 30 {
+		if id == "direct" || strings.HasPrefix(id, "wss:") || strings.HasPrefix(id, "frp:") || strings.HasPrefix(id, "backhaul:") || strings.HasPrefix(id, "bagher:") {
+			if bestCarrier == "" && candidates[i].Score >= 10 {
 				bestCarrier = id
+				bestCarrierName = candidates[i].Name
 				candidates[i].IsRecommended = true
 				break
 			}
@@ -749,18 +730,22 @@ func runCarrierBenchmark() *BenchmarkReport {
 	}
 	if bestCarrier == "" && len(candidates) > 0 {
 		bestCarrier = candidates[0].ID
+		bestCarrierName = candidates[0].Name
 		candidates[0].IsRecommended = true
 	}
 
 	duration := float64(time.Since(startTime).Milliseconds()) / 1000.0
 
 	report := &BenchmarkReport{
-		Timestamp:      time.Now().Format("2006-01-02 15:04:05"),
-		DurationSec:    duration,
-		PeerURL:        peerCfg.PeerURL,
-		PeerInternalIP: grePeer,
-		ActiveCarrier:  activeCarrier,
-		BestCarrier:    bestCarrier,
+		Timestamp:       time.Now().Format("2006-01-02 15:04:05"),
+		DurationSec:     duration,
+		TargetHost:      remotePub,
+		TargetRole:      targetRole,
+		PeerURL:         peerCfg.PeerURL,
+		PeerInternalIP:  grePeer,
+		ActiveCarrier:   activeCarrier,
+		BestCarrier:     bestCarrier,
+		BestCarrierName: bestCarrierName,
 		AutoPilot: AutoPilotStatus{
 			Enabled:       peerCfg.AutoPilotEnabled,
 			ThresholdLoss: peerCfg.AutoPilotThreshold,
@@ -837,7 +822,11 @@ func handleBenchmarkGet(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/benchmark/run
 func handleBenchmarkRun(w http.ResponseWriter, r *http.Request) {
-	rep := runCarrierBenchmark()
+	var req BenchmarkRunRequest
+	if r.Body != nil && r.ContentLength > 0 {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	rep := runCarrierBenchmark(req)
 	writeJSON(w, rep)
 }
 

@@ -204,8 +204,11 @@ func TestClusterStatusLicenseGate(t *testing.T) {
 	_, cleanup := setupClusterTest(t)
 	defer cleanup()
 
-	// Clear license
+	// Clear license and set check time so disk is not re-queried during test
+	activeLicenseMu.Lock()
 	activeLicense = nil
+	licenseCheckedAt = time.Now()
+	activeLicenseMu.Unlock()
 
 	// Config post without license must return 402
 	body := []byte(`{"enabled":true}`)

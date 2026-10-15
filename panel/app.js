@@ -5532,7 +5532,22 @@ async function loadBenchmark(forceRun = false) {
   if (_tb && !(benchData && benchData.metrics && benchData.metrics.length)) _tb.innerHTML = '<tr><td colspan="10">' + skel(3) + '</td></tr>';
   try {
     if (forceRun) {
-      benchData = await api('/api/benchmark/run');
+      const targetHost = ($('benchTargetHost') ? $('benchTargetHost').value.trim() : '');
+      const targetRole = ($('benchTargetRole') ? $('benchTargetRole').value : 'iran');
+      const frpPort = parseInt($('benchFrpPort') ? $('benchFrpPort').value : 7000) || 7000;
+      const wssPort = parseInt($('benchWssPort') ? $('benchWssPort').value : 8443) || 8443;
+      const backhaulPort = parseInt($('benchBackhaulPort') ? $('benchBackhaulPort').value : 3080) || 3080;
+      const bagherPort = parseInt($('benchBagherPort') ? $('benchBagherPort').value : 22) || 22;
+
+      const payload = {
+        target_host: targetHost,
+        target_role: targetRole,
+        frp_port: frpPort,
+        wss_port: wssPort,
+        backhaul_port: backhaulPort,
+        bagher_port: bagherPort
+      };
+      benchData = await api('/api/benchmark/run', payload);
     } else {
       benchData = await api('/api/benchmark');
     }
@@ -5545,6 +5560,23 @@ async function loadBenchmark(forceRun = false) {
     peerData = await api('/api/peer/status');
   } catch (err) {
     reportErr('peerlink', err);
+  }
+
+  // Auto-detect target IP if empty and known from config or peer
+  const hostInput = $('benchTargetHost');
+  if (hostInput && !hostInput.value.trim()) {
+    if (peerData && peerData.peer_url) {
+      try {
+        const u = new URL(peerData.peer_url.startsWith('http') ? peerData.peer_url : 'http://' + peerData.peer_url);
+        if (u.hostname) {
+          hostInput.value = u.hostname;
+          if ($('benchAutoDetectBadge')) $('benchAutoDetectBadge').style.display = 'inline-block';
+        }
+      } catch (_) {}
+    } else if (benchData && benchData.target_host) {
+      hostInput.value = benchData.target_host;
+      if ($('benchAutoDetectBadge')) $('benchAutoDetectBadge').style.display = 'inline-block';
+    }
   }
 
   renderBenchmark(benchData, peerData);
@@ -5560,13 +5592,13 @@ function renderBenchmark(bench, peer) {
     const badge = $('peerLinkBadge');
     if (badge) {
       badge.className = 'badge ' + (isConn ? 'ok' : 'err');
-      badge.textContent = isConn ? 'Connected' : (peer.peer_url ? 'Unreachable' : 'Unpaired');
+      badge.textContent = isConn ? 'متصل' : (peer.peer_url ? 'غیرقابل دسترس' : 'تنظیم‌نشده');
     }
-    if ($('peerRoleVal')) $('peerRoleVal').textContent = (peer.role === 'master' ? 'Master (Iran)' : 'Worker (Kharej)');
+    if ($('peerRoleVal')) $('peerRoleVal').textContent = (peer.role === 'master' ? 'مستر (ایران)' : 'ورکر (خارج)');
     if ($('peerUrlVal')) $('peerUrlVal').textContent = peer.peer_url || '—';
     if ($('peerInternalVal')) $('peerInternalVal').textContent = peer.internal_ip || '—';
     if ($('peerLatencyVal')) $('peerLatencyVal').textContent = (peer.latency_ms > 0 ? peer.latency_ms.toFixed(1) + ' ms' : '—');
-    if ($('peerLastSyncVal')) $('peerLastSyncVal').textContent = peer.last_sync || 'Never';
+    if ($('peerLastSyncVal')) $('peerLastSyncVal').textContent = peer.last_sync || 'هرگز';
 
     // Automatic Failover Policy
     if ($('autoPilotToggle')) $('autoPilotToggle').checked = !!peer.autopilot;
@@ -5574,7 +5606,7 @@ function renderBenchmark(bench, peer) {
     if ($('autoPilotBadge')) {
       const b = $('autoPilotBadge');
       b.className = 'badge ' + (peer.autopilot ? 'warn' : 'dim');
-      b.textContent = peer.autopilot ? '[ ON ] Auto-Switching' : '[ OFF ] Manual Mode';
+      b.textContent = peer.autopilot ? '[ روشن ] سوییچ خودکار' : '[ خاموش ] حالت دستی';
     }
   }
 
@@ -5586,22 +5618,46 @@ function renderBenchmark(bench, peer) {
     const winnerName = winner ? (winner.name || winner.id).replace(/\s*\(.*?\)/, '') : '—';
     const activeName = active ? (active.name || active.id).replace(/\s*\(.*?\)/, '') : '—';
 
+    // Winner Banner Showcase
+    const winnerBanner = $('benchWinnerBanner');
+    if (winner && winnerBanner) {
+      winnerBanner.classList.remove('hidden');
+      if ($('benchWinnerTitle')) $('benchWinnerTitle').textContent = winner.name || winner.id;
+      if ($('benchWinnerScore')) $('benchWinnerScore').textContent = `${winner.score} / 100`;
+      if ($('benchWinnerBadge')) {
+        const wb = $('benchWinnerBadge');
+        wb.className = 'badge ' + (winner.status === 'healthy' ? 'ok' : (winner.status === 'good' ? 'info' : 'warn'));
+        wb.textContent = winner.status === 'healthy' ? '⚡ بالاترین پایداری' : (winner.status === 'good' ? '🟢 کیفیت مطلوب' : '⚠️ مشروط');
+      }
+      if ($('benchWinnerDesc')) {
+        const rttTxt = winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} میلی‌ثانیه تاخیر` : 'پاسخگویی سریع';
+        $('benchWinnerDesc').textContent = `بر اساس تست زنده، این پروتکل با پکت‌لاس ${winner.packet_loss}% و ${rttTxt}، بهترین بازدهی را برای دور زدن فیلترینگ و اختلال شبکه دارد.`;
+      }
+      const applyBtn = $('benchApplyWinnerBtn');
+      if (applyBtn) {
+        applyBtn.onclick = () => smartApplyOrSetupCarrier(winner.id, winner.name);
+      }
+    } else if (winnerBanner) {
+      winnerBanner.classList.add('hidden');
+    }
+
     if ($('benchStatWinner')) $('benchStatWinner').textContent = winnerName;
-    if ($('benchStatWinnerSub')) $('benchStatWinnerSub').textContent = winner ? `Score: ${winner.score}/100 · ${winner.avg_rtt_ms} ms` : 'Top candidate';
+    if ($('benchStatWinnerSub')) $('benchStatWinnerSub').textContent = winner ? `امتیاز: ${winner.score}/100 · ${winner.avg_rtt_ms} ms` : 'گزینه اول پیشنهادی';
     if ($('benchStatActive')) $('benchStatActive').textContent = activeName;
-    if ($('benchStatActiveSub')) $('benchStatActiveSub').textContent = tr('x031', "Active route");
+    if ($('benchStatActiveSub')) $('benchStatActiveSub').textContent = 'کریر فعال شبکه';
     if ($('benchStatMinRtt')) $('benchStatMinRtt').textContent = minRtt > 0 ? `${minRtt.toFixed(1)} ms` : (winner && winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} ms` : '—');
-    if ($('benchStatMinRttSub')) $('benchStatMinRttSub').textContent = tr('x032', "Best round-trip");
+    if ($('benchStatMinRttSub')) $('benchStatMinRttSub').textContent = 'کمترین زمان رفت و برگشت';
     if ($('benchStatLoss')) $('benchStatLoss').textContent = winner ? `${winner.packet_loss}%` : '0%';
-    if ($('benchStatLossSub')) $('benchStatLossSub').textContent = (winner && winner.packet_loss === 0) ? (tr('x033', "Zero loss link")) : (tr('x034', "Packet drop rate"));
+    if ($('benchStatLossSub')) $('benchStatLossSub').textContent = (winner && winner.packet_loss === 0) ? 'بدون افت پکت' : 'نرخ افت پکت پروتکل برتر';
 
     if ($('benchMetaSub')) {
-      $('benchMetaSub').textContent = `${tr('x035', "Last benchmark")}: ${bench.timestamp || '—'} · ${bench.metrics.length} ${tr('x036', "candidates probed")}`;
+      const tgt = bench.target_host ? `به مقصد ${bench.target_host}` : '';
+      $('benchMetaSub').textContent = `آخرین بنچمارک: ${bench.timestamp || '—'} · سنجش ${bench.metrics.length} پروتکل فعال ${tgt}`;
     }
   }
 
   if (bench && bench.auto_pilot) {
-    if ($('autoPilotLastVal')) $('autoPilotLastVal').textContent = bench.auto_pilot.last_triggered || (tr('x037', "None"));
+    if ($('autoPilotLastVal')) $('autoPilotLastVal').textContent = bench.auto_pilot.last_triggered || 'هیچ‌کدام';
     if ($('autoPilotCountVal')) $('autoPilotCountVal').textContent = bench.auto_pilot.trigger_count || 0;
   }
 
@@ -5610,7 +5666,7 @@ function renderBenchmark(bench, peer) {
   if (!tbody) return;
 
   if (!bench || !bench.metrics || bench.metrics.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: tr('empty_bench_title', 'No benchmark metrics yet'), msg: tr('empty_bench_msg', 'Run a carrier benchmark to compare protocols.'), actionKey: 'runbench', actionLabel: tr('bench_run_btn', 'Run Carrier Benchmark'), compact: true })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: 'هنوز تستی انجام نشده است', msg: 'آدرس سرور خارج را وارد کرده و کلید شروع بنچمارک هوشمند را بزنید.', actionKey: 'runbench', actionLabel: '⚡ شروع بنچمارک هوشمند', compact: true })}</td></tr>`;
     return;
   }
 
@@ -5623,16 +5679,16 @@ function renderBenchmark(bench, peer) {
     let statusLabel = m.status;
     if (m.status === 'healthy') {
       statusClass = 'ok';
-      statusLabel = tr('x039', "Healthy");
+      statusLabel = 'عالی';
     } else if (m.status === 'good') {
       statusClass = 'info';
-      statusLabel = tr('x040', "Good");
+      statusLabel = 'مناسب';
     } else if (m.status === 'warning') {
       statusClass = 'warn';
-      statusLabel = tr('x041', "Warning");
+      statusLabel = 'دارای پکت‌لاس';
     } else if (m.status === 'critical' || m.status === 'down') {
       statusClass = 'err';
-      statusLabel = tr('x042', "Down");
+      statusLabel = 'مسدود / قطع';
     }
 
     let lossClass = 'ok';
@@ -5645,38 +5701,40 @@ function renderBenchmark(bench, peer) {
     const cleanName = (m.name || m.id).replace(/\s*\(.*?\)/, '');
     const cleanSub = m.name && m.name.includes('(') ? m.name.match(/\((.*?)\)/)[1] : '';
 
-    const portStr = m.port > 0 ? m.port : (tr('x043', "Raw 47"));
+    const portStr = m.port > 0 ? m.port : 'Raw 47';
 
     // Protocol badge styling
-    let protoPill = `<span class="bench-proto-pill dim">${esc(m.type.toUpperCase())}</span>`;
+    let protoPill = `<span class="bench-proto-pill dim">${esc((m.type || '').toUpperCase())}</span>`;
     const tLower = (m.type || '').toLowerCase();
-    if (tLower === 'gre') {
-      protoPill = `<span class="bench-proto-pill u-pill-sky">GRE KERNEL</span>`;
+    if (tLower === 'gre' || tLower === 'direct') {
+      protoPill = `<span class="bench-proto-pill u-pill-sky">GRE DIRECT</span>`;
     } else if (tLower === 'frp_tcp') {
-      protoPill = `<span class="bench-proto-pill" style="background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)">TCP MUX</span>`;
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)">FRP TCP</span>`;
     } else if (tLower === 'frp_kcp') {
-      protoPill = `<span class="bench-proto-pill" style="background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)">KCP ARQ</span>`;
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)">FRP KCP</span>`;
     } else if (tLower === 'frp_quic') {
-      protoPill = `<span class="bench-proto-pill u-pill-violet">QUIC UDP</span>`;
-    } else if (tLower === 'frp_ws') {
+      protoPill = `<span class="bench-proto-pill u-pill-violet">FRP QUIC</span>`;
+    } else if (tLower === 'frp_ws' || tLower === 'websocket') {
       protoPill = `<span class="bench-proto-pill" style="background:rgba(20,184,166,0.15);color:#2dd4bf;border:1px solid rgba(20,184,166,0.3)">WEBSOCKET</span>`;
-    } else if (tLower === 'wss') {
+    } else if (tLower === 'frp_wss' || tLower === 'wss') {
       protoPill = `<span class="bench-proto-pill" style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3)">WSS TLS</span>`;
     } else if (tLower.includes('backhaul')) {
       protoPill = `<span class="bench-proto-pill info">BACKHAUL</span>`;
+    } else if (tLower.includes('ssh') || tLower.includes('bagher')) {
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(236,72,153,0.15);color:#f472b6;border:1px solid rgba(236,72,153,0.3)">BAGHER SSH</span>`;
     }
 
     const rowBg = isActive
       ? 'background:rgba(56,189,248,0.06);'
-      : (isWinner ? 'background:rgba(16,185,129,0.03);' : '');
+      : (isWinner ? 'background:rgba(16,185,129,0.04);' : '');
 
     html += `<tr class="${isActive ? 'row-active' : ''}" style="${rowBg}">
       <td style="text-align:center;width:44px;">${rankBadge}</td>
       <td>
         <div class="u-flex-center-gap8">
           <strong style="color:var(--tx);font-size:13.5px;">${esc(cleanName)}</strong>
-          ${isActive ? `<span class="badge ok" style="font-size:12px;padding:2px 6px;">${tr('x044', "ACTIVE")}</span>` : ''}
-          ${isWinner ? `<span class="badge info" style="font-size:12px;padding:2px 6px;">${tr('x045', "BEST")}</span>` : ''}
+          ${isActive ? `<span class="badge ok" style="font-size:12px;padding:2px 6px;">فعال</span>` : ''}
+          ${isWinner ? `<span class="badge info" style="font-size:12px;padding:2px 6px;">پیشنهاد برتر</span>` : ''}
         </div>
         ${cleanSub ? `<div style="font-size:12px;color:var(--mu);margin-top:2px;">${esc(cleanSub)}</div>` : ''}
       </td>
@@ -5695,8 +5753,8 @@ function renderBenchmark(bench, peer) {
       </td>
       <td><span class="badge ${statusClass} u-fs-12">${esc(statusLabel)}</span></td>
       <td>
-        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs" disabled style="opacity:0.65;font-weight:600;padding:5px 12px;">${tr('x046', "Current")}</button>` :
-          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="applyCarrierClick('${esc(m.id)}')">${tr('x047', "Switch")}</button>`}
+        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs" disabled style="opacity:0.65;font-weight:600;padding:5px 12px;">کریر جاری</button>` :
+          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="smartApplyOrSetupCarrier('${esc(m.id)}', '${esc(m.name || m.id)}')">${isWinner ? '🚀 انتخاب برتر' : 'فعال‌سازی'}</button>`}
       </td>
     </tr>`;
   });
@@ -5706,50 +5764,129 @@ function renderBenchmark(bench, peer) {
 
 async function runBenchmarkClick() {
   if (benchRunning) return;
+  const targetHost = ($('benchTargetHost') ? $('benchTargetHost').value.trim() : '');
+  const isConn = peerData && peerData.is_connected;
+  
+  if (!targetHost && !isConn) {
+    toastWarn('آدرس سرور را وارد کنید', 'برای سنجش پیش از اتصال، لطفاً IP یا دامنه سرور خارج (مقصد) را وارد نمایید.');
+    if ($('benchTargetHost')) $('benchTargetHost').focus();
+    return;
+  }
+
   benchRunning = true;
   const btn = $('benchRunBtn');
   const txt = $('benchRunBtnTxt');
   if (btn) btn.disabled = true;
-  if (txt) txt.textContent = tr('x048', "Probing carriers...");
-  toast(tr('x049', "Benchmarking carriers"), tr('x050', "Probing GRE, WSS, TCP, KCP, QUIC, and WS..."));
+  if (txt) txt.textContent = 'در حال سنجش هوشمند پروتکل‌ها...';
+  toast('آغاز بنچمارک هوشمند', 'پروب همزمان تمام ۷ پروتکل هاشم به سمت سرور مقصد...');
 
   try {
     await loadBenchmark(true);
-    toastOk(tr('x051', "Benchmark Complete"), `${tr('x052', "Best Carrier")}: ${benchData ? (benchData.best_carrier || '—') : '—'}`);
+    toastOk('بنچمارک تکمیل شد', `بهترین پروتکل: ${benchData ? (benchData.best_carrier_name || benchData.best_carrier || '—') : '—'}`);
   } catch (err) {
-    toastErr(tr('x053', "Benchmark failed"), err.message || err);
+    toastErr('خطا در اجرای بنچمارک', err.message || err);
   } finally {
     benchRunning = false;
     if (btn) btn.disabled = false;
-    if (txt) txt.textContent = tr('bench_run_btn', 'Run Carrier Benchmark');
+    if (txt) txt.textContent = '⚡ شروع بنچمارک هوشمند';
   }
+}
+
+async function smartApplyOrSetupCarrier(carrierId, carrierName) {
+  const cleanName = carrierName || carrierId;
+  const targetHost = ($('benchTargetHost') ? $('benchTargetHost').value.trim() : '');
+  const isConn = peerData && peerData.is_connected;
+
+  // Case 1: Servers are already paired & active -> instant carrier switch with confirmation modal
+  if (isConn) {
+    entConfirm({
+      title: 'سوییچ به پروتکل برتر',
+      msg: `آیا مایلید کریر فعال تانل روی هر دو سرور به «${esc(cleanName)}» تغییر کند؟`,
+      okText: 'بله، تغییر بده',
+      cancelText: 'انصراف',
+      danger: false
+    }, async () => {
+      toast('در حال تغییر پروتکل', `${cleanName}...`);
+      try {
+        const res = await api('/api/benchmark/apply', { carrier: carrierId });
+        toastOk('پروتکل با موفقیت فعال شد', res.detail || `کریر فعال به ${cleanName} تغییر یافت.`);
+        await loadBenchmark();
+      } catch (err) {
+        toastErr('خطا در اعمال پروتکل', err.message || err);
+      }
+    });
+    return;
+  }
+
+  // Case 2: Pre-connection benchmark -> smart navigate to setup and pre-fill fields
+  toastOk('پروتکل هوشمند انتخاب شد', `هدایت به صفحه ستاپ با پروتکل پیشنهادی ${cleanName}...`);
+
+  // If Bagher (SSH forward) selected
+  if (carrierId.startsWith('bagher') || carrierId === 'sshfwd') {
+    if (typeof goTab === 'function') goTab('sshfwd');
+    if (targetHost) {
+      if ($('sshfwdRemoteHost')) $('sshfwdRemoteHost').value = targetHost;
+      if ($('bagherQuickRemoteHost')) $('bagherQuickRemoteHost').value = targetHost;
+    }
+    toast('راهنمای راه‌اندازی باقر', 'مشخصات سرور را در تب باقر تکمیل و دکمه راه‌اندازی را بزنید.');
+    return;
+  }
+
+  // Quick Setup tab navigation
+  if (typeof goTab === 'function') goTab('setup');
+
+  // Pre-fill target host in setup
+  if (targetHost && $('sRemotePub')) {
+    $('sRemotePub').value = targetHost;
+  }
+
+  // Set appropriate engine & transport
+  if (carrierId.startsWith('backhaul')) {
+    const bhBtn = $('engBh');
+    if (bhBtn) bhBtn.click();
+  } else if (carrierId === 'direct') {
+    const greBtn = $('engGreFrp');
+    if (greBtn) greBtn.click();
+    const trans = $('sTransport');
+    if (trans) trans.value = 'tcp';
+  } else if (carrierId.startsWith('frp:')) {
+    const greBtn = $('engGreFrp');
+    if (greBtn) greBtn.click();
+    const trans = $('sTransport');
+    const sub = carrierId.replace('frp:', '');
+    if (trans) {
+      if (sub === 'kcp') trans.value = 'kcp';
+      else if (sub === 'quic') trans.value = 'quic';
+      else if (sub === 'ws' || sub === 'websocket') trans.value = 'websocket';
+      else if (sub === 'wss') trans.value = 'wss';
+      else trans.value = 'tcp';
+    }
+  } else if (carrierId.startsWith('wss')) {
+    const greBtn = $('engGreFrp');
+    if (greBtn) greBtn.click();
+    const trans = $('sTransport');
+    if (trans) trans.value = 'wss';
+  }
+
+  toast('پیکربندی هوشمند تکمیل شد', `تنظیمات بر اساس پروتکل ${cleanName} لود شدند. کلید راه‌اندازی را لمس کنید.`);
 }
 
 async function applyCarrierClick(carrierId) {
-  const confirmMsg = tr('carrier_switch_confirm', 'Switch both Iran & Foreign servers to carrier "{id}"?').replace('{id}', carrierId);
-  if (!confirm(confirmMsg)) return;
-  toast(tr('x054', "Applying carrier"), `${carrierId}...`);
-  try {
-    const res = await api('/api/benchmark/apply', { carrier: carrierId });
-    toastOk(tr('x055', "Carrier Applied"), res.detail || `Active carrier is now ${carrierId}`);
-    await loadBenchmark();
-  } catch (err) {
-    toastErr(tr('x056', "Apply failed"), err.message || err);
-  }
+  smartApplyOrSetupCarrier(carrierId);
 }
 
 async function testPeerLinkClick() {
-  toast('Testing link', 'Sending probe to peer...');
+  toast('تست ارتباط پنل', 'در حال ارسال پکت پروب به سرور مقابل...');
   try {
     const res = await api('/api/peer/config', { action: 'test' });
     if (res.reachable) {
-      toastOk('Peer reachable', `Round-trip latency: ${res.latency_ms.toFixed(1)} ms`);
+      toastOk('ارتباط دو پنل برقرار است', `تاخیر رفت و برگشت: ${res.latency_ms.toFixed(1)} ms`);
     } else {
-      toastWarn('Peer unreachable', 'Could not establish connection to remote peer.');
+      toastWarn('سرور مقابل پاسخ نداد', 'امکان برقراری ارتباط با وب‌پنل سرور مقابل وجود ندارد.');
     }
     await loadBenchmark();
   } catch (err) {
-    toastErr('Peer probe failed', err.message || err);
+    toastErr('خطا در پروب پنل مقابل', err.message || err);
   }
 }
 
@@ -5758,13 +5895,13 @@ async function saveAutoPilotClick() {
   const enabled = $('autoPilotToggle') ? $('autoPilotToggle').checked : false;
   const thresh = $('autoPilotThresholdInput') ? parseFloat($('autoPilotThresholdInput').value) || 20 : 20;
 
-  setBtnLoading(btn, true, 'Saving…');
+  setBtnLoading(btn, true, 'در حال ذخیره…');
   try {
     await api('/api/benchmark/autopilot', { enabled: enabled, threshold: thresh });
-    toastOk('Failover Policy Saved', enabled ? `Automatic Failover is now ON (threshold: ${thresh}%)` : 'Automatic Failover is OFF (Manual Mode)');
+    toastOk('سیاست سوییچ خودکار ذخیره شد', enabled ? `سوییچ خودکار روشن است (آستانه: ${thresh}%)` : 'سوییچ خودکار خاموش است (حالت دستی)');
     await loadBenchmark();
   } catch (err) {
-    toastErr('Failed to save Failover Policy', err.message || err);
+    toastErr('خطا در ذخیره سیاست سوییچ', err.message || err);
   } finally {
     setBtnLoading(btn, false);
   }
@@ -5796,11 +5933,11 @@ async function savePeerConfigClick() {
     const payload = { role, peer_url: url, internal_ip: internal };
     if (secret) payload.peer_secret = secret;
     await api('/api/peer/config', payload);
-    toastOk('Peer Config Saved', 'Remote link configuration updated.');
+    toastOk('تنظیمات ارتباط ذخیره شد', 'اطلاعات سرور مقابل به‌روزرسانی گردید.');
     closePeerConfig();
     await loadBenchmark();
   } catch (err) {
-    toastErr('Save failed', err.message || err);
+    toastErr('خطا در ذخیره تنظیمات', err.message || err);
   }
 }
 
@@ -5813,7 +5950,60 @@ async function savePeerConfigClick() {
   on('peerConfigCloseBtn', 'click', closePeerConfig);
   on('cfgPeerSaveBtn', 'click', savePeerConfigClick);
   on('autoPilotSaveBtn', 'click', saveAutoPilotClick);
+
+  // Role buttons
+  const iranBtn = $('benchRoleIranBtn');
+  const forBtn = $('benchRoleForeignBtn');
+  const roleInput = $('benchTargetRole');
+  const roleHint = $('benchRoleHint');
+  const hostLabel = document.querySelector('label[for="benchTargetHost"] span');
+
+  if (iranBtn && forBtn && roleInput) {
+    iranBtn.addEventListener('click', () => {
+      iranBtn.classList.add('active');
+      iranBtn.setAttribute('aria-pressed', 'true');
+      forBtn.classList.remove('active');
+      forBtn.setAttribute('aria-pressed', 'false');
+      roleInput.value = 'iran';
+      if (roleHint) roleHint.textContent = 'در سرور ایران، مشخصات سرور خارج را وارد کنید تا تمام ۷ پروتکل از داخل ایران پروب شوند.';
+      if (hostLabel) hostLabel.textContent = 'آدرس IP عمومی یا دامنه سرور خارج (مقصد)';
+    });
+
+    forBtn.addEventListener('click', () => {
+      forBtn.classList.add('active');
+      forBtn.setAttribute('aria-pressed', 'true');
+      iranBtn.classList.remove('active');
+      iranBtn.setAttribute('aria-pressed', 'false');
+      roleInput.value = 'foreign';
+      if (roleHint) roleHint.textContent = 'در سرور خارج، مشخصات سرور ایران را وارد کنید تا تمام ۷ پروتکل از خارج پروب شوند.';
+      if (hostLabel) hostLabel.textContent = 'آدرس IP عمومی یا دامنه سرور ایران (مقصد)';
+    });
+  }
+
+  // Advanced options accordion
+  const advToggle = $('benchAdvToggle');
+  const advWrap = $('benchAdvWrap');
+  const advChevron = $('benchAdvChevron');
+  if (advToggle && advWrap) {
+    advToggle.addEventListener('click', () => {
+      advWrap.classList.toggle('hidden');
+      if (advChevron) {
+        advChevron.textContent = advWrap.classList.contains('hidden') ? '▼ باز کردن' : '▲ بستن';
+      }
+    });
+  }
 })();
+
+// Expose on window for inline handlers
+window.loadBenchmark = loadBenchmark;
+window.runBenchmarkClick = runBenchmarkClick;
+window.applyCarrierClick = applyCarrierClick;
+window.smartApplyOrSetupCarrier = smartApplyOrSetupCarrier;
+window.testPeerLinkClick = testPeerLinkClick;
+window.saveAutoPilotClick = saveAutoPilotClick;
+window.openPeerConfig = openPeerConfig;
+window.closePeerConfig = closePeerConfig;
+window.savePeerConfigClick = savePeerConfigClick;
 
 // ---------- SSH Forward Carrier (tab-sshfwd) ----------
 _sshfwdData = null;

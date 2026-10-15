@@ -141,3 +141,51 @@ func TestBenchmarkExecutionAndEndpoints(t *testing.T) {
 		t.Fatalf("handleBenchmarkApply returned %d: %s", rrApply.Code, rrApply.Body.String())
 	}
 }
+
+func TestBenchmarkAllSevenProtocolsAndCustomTarget(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hashem_bench_protos_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldConfigDir := configDir
+	configDir = tmpDir
+	defer func() { configDir = oldConfigDir }()
+
+	// Test with custom TargetHost
+	req := BenchmarkRunRequest{
+		TargetHost:   "127.0.0.1",
+		TargetRole:   "iran",
+		FrpPort:      7000,
+		WssPort:      8443,
+		SshPort:      22,
+		BackhaulPort: 3080,
+	}
+
+	rep := runCarrierBenchmark(req)
+	if rep == nil {
+		t.Fatalf("expected non-nil report")
+	}
+
+	typesFound := make(map[string]bool)
+	for _, m := range rep.Metrics {
+		typesFound[m.Type] = true
+	}
+
+	expected := []string{"gre", "frp_tcp", "frp_kcp", "frp_quic", "wss", "backhaul", "bagher"}
+	for _, exp := range expected {
+		if !typesFound[exp] {
+			t.Errorf("missing active protocol %s in benchmark candidates (found: %+v)", exp, typesFound)
+		}
+	}
+
+	// Verify handler accepts JSON body with TargetHost
+	body, _ := json.Marshal(req)
+	reqAPI := httptest.NewRequest("POST", "/api/benchmark/run", bytes.NewReader(body))
+	rrAPI := httptest.NewRecorder()
+	handleBenchmarkRun(rrAPI, reqAPI)
+	if rrAPI.Code != http.StatusOK {
+		t.Fatalf("handleBenchmarkRun with custom target failed: %d", rrAPI.Code)
+	}
+}

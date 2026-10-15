@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -138,7 +139,10 @@ func TestLicenseAPI(t *testing.T) {
 		masterPublicKeyB64 = origKey
 		activeLicenseMu.Lock()
 		activeLicense = nil
+		licenseCheckedAt = time.Now()
 		activeLicenseMu.Unlock()
+		_ = os.Remove("/etc/hashem/license.key")
+		_ = os.Remove(filepath.Join(configDir, "license.key"))
 	}()
 
 	mHash := getMachineHash()

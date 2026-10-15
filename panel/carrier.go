@@ -384,7 +384,7 @@ func updateFrpcTransport(proto string) error {
 func applyCarrierMode(t string) (string, error) {
 	cfg := loadCarrierConfig()
 	t = strings.TrimSpace(t)
-	if t != "direct" && !strings.HasPrefix(t, "fou:") && !strings.HasPrefix(t, "wss") && !strings.HasPrefix(t, "frp:") && !strings.HasPrefix(t, "backhaul:") {
+	if t != "direct" && !strings.HasPrefix(t, "fou:") && !strings.HasPrefix(t, "wss") && !strings.HasPrefix(t, "frp:") && !strings.HasPrefix(t, "backhaul:") && !strings.HasPrefix(t, "bagher:") {
 		t = cfg.ActiveCarrier
 	}
 	cfg.ActiveCarrier = t
