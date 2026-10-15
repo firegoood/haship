@@ -117,7 +117,7 @@ get_component_status() {
         panel)
             local bin="/usr/local/bin/gre-panel"
             local svc="gre-panel"
-            if [[ ! -f "$bin" && ! -f "/etc/systemd/system/${svc}.service" ]]; then
+            if [[ ! -f "$bin" || ! -f "/etc/systemd/system/${svc}.service" ]]; then
                 echo "NOT_INSTALLED"; return 0
             fi
             if systemctl is-active --quiet "$svc" 2>/dev/null; then
@@ -201,6 +201,27 @@ get_component_status() {
     esac
 }
 
+wait_for_package_manager_lock() {
+    local max_wait=15
+    local waited=0
+    while [[ $waited -lt $max_wait ]]; do
+        if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+           fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+           fuser /var/lib/dpkg/lock >/dev/null 2>&1; then
+            sleep 1
+            waited=$((waited + 1))
+        else
+            break
+        fi
+    done
+    if [[ $waited -ge $max_wait ]]; then
+        fuser -k /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || true
+        fuser -k /var/lib/apt/lists/lock >/dev/null 2>&1 || true
+        fuser -k /var/lib/dpkg/lock >/dev/null 2>&1 || true
+        dpkg --configure -a >/dev/null 2>&1 || true
+    fi
+}
+
 ensure_dependencies_smart() {
     local DEPS_MARKER="/etc/gre-panel/.deps_installed"
     if [[ -f "$DEPS_MARKER" ]] && command -v ip >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && \
@@ -232,13 +253,23 @@ ensure_dependencies_smart() {
     log_msg "installer" "INFO" "Installing missing dependencies: ${uniq_pkgs}"
     
     if command -v apt-get >/dev/null 2>&1; then
+        wait_for_package_manager_lock
         export DEBIAN_FRONTEND=noninteractive
         (timeout 25 apt-get update -qq || true)
         apt-get install -y -qq --no-install-recommends $uniq_pkgs 2>/dev/null || {
-            echo -e "${YELLOW}[!] Warning: apt-get encountered issues installing: ${uniq_pkgs}. Continuing setup.${NC}"
+            dpkg --configure -a 2>/dev/null || true
+            apt-get install -y -qq --no-install-recommends $uniq_pkgs 2>/dev/null || true
         }
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q $uniq_pkgs 2>/dev/null || true
     elif command -v yum >/dev/null 2>&1; then
-        yum install -y -q $uniq_pkgs || true
+        yum install -y -q $uniq_pkgs 2>/dev/null || true
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm $uniq_pkgs 2>/dev/null || true
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install -y $uniq_pkgs 2>/dev/null || true
+    elif command -v apk >/dev/null 2>&1; then
+        apk add --no-cache $uniq_pkgs 2>/dev/null || true
     fi
     mkdir -p /etc/gre-panel
     touch "$DEPS_MARKER" 2>/dev/null || true
@@ -7347,6 +7378,27 @@ EOF
     echo -e "${GREEN}${BOLD}     HASHEM REVERSE TUNNEL & WEB PANEL MANAGER (Iran <-> Int)${NC}"
     echo -e "${CYAN}     Layer 3 GRE / FRP / Backhaul Reverse Relay & Web Panel${NC}"
     echo -e "${CYAN}==============================================================${NC}"
+
+    local ROLE="Unconfigured"
+    if [[ -f "/etc/frp/frps.toml" || -f "/etc/frp/frps.ini" || -f "/etc/backhaul/config.toml" ]]; then
+        ROLE="IRAN HUB"
+    elif [[ -f "/etc/frp/frpc.toml" || -f "/etc/frp/frpc.ini" ]]; then
+        ROLE="FOREIGN SPOKE"
+    fi
+    local TUN_STAT="${RED}Inactive${NC}"
+    if tunnel_present 2>/dev/null; then
+        TUN_STAT="${GREEN}Active${NC}"
+    fi
+    local PNL_STAT="${RED}Stopped${NC}"
+    if systemctl is-active --quiet gre-panel 2>/dev/null; then
+        local P_PORT P_PATH PUB_IP
+        P_PORT=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*' || echo "7777")
+        P_PATH=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4 || echo "")
+        PUB_IP=$(get_public_ip 2>/dev/null || echo "127.0.0.1")
+        PNL_STAT="${GREEN}Running${NC} (${CYAN}http://${PUB_IP}:${P_PORT}${P_PATH}/${NC})"
+    fi
+    echo -e " ${BOLD}Role:${NC} ${YELLOW}${ROLE}${NC} | ${BOLD}Tunnel:${NC} ${TUN_STAT} | ${BOLD}Panel:${NC} ${PNL_STAT}"
+    echo -e "${CYAN}==============================================================${NC}"
 }
 
 menu_tunnel() {
@@ -7430,49 +7482,52 @@ menu_tunnel() {
 }
 
 menu_bagher() {
-    clear
-    show_banner
-    echo -e "${CYAN}--- BAGHER ENGINE [PRO] (موتور باقر - تانل هیبرید استتار) ---${NC}"
-    cli_bagher status
-    echo ""
-    echo "  1) Enable Bagher Engine (Stealth Hybrid Pool)"
-    echo "  2) Disable Bagher Engine"
-    echo "  3) Start Bagher Engine Service"
-    echo "  4) Stop Bagher Engine Service"
-    echo "  5) Restart Bagher Engine Service"
-    echo "  6) View Bagher Service Logs"
-    echo "  7) Generate Key & Show Foreign authorized_keys Line"
-    echo "  8) Clear Conflicting DNAT Rules"
-    echo "  0) Back"
-    echo ""
-    read -p "Select an option [0-8]: " SF_OPT
-    case "$SF_OPT" in
-        1)
-            local R_IP R_PORTS R_PORT R_POOL R_MODE
-            read -p "Enter Remote Host (Foreign IP): " R_IP
-            read -p "Enter Remote SSH Port [22]: " R_PORT
-            R_PORT=${R_PORT:-22}
-            read -p "Enter Ports to forward [443, 8443, 1020, 1030, 1040]: " R_PORTS
-            R_PORTS=${R_PORTS:-"443, 8443, 1020, 1030, 1040"}
-            read -p "Mode (1: Bagher Hybrid Pool [PRO], 2: Direct SSH [Free]) [1]: " R_MODE
-            if [[ "$R_MODE" == "2" ]]; then
-                cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode direct
-            else
-                read -p "Enter Pool Count [25]: " R_POOL
-                R_POOL=${R_POOL:-25}
-                cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode bagher --pool-count "$R_POOL"
-            fi
-            ;;
-        2) cli_bagher disable ;;
-        3) cli_bagher start ;;
-        4) cli_bagher stop ;;
-        5) cli_bagher restart ;;
-        6) cli_bagher logs ;;
-        7) cli_bagher gen-key ;;
-        8) cli_bagher clear-dnat ;;
-        0) return 0 ;;
-        *) echo -e "${RED}[!] Invalid option.${NC}" ;;
-    esac
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}--- BAGHER ENGINE [PRO] (موتور باقر - تانل هیبرید استتار) ---${NC}"
+        cli_bagher status
+        echo ""
+        echo "  1) Enable Bagher Engine (Stealth Hybrid Pool)"
+        echo "  2) Disable Bagher Engine"
+        echo "  3) Start Bagher Engine Service"
+        echo "  4) Stop Bagher Engine Service"
+        echo "  5) Restart Bagher Engine Service"
+        echo "  6) View Bagher Service Logs"
+        echo "  7) Generate Key & Show Foreign authorized_keys Line"
+        echo "  8) Clear Conflicting DNAT Rules"
+        echo "  0) Back"
+        echo ""
+        read -p "Select an option [0-8]: " SF_OPT
+        case "$SF_OPT" in
+            1)
+                local R_IP R_PORTS R_PORT R_POOL R_MODE
+                read -p "Enter Remote Host (Foreign IP): " R_IP
+                read -p "Enter Remote SSH Port [22]: " R_PORT
+                R_PORT=${R_PORT:-22}
+                read -p "Enter Ports to forward [443, 8443, 1020, 1030, 1040]: " R_PORTS
+                R_PORTS=${R_PORTS:-"443, 8443, 1020, 1030, 1040"}
+                read -p "Mode (1: Bagher Hybrid Pool [PRO], 2: Direct SSH [Free]) [1]: " R_MODE
+                if [[ "$R_MODE" == "2" ]]; then
+                    cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode direct
+                else
+                    read -p "Enter Pool Count [5]: " R_POOL
+                    R_POOL=${R_POOL:-5}
+                    cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode bagher --pool-count "$R_POOL"
+                fi
+                pause_prompt
+                ;;
+            2) cli_bagher disable; pause_prompt ;;
+            3) cli_bagher start; pause_prompt ;;
+            4) cli_bagher stop; pause_prompt ;;
+            5) cli_bagher restart; pause_prompt ;;
+            6) cli_bagher logs; pause_prompt ;;
+            7) cli_bagher gen-key; pause_prompt ;;
+            8) cli_bagher clear-dnat; pause_prompt ;;
+            0) return 0 ;;
+            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
+        esac
+    done
 }
 
 menu_sshfwd() { menu_bagher "$@"; }
@@ -7742,32 +7797,167 @@ menu_modified_backhaul() {
     fi
 }
 
+menu_quick_setup() {
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}=== 🚀 QUICK TUNNEL SETUP (راه‌اندازی سریع تانل) ===${NC}"
+        echo ""
+        echo "  1) Setup IRAN Server (سرور ایران - ساخت کلید و باندل اتصال)"
+        echo "  2) Setup FOREIGN Server via Bundle (سرور خارج - اتصال سریع با کلید باندل)"
+        echo "  3) Setup Modified Backhaul Tunnel (تانل پیشرفته بک‌هال: TCPMux, ICMP, TUN)"
+        echo "  0) Back to Main Menu (بازگشت به منوی اصلی)"
+        echo ""
+        read -p "Select an option [0-3]: " QS_OPT
+        case "$QS_OPT" in
+            1) setup_iran_server; pause_prompt ;;
+            2) setup_foreign_server; pause_prompt ;;
+            3) menu_modified_backhaul ;;
+            0|q) return 0 ;;
+            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
+menu_cluster() {
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}=== ⚖️ MULTI-FOREIGN CLUSTER & LOAD BALANCER (کلاستر و توزیع بار چند خارج) ===${NC}"
+        echo ""
+        if command -v gre-panel >/dev/null 2>&1; then
+            gre-panel cluster status 2>/dev/null || cli_cluster status
+        else
+            cli_cluster status
+        fi
+        echo ""
+        echo "  1) View Foreign Cluster Pool & Latency / Weights"
+        echo "  2) Add Foreign Server to Cluster (نام، آی‌پی، پورت، وزن)"
+        echo "  3) Remove Foreign Server from Cluster (حذف سرور خارج از کلاستر)"
+        echo "  4) Switch Active Foreign Server (تغییر سرور خارج فعال)"
+        echo "  5) Change Balancing Strategy (تعیین روش بالانس: WRR / Failover / Latency)"
+        echo "  6) Revert Failover / Clear Balancing Rules (بازگردانی تنظیمات فایروال)"
+        echo "  0) Back to Main Menu (بازگشت)"
+        echo ""
+        read -p "Select an option [0-6]: " CL_OPT
+        case "$CL_OPT" in
+            1)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Foreign Node Pool & Health Status ===${NC}"
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster status
+                else
+                    cli_cluster status
+                fi
+                pause_prompt
+                ;;
+            2)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Add Foreign Server to Cluster ===${NC}"
+                read -p "Foreign Server Name (e.g. kharej-de-1): " FN_NAME
+                [[ -z "$FN_NAME" ]] && { echo -e "${RED}[!] Name cannot be empty.${NC}"; pause_prompt; continue; }
+                read -p "Foreign Public IP: " FN_IP
+                [[ -z "$FN_IP" ]] && { echo -e "${RED}[!] IP cannot be empty.${NC}"; pause_prompt; continue; }
+                read -p "Tunnel Port [default 7000]: " FN_PORT
+                FN_PORT="${FN_PORT:-7000}"
+                read -p "Traffic Weight (1-100) [default 1]: " FN_WEIGHT
+                FN_WEIGHT="${FN_WEIGHT:-1}"
+                read -p "Protocol [gre/wss, default gre]: " FN_PROTO
+                FN_PROTO="${FN_PROTO:-gre}"
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster add-foreign "$FN_NAME" "$FN_IP" "$FN_PORT" "$FN_WEIGHT" "$FN_PROTO"
+                else
+                    echo -e "${YELLOW}[*] Panel binary not found. Please install gre-panel.${NC}"
+                fi
+                pause_prompt
+                ;;
+            3)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Remove Foreign Server from Cluster ===${NC}"
+                read -p "Enter Foreign Server Name or ID to remove: " FN_DEL
+                [[ -z "$FN_DEL" ]] && { echo -e "${RED}[!] ID/Name cannot be empty.${NC}"; pause_prompt; continue; }
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster del-foreign "$FN_DEL"
+                fi
+                pause_prompt
+                ;;
+            4)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Switch Active Foreign Server ===${NC}"
+                read -p "Enter Foreign Server Name or ID to activate: " FN_SW
+                [[ -z "$FN_SW" ]] && { echo -e "${RED}[!] ID/Name cannot be empty.${NC}"; pause_prompt; continue; }
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster switch-foreign "$FN_SW"
+                fi
+                pause_prompt
+                ;;
+            5)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Change Balancing Strategy ===${NC}"
+                echo "  1) Weighted Round Robin (WRR - توزیع متناسب ترافیک بر اساس وزن)"
+                echo "  2) Automatic Failover (پشتیبان اضطراری در صورت قطعی)"
+                echo "  3) Lowest Latency (انتخاب خودکار کمترین پینگ)"
+                read -p "Select strategy [1-3]: " STRAT_OPT
+                case "$STRAT_OPT" in
+                    1) gre-panel cluster set-mode "wrr" 2>/dev/null || true ;;
+                    2) gre-panel cluster set-mode "failover" 2>/dev/null || true ;;
+                    3) gre-panel cluster set-mode "lowest_latency" 2>/dev/null || true ;;
+                    *) echo -e "${RED}[!] Invalid choice.${NC}" ;;
+                esac
+                pause_prompt
+                ;;
+            6)
+                clear
+                show_banner
+                echo -e "${CYAN}=== Reverting Failover Rules ===${NC}"
+                if command -v gre-panel >/dev/null 2>&1; then
+                    gre-panel cluster revert
+                else
+                    cli_cluster revert
+                fi
+                pause_prompt
+                ;;
+            0|q) return 0 ;;
+            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
 menu_loop() {
     trap 'echo -e "\n\n${CYAN}[*] Exiting Hashem Manager. Goodbye!${NC}"; exit 0' INT
     while true; do
         clear
         show_banner
         echo ""
-        echo "MAIN MENU"
-        echo "  1) Tunnel Management (GRE + FRP / Multi-Peer)"
-        echo "  2) Modified Backhaul (IPX, ICMP, anytls, xtcpmux, TUN)"
-        echo "  3) Web Panel & Domain"
-        echo "  4) Performance & Security"
-        echo "  5) Diagnostics & Backup"
-        echo "  6) Maintenance & Update"
-        echo "  7) Uninstallation"
-        echo "  0) Exit"
+        echo -e "${BOLD}MAIN MENU (منوی اصلی مدیریت)${NC}"
+        echo "  1) 🚀 Quick Tunnel Setup (راه‌اندازی سریع تانل ایران / خارج)"
+        echo "  2) 🌐 Tunnel Management (مدیریت تانل‌ها و سرورهای متصل)"
+        echo "  3) ⚖️ Multi-Foreign Cluster & Load Balancer (کلاستر و توزیع بار چند خارج)"
+        echo "  4) 🥷 Bagher Pro Stealth Hybrid Engine (موتور استتار باقر)"
+        echo "  5) ⚡ Auto-Pool & Performance Tuning (تنظیم خودکار استخر و سرعت)"
+        echo "  6) 🖥️ Web Panel Credentials & SSL (مشخصات و آدرس پنل، دامنه و رمز)"
+        echo "  7) 🩺 Diagnostics, Doctor & Benchmark (عیب‌یابی، تست پزشک و سرعت)"
+        echo "  8) 📦 Backup & System Maintenance (پشتیبان‌گیری، ری‌استارت و آپدیت)"
+        echo "  9) 🗑️ Uninstall Hashem (حذف کامل)"
+        echo "  0) 🚪 Exit (خروج)"
         echo ""
-        read -p "Select an option [0-7]: " MAIN_OPT
+        read -p "Select an option [0-9]: " MAIN_OPT
         case "$MAIN_OPT" in
-            1) menu_tunnel ;;
-            2) menu_modified_backhaul ;;
-            3) menu_panel ;;
-            4) menu_optimization ;;
-            5) menu_diagnostics_backup ;;
-            6) menu_maintenance ;;
-            7) menu_uninstall ;;
-            0|8|exit|q)
+            1) menu_quick_setup ;;
+            2) menu_tunnel ;;
+            3) menu_cluster ;;
+            4) menu_bagher ;;
+            5) menu_perf ;;
+            6) menu_panel ;;
+            7) menu_diagnostics_backup ;;
+            8) menu_maintenance ;;
+            9) menu_uninstall ;;
+            0|exit|q)
                 echo -e "${CYAN}Exiting Hashem Manager. Goodbye!${NC}"
                 exit 0
                 ;;
@@ -7789,9 +7979,7 @@ main_menu() {
 usage_cli() {
     cat <<EOF
 Usage:
-  hashem                                    # first run: auto-install (deps + FRP + panel) & show credentials
-                                            # after install: show panel credentials & exit
-  hashem menu                               # interactive management menu (all options)
+  hashem                                    # open interactive management menu (or auto-install on 1st run)
   hashem setup-iran    --local-pub IP --remote-pub IP [--frp-port N] [--local-gre IP] [--peer-gre IP] [--token T] [--force]
   hashem setup-foreign --local-pub IP --remote-pub IP [--frp-port N] --token T --ports "443, 2083" [--local-gre IP] [--peer-gre IP] [--force]
                        # ... or: hashem setup-foreign --bundle hsh1_... / bh1_... / gh1_...
@@ -8095,8 +8283,32 @@ cli_setup_gre_backhaul_foreign() {
     setup_gre_backhaul_foreign_server_noninteractive "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$TOKEN" "$LOCAL_GRE" "$PEER_GRE" "$TRANSPORT"
 }
 
-# ---- Auto-install: first-run installs everything, shows credentials, exits ----
+render_install_progress() {
+    local percent="$1"
+    local desc="$2"
+    local width=28
+    local filled=$(( percent * width / 100 ))
+    local empty=$(( width - filled ))
+    local bar=""
+    local i
+    for ((i=0; i<filled; i++)); do bar="${bar}█"; done
+    for ((i=0; i<empty; i++)); do bar="${bar}░"; done
+
+    if [[ -t 1 ]]; then
+        printf "\r\033[K${CYAN}[${GREEN}%s${CYAN}] %3d%%  ${YELLOW}%-40s${NC}" "$bar" "$percent" "$desc"
+        if [[ "$percent" -ge 100 ]]; then
+            echo ""
+        fi
+    else
+        echo "[${percent}%] ${desc}" >> "$INSTALL_LOG" 2>&1
+    fi
+}
+
+# ---- Auto-install: smart automated first-run installation with single progress bar ----
 auto_install_and_show() {
+    INSTALL_LOG="/tmp/hashem_install.log"
+    echo "=== Hashem Smart Installer started: $(date) ===" > "$INSTALL_LOG"
+
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║                                                              ║${NC}"
@@ -8107,20 +8319,62 @@ auto_install_and_show() {
     echo -e "${CYAN}║${NC}   ${GREEN}██║  ██║██║  ██║███████║██║  ██║███████╗██║ ╚═╝ ██║${NC}       ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   ${GREEN}╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝${NC}       ${CYAN}║${NC}"
     echo -e "${CYAN}║                                                              ║${NC}"
-    echo -e "${CYAN}║${NC}        ${YELLOW}GRE + FRP Reverse Tunnel — Auto Installer${NC}             ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}        ${YELLOW}Smart Automated Installer & Self-Diagnostics${NC}           ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
-    echo -e "${CYAN}[1/3]${NC} ${GREEN}Installing system dependencies...${NC}"
-    ensure_dependencies_smart
+    render_install_progress 5 "Checking environment & architecture..."
+    detect_arch >> "$INSTALL_LOG" 2>&1 || true
+    mkdir -p /etc/gre-panel "$CONFIG_DIR" >> "$INSTALL_LOG" 2>&1 || true
 
-    echo ""
-    echo -e "${CYAN}[2/3]${NC} ${GREEN}Installing FRP binaries (frps + frpc)...${NC}"
-    install_frp_binaries
+    render_install_progress 20 "Installing system dependencies..."
+    ensure_dependencies_smart >> "$INSTALL_LOG" 2>&1
 
-    echo ""
-    echo -e "${CYAN}[3/3]${NC} ${GREEN}Installing Hashem Web Panel...${NC}"
-    install_panel
+    render_install_progress 45 "Downloading FRP tunnel binaries..."
+    install_frp_binaries "all" >> "$INSTALL_LOG" 2>&1 || {
+        install_frp_binaries "all" >> "$INSTALL_LOG" 2>&1 || true
+    }
+
+    render_install_progress 70 "Installing Web Panel & core assets..."
+    install_panel >> "$INSTALL_LOG" 2>&1 || {
+        install_panel >> "$INSTALL_LOG" 2>&1 || true
+    }
+
+    render_install_progress 88 "Configuring systemd service & port..."
+    if is_port_in_use 7777; then
+        local OCCUPIER
+        OCCUPIER=$(lsof -i :7777 -sTCP:LISTEN -t 2>/dev/null || ss -tulpn "sport = :7777" 2>/dev/null || true)
+        if ! echo "$OCCUPIER" | grep -qi "gre-panel"; then
+            local CANDIDATE_PORT=7778
+            while is_port_in_use "$CANDIDATE_PORT" && [[ "$CANDIDATE_PORT" -lt 7800 ]]; do
+                CANDIDATE_PORT=$((CANDIDATE_PORT + 1))
+            done
+            if [[ -f "/etc/gre-panel/panel.json" ]]; then
+                sed -i "s/\"port\": *[0-9]*/\"port\": ${CANDIDATE_PORT}/" /etc/gre-panel/panel.json 2>/dev/null || true
+            fi
+        fi
+    fi
+    ensure_panel_pass >> "$INSTALL_LOG" 2>&1 || true
+
+    render_install_progress 95 "Starting Web Panel & validating health..."
+    systemctl daemon-reload >> "$INSTALL_LOG" 2>&1 || true
+    systemctl enable gre-panel >> "$INSTALL_LOG" 2>&1 || true
+    systemctl restart gre-panel >> "$INSTALL_LOG" 2>&1 || true
+
+    local P_OK=0
+    for i in {1..5}; do
+        if systemctl is-active --quiet gre-panel 2>/dev/null; then
+            P_OK=1
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ "$P_OK" -eq 1 ]]; then
+        render_install_progress 100 "Installation completed successfully!"
+    else
+        render_install_progress 100 "Installation complete (Service restarting)"
+    fi
 
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
@@ -8128,15 +8382,27 @@ auto_install_and_show() {
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
     show_panel_url
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${CYAN}║${NC}  ${YELLOW}Next steps:${NC}                                                ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  • Open the panel URL above in your browser                ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  • Login and setup your tunnel from the web panel           ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  • Run ${GREEN}hashem${NC} for the interactive management menu          ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  • Run ${GREEN}hashem --help${NC} for CLI commands                      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  ${YELLOW}Quick Access:${NC}                                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  • Open the Web Panel link above in your browser            ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  • Run ${GREEN}hashem${NC} anytime to open the terminal management menu   ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  • Detailed installation log: ${CYAN}/tmp/hashem_install.log${NC}        ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${GREEN}${BOLD}DNC MADE THIS${NC}"
     echo ""
+
+    if [[ -t 0 ]]; then
+        read -p "Would you like to open the management menu now? [Y/n]: " ENTER_MENU
+        ENTER_MENU="${ENTER_MENU:-Y}"
+        case "$ENTER_MENU" in
+            [Yy]*|"")
+                main_menu
+                ;;
+            *)
+                echo -e "${GREEN}[✔️] All done! You can open the menu anytime by typing: ${CYAN}hashem${NC}\n"
+                ;;
+        esac
+    fi
 }
 
 # ---- show_credentials_and_exit: pretty credentials banner for already-installed panel ----
@@ -8824,18 +9090,26 @@ case "$PANEL_STATUS" in
         exit 0
         ;;
     RUNNING)
-        # Already installed and healthy — show credentials and exit
-        show_credentials_and_exit
-        exit 0
+        # Already installed and healthy — open interactive menu if in terminal, else show credentials
+        if [[ -t 0 ]]; then
+            main_menu
+        else
+            show_credentials_and_exit
+            exit 0
+        fi
         ;;
     STOPPED)
-        # Installed but stopped — start it, show credentials, exit
+        # Installed but stopped — start it
         echo -e "${YELLOW}[*] Panel is installed but stopped. Starting...${NC}"
         systemctl start gre-panel 2>/dev/null || true
         sleep 2
         if systemctl is-active --quiet gre-panel 2>/dev/null; then
-            show_credentials_and_exit
-            exit 0
+            if [[ -t 0 ]]; then
+                main_menu
+            else
+                show_credentials_and_exit
+                exit 0
+            fi
         else
             echo -e "${RED}[!] Failed to start panel — entering interactive menu for troubleshooting.${NC}"
             main_menu
@@ -8857,8 +9131,12 @@ case "$PANEL_STATUS" in
                 sleep 2
                 if systemctl is-active --quiet gre-panel; then
                     echo -e "${GREEN}[✔️] Panel repaired and running!${NC}"
-                    show_credentials_and_exit
-                    exit 0
+                    if [[ -t 0 ]]; then
+                        main_menu
+                    else
+                        show_credentials_and_exit
+                        exit 0
+                    fi
                 else
                     echo -e "${RED}[!] Repair failed. Reinstalling...${NC}"
                     backup_configs "panel_broken"

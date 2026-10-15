@@ -1062,6 +1062,129 @@ func cliCluster(args []string) int {
 		fmt.Println("Failover iptables NAT rules reverted to local tunnel.")
 		return 0
 	}
-	fmt.Println("Usage: gre-panel cluster [status | revert]")
+	if args[0] == "add-foreign" {
+		if len(args) < 4 {
+			fmt.Println("Usage: gre-panel cluster add-foreign <name> <ip> <tunnel_port> [weight] [protocol]")
+			return 1
+		}
+		name := args[1]
+		ip := args[2]
+		port, err := strconv.Atoi(args[3])
+		if err != nil || port < 1 || port > 65535 {
+			fmt.Println("Invalid port:", args[3])
+			return 1
+		}
+		weight := 1
+		if len(args) >= 5 {
+			if w, err := strconv.Atoi(args[4]); err == nil && w > 0 {
+				weight = w
+			}
+		}
+		proto := "gre"
+		if len(args) >= 6 && args[5] != "" {
+			proto = args[5]
+		}
+		cfg := loadClusterConfig()
+		if cfg.ForeignNodes == nil {
+			cfg.ForeignNodes = make(map[string]ForeignNode)
+		}
+		id := fmt.Sprintf("fn_%d", time.Now().UnixNano()%100000)
+		cfg.ForeignNodes[id] = ForeignNode{
+			ID:          id,
+			Name:        name,
+			PublicIP:    ip,
+			TunnelPort:  port,
+			Weight:      weight,
+			Protocol:    proto,
+			IsActive:    len(cfg.ForeignNodes) == 0,
+			IsHealthy:   true,
+			LastProbe:   time.Now(),
+		}
+		if cfg.ActiveForeign == "" {
+			cfg.ActiveForeign = id
+		}
+		if err := saveClusterConfig(cfg); err != nil {
+			fmt.Println("Failed to save cluster config:", err)
+			return 1
+		}
+		fmt.Printf("Foreign node '%s' added with ID: %s (Weight: %d)\n", name, id, weight)
+		return 0
+	}
+	if args[0] == "del-foreign" || args[0] == "rm-foreign" {
+		if len(args) < 2 {
+			fmt.Println("Usage: gre-panel cluster del-foreign <id_or_name>")
+			return 1
+		}
+		target := args[1]
+		cfg := loadClusterConfig()
+		found := false
+		for k, v := range cfg.ForeignNodes {
+			if k == target || v.Name == target {
+				delete(cfg.ForeignNodes, k)
+				found = true
+				if cfg.ActiveForeign == k {
+					cfg.ActiveForeign = ""
+					for nextID := range cfg.ForeignNodes {
+						cfg.ActiveForeign = nextID
+						break
+					}
+				}
+				break
+			}
+		}
+		if !found {
+			fmt.Println("Foreign node not found:", target)
+			return 1
+		}
+		_ = saveClusterConfig(cfg)
+		fmt.Println("Foreign node removed:", target)
+		return 0
+	}
+	if args[0] == "set-mode" {
+		if len(args) < 2 {
+			fmt.Println("Usage: gre-panel cluster set-mode <wrr|failover|lowest_latency>")
+			return 1
+		}
+		mode := args[1]
+		if mode != "wrr" && mode != "failover" && mode != "lowest_latency" {
+			fmt.Println("Invalid mode. Allowed: wrr, failover, lowest_latency")
+			return 1
+		}
+		cfg := loadClusterConfig()
+		cfg.BalancingMode = mode
+		_ = saveClusterConfig(cfg)
+		fmt.Println("Balancing mode set to:", mode)
+		return 0
+	}
+	if args[0] == "switch-foreign" {
+		if len(args) < 2 {
+			fmt.Println("Usage: gre-panel cluster switch-foreign <id_or_name>")
+			return 1
+		}
+		target := args[1]
+		cfg := loadClusterConfig()
+		found := false
+		for k, v := range cfg.ForeignNodes {
+			if k == target || v.Name == target {
+				cfg.ActiveForeign = k
+				node := v
+				node.IsActive = true
+				cfg.ForeignNodes[k] = node
+				found = true
+			} else {
+				node := v
+				node.IsActive = false
+				cfg.ForeignNodes[k] = node
+			}
+		}
+		if !found {
+			fmt.Println("Foreign node not found:", target)
+			return 1
+		}
+		_ = saveClusterConfig(cfg)
+		fmt.Println("Switched active foreign node to:", target)
+		return 0
+	}
+	fmt.Println("Usage: gre-panel cluster [status | revert | add-foreign | del-foreign | set-mode | switch-foreign]")
 	return 1
 }

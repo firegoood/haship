@@ -437,3 +437,46 @@ func TestClusterCustomTargetPorts(t *testing.T) {
 	}
 }
 
+func TestCliClusterCommands(t *testing.T) {
+	_, cleanup := setupClusterTest(t)
+	defer cleanup()
+
+	// 1. Status command
+	if code := cliCluster([]string{"status"}); code != 0 {
+		t.Fatalf("expected status to return 0, got %d", code)
+	}
+
+	// 2. Add foreign node
+	if code := cliCluster([]string{"add-foreign", "test-de", "88.99.100.101", "7000", "2", "gre"}); code != 0 {
+		t.Fatalf("expected add-foreign to return 0, got %d", code)
+	}
+
+	cfg := loadClusterConfig()
+	if len(cfg.ForeignNodes) != 1 {
+		t.Fatalf("expected 1 foreign node, got %d", len(cfg.ForeignNodes))
+	}
+
+	// 3. Set mode
+	if code := cliCluster([]string{"set-mode", "wrr"}); code != 0 {
+		t.Fatalf("expected set-mode to return 0, got %d", code)
+	}
+	cfg = loadClusterConfig()
+	if cfg.BalancingMode != "wrr" {
+		t.Fatalf("expected mode wrr, got %s", cfg.BalancingMode)
+	}
+
+	// 4. Switch foreign
+	if code := cliCluster([]string{"switch-foreign", "test-de"}); code != 0 {
+		t.Fatalf("expected switch-foreign to return 0, got %d", code)
+	}
+
+	// 5. Del foreign
+	if code := cliCluster([]string{"del-foreign", "test-de"}); code != 0 {
+		t.Fatalf("expected del-foreign to return 0, got %d", code)
+	}
+	cfg = loadClusterConfig()
+	if len(cfg.ForeignNodes) != 0 {
+		t.Fatalf("expected 0 foreign nodes after deletion, got %d", len(cfg.ForeignNodes))
+	}
+}
+
