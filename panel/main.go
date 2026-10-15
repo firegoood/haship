@@ -555,8 +555,15 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			reloadConfigIfChanged()
+		nonceTicker := time.NewTicker(12 * time.Hour)
+		defer nonceTicker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				reloadConfigIfChanged()
+			case <-nonceTicker.C:
+				rotateNonce()
+			}
 		}
 	}()
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -876,7 +877,7 @@ func updateServiceRemoteIP(serviceFile string, oldIP string, newIP string) {
 }
 
 func testPing(ip string, timeoutSec int) bool {
-	if ip == "" {
+	if ip == "" || net.ParseIP(ip) == nil {
 		return false
 	}
 	cmd := exec.Command("ping", "-c", "1", "-W", strconv.Itoa(timeoutSec), ip)

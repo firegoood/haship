@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -110,6 +111,19 @@ func TestSessionTokenNotDerivableFromHash(t *testing.T) {
 	a, b := newSessionToken(), newSessionToken()
 	if a == b {
 		t.Fatal("session tokens must be unique per login")
+	}
+}
+
+func TestRotateNonce(t *testing.T) {
+	mu.Lock()
+	old := nonce
+	mu.Unlock()
+	rotateNonce()
+	mu.Lock()
+	current := nonce
+	mu.Unlock()
+	if subtle.ConstantTimeCompare(old[:], current[:]) == 1 {
+		t.Fatal("rotateNonce must alter nonce entropy")
 	}
 }
 

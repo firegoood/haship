@@ -22,6 +22,12 @@ var (
 	nonce [32]byte
 )
 
+func rotateNonce() {
+	mu.Lock()
+	_, _ = rand.Read(nonce[:])
+	mu.Unlock()
+}
+
 const (
 	loginFailWindow = 15 * time.Minute
 	loginLockoutDur = 15 * time.Minute
