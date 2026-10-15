@@ -155,6 +155,27 @@ func saveCfg() {
 
 func saveConfigAtomic(c panelConfig) error {
 	p := cfgPath()
+	// Prevent accidental credential or config wipe if empty fields passed
+	if existingData, err := os.ReadFile(p); err == nil && len(existingData) > 0 {
+		var prev panelConfig
+		if json.Unmarshal(existingData, &prev) == nil {
+			if strings.TrimSpace(c.PassHash) == "" && strings.TrimSpace(prev.PassHash) != "" {
+				c.PassHash = prev.PassHash
+			}
+			if strings.TrimSpace(c.BasePath) == "" && strings.TrimSpace(prev.BasePath) != "" {
+				c.BasePath = prev.BasePath
+			}
+			if strings.TrimSpace(c.Username) == "" && strings.TrimSpace(prev.Username) != "" {
+				c.Username = prev.Username
+			}
+			if c.Port <= 0 && prev.Port > 0 {
+				c.Port = prev.Port
+			}
+			if strings.TrimSpace(c.LicenseKey) == "" && strings.TrimSpace(prev.LicenseKey) != "" {
+				c.LicenseKey = prev.LicenseKey
+			}
+		}
+	}
 	data := mustJSON(c)
 	tmp := p + ".tmp"
 	if err := os.WriteFile(tmp, data, 0600); err != nil {
@@ -450,6 +471,8 @@ func cliSetPassword(args []string) int {
 	saveCfg()
 	mu.Unlock()
 
+	ResetAllLockouts()
+
 	ip := getOutboundIP()
 	fmt.Println("==================================================")
 	fmt.Println("[✔️] Panel password successfully updated!")
@@ -607,6 +630,20 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/support", requireAuth(requireCSRF(handleSupport)))
 	mux.HandleFunc("GET "+base+"/api/doctor", requireAuth(handleDoctorGet))
 	mux.HandleFunc("POST "+base+"/api/doctor", requireAuth(requireCSRF(handleDoctorPost)))
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		curBase := cfg.BasePath
+		mu.Unlock()
+		if curBase == "" {
+			curBase = "panel"
+		}
+		target := "/" + curBase + "/"
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusFound)
+	})
 
 	// Peer-to-peer synchronization & commands
 	mux.HandleFunc("POST "+base+"/api/peer/handshake", requirePeerAuth(handlePeerHandshake))

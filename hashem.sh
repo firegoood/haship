@@ -5790,15 +5790,15 @@ reset_panel_password() {
     echo -e "${CYAN}             RESET HASHEM WEB PANEL PASSWORD                  ${NC}"
     echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo -e "${YELLOW}Enter new password for user 'admin' (minimum 12 chars).${NC}"
+    echo -e "${YELLOW}Enter new password for user 'admin' (minimum 8 chars).${NC}"
     echo -e "${YELLOW}Or press Enter to auto-generate a secure random password.${NC}"
     echo ""
     read -p "New Password: " USER_NEW_PASS
     if [[ -z "$USER_NEW_PASS" ]]; then
-        USER_NEW_PASS=$(tr -dc 'A-Za-z0-9!@#$%' </dev/urandom | head -c 16)
+        USER_NEW_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)
     else
-        if [[ ${#USER_NEW_PASS} -lt 12 ]]; then
-            echo -e "${RED}[!] Password must be at least 12 characters long (NIST 800-63B).${NC}"
+        if [[ ${#USER_NEW_PASS} -lt 8 ]]; then
+            echo -e "${RED}[!] Password must be at least 8 characters long.${NC}"
             return 1
         fi
     fi
@@ -5900,7 +5900,36 @@ ensure_panel_pass() {
     fi
     echo -e "${YELLOW}[*] No panel config found — generating initial credentials...${NC}"
     local NEWPASS HASH
-    NEWPASS=$(tr -dc 'A-Za-z0-9!@#$%' </dev/urandom | head -c 16)
+    # Ask for password if running interactively
+    if [[ -t 0 && "${DEBIAN_FRONTEND:-}" != "noninteractive" ]]; then
+        echo ""
+        echo -e "${CYAN}=== Web Panel Password Setup ===${NC}"
+        echo -e "${YELLOW}Enter custom panel password (minimum 8 characters), or press Enter for auto-generated:${NC}"
+        read -r USER_PASS
+        if [[ -n "$USER_PASS" ]]; then
+            while [[ ${#USER_PASS} -lt 8 ]]; do
+                echo -e "${RED}[!] Password must be at least 8 characters long.${NC}"
+                read -r -p "Password (min 8 chars): " USER_PASS
+                [[ -z "$USER_PASS" ]] && break
+            done
+        fi
+        if [[ -n "$USER_PASS" ]]; then
+            NEWPASS="$USER_PASS"
+        else
+            NEWPASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)
+        fi
+    else
+        NEWPASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)
+    fi
+    # Use panel binary to hash and save password with argon2id if available
+    if [[ -x /usr/local/bin/gre-panel ]]; then
+        /usr/local/bin/gre-panel password "$NEWPASS" >/dev/null 2>&1 || true
+        PANEL_PASS="$NEWPASS"
+        systemctl restart gre-panel 2>/dev/null || true
+        echo -e "${GREEN}[✔️] Initial password configured: ${CYAN}${NEWPASS}${NC}"
+        echo -e "${YELLOW}[!] NOTE: Passwords are not saved in plaintext on disk (CWE-256). Record it now!${NC}"
+        return 0
+    fi
     HASH=$(echo -n "$NEWPASS" | sha256sum | awk '{print $1}')
     if [[ -z "$HASH" ]] || ! command -v python3 >/dev/null 2>&1; then
         echo -e "${RED}[!] Cannot initialize panel config (need sha256sum + python3).${NC}"

@@ -115,6 +115,14 @@ func checkLocked(ip string) bool {
 	return now.Before(a.lockedUntil)
 }
 
+// ResetAllLockouts clears all failed attempt records and IP lockouts (used on password reset).
+func ResetAllLockouts() {
+	attemptMu.Lock()
+	defer attemptMu.Unlock()
+	attempts = make(map[string]*ipAttempts)
+	lockStrikes = make(map[string]*lockStrike)
+}
+
 func recordLoginFailure(ip string) {
 	attemptMu.Lock()
 	now := time.Now()
