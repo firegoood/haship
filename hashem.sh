@@ -7480,7 +7480,7 @@ menu_tunnel() {
         echo "  7) Tunnel Health Status & GRE Ping Test"
         echo "  8) Restart All Tunnel Services"
         echo "  9) Teardown All Tunnels (Panel remains active)"
-        echo "  10) Bagher Engine [PRO] (موتور باقر - تانل هیبرید استتار)"
+        echo "  10) Bagher Engine [PRO] (Hybrid Stealth Tunnel)"
         echo "  0) Back to Main Menu"
         echo ""
         read -p "Select an option [0-10]: " T_OPT
@@ -7550,7 +7550,7 @@ menu_bagher() {
     while true; do
         clear
         show_banner
-        echo -e "${CYAN}--- BAGHER ENGINE [PRO] (موتور باقر - تانل هیبرید استتار) ---${NC}"
+        echo -e "${CYAN}--- BAGHER ENGINE [PRO] (Hybrid Stealth Tunnel) ---${NC}"
         cli_bagher status
         echo ""
         echo "  1) Enable Bagher Engine (Stealth Hybrid Pool)"
@@ -7866,12 +7866,12 @@ menu_quick_setup() {
     while true; do
         clear
         show_banner
-        echo -e "${CYAN}=== 🚀 QUICK TUNNEL SETUP (راه‌اندازی سریع تانل) ===${NC}"
+        echo -e "${CYAN}=== 🚀 QUICK TUNNEL SETUP ===${NC}"
         echo ""
-        echo "  1) Setup IRAN Server (سرور ایران - ساخت کلید و باندل اتصال)"
-        echo "  2) Setup FOREIGN Server via Bundle (سرور خارج - اتصال سریع با کلید باندل)"
-        echo "  3) Setup Modified Backhaul Tunnel (تانل پیشرفته بک‌هال: TCPMux, ICMP, TUN)"
-        echo "  0) Back to Main Menu (بازگشت به منوی اصلی)"
+        echo "  1) Setup Iran Server (Create Key & Bundle)"
+        echo "  2) Setup Foreign Server via Bundle"
+        echo "  3) Setup Backhaul Tunnel (TCPMux, ICMP, TUN)"
+        echo "  0) Back to Main Menu"
         echo ""
         read -p "Select an option [0-3]: " QS_OPT
         case "$QS_OPT" in
@@ -7888,7 +7888,7 @@ menu_cluster() {
     while true; do
         clear
         show_banner
-        echo -e "${CYAN}=== ⚖️ MULTI-FOREIGN CLUSTER & LOAD BALANCER (کلاستر و توزیع بار چند خارج) ===${NC}"
+        echo -e "${CYAN}=== ⚖️ MULTI-FOREIGN CLUSTER & LOAD BALANCER ===${NC}"
         echo ""
         if command -v gre-panel >/dev/null 2>&1; then
             gre-panel cluster status 2>/dev/null || cli_cluster status
@@ -7897,12 +7897,12 @@ menu_cluster() {
         fi
         echo ""
         echo "  1) View Foreign Cluster Pool & Latency / Weights"
-        echo "  2) Add Foreign Server to Cluster (نام، آی‌پی، پورت، وزن)"
-        echo "  3) Remove Foreign Server from Cluster (حذف سرور خارج از کلاستر)"
-        echo "  4) Switch Active Foreign Server (تغییر سرور خارج فعال)"
-        echo "  5) Change Balancing Strategy (تعیین روش بالانس: WRR / Failover / Latency)"
-        echo "  6) Revert Failover / Clear Balancing Rules (بازگردانی تنظیمات فایروال)"
-        echo "  0) Back to Main Menu (بازگشت)"
+        echo "  2) Add Foreign Server to Cluster"
+        echo "  3) Remove Foreign Server from Cluster"
+        echo "  4) Switch Active Foreign Server"
+        echo "  5) Change Balancing Strategy"
+        echo "  6) Revert Failover / Clear Balancing Rules"
+        echo "  0) Back to Main Menu"
         echo ""
         read -p "Select an option [0-6]: " CL_OPT
         case "$CL_OPT" in
@@ -7964,9 +7964,9 @@ menu_cluster() {
                 clear
                 show_banner
                 echo -e "${CYAN}=== Change Balancing Strategy ===${NC}"
-                echo "  1) Weighted Round Robin (WRR - توزیع متناسب ترافیک بر اساس وزن)"
-                echo "  2) Automatic Failover (پشتیبان اضطراری در صورت قطعی)"
-                echo "  3) Lowest Latency (انتخاب خودکار کمترین پینگ)"
+                echo "  1) Weighted Round Robin (WRR - Proportional Distribution)"
+                echo "  2) Automatic Failover (Backup on Outage)"
+                echo "  3) Lowest Latency (Dynamic Lowest Ping)"
                 read -p "Select strategy [1-3]: " STRAT_OPT
                 case "$STRAT_OPT" in
                     1) gre-panel cluster set-mode "wrr" 2>/dev/null || true ;;
@@ -7999,17 +7999,17 @@ menu_loop() {
         clear
         show_banner
         echo ""
-        echo -e "${BOLD}MAIN MENU (منوی اصلی مدیریت)${NC}"
-        echo "  1) 🚀 Quick Tunnel Setup (راه‌اندازی سریع تانل ایران / خارج)"
-        echo "  2) 🌐 Tunnel Management (مدیریت تانل‌ها و سرورهای متصل)"
-        echo "  3) ⚖️ Multi-Foreign Cluster & Load Balancer (کلاستر و توزیع بار چند خارج)"
-        echo "  4) 🥷 Bagher Pro Stealth Hybrid Engine (موتور استتار باقر)"
-        echo "  5) ⚡ Auto-Pool & Performance Tuning (تنظیم خودکار استخر و سرعت)"
-        echo "  6) 🖥️ Web Panel Credentials & SSL (مشخصات و آدرس پنل، دامنه و رمز)"
-        echo "  7) 🩺 Diagnostics, Doctor & Benchmark (عیب‌یابی، تست پزشک و سرعت)"
-        echo "  8) 📦 Backup & System Maintenance (پشتیبان‌گیری، ری‌استارت و آپدیت)"
-        echo "  9) 🗑️ Uninstall Hashem (حذف کامل)"
-        echo "  0) 🚪 Exit (خروج)"
+        echo -e "${BOLD}MAIN MENU${NC}"
+        echo "  1) 🚀 Quick Tunnel Setup (Iran / Foreign)"
+        echo "  2) 🌐 Tunnel Management"
+        echo "  3) ⚖️ Multi-Foreign Cluster & Load Balancer"
+        echo "  4) 🥷 Bagher Pro Stealth Hybrid Engine"
+        echo "  5) ⚡ Auto-Pool & Performance Tuning"
+        echo "  6) 🖥️ Web Panel Credentials & SSL"
+        echo "  7) 🩺 Diagnostics, Doctor & Benchmark"
+        echo "  8) 📦 Backup & System Maintenance"
+        echo "  9) 🗑️ Uninstall Hashem"
+        echo "  0) 🚪 Exit"
         echo ""
         read -p "Select an option [0-9]: " MAIN_OPT
         case "$MAIN_OPT" in

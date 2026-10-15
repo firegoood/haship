@@ -772,7 +772,421 @@ const I18N = {
     err_retry: "Retry failed",
     carrier_switch_confirm: "Switch both Iran & Foreign servers to carrier \"{id}\"?"
   },
-  fa: {}
+  fa: {
+    nav_dashboard: "Dashboard",
+    nav_tunnel: "Tunnel",
+    nav_sshfwd: "Bagher",
+    nav_bagher: "Bagher",
+    nav_cluster: "Cluster",
+    nav_setup: "Setup",
+    nav_logs: "Logs",
+    nav_perf: "Performance",
+    perf_mux_title: "TCP Multiplexing (transport.tcpMux)",
+    perf_mux_hint: "Packs every user stream into ONE TCP connection between frpc and frps. Measured over GRE it roughly halves tunnel throughput (e.g. 460 vs 1010 Mbit on Finland). Default is OFF (max speed). It must be identical on the Iran hub AND every foreign server, otherwise frpc cannot log in.",
+    nav_watchdog: "Watchdog",
+    nav_doctor: "Diagnostics",
+    nav_benchmark: "Benchmark",
+    nav_update: "Update",
+    upd_channel: "Update channel",
+    upd_channel_stable: "Stable",
+    upd_channel_dev: "Dev",
+    upd_dev_warn: "Dev channel: test builds, may break. Not for production tunnels.",
+    upd_dev_badge: "DEV",
+    nav_settings: "Settings",
+    nav_terminal: "Terminal",
+    sec_overview: "Overview",
+    sec_tunnel: "Tunnel",
+    sec_system: "System",
+    theme: "Theme",
+    logout: "Logout",
+    refresh: "Refresh",
+    kpi_traffic: "Traffic & Speed",
+    kpi_status: "Tunnel Status",
+    kpi_links: "Links (GRE / FRP)",
+    kpi_latency: "Latency",
+    kpi_cpu: "CPU",
+    kpi_ram: "RAM",
+    kpi_disk: "Disk",
+    kpi_conns: "Uptime / Conns",
+    details: "Details",
+    chart_traffic_title: "Tunnel Traffic Throughput",
+    chart_traffic_sub: "Real-time download and upload speeds over time",
+    chart_activity_title: "Tunnel Activity & Connections",
+    chart_activity_sub: "Active concurrent connections and session stream over time",
+    download: "Download",
+    upload: "Upload",
+
+    // General
+    status_active: "Active",
+    status_down: "Down",
+    status_healthy: "Healthy",
+    status_connected: "Connected",
+    status_disconnected: "Disconnected",
+    status_unreachable: "Unreachable",
+    status_running: "Running",
+    status_stopped: "Stopped",
+    status_error: "Error",
+    actions: "Actions",
+    confirm: "Confirm",
+    apply: "Apply",
+    copy: "Copy",
+    copied: "Copied!",
+    remove: "Remove",
+    restart: "Restart",
+    ping: "Ping",
+    bundle: "Bundle",
+    show_bundle: "Show Bundle",
+    copy_bundle: "Copy Bundle",
+    test: "Test",
+    switch: "Switch",
+    current: "Current",
+    loading: "Loading…",
+    save_settings: "Save Settings",
+
+    // Dashboard Details & Cards
+    card_server_title: "Server & Role",
+    card_gre_title: "GRE Kernel Tunnel",
+    card_frp_title: "FRP Relay & Traffic",
+    card_peers_title: "Peer Tunnels",
+    lbl_public_ip: "Public IP",
+    lbl_role: "Role",
+    lbl_forwarded_ports: "Forwarded Ports",
+    lbl_gre_local: "Local GRE IP",
+    lbl_gre_peer: "Peer GRE IP",
+    lbl_gre_interface: "Interface",
+    lbl_frp_status: "Status",
+    lbl_control_port: "Control Port",
+    lbl_bind_port: "Bind Port",
+    lbl_tunnel_ports: "Tunnel Ports",
+    lbl_uptime_since: "Active Since",
+    lbl_peer_name: "Name",
+    lbl_peer_id: "ID",
+    lbl_peer_foreign_ip: "Foreign IP",
+    lbl_peer_ports: "Ports",
+    lbl_peer_latency: "Ping Latency",
+
+    // Tunnel Tab
+    tun_title: "Tunnel Topology & Status",
+    tun_sub: "Live link metrics, peer inventory, and interface health",
+    tun_main_card: "Main Link (Hub / Spoke 1)",
+    tun_add_peer_btn: "+ Connect Another Server",
+    tun_view_bundle_btn: "📦 View Setup Bundle",
+
+    // Setup Tab
+    setup_title: "Quick setup — GRE + FRP tunnel",
+    setup_sub: "Two servers, one tunnel. Answer on this machine; the Iran side gives you a token to paste on the Foreign side.",
+    setup_step1: "1. Which server am I on right now?",
+    setup_role_iran: "Iran — users connect here",
+    setup_role_foreign: "Foreign — service runs here",
+    setup_step2_engine: "2. Tunnel Engine",
+    setup_eng_frp: "🚀 GRE + FRP",
+    setup_eng_grebh: "⚡ GRE + Backhaul",
+    setup_eng_bh: "🌐 Backhaul (No-GRE)",
+    setup_step3_params: "3. Connection Parameters",
+    setup_local_pub: "Iran public IP (auto, editable)",
+    setup_remote_pub: "Remote public IP (the other server)",
+    setup_local_gre: "Local GRE IP",
+    setup_peer_gre: "Peer GRE IP",
+    setup_ctrl_port: "Control / Bind port",
+    setup_transport: "Transport Protocol",
+    setup_forward_ports: "Forwarded Ports (single, ranges, mappings)",
+    setup_step4_token: "4. Token & apply",
+    setup_apply_btn: "Apply setup",
+    setup_unlock_btn: "Unlock to replace",
+    setup_relock_btn: "Keep locked",
+    setup_bundle_title: "📦 Setup Bundle (Copy to Foreign server)",
+    setup_foreign_step2: "2. Join tunnel (from Iran bundle)",
+    setup_bundle_paste_lbl: "Setup bundle or token (from Iran side)",
+    setup_bundle_paste_ph: "paste hsh1_..., bh1_..., or gh1_... bundle",
+    setup_join_btn: "Connect to Iran",
+    setup_foreign_step3: "3. Advanced (optional)",
+    setup_add_peer_title: "➕ Connect another foreign server",
+    setup_peer_name_lbl: "Name (label for this tunnel)",
+    setup_add_tunnel_btn: "Add tunnel",
+
+    // Performance & Tuning Tab
+    perf_status_pool: "Work-conn pool (frpc / frps)",
+    perf_status_decision: "Auto Pool decision",
+    perf_mode_auto: "Auto Pool",
+    perf_mode_manual: "Manual",
+    perf_ap_title: "Auto Pool (FRP work connections)",
+    perf_ap_sub: "Sizes frpc poolCount and frps maxPoolCount from pool-full errors, active connections, CPU and free RAM. Scales up fast, scales down slowly, restarts only frpc and only when few users are connected.",
+    perf_ap_toggle: "Auto Pool (recommended)",
+    perf_ap_toggle_hint: "When off, the manual values below are written to frpc.toml / frps.toml as typed.",
+    perf_ap_last_decision: "Last decision",
+    perf_ap_errors: "Pool-full errors (last tick)",
+    perf_ap_last_restart: "Last frpc restart",
+    perf_ap_frps_note: "maxPoolCount was raised in frps.toml; restart frps during a quiet period to apply it.",
+    perf_ap_saved: "Auto Pool updated",
+    perf_ap_on_msg: "Pool is resized automatically every minute.",
+    perf_ap_off_msg: "Manual values apply after Save & Apply.",
+    perf_pool_count: "Client Pool Count (frpc)",
+    perf_pool_sub: "Pre-opened work connections on foreign spokes.",
+    perf_max_pool: "Max Pool Count (frps)",
+    perf_max_sub: "Server-side maximum work connection headroom (always at least 1.5 × poolCount).",
+    perf_save_tuning: "💾 Save & Apply Capacity",
+    perf_carrier_title: "Carrier & UDP Encapsulation (FOU)",
+    perf_carrier_save: "Save Mode",
+
+    // Watchdog
+    wd_title: "Tunnel Watchdog",
+    wd_hint: "Monitors GRE ping and FRP service every 1 minute. Sends Telegram alerts and optional auto-restart after consecutive failures.",
+    wd_autorestart_label: "Auto-Restart on Failure",
+    wd_autorestart_sub: "(Disabled by default to prevent CPU spike storms; alerts only)",
+    wd_health: "Tunnel Health",
+    wd_fails: "Consecutive Fails",
+    wd_last_check: "Last Check",
+    wd_restart_title: "Tunnel Auto-Restart Schedule",
+    wd_restart_hint: "Periodically refreshes the tunnel interfaces and restarts FRP/Backhaul relay services gracefully without interrupting the web panel or losing configuration.",
+    wd_restart_interval: "Restart Interval",
+    wd_restart_save: "Save Schedule",
+    wd_restart_now: "Restart Tunnel Now",
+    wd_tg_title: "Telegram Alerts",
+    wd_tg_hint: "Receive instant Telegram notifications when the tunnel drops or recovers. Middle of bot token is never exposed.",
+    wd_tg_token: "Bot Token",
+    wd_tg_chat: "Chat ID",
+    wd_tg_route: "Telegram Route",
+    wd_tg_save: "Save Telegram Settings",
+    wd_tg_test: "Test Alert",
+    wd_backup_title: "Encrypted Backups",
+    wd_backup_hint: "Full backup of FRP tomls, panel settings, peers registry, and systemd units encrypted with OpenSSL AES-256-CBC keyed from your panel password.",
+    wd_backup_now: "Create Backup Now",
+    wd_backup_sched: "Backup Schedule",
+    wd_backup_save: "Save Schedule",
+    wd_events_title: "Watchdog Event Log",
+
+    // Benchmark Tab
+    bench_title: "Carrier Benchmark & Auto-Pilot",
+    bench_peer_link_title: "Inter-Panel Link (Peer)",
+    bench_peer_link_sub: "Master/Worker dual-path synchronization with remote panel.",
+    bench_peer_test_btn: "Test Connection",
+    bench_peer_cfg_btn: "Configure Link",
+    bench_failover_title: "Automatic Failover",
+    bench_failover_sub: "Strictly OFF by default. When OFF, the tunnel never switches automatically.",
+    bench_failover_toggle: "Enable Automatic Failover (Auto-Switching)",
+    bench_failover_threshold: "Packet Loss Trigger Threshold (%)",
+    bench_failover_save: "Save Failover Policy",
+    bench_leaderboard_title: "Carrier Performance Leaderboard",
+    bench_run_btn: "Run Carrier Benchmark",
+    bench_tbl_rank: "Carrier & Route",
+    bench_tbl_trans: "Transport",
+    bench_tbl_port: "Port",
+    bench_tbl_rtt: "Latency (RTT)",
+    bench_tbl_loss: "Packet Loss",
+    bench_tbl_jitter: "Jitter",
+    bench_tbl_score: "Quality Score",
+    bench_tbl_status: "Status",
+    bench_tbl_action: "Action",
+
+    // Diagnostics / Doctor Tab
+    doc_title: "Network Doctor & Diagnostic Suite",
+    doc_sub: "Automated end-to-end path tests, MTU probe, socket exhaustion check, and routing health",
+    doc_run_btn: "Run Full Diagnostics",
+    doc_fix_btn: "Quick Repair & Optimize",
+    doc_fix_box_btn: "Auto-Fix Detected Issues",
+    doc_issues_title: "Issues & Recommendations",
+
+    // Logs Tab
+    logs_title: "System & Tunnel Service Logs",
+    logs_sub: "Real-time journal logs for FRP services, GRE interfaces, and watchdog events",
+    logs_svc_label: "Service",
+    logs_lines_label: "Lines",
+    logs_refresh_btn: "Refresh Logs",
+    logs_copy_btn: "Copy Logs",
+
+    // Settings & Update Tab
+    settings_title: "Panel Security & Password",
+    settings_cur_pass: "Current panel password",
+    settings_new_pass: "New panel password",
+    settings_change_btn: "Change Password",
+    update_title: "Panel update",
+    update_current: "Installed version",
+    update_check_btn: "Check for updates",
+
+    // Terminal Tab
+    term_title: "Interactive Web Console (PTY)",
+    term_connect: "Connect Terminal",
+    term_clear: "Clear Screen",
+
+    // Right Sidebar & Modals
+    login_sub: "Sign in with your username and password",
+    login_user_ph: "Username",
+    login_pass_ph: "Password",
+    login_signin: "Sign in",
+    rs_header: "Live Activity Stream",
+    rsc_title: "Connectivity Rescue", rsc_remote: "Reachable server (the one that can connect to this server)", rsc_ports: "Ports to connect (TCP + UDP)",
+    rsc_code: "Rescue code from the blocked server", rsc_ban_t: "This server cannot connect to its peer",
+    rsc_ban_d: "Ping works but every TCP connection is dropped on the way. A one-click fix reverses the connection direction.", rsc_ban_go: "Fix it",
+    rsc_idle_ok: "No problem detected. If a peer can ping you but connections time out, this tool reverses the direction automatically.",
+    rsc_idle_warn: "A one-way block was detected: ping works but TCP is dropped. Enable Rescue to reverse the direction.",
+    rsc_b_off: "Off", rsc_b_susp: "Block detected", rsc_b_on: "Active", rsc_b_on_auto: "Active (Auto)", rsc_b_wait: "Waiting for peer", rsc_b_lift: "Block lifted",
+    rsc_check: "Check now", rsc_enable: "Enable Rescue", rsc_join: "Join with code", rsc_apply: "Apply code", rsc_disable: "Disable and remove",
+    rsc_cancel: "Cancel", rsc_getcode: "Show rescue code", rsc_copy: "Copy code", rsc_nocfg: "frp binaries are missing on this server. Run hashem update first.",
+    rsc_origin: "This server is the blocked side. {n} port(s) are forwarded through {ip}.", rsc_origin_auto: "One-way block detected: connectivity automatically established through {ip} ({n} ports forwarded).", rsc_entry: "This server is the entry. {n} port(s) are served here and tunnelled to {ip}.", rsc_entry_auto: "This server is acting as the entry for {ip} ({n} ports tunnelled).",
+    rsc_skipped: "Skipped (busy or reserved): {p}", rsc_conn: "Control link", rsc_conn_ok: "connected", rsc_conn_no: "not connected yet",
+    rsc_svc: "Services", rsc_direct: "Kernel forward (full speed)", rsc_relay: "FRP relay (filtered path)", rsc_auto: "The other panel picks this up by itself within a few minutes if the two panels are paired. Otherwise use the code.",
+    rsc_lift: "The direct route works again. You can disable Rescue and use the normal tunnel.",
+    rsc_confirm_t: "Enable Connectivity Rescue?", rsc_confirm_b: "This starts three small services here and opens one firewalled control port. The reachable server is the only host allowed to use it. You can remove everything with one click.",
+    rsc_dis_t: "Remove Rescue?", rsc_dis_b: "The forwarded ports on the entry server stop working until the normal tunnel is up.",
+    rsc_probe_ok: "Peer reachable", rsc_probe_block: "One-way block confirmed", rsc_probe_down: "Peer unreachable (outage, not a block)", rsc_probe_svc: "Peer reachable but its panel is not listening",
+    rsc_done: "Rescue enabled", rsc_removed: "Rescue removed", rsc_copied: "Copied",
+    pal_open: "Search and commands", pal_search: "Search", pal_title: "Command palette", pal_ph: "Search pages and actions…",
+    pal_nav: "navigate", pal_run: "run", pal_close: "close", pal_none: "Nothing matches", pal_go: "Go to", pal_act: "Actions", pal_look: "Appearance",
+    pal_refresh: "Refresh data", pal_theme: "Toggle dark / light theme", pal_lang: "Switch language", pal_stream: "Show / hide Live Activity Stream",
+    pal_sidebar: "Collapse / expand sidebar", pal_density: "Toggle table density", pal_diag: "Run diagnostics", pal_donate: "Support Hashem", pal_logout: "Log out",
+    pal_accent: "Accent colour",
+    sb_collapse: "Collapse sidebar", sb_expand: "Expand sidebar",
+    tbl_filter: "Filter errors…", tbl_shown: "{n} of {t} shown",
+    dens_title: "Table density", dens_comfy: "Comfortable", dens_compact: "Compact",
+    onb_title: "Welcome to Hashem", onb_sub: "No tunnel yet. Three steps and you are live.",
+    onb_s1: "Choose this server's role", onb_s1d: "Iran hub (server) or foreign server (client) from the Setup tab.",
+    onb_s2: "Link the other server", onb_s2d: "Create the tunnel and paste the connection bundle on the other side.",
+    onb_s3: "Verify and optimise", onb_s3d: "Run Diagnostics, then Optimize in the Tunnel tab.",
+    onb_go: "Open Setup", onb_later: "Not now", onb_dismiss: "Dismiss",
+    badge_tunnel: "{n} tunnel(s) need attention", badge_doctor: "{n} diagnostic issue(s)",
+    fleet_title: "Fleet health",
+    fleet_all_ok: "All servers healthy",
+    fleet_some: "{n} of {t} servers need attention",
+    fleet_all_down: "All servers are down",
+    fleet_meta: "Updated {time} · sampled every {s}s · last hour",
+    fleet_hub: "Iran hub",
+    fleet_healthy: "Healthy",
+    fleet_degraded: "Degraded",
+    fleet_down: "Down",
+    fleet_avg: "Avg",
+    fleet_loss: "Loss",
+    fleet_uptime: "Uptime",
+    fleet_nodata: "Collecting data…",
+    fleet_frp_only: "FRP only",
+    fleet_icmp_filtered: "ICMP filtered",
+    fleet_session_up: "session up",
+    fleet_updated: "updated",
+    fleet_ago: "ago",
+    dial_title: "Route to the Iran hub", dial_hint: "How this server reaches Iran: over the GRE inner IP, directly to the hub's public IP, or Auto (GRE when it works, public IP otherwise).", dial_auto: "Auto", dial_gre: "GRE inner IP", dial_public: "Public IP", dial_public_btn: "Iran public IP",
+    fleet_topo_aria: "Tunnel topology: {hub} connected to {n} servers",
+    fleet_ring_aria: "{h} of {t} servers healthy",
+    rs_hide_aria: "Hide live activity stream",
+    rs_hidden_toast: "Live Activity Stream hidden",
+    rs_hidden_sub: "Bring it back from Logs → Live Activity Stream",
+    rs_restore_hint: "Side panel with the latest events. Wide screens (1200px+) only.",
+    rs_btn_hide: "Hide",
+    rs_btn_show: "Show",
+    sup_title: "Enjoying a stable tunnel?",
+    sup_body: "Hashem is free and built by one developer. If it keeps your connection alive, a small donation helps keep it improving.",
+    sup_donate: "Donate",
+    sup_later: "Maybe later",
+    sup_snooze: "Don't remind me for 30 days",
+    sup_card_title: "Support Hashem",
+    sup_card_hint: "Hashem is free. If it helps you, you can support its development any time.",
+    appear_title: "Appearance",
+    appear_hint: "Pick an accent colour. Every preset is contrast-checked for both dark and light themes.",
+    appear_aria: "Accent colour",
+    acc_blue: "Blue", acc_indigo: "Indigo", acc_violet: "Violet", acc_rose: "Rose", acc_emerald: "Emerald", acc_teal: "Teal", acc_orange: "Orange",
+    rs_waiting: "Waiting for logs...",
+    edit_tunnel_title: "Edit Tunnel",
+    edit_tunnel_sub: "Modify tunnel parameters, carrier protocol, or forwarded ports. Changes apply immediately.",
+    carrier_title: "Carrier Selection / Policy",
+    save_carrier: "Save Mode",
+    connect_iran: "Connect to Iran",
+    reverse_ports: "Reverse ports (ranges & mappings allowed)",
+    disabled: "Disabled",
+    enabled: "Enabled",
+    save: "Save",
+    cancel: "Cancel",
+    close: "Close",
+    x002: "Iran",
+    x003: "Foreign",
+    x004: "[ ON ] Auto-Switching",
+    x005: "[ OFF ] Manual Mode",
+    x006: "Stable / Zero Drops",
+    x007: "Engine",
+    x008: "Carrier & Failover",
+    x009: "Active Carrier",
+    x010: "Failover Policy",
+    x011: "Diagnostics",
+    x012: "tunnel up",
+    x013: "Open full card in Tunnel tab",
+    x014: "All diagnostic tests passed with zero bottlenecks. Connection is operating at peak performance.",
+    x015: "Recommendation: Run automated repair to resolve bottlenecks and optimize parameters.",
+    x016: "Auto-Fix Detected Issues",
+    x017: "Diagnosing… (sweep MTU & ping)",
+    x018: "Diagnostics complete",
+    x019: "Health score",
+    x020: "Diagnostics failed",
+    x021: "Run Diagnostics",
+    x022: "Apply Automated Optimizations?",
+    x023: "This will enable TCP BBR, configure MSS clamping, ensure IPv4 forwarding, tune FRP concurrency limits, and restore tunnel interface connectivity.",
+    x024: "Repair & Optimize",
+    x025: "Applying fixes…",
+    x026: "Applying…",
+    x027: "Optimizations applied",
+    x028: "System stack optimized",
+    x029: "Fix failed",
+    x030: "Quick Repair & Optimize",
+    x031: "Active route",
+    x032: "Best round-trip",
+    x033: "Zero loss link",
+    x034: "Packet drop rate",
+    x035: "Last benchmark",
+    x036: "candidates probed",
+    x037: "None",
+    x038: "No benchmark metrics yet. Click \"Run Carrier Benchmark\".",
+    x039: "Healthy",
+    x040: "Good",
+    x041: "Warning",
+    x042: "Down",
+    x043: "Raw 47",
+    x044: "ACTIVE",
+    x045: "BEST",
+    x046: "Current",
+    x047: "Switch",
+    x048: "Probing carriers...",
+    x049: "Benchmarking carriers",
+    x050: "Probing GRE, WSS, TCP, KCP, QUIC, and WS...",
+    x051: "Benchmark Complete",
+    x052: "Best Carrier",
+    x053: "Benchmark failed",
+    x054: "Applying carrier",
+    x055: "Carrier Applied",
+    x056: "Apply failed",
+    err_generic: "Request failed",
+    state_retry: "Retry",
+    state_error_title: "Could not load data",
+    rs_empty_title: "No log lines yet",
+    rs_waiting_sys: "Waiting for system logs...",
+    empty_bench_title: "No benchmark metrics yet",
+    empty_bench_msg: "Run a carrier benchmark to compare protocols.",
+    empty_peers_title: "No peer tunnels yet",
+    empty_peers_msg: "Add one from Setup → Add another foreign server.",
+    empty_logs_title: "No log lines",
+    empty_logs_msg: "Nothing to show for this service yet.",
+    empty_errors_title: "No panel errors",
+    empty_errors_msg: "Clean run — every failure will appear here with its code.",
+    aria_close: "Close",
+    aria_menu: "Menu",
+    aria_main_nav: "Main navigation",
+    aria_toggle_visibility: "Toggle visibility",
+    aria_copy: "Copy",
+    aria_edit_ports: "Edit ports",
+    aria_close_search: "Close search",
+    aria_close_proxy: "Close proxy configuration",
+    aria_font_smaller: "Smaller font",
+    aria_font_larger: "Larger font",
+    aria_fullscreen: "Fullscreen",
+    err_status: "Refresh failed",
+    err_dashboard: "Dashboard refresh failed",
+    err_carrier: "Carrier status failed",
+    err_peers: "Peers load failed",
+    err_setup: "Setup defaults failed",
+    err_logs: "Logs load failed",
+    err_errors: "Error history failed",
+    err_rslogs: "Live log stream failed",
+    err_benchmark: "Benchmark load failed",
+    err_peerlink: "Peer link status failed",
+    err_bundle: "Bundle lookup failed",
+    err_retry: "Retry failed",
+    carrier_switch_confirm: "Switch both Iran & Foreign servers to carrier \"{id}\"?"
+  }
 };
 
 let currentLang = 'en';
@@ -5592,13 +6006,13 @@ function renderBenchmark(bench, peer) {
     const badge = $('peerLinkBadge');
     if (badge) {
       badge.className = 'badge ' + (isConn ? 'ok' : 'err');
-      badge.textContent = isConn ? 'متصل' : (peer.peer_url ? 'غیرقابل دسترس' : 'تنظیم‌نشده');
+      badge.textContent = isConn ? 'Connected' : (peer.peer_url ? 'Unreachable' : 'Not configured');
     }
-    if ($('peerRoleVal')) $('peerRoleVal').textContent = (peer.role === 'master' ? 'مستر (ایران)' : 'ورکر (خارج)');
+    if ($('peerRoleVal')) $('peerRoleVal').textContent = (peer.role === 'master' ? 'Master (Iran)' : 'Worker (Foreign)');
     if ($('peerUrlVal')) $('peerUrlVal').textContent = peer.peer_url || '—';
     if ($('peerInternalVal')) $('peerInternalVal').textContent = peer.internal_ip || '—';
     if ($('peerLatencyVal')) $('peerLatencyVal').textContent = (peer.latency_ms > 0 ? peer.latency_ms.toFixed(1) + ' ms' : '—');
-    if ($('peerLastSyncVal')) $('peerLastSyncVal').textContent = peer.last_sync || 'هرگز';
+    if ($('peerLastSyncVal')) $('peerLastSyncVal').textContent = peer.last_sync || 'Never';
 
     // Automatic Failover Policy
     if ($('autoPilotToggle')) $('autoPilotToggle').checked = !!peer.autopilot;
@@ -5606,7 +6020,7 @@ function renderBenchmark(bench, peer) {
     if ($('autoPilotBadge')) {
       const b = $('autoPilotBadge');
       b.className = 'badge ' + (peer.autopilot ? 'warn' : 'dim');
-      b.textContent = peer.autopilot ? '[ روشن ] سوییچ خودکار' : '[ خاموش ] حالت دستی';
+      b.textContent = peer.autopilot ? '[ ON ] Auto Switch' : '[ OFF ] Manual';
     }
   }
 
@@ -5627,11 +6041,11 @@ function renderBenchmark(bench, peer) {
       if ($('benchWinnerBadge')) {
         const wb = $('benchWinnerBadge');
         wb.className = 'badge ' + (winner.status === 'healthy' ? 'ok' : (winner.status === 'good' ? 'info' : 'warn'));
-        wb.textContent = winner.status === 'healthy' ? '⚡ بالاترین پایداری' : (winner.status === 'good' ? '🟢 کیفیت مطلوب' : '⚠️ مشروط');
+        wb.textContent = winner.status === 'healthy' ? '⚡ Highest Stability' : (winner.status === 'good' ? '🟢 Good Quality' : '⚠️ Conditional');
       }
       if ($('benchWinnerDesc')) {
-        const rttTxt = winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} میلی‌ثانیه تاخیر` : 'پاسخگویی سریع';
-        $('benchWinnerDesc').textContent = `بر اساس تست زنده، این پروتکل با پکت‌لاس ${winner.packet_loss}% و ${rttTxt}، بهترین بازدهی را برای دور زدن فیلترینگ و اختلال شبکه دارد.`;
+        const rttTxt = winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} ms RTT` : 'Fast response';
+        $('benchWinnerDesc').textContent = `Based on live test, this protocol with packet loss ${winner.packet_loss}% and ${rttTxt} offers the best throughput for bypassing filtering and network disruption.`;
       }
       const applyBtn = $('benchApplyWinnerBtn');
       if (applyBtn) {
@@ -5642,22 +6056,22 @@ function renderBenchmark(bench, peer) {
     }
 
     if ($('benchStatWinner')) $('benchStatWinner').textContent = winnerName;
-    if ($('benchStatWinnerSub')) $('benchStatWinnerSub').textContent = winner ? `امتیاز: ${winner.score}/100 · ${winner.avg_rtt_ms} ms` : 'گزینه اول پیشنهادی';
+    if ($('benchStatWinnerSub')) $('benchStatWinnerSub').textContent = winner ? `Score: ${winner.score}/100 · ${winner.avg_rtt_ms} ms` : 'Top Recommendation';
     if ($('benchStatActive')) $('benchStatActive').textContent = activeName;
-    if ($('benchStatActiveSub')) $('benchStatActiveSub').textContent = 'کریر فعال شبکه';
+    if ($('benchStatActiveSub')) $('benchStatActiveSub').textContent = 'Active Network Carrier';
     if ($('benchStatMinRtt')) $('benchStatMinRtt').textContent = minRtt > 0 ? `${minRtt.toFixed(1)} ms` : (winner && winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} ms` : '—');
-    if ($('benchStatMinRttSub')) $('benchStatMinRttSub').textContent = 'کمترین زمان رفت و برگشت';
+    if ($('benchStatMinRttSub')) $('benchStatMinRttSub').textContent = 'Minimum Round Trip Time';
     if ($('benchStatLoss')) $('benchStatLoss').textContent = winner ? `${winner.packet_loss}%` : '0%';
-    if ($('benchStatLossSub')) $('benchStatLossSub').textContent = (winner && winner.packet_loss === 0) ? 'بدون افت پکت' : 'نرخ افت پکت پروتکل برتر';
+    if ($('benchStatLossSub')) $('benchStatLossSub').textContent = (winner && winner.packet_loss === 0) ? 'No Packet Loss' : 'Best Carrier Packet Loss';
 
     if ($('benchMetaSub')) {
-      const tgt = bench.target_host ? `به مقصد ${bench.target_host}` : '';
-      $('benchMetaSub').textContent = `آخرین بنچمارک: ${bench.timestamp || '—'} · سنجش ${bench.metrics.length} پروتکل فعال ${tgt}`;
+      const tgt = bench.target_host ? `to ${bench.target_host}` : '';
+      $('benchMetaSub').textContent = `Last benchmark: ${bench.timestamp || '—'} · Tested ${bench.metrics.length} carriers ${tgt}`;
     }
   }
 
   if (bench && bench.auto_pilot) {
-    if ($('autoPilotLastVal')) $('autoPilotLastVal').textContent = bench.auto_pilot.last_triggered || 'هیچ‌کدام';
+    if ($('autoPilotLastVal')) $('autoPilotLastVal').textContent = bench.auto_pilot.last_triggered || 'None';
     if ($('autoPilotCountVal')) $('autoPilotCountVal').textContent = bench.auto_pilot.trigger_count || 0;
   }
 
@@ -5666,7 +6080,7 @@ function renderBenchmark(bench, peer) {
   if (!tbody) return;
 
   if (!bench || !bench.metrics || bench.metrics.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: 'هنوز تستی انجام نشده است', msg: 'آدرس سرور خارج را وارد کرده و کلید شروع بنچمارک هوشمند را بزنید.', actionKey: 'runbench', actionLabel: '⚡ شروع بنچمارک هوشمند', compact: true })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: 'No benchmark run yet', msg: 'Enter foreign server address and click Run Smart Benchmark.', actionKey: 'runbench', actionLabel: '⚡ Run Smart Benchmark', compact: true })}</td></tr>`;
     return;
   }
 
@@ -5679,16 +6093,16 @@ function renderBenchmark(bench, peer) {
     let statusLabel = m.status;
     if (m.status === 'healthy') {
       statusClass = 'ok';
-      statusLabel = 'عالی';
+      statusLabel = 'Excellent';
     } else if (m.status === 'good') {
       statusClass = 'info';
-      statusLabel = 'مناسب';
+      statusLabel = 'Good';
     } else if (m.status === 'warning') {
       statusClass = 'warn';
-      statusLabel = 'دارای پکت‌لاس';
+      statusLabel = 'Lossy';
     } else if (m.status === 'critical' || m.status === 'down') {
       statusClass = 'err';
-      statusLabel = 'مسدود / قطع';
+      statusLabel = 'Down';
     }
 
     let lossClass = 'ok';
@@ -5733,8 +6147,8 @@ function renderBenchmark(bench, peer) {
       <td>
         <div class="u-flex-center-gap8">
           <strong style="color:var(--tx);font-size:13.5px;">${esc(cleanName)}</strong>
-          ${isActive ? `<span class="badge ok" style="font-size:12px;padding:2px 6px;">فعال</span>` : ''}
-          ${isWinner ? `<span class="badge info" style="font-size:12px;padding:2px 6px;">پیشنهاد برتر</span>` : ''}
+          ${isActive ? `<span class="badge ok" style="font-size:12px;padding:2px 6px;">Active</span>` : ''}
+          ${isWinner ? `<span class="badge info" style="font-size:12px;padding:2px 6px;">Recommended</span>` : ''}
         </div>
         ${cleanSub ? `<div style="font-size:12px;color:var(--mu);margin-top:2px;">${esc(cleanSub)}</div>` : ''}
       </td>
@@ -5753,8 +6167,8 @@ function renderBenchmark(bench, peer) {
       </td>
       <td><span class="badge ${statusClass} u-fs-12">${esc(statusLabel)}</span></td>
       <td>
-        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs" disabled style="opacity:0.65;font-weight:600;padding:5px 12px;">کریر جاری</button>` :
-          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="smartApplyOrSetupCarrier('${esc(m.id)}', '${esc(m.name || m.id)}')">${isWinner ? '🚀 انتخاب برتر' : 'فعال‌سازی'}</button>`}
+        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs" disabled style="opacity:0.65;font-weight:600;padding:5px 12px;">Current Carrier</button>` :
+          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="smartApplyOrSetupCarrier('${esc(m.id)}', '${esc(m.name || m.id)}')">${isWinner ? '🚀 Top Pick' : 'Switch'}</button>`}
       </td>
     </tr>`;
   });
@@ -5768,7 +6182,7 @@ async function runBenchmarkClick() {
   const isConn = peerData && peerData.is_connected;
   
   if (!targetHost && !isConn) {
-    toastWarn('آدرس سرور را وارد کنید', 'برای سنجش پیش از اتصال، لطفاً IP یا دامنه سرور خارج (مقصد) را وارد نمایید.');
+    toastWarn('Enter Destination', 'Please enter foreign server IP or domain name before benchmarking.');
     if ($('benchTargetHost')) $('benchTargetHost').focus();
     return;
   }
@@ -5777,18 +6191,18 @@ async function runBenchmarkClick() {
   const btn = $('benchRunBtn');
   const txt = $('benchRunBtnTxt');
   if (btn) btn.disabled = true;
-  if (txt) txt.textContent = 'در حال سنجش هوشمند پروتکل‌ها...';
-  toast('آغاز بنچمارک هوشمند', 'پروب همزمان تمام ۷ پروتکل هاشم به سمت سرور مقصد...');
+  if (txt) txt.textContent = 'Benchmarking carriers...';
+  toast('Running Benchmark', 'Probing all Hashem carriers concurrently...');
 
   try {
     await loadBenchmark(true);
-    toastOk('بنچمارک تکمیل شد', `بهترین پروتکل: ${benchData ? (benchData.best_carrier_name || benchData.best_carrier || '—') : '—'}`);
+    toastOk('Benchmark Complete', `Best Carrier: ${benchData ? (benchData.best_carrier_name || benchData.best_carrier || '—') : '—'}`);
   } catch (err) {
-    toastErr('خطا در اجرای بنچمارک', err.message || err);
+    toastErr('Benchmark failed', err.message || err);
   } finally {
     benchRunning = false;
     if (btn) btn.disabled = false;
-    if (txt) txt.textContent = '⚡ شروع بنچمارک هوشمند';
+    if (txt) txt.textContent = '⚡ Run Carrier Benchmark';
   }
 }
 
@@ -5800,26 +6214,26 @@ async function smartApplyOrSetupCarrier(carrierId, carrierName) {
   // Case 1: Servers are already paired & active -> instant carrier switch with confirmation modal
   if (isConn) {
     entConfirm({
-      title: 'سوییچ به پروتکل برتر',
-      msg: `آیا مایلید کریر فعال تانل روی هر دو سرور به «${esc(cleanName)}» تغییر کند؟`,
-      okText: 'بله، تغییر بده',
-      cancelText: 'انصراف',
+      title: 'Switch to Best Carrier',
+      msg: `Switch both Iran and Foreign servers to carrier "${esc(cleanName)}"?`,
+      okText: 'Confirm Switch',
+      cancelText: 'Cancel',
       danger: false
     }, async () => {
-      toast('در حال تغییر پروتکل', `${cleanName}...`);
+      toast('Applying Carrier', `${cleanName}...`);
       try {
         const res = await api('/api/benchmark/apply', { carrier: carrierId });
-        toastOk('پروتکل با موفقیت فعال شد', res.detail || `کریر فعال به ${cleanName} تغییر یافت.`);
+        toastOk('Carrier Applied', res.detail || `Active carrier switched to ${cleanName}.`);
         await loadBenchmark();
       } catch (err) {
-        toastErr('خطا در اعمال پروتکل', err.message || err);
+        toastErr('Apply failed', err.message || err);
       }
     });
     return;
   }
 
   // Case 2: Pre-connection benchmark -> smart navigate to setup and pre-fill fields
-  toastOk('پروتکل هوشمند انتخاب شد', `هدایت به صفحه ستاپ با پروتکل پیشنهادی ${cleanName}...`);
+  toastOk('Carrier Selected', `Opening setup for recommended carrier ${cleanName}...`);
 
   // If Bagher (SSH forward) selected
   if (carrierId.startsWith('bagher') || carrierId === 'sshfwd') {
@@ -5828,7 +6242,7 @@ async function smartApplyOrSetupCarrier(carrierId, carrierName) {
       if ($('sshfwdRemoteHost')) $('sshfwdRemoteHost').value = targetHost;
       if ($('bagherQuickRemoteHost')) $('bagherQuickRemoteHost').value = targetHost;
     }
-    toast('راهنمای راه‌اندازی باقر', 'مشخصات سرور را در تب باقر تکمیل و دکمه راه‌اندازی را بزنید.');
+    toast('Bagher Setup', 'Fill server credentials in Bagher tab and apply.');
     return;
   }
 
@@ -5868,7 +6282,7 @@ async function smartApplyOrSetupCarrier(carrierId, carrierName) {
     if (trans) trans.value = 'wss';
   }
 
-  toast('پیکربندی هوشمند تکمیل شد', `تنظیمات بر اساس پروتکل ${cleanName} لود شدند. کلید راه‌اندازی را لمس کنید.`);
+  toast('Carrier Configured', `Config loaded for ${cleanName}. Apply when ready.`);
 }
 
 async function applyCarrierClick(carrierId) {
@@ -5876,17 +6290,17 @@ async function applyCarrierClick(carrierId) {
 }
 
 async function testPeerLinkClick() {
-  toast('تست ارتباط پنل', 'در حال ارسال پکت پروب به سرور مقابل...');
+  toast('Testing Peer Link', 'Sending probe to peer panel...');
   try {
     const res = await api('/api/peer/config', { action: 'test' });
     if (res.reachable) {
-      toastOk('ارتباط دو پنل برقرار است', `تاخیر رفت و برگشت: ${res.latency_ms.toFixed(1)} ms`);
+      toastOk('Peer Connected', `RTT: ${res.latency_ms.toFixed(1)} ms`);
     } else {
-      toastWarn('سرور مقابل پاسخ نداد', 'امکان برقراری ارتباط با وب‌پنل سرور مقابل وجود ندارد.');
+      toastWarn('Peer Unreachable', 'Could not reach remote panel web endpoint.');
     }
     await loadBenchmark();
   } catch (err) {
-    toastErr('خطا در پروب پنل مقابل', err.message || err);
+    toastErr('Peer probe failed', err.message || err);
   }
 }
 
@@ -5895,13 +6309,13 @@ async function saveAutoPilotClick() {
   const enabled = $('autoPilotToggle') ? $('autoPilotToggle').checked : false;
   const thresh = $('autoPilotThresholdInput') ? parseFloat($('autoPilotThresholdInput').value) || 20 : 20;
 
-  setBtnLoading(btn, true, 'در حال ذخیره…');
+  setBtnLoading(btn, true, 'Saving…');
   try {
     await api('/api/benchmark/autopilot', { enabled: enabled, threshold: thresh });
-    toastOk('سیاست سوییچ خودکار ذخیره شد', enabled ? `سوییچ خودکار روشن است (آستانه: ${thresh}%)` : 'سوییچ خودکار خاموش است (حالت دستی)');
+    toastOk('Failover Policy Saved', enabled ? `Auto failover enabled (Threshold: ${thresh}%)` : 'Auto failover disabled (Manual mode)');
     await loadBenchmark();
   } catch (err) {
-    toastErr('خطا در ذخیره سیاست سوییچ', err.message || err);
+    toastErr('Failed to save failover policy', err.message || err);
   } finally {
     setBtnLoading(btn, false);
   }
@@ -5933,11 +6347,11 @@ async function savePeerConfigClick() {
     const payload = { role, peer_url: url, internal_ip: internal };
     if (secret) payload.peer_secret = secret;
     await api('/api/peer/config', payload);
-    toastOk('تنظیمات ارتباط ذخیره شد', 'اطلاعات سرور مقابل به‌روزرسانی گردید.');
+    toastOk('Peer Config Saved', 'Remote panel link updated.');
     closePeerConfig();
     await loadBenchmark();
   } catch (err) {
-    toastErr('خطا در ذخیره تنظیمات', err.message || err);
+    toastErr('Failed to save peer config', err.message || err);
   }
 }
 
@@ -5965,8 +6379,8 @@ async function savePeerConfigClick() {
       forBtn.classList.remove('active');
       forBtn.setAttribute('aria-pressed', 'false');
       roleInput.value = 'iran';
-      if (roleHint) roleHint.textContent = 'در سرور ایران، مشخصات سرور خارج را وارد کنید تا تمام ۷ پروتکل از داخل ایران پروب شوند.';
-      if (hostLabel) hostLabel.textContent = 'آدرس IP عمومی یا دامنه سرور خارج (مقصد)';
+      if (roleHint) roleHint.textContent = 'On Iran server, enter foreign server address to probe all 7 protocols outwards.';
+      if (hostLabel) hostLabel.textContent = 'Foreign Server Public IP or Domain (Destination)';
     });
 
     forBtn.addEventListener('click', () => {
@@ -5975,8 +6389,8 @@ async function savePeerConfigClick() {
       iranBtn.classList.remove('active');
       iranBtn.setAttribute('aria-pressed', 'false');
       roleInput.value = 'foreign';
-      if (roleHint) roleHint.textContent = 'در سرور خارج، مشخصات سرور ایران را وارد کنید تا تمام ۷ پروتکل از خارج پروب شوند.';
-      if (hostLabel) hostLabel.textContent = 'آدرس IP عمومی یا دامنه سرور ایران (مقصد)';
+      if (roleHint) roleHint.textContent = 'On foreign server, enter Iran server address to probe inbound connectivity.';
+      if (hostLabel) hostLabel.textContent = 'Iran Server Public IP or Domain (Destination)';
     });
   }
 
@@ -5988,7 +6402,7 @@ async function savePeerConfigClick() {
     advToggle.addEventListener('click', () => {
       advWrap.classList.toggle('hidden');
       if (advChevron) {
-        advChevron.textContent = advWrap.classList.contains('hidden') ? '▼ باز کردن' : '▲ بستن';
+        advChevron.textContent = advWrap.classList.contains('hidden') ? '▼ Expand' : '▲ Collapse';
       }
     });
   }

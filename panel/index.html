@@ -1408,19 +1408,19 @@
           <!-- Role Selector (Identical to gre-frp Quick Setup) -->
           <div class="tc-box" style="background:rgba(255,255,255,0.02); border:1px solid rgba(56,189,248,0.2); padding:16px; border-radius:10px; margin-bottom:16px;">
             <label class="qs-label" style="font-size:14px; font-weight:700; color:#e2e8f0; margin-bottom:10px; display:block;">
-              مرحله ۱: انتخاب نقش این سرور / Step 1: Select Server Role
+              Step 1: Select Server Role
             </label>
             <div class="qs-seg" role="group" aria-label="Bagher Server Role">
               <button type="button" id="bagherRoleIran" onclick="setBagherRole('iran')" aria-pressed="true" style="font-weight:700; padding:10px 20px; font-size:13px;">
-                🇮🇷 سرور ایران (دریافت ترافیک کاربران)
+                🇮🇷 Iran Server (Receives User Traffic)
               </button>
               <button type="button" id="bagherRoleForeign" onclick="setBagherRole('foreign')" aria-pressed="false" style="font-weight:700; padding:10px 20px; font-size:13px;">
-                🌍 سرور خارج (مقصد فیلترشکن و خروج اینترنت)
+                🌍 Foreign Server (Exit & Service Host)
               </button>
             </div>
             <input type="hidden" id="bagherRoleInput" value="iran">
             <div class="qs-hint" id="bagherRoleHint" style="margin-top:8px; line-height:1.5;">
-              سرور ایران ترافیک کاربران را دریافت کرده، روی پورت‌های عبوری گوش می‌دهد و از طریق تونل مخفی به سرور خارج هدایت می‌کند.
+              Iran server receives user traffic, listens on forwarded ports, and routes via stealth tunnel to foreign server.
             </div>
           </div>
 
@@ -1428,23 +1428,23 @@
           <div id="bagherIranWrap">
             <div class="tc-box" style="background:rgba(255,255,255,0.02); border:1px solid rgba(56,189,248,0.18); padding:16px; border-radius:10px; margin-bottom:16px;">
               <h4 style="font-size:14px; font-weight:700; color:#38bdf8; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
-                ⚙️ مرحله ۲: مشخصات سرور خارج و پورت‌های عبوری (Iran Setup)
+                ⚙️ Step 2: Foreign Server Details & Forwarded Ports (Iran Setup)
               </h4>
               <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:14px; margin-bottom:14px;">
                 <div>
-                  <label class="u-lbl-dim">آدرس آی‌پی پابلیک سرور خارج (Foreign Server Public IP) <span style="color:#ef4444;">*</span></label>
-                  <input type="text" id="sshfwdRemoteHost" class="hashem-input" placeholder="مثال: 91.107.174.173" style="width:100%;">
-                  <div class="u-hint-11">آدرس IP پابلیک سرور خارج که کانفیگ‌ها و پنل شما روی آن قرار دارد.</div>
+                  <label class="u-lbl-dim">Foreign Server Public IP <span style="color:#ef4444;">*</span></label>
+                  <input type="text" id="sshfwdRemoteHost" class="hashem-input" placeholder="e.g. 91.107.174.173" style="width:100%;">
+                  <div class="u-hint-11">Foreign server public IP where your proxy core and panel reside.</div>
                 </div>
                 <div>
-                  <label class="u-lbl-dim">پورت‌های عبوری تانل (Forwarded Ports) <span style="color:#ef4444;">*</span></label>
-                  <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="مثال: 443, 8443, 2083" style="width:100%;">
+                  <label class="u-lbl-dim">Forwarded Ports <span style="color:#ef4444;">*</span></label>
+                  <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="e.g. 443, 8443, 2083" style="width:100%;">
                   <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
                     <button type="button" class="hashem-btn hashem-btn-sm" onclick="document.getElementById('sshfwdPorts').value='443, 8443';" style="font-size:11px; padding:2px 8px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8;">🌐 Web (443, 8443)</button>
                     <button type="button" class="hashem-btn hashem-btn-sm" onclick="document.getElementById('sshfwdPorts').value='443, 8443, 2053, 2083, 2087';" style="font-size:11px; padding:2px 8px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8;">⚡ CDN/V2Ray (443, 8443, 2053, 2083, 2087)</button>
                     <button type="button" class="hashem-btn hashem-btn-sm" onclick="document.getElementById('sshfwdPorts').value='443';" style="font-size:11px; padding:2px 8px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8;">🔒 Single (443)</button>
                   </div>
-                  <div class="u-hint-11">پورت‌هایی که در سرور ایران باز می‌شوند و ترافیک کاربر را به سرور خارج می‌فرستند.</div>
+                  <div class="u-hint-11">Ports opened on Iran server that route client traffic to the foreign server.</div>
                 </div>
               </div>
 
@@ -1500,7 +1500,7 @@
                 </button>
               </div>
               <div class="u-hint-12" style="margin-bottom:8px; line-height:1.5;">
-                💡 <b>راهنمای اتصال:</b> این کد شامل کلیدهای امنیتی و پورت‌های تانل است. آن را کپی کرده و در پنل وب سرور خارج در بخش نقش سرور خارج (Foreign Server) پیست نمایید.
+                💡 <b>Connection Guide:</b> This bundle contains security keys and tunnel parameters. Copy and paste it on the Foreign Server web panel under Foreign Server role.
               </div>
               <textarea id="bagherBundleText" class="hashem-input" rows="4" readonly placeholder="Fill in the fields above and click 'Initialize Iran Server &amp; Issue Bundle' to generate the connection bundle here..." style="width:100%; min-height:95px; font-family:monospace; font-size:12px; line-height:1.45; background:rgba(0,0,0,0.55); resize:vertical; color:#38bdf8; word-break:break-all; padding:10px; border-radius:6px;"></textarea>
             </div>
@@ -1511,12 +1511,12 @@
             <div class="tc-box" style="background:linear-gradient(180deg, rgba(16,185,129,0.08) 0%, rgba(15,23,42,0.4) 100%); border:1px solid rgba(16,185,129,0.25); padding:18px; border-radius:10px; margin-bottom:16px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
                 <span style="font-weight:700; font-size:15px; color:#34d399; display:flex; align-items:center; gap:8px;">
-                  📥 مرحله ۲: پیست کردن کد اتصال سرور ایران و شروع تانل
+                  📥 Step 2: Paste Iran Connection Bundle & Start Tunnel
                 </span>
                 <span class="badge ok" style="font-size:11px;">1-Click Auto Connection</span>
               </div>
               <div class="u-hint-12" style="margin-bottom:10px; line-height:1.5;">
-                کد خروجی مرحله ایران را (که با <code style="color:#38bdf8;">BAGHER:</code> شروع می‌شود) در کادر زیر قرار داده و روی دکمه اتصال کلیک کنید:
+                Paste the connection code from Iran server (starts with <code style="color:#38bdf8;">BAGHER:</code>) below and click Connect:
               </div>
               <div style="display:flex; flex-direction:column; gap:12px;">
                 <textarea id="bagherPasteBundleInput" class="hashem-input" rows="4" placeholder="BAGHER:eyJ2Ij...NDNd..." style="width:100%; min-height:90px; font-family:monospace; font-size:12px; background:rgba(0,0,0,0.5); resize:vertical; padding:10px; border-radius:6px; color:#34d399; word-break:break-all;"></textarea>
@@ -2422,16 +2422,16 @@
               <div class="u-flex-center-gap10">
                 <span class="tc-title" style="font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px;" data-i18n="bench_leaderboard_title">
                   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#38bdf8" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                  سنجش هوشمند پروتکل‌های تانل (Multi-Protocol Benchmark)
+                  Smart Multi-Protocol Carrier Benchmark
                 </span>
-                <span class="badge ok" id="benchStatusPill">آماده تست</span>
+                <span class="badge ok" id="benchStatusPill">Ready</span>
               </div>
-              <div class="qs-hint u-mt-4" id="benchMetaSub">سنجش مستقیم و مستقل تمام پروتکل‌های هاشم حتی پیش از راه‌اندازی تانل بین دو سرور</div>
+              <div class="qs-hint u-mt-4" id="benchMetaSub">Independent end-to-end benchmark across all 7 Hashem protocols before establishing tunnel</div>
             </div>
             <div class="qs-actions">
               <button class="hashem-btn hashem-btn-primary" id="benchRunBtn" style="padding:10px 20px;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:8px;box-shadow:0 0 22px rgba(56,189,248,0.32);">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span id="benchRunBtnTxt" data-i18n="bench_run_btn">⚡ شروع بنچمارک هوشمند</span>
+                <span id="benchRunBtnTxt" data-i18n="bench_run_btn">⚡ Run Smart Benchmark</span>
               </button>
             </div>
           </div>
@@ -2440,24 +2440,24 @@
           <div class="u-grid-2 u-gap-16 u-mb-16" style="background:rgba(255,255,255,0.02); padding:16px; border-radius:10px; border:1px solid rgba(255,255,255,0.05);">
             <div>
               <label class="qs-label" style="margin-bottom:8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
-                <span>نقش سرور جاری</span>
-                <span class="badge info" style="font-size:11px;padding:1px 6px;">موقعیت</span>
+                <span>Current Server Role</span>
+                <span class="badge info" style="font-size:11px;padding:1px 6px;">Role</span>
               </label>
               <div class="qs-seg" role="group" aria-label="Server Role Selection" style="margin-bottom:8px;">
-                <button type="button" id="benchRoleIranBtn" class="active" aria-pressed="true" style="font-weight:600;">🇮🇷 سرور ایران</button>
-                <button type="button" id="benchRoleForeignBtn" aria-pressed="false" style="font-weight:600;">🌍 سرور خارج</button>
+                <button type="button" id="benchRoleIranBtn" class="active" aria-pressed="true" style="font-weight:600;">🇮🇷 Iran Server</button>
+                <button type="button" id="benchRoleForeignBtn" aria-pressed="false" style="font-weight:600;">🌍 Foreign Server</button>
               </div>
               <input type="hidden" id="benchTargetRole" value="iran">
-              <div class="qs-hint" id="benchRoleHint">در سرور ایران، مشخصات سرور خارج را وارد کنید تا تمام ۷ پروتکل از داخل ایران پروب شوند.</div>
+              <div class="qs-hint" id="benchRoleHint">On Iran server, enter foreign server address to probe all 7 protocols outwards.</div>
             </div>
 
             <div>
               <label class="qs-label" for="benchTargetHost" style="margin-bottom:8px;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
-                <span>آدرس IP عمومی یا دامنه سرور خارج (مقصد)</span>
-                <span class="badge dim" id="benchAutoDetectBadge" style="display:none;font-size:11px;">شناسایی خودکار</span>
+                <span>Foreign Server Public IP or Domain (Destination)</span>
+                <span class="badge dim" id="benchAutoDetectBadge" style="display:none;font-size:11px;">Auto Detect</span>
               </label>
-              <input class="hashem-input" id="benchTargetHost" placeholder="مثال: 195.201.55.10 یا kharej.mydomain.com" inputmode="decimal" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:13.5px;padding:9px 12px;">
-              <div class="qs-hint u-mt-4" id="benchTargetHint">آدرس سرور خارج را وارد کنید تا بهترین پروتکل بر اساس پکت‌لاس و تاخیر پیشنهاد شود.</div>
+              <input class="hashem-input" id="benchTargetHost" placeholder="e.g. 195.201.55.10 or foreign.mydomain.com" inputmode="decimal" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:13.5px;padding:9px 12px;">
+              <div class="qs-hint u-mt-4" id="benchTargetHint">Enter destination host to benchmark and discover the best protocol for lowest packet loss.</div>
             </div>
           </div>
 
@@ -2466,25 +2466,25 @@
             <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 4px;" id="benchAdvToggle">
               <span style="font-size:12.5px;color:var(--ac);font-weight:600;display:flex;align-items:center;gap:6px;">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                <span>تنظیم پورت‌های اختصاصی تست (اختیاری)</span>
+                <span>Custom Benchmark Ports (Optional)</span>
               </span>
-              <span style="font-size:11px;color:var(--mu);" id="benchAdvChevron">▼ باز کردن</span>
+              <span style="font-size:11px;color:var(--mu);" id="benchAdvChevron">▼ Expand</span>
             </div>
             <div id="benchAdvWrap" class="hidden u-grid-4 u-gap-12 u-mt-8" style="background:rgba(0,0,0,0.25);padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);">
               <div>
-                <label for="benchFrpPort" style="font-size:11.5px;color:var(--mu);display:block;margin-bottom:4px;">پورت FRP (TCP/KCP/QUIC)</label>
+                <label for="benchFrpPort" style="font-size:11.5px;color:var(--mu);display:block;margin-bottom:4px;">FRP Port (TCP/KCP/QUIC)</label>
                 <input class="hashem-input" id="benchFrpPort" type="number" value="7000" style="padding:6px 10px;font-size:12px;font-family:var(--font-mono);">
               </div>
               <div>
-                <label for="benchWssPort" style="font-size:11.5px;color:var(--mu);display:block;margin-bottom:4px;">پورت WSS TLS</label>
+                <label for="benchWssPort" style="font-size:11.5px;color:var(--mu);display:block;margin-bottom:4px;">WSS TLS Port</label>
                 <input class="hashem-input" id="benchWssPort" type="number" value="8443" style="padding:6px 10px;font-size:12px;font-family:var(--font-mono);">
               </div>
               <div>
-                <label for="benchBackhaulPort" style="font-size:11.5px;color:var(--mu);display:block;margin-bottom:4px;">پورت Backhaul</label>
+                <label for="benchBackhaulPort" style="font-size:11.5px;color:var(--mu);display:block;margin-bottom:4px;">Backhaul Port</label>
                 <input class="hashem-input" id="benchBackhaulPort" type="number" value="3080" style="padding:6px 10px;font-size:12px;font-family:var(--font-mono);">
               </div>
               <div>
-                <label for="benchBagherPort" style="font-size:11.5px;color:var(--mu);display:block;margin-bottom:4px;">پورت Bagher SSH</label>
+                <label for="benchBagherPort" style="font-size:11.5px;color:var(--mu);display:block;margin-bottom:4px;">Bagher SSH Port</label>
                 <input class="hashem-input" id="benchBagherPort" type="number" value="22" style="padding:6px 10px;font-size:12px;font-family:var(--font-mono);">
               </div>
             </div>
@@ -2495,19 +2495,19 @@
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;">
               <div>
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span class="badge ok" style="font-size:12px;padding:3px 9px;font-weight:700;">🏆 پیشنهاد برتر هاشم</span>
-                  <span class="badge info" id="benchWinnerBadge" style="font-size:12px;padding:3px 8px;">بهترین پایداری</span>
+                  <span class="badge ok" style="font-size:12px;padding:3px 9px;font-weight:700;">🏆 Recommended Protocol</span>
+                  <span class="badge info" id="benchWinnerBadge" style="font-size:12px;padding:3px 8px;">Highest Stability</span>
                 </div>
                 <h3 id="benchWinnerTitle" style="margin:8px 0 4px 0;font-size:19px;font-weight:800;color:var(--tx);display:flex;align-items:center;gap:8px;">—</h3>
-                <div id="benchWinnerDesc" style="font-size:13px;color:var(--mu);">بر اساس تست زنده، این پروتکل بالاترین نرخ عبور پکت و کمترین تاخیر را دارد.</div>
+                <div id="benchWinnerDesc" style="font-size:13px;color:var(--mu);">Based on live probe metrics, this carrier offers maximum throughput with lowest drop rate.</div>
               </div>
               <div style="display:flex;align-items:center;gap:12px;">
                 <div style="text-align:right;background:rgba(0,0,0,0.35);padding:8px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);">
-                  <div style="font-size:11px;color:var(--mu);">امتیاز کیفیت</div>
+                  <div style="font-size:11px;color:var(--mu);">Quality Score</div>
                   <div id="benchWinnerScore" style="font-size:18px;font-weight:800;color:#10b981;font-family:var(--font-mono);">— / 100</div>
                 </div>
                 <button class="hashem-btn hashem-btn-primary" id="benchApplyWinnerBtn" style="padding:11px 22px;font-size:13.5px;font-weight:700;box-shadow:0 0 20px rgba(16,185,129,0.35);background:#10b981;border-color:#10b981;color:#fff;">
-                  🚀 فعال‌سازی این پروتکل
+                  🚀 Apply This Protocol
                 </button>
               </div>
             </div>
@@ -2517,31 +2517,31 @@
           <div class="bench-stats-grid">
             <div class="bench-stat-card">
               <span class="wd-stat-label u-stat-label">
-                پروتکل برتر
+                Best Protocol
               </span>
               <div class="wd-stat-val u-stat-val-ok" id="benchStatWinner">—</div>
-              <span class="wd-stat-sub u-hint-12" id="benchStatWinnerSub">گزینه اول پیشنهادی</span>
+              <span class="wd-stat-sub u-hint-12" id="benchStatWinnerSub">Top Recommendation</span>
             </div>
             <div class="bench-stat-card">
               <span class="wd-stat-label u-stat-label">
-                مسیر فعال تانل
+                Active Tunnel Carrier
               </span>
               <div class="wd-stat-val" id="benchStatActive" style="font-size: 17px; font-weight: 700; color: #38bdf8; margin: 8px 0 4px 0;">—</div>
-              <span class="wd-stat-sub u-hint-12" id="benchStatActiveSub">کریر در حال کار</span>
+              <span class="wd-stat-sub u-hint-12" id="benchStatActiveSub">Running Carrier</span>
             </div>
             <div class="bench-stat-card">
               <span class="wd-stat-label u-stat-label">
-                کمترین تاخیر (RTT)
+                Lowest RTT Latency
               </span>
               <div class="wd-stat-val" id="benchStatMinRtt" style="font-size: 17px; font-weight: 700; color: var(--tx); margin: 8px 0 4px 0;">—</div>
-              <span class="wd-stat-sub u-hint-12" id="benchStatMinRttSub">رفت و برگشت پکت</span>
+              <span class="wd-stat-sub u-hint-12" id="benchStatMinRttSub">Round-Trip Time</span>
             </div>
             <div class="bench-stat-card">
               <span class="wd-stat-label u-stat-label">
-                نرخ پکت‌لاس
+                Packet Loss Rate
               </span>
               <div class="wd-stat-val u-stat-val-ok" id="benchStatLoss">0%</div>
-              <span class="wd-stat-sub u-hint-12" id="benchStatLossSub">پکت‌های گم‌شده</span>
+              <span class="wd-stat-sub u-hint-12" id="benchStatLossSub">Dropped Packets</span>
             </div>
           </div>
 
@@ -2551,15 +2551,15 @@
               <thead>
                 <tr>
                   <th style="width: 44px; text-align: center;">#</th>
-                  <th data-i18n="bench_tbl_rank">پروتکل و کریر</th>
-                  <th data-i18n="bench_tbl_trans">هسته انتقال</th>
-                  <th data-i18n="bench_tbl_port">پورت مقصد</th>
-                  <th data-i18n="bench_tbl_rtt">تاخیر (RTT)</th>
-                  <th data-i18n="bench_tbl_loss">پکت‌لاس</th>
-                  <th data-i18n="bench_tbl_jitter">جیتر</th>
-                  <th data-i18n="bench_tbl_score">امتیاز کیفیت</th>
-                  <th data-i18n="bench_tbl_status">وضعیت</th>
-                  <th data-i18n="bench_tbl_action">عملیات</th>
+                  <th data-i18n="bench_tbl_rank">Protocol & Carrier</th>
+                  <th data-i18n="bench_tbl_trans">Transport Core</th>
+                  <th data-i18n="bench_tbl_port">Destination Port</th>
+                  <th data-i18n="bench_tbl_rtt">RTT Latency</th>
+                  <th data-i18n="bench_tbl_loss">Packet Loss</th>
+                  <th data-i18n="bench_tbl_jitter">Jitter</th>
+                  <th data-i18n="bench_tbl_score">Quality Score</th>
+                  <th data-i18n="bench_tbl_status">Status</th>
+                  <th data-i18n="bench_tbl_action">Actions</th>
                 </tr>
               </thead>
               <tbody id="benchTableBody">
@@ -2576,34 +2576,34 @@
             <div class="tc-header">
               <span class="tc-title u-flex-center-gap8">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                <span data-i18n="bench_peer_link_title">ارتباط دو پنل (Inter-Panel Link)</span>
+                <span data-i18n="bench_peer_link_title">Inter-Panel Link</span>
               </span>
-              <span class="badge dim" id="peerLinkBadge">در حال بررسی...</span>
+              <span class="badge dim" id="peerLinkBadge">Probing...</span>
             </div>
-            <div class="qs-hint" id="peerLinkSub" data-i18n="bench_peer_link_sub">همگام‌سازی لحظه‌ای تنظیمات و تله‌متری با پنل سرور مقابل.</div>
+            <div class="qs-hint" id="peerLinkSub" data-i18n="bench_peer_link_sub">Real-time telemetry and state synchronization with peer panel.</div>
             <div class="trow u-mt-8">
-              <span class="k" data-i18n="lbl_role">نقش سرور</span>
+              <span class="k" data-i18n="lbl_role">Server Role</span>
               <span class="v" id="peerRoleVal">—</span>
             </div>
             <div class="trow">
-              <span class="k">آدرس پنل مقابل</span>
+              <span class="k">Peer Panel URL</span>
               <span class="v" id="peerUrlVal">—</span>
             </div>
             <div class="trow">
-              <span class="k">آدرس داخلی تانل</span>
+              <span class="k">Internal Tunnel IP</span>
               <span class="v" id="peerInternalVal">—</span>
             </div>
             <div class="trow">
-              <span class="k">تاخیر پنل مقابل</span>
+              <span class="k">Peer Latency</span>
               <span class="v" id="peerLatencyVal">— ms</span>
             </div>
             <div class="trow">
-              <span class="k">آخرین همگام‌سازی</span>
+              <span class="k">Last Sync</span>
               <span class="v" id="peerLastSyncVal">—</span>
             </div>
             <div class="qs-actions u-mt-12">
-              <button class="hashem-btn hashem-btn-secondary u-btn-xs" id="peerTestBtn" data-i18n="bench_peer_test_btn">تست ارتباط پنل</button>
-              <button class="hashem-btn hashem-btn-ghost u-btn-xs" id="peerConfigBtn" data-i18n="bench_peer_cfg_btn">تنظیمات همگام‌سازی</button>
+              <button class="hashem-btn hashem-btn-secondary u-btn-xs" id="peerTestBtn" data-i18n="bench_peer_test_btn">Test Link</button>
+              <button class="hashem-btn hashem-btn-ghost u-btn-xs" id="peerConfigBtn" data-i18n="bench_peer_cfg_btn">Configure Link</button>
             </div>
           </div>
 
@@ -2612,32 +2612,32 @@
             <div class="tc-header">
               <span class="tc-title u-flex-center-gap8">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                <span data-i18n="bench_failover_title">سوییچ خودکار (Failover)</span>
+                <span data-i18n="bench_failover_title">Automatic Failover</span>
               </span>
-              <span class="badge dim" id="autoPilotBadge">[ خاموش ] حالت دستی</span>
+              <span class="badge dim" id="autoPilotBadge">[ OFF ] Manual Mode</span>
             </div>
-            <div class="qs-hint" data-i18n="bench_failover_sub">پیش‌فرض: <b>خاموش</b>. با روشن کردن این قابلیت، در صورت اختلال در کریر فعال، تانل خودکار به بهترین کریر سوییچ می‌کند.</div>
+            <div class="qs-hint" data-i18n="bench_failover_sub">Default: <b>OFF</b>. When enabled, watchdog automatically promotes the healthiest backup carrier upon packet loss spike.</div>
             <div class="fg u-mt-12">
               <label class="u-flex-center-wrap10">
                 <input type="checkbox" id="autoPilotToggle" style="width:16px;height:16px;accent-color:var(--ac);">
-                <span style="font-weight:600" data-i18n="bench_failover_toggle">فعال‌سازی سوییچ هوشمند خودکار</span>
+                <span style="font-weight:600" data-i18n="bench_failover_toggle">Enable Carrier Auto-Failover</span>
               </label>
             </div>
             <div class="fg u-mt-8">
-              <label for="autoPilotThresholdInput" data-i18n="bench_failover_threshold">آستانه تحریک پکت‌لاس (%)</label>
+              <label for="autoPilotThresholdInput" data-i18n="bench_failover_threshold">Packet Loss Trigger Threshold (%)</label>
               <input class="hashem-input" id="autoPilotThresholdInput" type="number" min="5" max="90" value="20" style="max-width:140px;">
-              <span class="ent-help">در صورتی که پکت‌لاس کریر جاری از این مقدار بیشتر شود، تانل به پروتکل با کیفیت بالاتر سوییچ خواهد شد.</span>
+              <span class="ent-help">If the current carrier packet loss exceeds this threshold, the tunnel seamlessly switches to the best candidate.</span>
             </div>
             <div class="trow u-mt-4">
-              <span class="k">آخرین سوییچ خودکار</span>
+              <span class="k">Last Auto Failover</span>
               <span class="v" id="autoPilotLastVal">—</span>
             </div>
             <div class="trow">
-              <span class="k">تعداد سوییچ‌ها</span>
+              <span class="k">Switch Counter</span>
               <span class="v" id="autoPilotCountVal">0</span>
             </div>
             <div class="qs-actions u-mt-12">
-              <button class="hashem-btn hashem-btn-primary u-btn-xs" id="autoPilotSaveBtn" data-i18n="bench_failover_save">ذخیره سیاست سوییچ</button>
+              <button class="hashem-btn hashem-btn-primary u-btn-xs" id="autoPilotSaveBtn" data-i18n="bench_failover_save">Save Failover Policy</button>
             </div>
           </div>
         </div>
@@ -2645,32 +2645,32 @@
         <!-- Modal / Inline Panel for Peer Configuration -->
         <div class="tunnel-card hidden" id="peerConfigCard" style="border:1px solid var(--ac);">
           <div class="tc-header">
-            <p class="tc-title">تنظیم همگام‌سازی پنل با سرور مقابل</p>
-            <button class="hashem-btn hashem-btn-ghost u-btn-xs" id="peerConfigCloseBtn">بستن</button>
+            <p class="tc-title">Configure Inter-Panel Peer Sync</p>
+            <button class="hashem-btn hashem-btn-ghost u-btn-xs" id="peerConfigCloseBtn">Close</button>
           </div>
           <div class="u-grid-2 u-gap-16 u-mt-8">
             <div class="fg">
-              <label for="cfgPeerRole">نقش این سرور</label>
+              <label for="cfgPeerRole">This Server Role</label>
               <select class="hashem-input" id="cfgPeerRole">
-                <option value="master">مستر - ایران (فرمانده)</option>
-                <option value="worker">ورکر - خارج (پاسخگو)</option>
+                <option value="master">Master - Iran (Primary Controller)</option>
+                <option value="worker">Worker - Foreign (Replica Worker)</option>
               </select>
             </div>
             <div class="fg">
-              <label for="cfgPeerUrl">آدرس وب‌پنل سرور مقابل</label>
+              <label for="cfgPeerUrl">Peer Web Panel URL</label>
               <input class="hashem-input" id="cfgPeerUrl" placeholder="http://5.6.7.8:8080">
             </div>
             <div class="fg">
-              <label for="cfgPeerInternal">آدرس داخلی تانل</label>
+              <label for="cfgPeerInternal">Internal Tunnel IP</label>
               <input class="hashem-input" id="cfgPeerInternal" placeholder="10.10.10.1">
             </div>
             <div class="fg">
-              <label for="cfgPeerSecret">کلید امنیتی مشترک</label>
+              <label for="cfgPeerSecret">Shared Secret Key</label>
               <input class="hashem-input" id="cfgPeerSecret" type="password" placeholder="••••••••••••••••••••••••">
             </div>
           </div>
           <div class="qs-actions u-mt-12">
-            <button class="hashem-btn hashem-btn-primary" id="cfgPeerSaveBtn">ذخیره تنظیمات همگام‌سازی</button>
+            <button class="hashem-btn hashem-btn-primary" id="cfgPeerSaveBtn">Save Link Configuration</button>
           </div>
         </div>
       </section>
