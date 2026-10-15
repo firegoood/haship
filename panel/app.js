@@ -256,7 +256,7 @@ function goTab(name) {
     loadClusterStatus();
   }
   if (name === 'perf') { loadPerf(); loadCarrier(); }
-  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); }
+  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); }
   if (name === 'watchdog') loadWatchdog();
   if (name === 'doctor') loadDoctor();
   if (name === 'benchmark') loadBenchmark();
@@ -378,6 +378,14 @@ const I18N = {
     upd_dev_warn: "Dev channel: test builds, may break. Not for production tunnels.",
     upd_dev_badge: "DEV",
     nav_settings: "Settings",
+    tls_custom_title: "Use your own certificate",
+    tls_ip_title: "HTTPS on this server\'s IP (self-signed)",
+    tls_ip_hint: "No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.",
+    tls_custom_hint: "Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.",
+    acc_title: "Panel access (port / login / address)",
+    acc_hint: "Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.",
+    acc_user: "Login username", acc_port: "HTTP port (1–65535)", acc_base: "Address path (after IP:port/…)",
+    acc_pass: "Current password (confirm)", acc_save: "Save & restart panel",
     nav_terminal: "Terminal",
     sec_overview: "Overview",
     sec_tunnel: "Tunnel",
@@ -3110,7 +3118,7 @@ function doLogin() {
     try {
       await api('/api/login', {username: $('u').value, password: $('p').value, code: $('totpCode').value.trim()});
       $('p').value = ''; $('totpCode').value = ''; $('codeField').classList.add('hidden'); $('loginErr').textContent = '';
-      showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh();
+      showApp(); refresh(); loadSetupDefaults(); loadVersion(); accessRefresh(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh();
     } catch(e) {
       if (e.code === 'E-AUTH-09') { $('codeField').classList.remove('hidden'); $('totpCode').focus(); }
       $('loginErr').textContent = e.message;
@@ -3512,6 +3520,7 @@ async function loadVersion() {
     const btn = $('updateBtn');
     if (v.update_available) { btn.disabled = false; btn.textContent = 'Update to ' + v.latest; }
     else { btn.disabled = true; btn.textContent = 'Check for updates'; }
+    loadRollback();
     $('updateMsg').textContent = v.update_available ? 'A newer release (' + v.latest + ') is ready. Press Update to install it here.' : 'You are on the latest release.';
   } catch(e) {
     const rows = $('verRowsUpd'); if (rows) rows.innerHTML = '<div class="warnbox">Version check failed: ' + esc(e.message) + '</div>';
@@ -3520,6 +3529,31 @@ async function loadVersion() {
     setTimeout(async () => { try { await api('/api/status'); loadVersion(); } catch(_){ /* panel still restarting: ignore */ } }, 5000);
   }
 }
+async function loadRollback() {
+  const sel = $('rbTag'), b = $('rbBtn'); if (!sel) return;
+  try {
+    const r = await api('/api/releases');
+    const cur = $('verCurrent') ? $('verCurrent').textContent : '';
+    sel.innerHTML = (r.releases || []).map(x => '<option value="' + esc(x.tag) + '">' + esc(x.tag) + (x.tag === cur ? ' (installed)' : '') + '</option>').join('') || '<option value="">No releases</option>';
+    b.disabled = !(r.releases || []).length;
+  } catch(e) { sel.innerHTML = '<option value="">' + esc(e.message) + '</option>'; b.disabled = true; }
+}
+$('rbBtn').onclick = async () => {
+  const tag = $('rbTag').value; if (!tag) return;
+  if (!await entConfirm('Install ' + tag + '?', 'Install ' + tag + ' now (can be older than the running version). The panel will restart; tunnels keep running. A failed install rolls back automatically.', 'Install')) return;
+  $('rbBtn').disabled = true;
+  try {
+    const r = await api('/api/update', {tag});
+    $('updateMsg').textContent = (r.detail || 'installed') + ' — refreshing…';
+    let n = 0;
+    const iv = setInterval(async () => {
+      n++;
+      try { const h = await (await fetch(at('/api/health'), {cache: 'no-store'})).json(); if (h && h.status === 'ok') { clearInterval(iv); location.reload(); } }
+      catch(_){ /* restarting */ }
+      if (n > 30) clearInterval(iv);
+    }, 2000);
+  } catch(e) { toastErr('install failed', e.message); $('rbBtn').disabled = false; }
+};
 $('updChannel').onchange = async () => {
   const sel = $('updChannel');
   try { await api('/api/update/channel', {channel: sel.value}); toastOk(tr('upd_channel', 'Update channel'), sel.value); }
@@ -3663,6 +3697,40 @@ $('alTest').onclick = async () => {
   try { await api('/api/alerts', {action: 'test'}); toastOk('test alert sent'); }
   catch(e) { toastErr('test alert failed', e.message); }
 };
+
+// ---- panel access settings (port / username / base path) ----
+async function accessRefresh() {
+  try {
+    const a = await api('/api/access');
+    if ($('accUser') && !$('accUser').value) $('accUser').value = a.username || '';
+    if ($('accPort') && !$('accPort').value) $('accPort').value = a.http_port || '';
+    if ($('accBase') && !$('accBase').value) $('accBase').value = a.base_path || '';
+    if ($('accCurrent')) $('accCurrent').innerHTML = 'Now: <b>' + esc(a.http_url || '') + '</b> · user <b>' + esc(a.username || '') + '</b>';
+  } catch(e) { /* leave placeholder text */ }
+}
+const _accSave = $('accSave');
+if (_accSave) _accSave.onclick = async () => {
+  const cur = ($('accPass') ? $('accPass').value : '').trim();
+  if (!cur) { toastWarn('current password required', 'Please enter your current password.'); return; }
+  const body = { current_password: cur };
+  const u = ($('accUser') ? $('accUser').value : '').trim();
+  const pt = ($('accPort') ? $('accPort').value : '').trim();
+  const bp = ($('accBase') ? $('accBase').value : '').trim();
+  if (u) body.username = u;
+  if (pt) body.port = parseInt(pt, 10);
+  if (bp) body.base_path = bp;
+  if (!body.username && !body.port && !body.base_path) { toastWarn('nothing to change', 'Edit the username, port, or path first.'); return; }
+  if (!await entConfirm('Save & restart panel?', 'Only the panel web service restarts — tunnels keep running. You will need to reopen the panel at the new address.', 'Save & restart')) return;
+  const b = $('accSave'); b.disabled = true; b.textContent = 'Saving…';
+  try {
+    const r = await api('/api/access', body);
+    if ($('accPass')) $('accPass').value = '';
+    toastOk('access saved — panel restarting', 'Reopen: ' + (r.http_url || ''));
+    setTimeout(() => { window.location.href = r.http_url || '/'; }, 4000);
+  } catch(e) { toastErr('save failed', e.message); }
+  b.disabled = false; b.textContent = tr('acc_save', 'Save & restart panel');
+};
+
 async function idleRefresh() { try { const r = await api('/api/session-settings'); $('idleMin').value = r.idle_minutes; } catch(e) {} }
 $('idleSave').onclick = async () => {
   try { await api('/api/session-settings', {idle_minutes: parseInt($('idleMin').value || '0', 10)}); toastOk('idle timeout saved'); }
@@ -4743,6 +4811,76 @@ $('tlsProxyConfBtn').onclick = async () => {
   } catch(e) { toastErr('Proxy Config Failed', e.message); }
 };
 
+
+async function readFileAsText(f) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(f); }); }
+const _tlsCustomBtn = $('tlsCustomBtn');
+if (_tlsCustomBtn) _tlsCustomBtn.onclick = async () => {
+  const certTxt = ($('tlsCustomCert') ? $('tlsCustomCert').value : '').trim();
+  const keyTxt = ($('tlsCustomKey') ? $('tlsCustomKey').value : '').trim();
+  const certF = ($('tlsCustomCertFile') && $('tlsCustomCertFile').files[0]) || null;
+  const keyF = ($('tlsCustomKeyFile') && $('tlsCustomKeyFile').files[0]) || null;
+  const certP = ($('tlsCustomCertPath') ? $('tlsCustomCertPath').value : '').trim();
+  const keyP = ($('tlsCustomKeyPath') ? $('tlsCustomKeyPath').value : '').trim();
+  const modes = [certTxt && keyTxt ? 1 : 0, certF && keyF ? 1 : 0, certP && keyP ? 1 : 0].reduce((a, b) => a + b, 0);
+  if (modes !== 1) { toastWarn('one input method', 'Paste both PEM texts, or pick both files, or fill both server paths — exactly one way.'); return; }
+  if (!await entConfirm('Install custom certificate?', 'The pair is validated before install. HTTPS reloads in-process; tunnels keep running.', 'Install')) return;
+  const b = $('tlsCustomBtn'); b.disabled = true; b.textContent = 'Installing…';
+  try {
+    let r;
+    if (certF && keyF) {
+      const fd = new FormData();
+      fd.append('cert', certF, certF.name || 'server.crt');
+      fd.append('key', keyF, keyF.name || 'server.key');
+      const resp = await fetch(at('/api/tls/custom'), {
+        method: 'POST', body: fd,
+        headers: {'X-CSRF-Token': getCSRFToken() || ''},
+      });
+      if (resp.status === 401) { showLogin(); throw new Error('session expired'); }
+      r = await resp.json();
+      if (!resp.ok) {
+        const e = new Error(((r && r.error_code ? '[' + r.error_code + '] ' : '') + (r && (r.error || resp.statusText))) + ((r && r.hint) ? '\n\u21AA ' + r.hint : ''));
+        e.code = r && r.error_code; throw e;
+      }
+      if (r && r.csrf_token) setCSRFToken(r.csrf_token);
+    } else if (certP && keyP) {
+      r = await api('/api/tls/custom', { cert_path: certP, key_path: keyP });
+    } else {
+      r = await api('/api/tls/custom', { cert: certTxt, key: keyTxt });
+    }
+    toastOk('custom certificate installed', 'HTTPS: ' + (r.https_url || '') + (r.expiry ? ' · expires ' + r.expiry : ''));
+    tlsRefresh();
+  } catch(e) { toastErr('install failed', e.message); }
+  b.disabled = false; b.textContent = 'Install custom certificate';
+};
+
+
+const _tlsIPBtn = $('tlsIPBtn');
+if (_tlsIPBtn) _tlsIPBtn.onclick = async () => {
+  const ip = ($('tlsIP') ? $('tlsIP').value : '').trim();
+  if (!ip) { toastWarn('IP required', 'Enter this server\'s IP address first.'); return; }
+  if (!await entConfirm('Issue self-signed IP certificate?', 'HTTPS will serve on the IP with a certificate from the panel\'s own authority. Tunnels keep running.', 'Issue')) return;
+  const b = $('tlsIPBtn'); b.disabled = true; b.textContent = 'Issuing…';
+  try {
+    const r = await api('/api/tls/ip', { ip });
+    toastOk('IP certificate installed', 'HTTPS: ' + (r.https_url || '') + (r.expiry ? ' · expires ' + r.expiry : ''));
+    tlsRefresh();
+  } catch(e) { toastErr('issue failed', e.message); }
+  b.disabled = false; b.textContent = 'Issue IP certificate';
+};
+const _tlsIPRegenBtn = $('tlsIPRegenBtn');
+if (_tlsIPRegenBtn) _tlsIPRegenBtn.onclick = async () => {
+  if (!await entConfirm('Regenerate server certificate?', 'Only the server certificate rotates — the CA stays the same, so browsers keep trusting it.', 'Regenerate')) return;
+  const b = $('tlsIPRegenBtn'); b.disabled = true; b.textContent = 'Regenerating…';
+  try {
+    const r = await api('/api/tls/ip', { regenerate: true });
+    toastOk('certificate regenerated', 'HTTPS: ' + (r.https_url || ''));
+    tlsRefresh();
+  } catch(e) { toastErr('regenerate failed', e.message); }
+  b.disabled = false; b.textContent = 'Regenerate';
+};
+const _tlsCABtn = $('tlsCABtn');
+if (_tlsCABtn) _tlsCABtn.onclick = () => { window.open(at('/api/tls/ip/ca'), '_blank'); };
+
 $('tlsProxyCloseBtn').onclick = () => {
   const box = $('tlsProxyBox');
   if (box) box.style.display = 'none';
@@ -4981,6 +5119,54 @@ async function runTunnelHealthClick() {
 (function initTunnelHealthEvents() {
   const b = $('thRunBtn');
   if (b) b.addEventListener('click', runTunnelHealthClick);
+})();
+
+
+// ---- Traffic usage: per-peer bytes kept on disk for 7 days ----
+let usageTimer = null;
+function usageBars(days) {
+  if (!days || !days.length) return '';
+  const max = Math.max(1, ...days.map(d => d.rx + d.tx));
+  return '<div class="usage-bars" style="display:flex;gap:6px;align-items:flex-end;height:64px;margin:.5rem 0">' +
+    days.map(d => {
+      const h = Math.max(2, Math.round(((d.rx + d.tx) / max) * 60));
+      return '<div title="' + esc(d.day + ' — ↓ ' + fmtBytes(d.rx) + ' · ↑ ' + fmtBytes(d.tx)) + '" style="flex:1;min-width:10px;text-align:center">' +
+        '<div style="height:' + h + 'px;background:var(--accent,#4f8cff);border-radius:3px 3px 0 0"></div>' +
+        '<div class="qs-hint" style="font-size:.65rem">' + esc(d.day.slice(5)) + '</div></div>';
+    }).join('') + '</div>';
+}
+function renderUsage(d) {
+  const box = $('usageBody');
+  if (!box) return;
+  const links = (d && d.links) || [];
+  if (!links.length || links.every(l => !l.rx && !l.tx && !(l.days || []).length)) {
+    box.innerHTML = '<p class="qs-hint">' + esc(tr('usage_empty', 'No traffic recorded yet. It appears here after the first minute of traffic.')) + '</p>';
+    return;
+  }
+  const tot = links[0];
+  const rows = links.slice(1).map(l =>
+    '<tr><td>' + esc(l.name || l.key) + '</td><td class="mono">↓ ' + fmtBytes(l.rx) + '</td><td class="mono">↑ ' + fmtBytes(l.tx) +
+    '</td><td class="mono">' + fmtBytes(l.rx + l.tx) + '</td></tr>').join('');
+  box.innerHTML =
+    '<div class="det-row"><span class="det-k">' + esc(tr('usage_total', 'Hub total')) + '</span><span class="det-v mono">↓ ' + fmtBytes(tot.rx) +
+    ' · ↑ ' + fmtBytes(tot.tx) + ' · ' + fmtBytes(tot.rx + tot.tx) + '</span></div>' +
+    usageBars(tot.days) +
+    '<div class="table-wrap"><table class="hashem-table"><thead><tr><th>' + esc(tr('usage_server', 'Server')) + '</th><th>↓ ' + esc(tr('usage_in', 'Received')) +
+    '</th><th>↑ ' + esc(tr('usage_out', 'Sent')) + '</th><th>' + esc(tr('usage_sum', 'Total')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+async function loadUsage() {
+  try {
+    const r = ($('usageRange') || {}).value || '7d';
+    renderUsage(await api('/api/traffic/usage?range=' + encodeURIComponent(r)));
+  } catch (e) { reportErr('usage', e); }
+}
+(function initUsage() {
+  const sel = $('usageRange');
+  if (sel) sel.addEventListener('change', loadUsage);
+  if (!usageTimer) usageTimer = setInterval(() => {
+    const t = $('tab-tunnel');
+    if (t && !t.hidden && !document.hidden) loadUsage();
+  }, 60000);
 })();
 
 async function runDoctor() {
@@ -5372,7 +5558,7 @@ function rscBtn(id, key, cls, fn) {
 }
 function rscRender() {
   const s = _rsc || {}, card = $('rescueCard'), ban = $('rscBanner');
-  const active = !!s.role, show = active || s.suspected || _rscMode;
+  const active = !!s.role, show = true; // always visible: Iran hub must reach Join with code
   card.hidden = !show;
   // Banner: only on the tunnel-less detection state, and only outside the card's own tab flow.
   ban.hidden = !(s.suspected && !active);

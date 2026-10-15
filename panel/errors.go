@@ -152,6 +152,13 @@ var errCatalog = map[string]errInfo{
 	"E-TLS-09": {400, "domain DNS resolution failed", "The domain does not resolve to this server's public IP. Please verify DNS A/AAAA records before setting domain."},
 	"E-TLS-10": {409, "port conflict detected", "The requested port or ACME port 80 conflicts with an active tunnel or service. Resolve port conflict or use a reverse proxy."},
 	"E-TLS-11": {200, "domain removed successfully", "TLS configuration removed. Panel reverted to HTTP IP access without interrupting tunnels."},
+	"E-TLS-12": {400, "bad custom certificate", "Paste a matching cert+key PEM pair, upload both files, or give readable server paths."},
+	"E-TLS-13": {400, "bad IP certificate request", "Send {\"ip\":\"1.2.3.4\"} with a valid IPv4/IPv6 address of this server."},
+	// panel access settings
+	"E-ACCESS-00": {0, "access settings changed", "Informational: panel port/username/path saved; gre-panel restarts, tunnels unaffected."},
+	"E-ACCESS-01": {400, "bad access-settings request", "Send current_password plus at least one of port, username, base_path."},
+	"E-ACCESS-02": {401, "current password is incorrect", "Verify your current password before changing access settings."},
+	"E-ACCESS-03": {409, "port conflict detected", "The requested port is reserved or used by a tunnel/proxy. Pick a free port."},
 	// watchdog & backup
 	"E-WD-01": {400, "bad watchdog request", "Check request parameters and try again."},
 	"E-WD-02": {502, "telegram alert failed", "Verify bot token, chat ID, and selected route."},

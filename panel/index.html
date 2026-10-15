@@ -59,7 +59,7 @@
   .sidebar-nav { padding:12px; display:flex; flex-direction:column; gap:4px; flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-behavior:smooth; }
   .nav-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
     border:0; background:transparent; color:var(--mu); font-size:var(--fs-body); font-weight:600;
-    cursor:pointer; text-align:left; width:100%; transition:background .15s,color .15s,transform .15s var(--spring); }
+    cursor:pointer; text-align:start; width:100%; transition:background .15s,color .15s,transform .15s var(--spring); }
   .nav-item svg { width:17px; height:17px; flex:none; }
   .nav-item:hover { background:var(--sunk); color:var(--tx2); transform:translateX(2px); }
   .nav-item.on { background:var(--ac-soft); color:var(--tx);
@@ -77,7 +77,7 @@
   }
   .topbar h1 { font-size:var(--fs-h2); margin:0; }
   .topbar .sub { color:var(--mu); font-size:var(--fs-small); }
-  .topbar .acts { margin-left:auto; display:flex; gap:8px; }
+  .topbar .acts { margin-inline-start:auto; display:flex; gap:8px; }
   .page { max-width:1120px; margin:0 auto; padding:20px; width:100%; display:grid; gap:16px; padding-bottom:72px; }
   .tunnel-card, .qs { background:var(--s1); border:1px solid var(--ln); border-radius:var(--r-lg);
     padding:18px; display:flex; flex-direction:column; gap:12px;
@@ -104,8 +104,8 @@
   .trow { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0;
     border-bottom:1px solid var(--ln); font-size:var(--fs-body); }
   .trow:last-child { border:0; }
-  .trow .k { color:var(--mu); } .trow .v { color:var(--tx2); text-align:right; font-variant-numeric:tabular-nums; }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .trow .k { color:var(--mu); } .trow .v { color:var(--tx2); text-align:end; font-variant-numeric:tabular-nums; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-inline-end:6px; }
   .up { background:var(--ok); color:var(--ok); } .down { background:var(--er); color:var(--er); }
   .qs-head { display:flex; gap:12px; align-items:flex-start; }
   .qs-bolt { width:34px; height:34px; border-radius:10px; display:grid; place-items:center; flex:none;
@@ -246,7 +246,7 @@
   .chart-card.is-down { border-color:var(--er-b45);
     box-shadow:0 0 24px color-mix(in srgb, var(--er) 12%, transparent), var(--lift-sm); }
   .chart-legend { display:flex; gap:16px; font-size:var(--fs-small); color:var(--mu); flex-wrap:wrap; margin-top:10px; align-items:center; }
-  .chart-legend .sw { display:inline-block; width:12px; height:4px; border-radius:2px; margin-right:6px; vertical-align:middle; transition:background .2s ease; }
+  .chart-legend .sw { display:inline-block; width:12px; height:4px; border-radius:2px; margin-inline-end:6px; vertical-align:middle; transition:background .2s ease; }
   .chart-legend .sw-dl, .chart-legend span:first-child .sw { background:#38bdf8; box-shadow:0 0 6px rgba(56,189,248,.45); }
   .chart-legend .sw-ul, .chart-legend span:last-child .sw { background:#a78bfa; box-shadow:0 0 6px rgba(167,139,250,.35); }
   /* Glass tooltip */
@@ -321,7 +321,7 @@
   body[data-t="light"] .tunnel-card, body[data-t="light"] .qs {
     box-shadow:var(--lift-sm), inset 0 1px 0 rgba(255,255,255,.7); }
   .nav-item { position:relative; }
-  .nav-item.on::before { content:""; position:absolute; left:-12px; top:8px; bottom:8px; width:3px;
+  .nav-item.on::before { content:""; position:absolute; inset-inline-start:-12px; top:8px; bottom:8px; width:3px;
     border-radius:3px; background:var(--ac); box-shadow:0 0 8px color-mix(in srgb, var(--ac) 60%, transparent); }
   .status-indicator.active .dot { animation:pulse 2s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.45; } }
@@ -429,13 +429,15 @@
   .drawer-ov { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.55);
     opacity:0; pointer-events:none; transition:opacity .22s ease; }
   .drawer-ov.open { opacity:1; pointer-events:auto; }
-  .drawer { position:fixed; top:0; bottom:0; left:0; z-index:61; width:min(84vw,300px);
-    background:var(--s1); border-right:1px solid var(--ln2); box-shadow:var(--lift);
+  .drawer { position:fixed; top:0; bottom:0; inset-inline-start:0; z-index:61; width:min(84vw,300px);
+    background:var(--s1); border-inline-end:1px solid var(--ln2); box-shadow:var(--lift);
     display:flex; flex-direction:column; transform:translateX(-102%); transition:transform .25s var(--spring); }
   .drawer.open { transform:none; }
+  html[dir="rtl"] .drawer { transform:translateX(102%); }
+  html[dir="rtl"] .drawer.open { transform:none; }
   .drawer-head { display:flex; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--ln); }
   .drawer-head .brand-name { font-weight:700; letter-spacing:.05em; color:var(--tx); }
-  .drawer-x { margin-left:auto; border:0; background:transparent; color:var(--mu); font-size:22px; cursor:pointer; padding:4px 8px; }
+  .drawer-x { margin-inline-start:auto; border:0; background:transparent; color:var(--mu); font-size:22px; cursor:pointer; padding:4px 8px; }
   .drawer-nav { padding:12px; display:flex; flex-direction:column; gap:4px; flex:1; overflow-y:auto; }
   .drawer-nav .nav-sec { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
     color:var(--mu); padding:10px 12px 4px; }
@@ -443,9 +445,9 @@
   /* per-tunnel health chips shown under the Status card */
   .tun-chip { display:flex; align-items:center; gap:8px; padding:9px 12px; border-radius:10px;
     border:1px solid var(--ln); background:var(--sunk); font-size:13px; font-weight:600;
-    cursor:pointer; text-align:left; width:100%; color:var(--tx2); }
+    cursor:pointer; text-align:start; width:100%; color:var(--tx2); }
   .tun-chip:hover { border-color:var(--ac); color:var(--tx); }
-  .tun-chip .qs-hint { margin-left:auto; }
+  .tun-chip .qs-hint { margin-inline-start:auto; }
   #tunChips { display:grid; gap:6px; margin-top:10px; }
   .drawer-foot { padding:12px; border-top:1px solid var(--ln); display:flex; gap:8px; }
   .drawer-foot .hashem-btn { flex:1; min-width:0; }
@@ -537,7 +539,6 @@
   .doc-hero-acts { display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
   .doc-hero-acts .hashem-btn { display:inline-flex !important; align-items:center !important; justify-content:center !important; gap:8px !important; white-space:nowrap; padding:8px 16px !important; }
   html[dir="rtl"] .doc-hero-acts { align-items:flex-start; }
-  html[dir="rtl"] .doc-hero-acts .hashem-btn { flex-direction:row-reverse; }
   .doc-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px; margin-top:14px; }
   .doc-card { background:var(--s2); border:1px solid var(--ln); border-radius:var(--r-md); padding:16px; display:flex; flex-direction:column; gap:12px; }
   .doc-card-head { display:flex; justify-content:space-between; align-items:center; }
@@ -687,20 +688,12 @@
     border-right: none;
     border-left: 1px solid var(--ln);
   }
-  body.is-rtl .sidebar-nav .nav-item {
-    justify-content: flex-start !important;
-    padding-left: 14px !important;
-    padding-right: 20px !important;
-  }
   body.is-rtl .sidebar-nav .nav-item:hover {
     transform: translateX(-4px);
   }
   body.is-rtl .rs-header {
     text-align: right;
     letter-spacing: 0;
-  }
-  body.is-rtl .trow {
-    flex-direction: row-reverse;
   }
   body.is-rtl .hashem-input,
   body.is-rtl select.hashem-input {
@@ -720,8 +713,8 @@
     font-size: 16px !important;
     font-weight: 600 !important;
     justify-content: flex-start !important;
-    padding-left: 20px !important;
-    text-align: left !important;
+    padding-inline-start: 20px !important;
+    text-align: start !important;
     gap: 12px;
   }
   .sidebar-nav .nav-item span {
@@ -733,7 +726,7 @@
     font-size: 16px !important;
     font-weight: 600 !important;
     justify-content: flex-start !important;
-    padding-left: 20px !important;
+    padding-inline-start: 20px !important;
     gap: 12px;
   }
   .nav-item svg { width: 22px; height: 22px; }
@@ -774,6 +767,8 @@
   }
 
   /* RTL / Persian (Farsi) Layout Overrides */
+  /* Letter-spacing breaks Arabic-script joining; uppercase is meaningless there. */
+  html[dir="rtl"] *, html[dir="rtl"] *::before, html[dir="rtl"] *::after { letter-spacing:0 !important; text-transform:none !important; }
   html[dir="rtl"] {
     direction: rtl;
     text-align: right;
@@ -785,62 +780,8 @@
     border-right: none;
     border-left: 1px solid var(--ln);
   }
-  html[dir="rtl"] .topbar .acts {
-    margin-left: 0;
-    margin-right: auto;
-  }
-  html[dir="rtl"] .topbar .menu-btn {
-    margin-right: 0;
-    margin-left: 10px;
-  }
-  html[dir="rtl"] .sidebar-nav .nav-item {
-    text-align: right;
-    flex-direction: row;
-  }
-  html[dir="rtl"] .sidebar-nav .nav-item svg {
-    margin-right: 0;
-    margin-left: 10px;
-  }
-  html[dir="rtl"] .u-ml-auto {
-    margin-left: 0 !important;
-    margin-right: auto !important;
-  }
-  html[dir="rtl"] .drawer-head .drawer-x {
-    margin-left: 0;
-    margin-right: auto;
-  }
-  html[dir="rtl"] .modal-head {
-    flex-direction: row-reverse;
-  }
-  html[dir="rtl"] .modal-close {
-    margin-left: 0;
-    margin-right: auto;
-  }
-  html[dir="rtl"] .kpi-top, html[dir="rtl"] .chart-head {
-    flex-direction: row-reverse;
-  }
-  html[dir="rtl"] .chart-actions {
-    margin-left: 0;
-    margin-right: auto;
-  }
   html[dir="rtl"] .chart-legend {
     justify-content: flex-start;
-  }
-  html[dir="rtl"] .qs-step {
-    flex-direction: row;
-  }
-  html[dir="rtl"] .qs-num {
-    margin-right: 0;
-    margin-left: 12px;
-  }
-  html[dir="rtl"] .wd-hero-grid, html[dir="rtl"] .u-flex-center-wrap10, html[dir="rtl"] .u-flex-center-gap8, html[dir="rtl"] .u-flex-center-gap10 {
-    flex-direction: row;
-  }
-  html[dir="rtl"] .tc-header {
-    flex-direction: row;
-  }
-  html[dir="rtl"] .qs-actions, html[dir="rtl"] .modal-foot {
-    flex-direction: row;
   }
   html[dir="rtl"] .badge {
     direction: ltr;
@@ -1304,6 +1245,14 @@
         </div>
 
         <!-- Tunnel Health: per-tunnel PASS / FAIL / UNREACHABLE (service + session + data) -->
+        <div class="tunnel-card" id="usageCard">
+          <div class="tc-header"><p class="tc-title" data-i18n="usage_title">Traffic usage (kept 7 days)</p>
+            <select class="hashem-input" id="usageRange" aria-label="Range" style="max-width:9rem">
+              <option value="1h">1 h</option><option value="6h">6 h</option><option value="24h">24 h</option><option value="7d" selected>7 days</option>
+            </select></div>
+          <p class="qs-hint" data-i18n="usage_hint">Saved on disk every minute, so it survives restarts, updates and reboots. Per foreign server, plus the hub total.</p>
+          <div id="usageBody"><p class="qs-hint">…</p></div>
+        </div>
         <div class="tunnel-card" id="tunnelHealthCard">
           <div class="tc-header">
             <p class="tc-title">Tunnel Health</p>
@@ -2688,6 +2637,10 @@
             <button class="hashem-btn hashem-btn-primary" id="updateBtn">Check for updates</button>
           </div>
           <div class="qs-hint" id="updateMsg">Press Check to see if a newer release is available.</div>
+          <div class="fg u-mt-8"><label for="rbTag">Install a specific version (downgrade)</label>
+            <select class="hashem-input" id="rbTag"><option value="">Loading…</option></select>
+          </div>
+          <div class="qs-actions u-mt-4"><button class="hashem-btn" id="rbBtn" disabled>Install selected version</button></div>
         </div>
       </section>
       <section id="tab-settings" role="tabpanel" hidden>
@@ -2764,6 +2717,16 @@
             <button class="hashem-btn hashem-btn-secondary" id="alTest">Send test</button>
           </div>
         </div>
+        <div class="tunnel-card" id="accessCard">
+          <div class="tc-header"><p class="tc-title" data-i18n="acc_title">Panel access (port / login / address)</p></div>
+          <div class="ent-help" data-i18n="acc_hint">Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.</div>
+          <div class="fg"><label for="accUser" data-i18n="acc_user">Login username</label><input class="hashem-input" id="accUser" autocomplete="off" spellcheck="false" placeholder="admin"></div>
+          <div class="fg"><label for="accPort" data-i18n="acc_port">HTTP port (1–65535)</label><input class="hashem-input" id="accPort" type="number" min="1" max="65535" placeholder="7777"></div>
+          <div class="fg"><label for="accBase" data-i18n="acc_base">Address path (after IP:port/…)</label><input class="hashem-input" id="accBase" autocomplete="off" spellcheck="false" placeholder="a1b2c3d4e5f6"></div>
+          <div class="ent-help" id="accCurrent">—</div>
+          <div class="fg"><label for="accPass" data-i18n="acc_pass">Current password (confirm)</label><input class="hashem-input" id="accPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>
+          <div><button class="hashem-btn hashem-btn-primary" id="accSave" data-i18n="acc_save">Save & restart panel</button></div>
+        </div>
         <div class="tunnel-card" id="idleCard">
           <div class="tc-header"><p class="tc-title">Session idle timeout</p></div>
           <div class="ent-help">Sign out automatically after this many minutes without clicks or key presses. Background refresh does not count as activity. 0 = off.</div>
@@ -2829,6 +2792,28 @@
             <button class="hashem-btn hashem-btn-secondary" id="tlsProxyConfBtn">Reverse Proxy Config</button>
           </div>
           <div class="qs-hint" id="tlsMsg">HTTPS serves on dedicated port 7443 alongside HTTP on port 7777.</div>
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
+            <b data-i18n="tls_ip_title">HTTPS on this server's IP (self-signed)</b>
+            <div class="qs-hint" data-i18n="tls_ip_hint">No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.</div>
+            <div class="fg"><label for="tlsIP">Server IP</label><input class="hashem-input" id="tlsIP" placeholder="1.2.3.4" autocomplete="off" spellcheck="false"></div>
+            <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="hashem-btn hashem-btn-primary" id="tlsIPBtn">Issue IP certificate</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsIPRegenBtn">Regenerate</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (install once)</button>
+            </div>
+          </div>
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
+            <b data-i18n="tls_custom_title">Use your own certificate</b>
+            <div class="qs-hint" data-i18n="tls_custom_hint">Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.</div>
+            <div class="fg"><label for="tlsCustomCert">Certificate (PEM)</label><textarea class="hashem-input" id="tlsCustomCert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" autocomplete="off" spellcheck="false"></textarea></div>
+            <div class="fg"><label for="tlsCustomKey">Private key (PEM)</label><textarea class="hashem-input" id="tlsCustomKey" rows="4" placeholder="-----BEGIN PRIVATE KEY-----" autocomplete="off" spellcheck="false"></textarea></div>
+            <div class="fg"><label for="tlsCustomCertFile">…or upload files</label><input type="file" id="tlsCustomCertFile" accept=".crt,.pem,.cert"> <input type="file" id="tlsCustomKeyFile" accept=".key,.pem"></div>
+            <div class="fg"><label for="tlsCustomCertPath">…or server paths</label><input class="hashem-input" id="tlsCustomCertPath" placeholder="/etc/ssl/my.crt" autocomplete="off" spellcheck="false"></div>
+            <div class="fg"><label for="tlsCustomKeyPath">Key path</label><input class="hashem-input" id="tlsCustomKeyPath" placeholder="/etc/ssl/my.key" autocomplete="off" spellcheck="false"></div>
+            <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <button class="hashem-btn hashem-btn-primary" id="tlsCustomBtn">Install custom certificate</button>
+            </div>
+          </div>
           <div id="tlsProxyBox" style="display:none; margin-top:12px; padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <b>Reverse Proxy Configuration (Nginx & Caddy)</b>

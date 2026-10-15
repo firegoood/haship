@@ -35,21 +35,38 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = arch
-	latest, _ := latestReleaseTag()
-	if latest == "" {
-		latest = "latest"
+	// Optional {"tag":"vX.Y.Z"}: install that exact release, older included
+	// (downgrade). No body = newest of the channel, as before.
+	var req struct {
+		Tag string `json:"tag"`
 	}
-	if latest != "latest" && !validTag(latest) {
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req)
+	}
+	explicit := req.Tag != ""
+	if explicit && !validTag(req.Tag) {
 		writeAPIError(w, r, "E-UPDATE-01", "unexpected release tag")
 		return
+	}
+	latest := req.Tag
+	if !explicit {
+		latest, _ = latestReleaseTag()
+		if latest == "" {
+			latest = "latest"
+		}
+		if latest != "latest" && !validTag(latest) {
+			writeAPIError(w, r, "E-UPDATE-01", "unexpected release tag")
+			return
+		}
 	}
 	if latest != "latest" && latest == panelVersion {
 		writeJSON(w, map[string]string{"status": "ok", "detail": "already latest (" + displayVersion(panelVersion) + ")"})
 		return
 	}
 	// never install something that is not newer than what is running
-	// (e.g. a stable host must not be "updated" to an older tag)
-	if latest != "latest" && !updateAvailable(panelVersion, latest, updateChannel()) {
+	// (e.g. a stable host must not be "updated" to an older tag) —
+	// unless the operator picked the tag, which is how a downgrade works
+	if !explicit && latest != "latest" && !updateAvailable(panelVersion, latest, updateChannel()) {
 		writeJSON(w, map[string]string{"status": "ok", "detail": "already latest (" + displayVersion(panelVersion) + ")"})
 		return
 	}

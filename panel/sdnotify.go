@@ -17,7 +17,16 @@ import (
 
 const sdWatchdogInterval = 10 * time.Second
 
-var sdNotifySocket = func() string { return os.Getenv("NOTIFY_SOCKET") }
+// notifySockAtStart is NOTIFY_SOCKET captured once at process start and then
+// removed from the environment (see init): every exec.Command in the panel
+// copies os.Environ(), and a child that inherits the socket and talks to
+// systemd makes it log "Got notification message from PID n, but reception
+// only permitted for main PID" for each command (thousands of lines an hour).
+var notifySockAtStart = os.Getenv("NOTIFY_SOCKET")
+
+func init() { _ = os.Unsetenv("NOTIFY_SOCKET") }
+
+var sdNotifySocket = func() string { return notifySockAtStart }
 
 // sdNotify sends one datagram to the systemd notify socket.
 func sdNotify(state string) error {

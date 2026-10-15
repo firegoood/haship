@@ -178,6 +178,8 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-TLS-09` | 400 | domain DNS resolution failed | The domain does not resolve to this server's public IP. Please verify DNS A/AAAA records before setting domain. |
 | `E-TLS-10` | 409 | port conflict detected | The requested port or ACME port 80 conflicts with an active tunnel or service. Resolve port conflict or use a reverse proxy. |
 | `E-TLS-11` | 200 | domain removed successfully | TLS configuration removed. Panel reverted to HTTP IP access without interrupting tunnels. |
+| `E-TLS-12` | 400 | bad custom certificate | Paste a matching cert+key PEM pair, upload both files, or give readable server paths. |
+| `E-TLS-13` | 400 | bad IP certificate request | Send {"ip":"1.2.3.4"} with a valid IPv4/IPv6 address of this server. |
 
 ## E-PERF-xx — Performance tuning
 

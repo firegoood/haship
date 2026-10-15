@@ -27,6 +27,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/2fa/disable` | session + CSRF | `handle2FADisable` |
 | `POST` | `/api/2fa/enable` | session + CSRF | `handle2FAEnable` |
 | `POST` | `/api/2fa/setup` | session + CSRF | `handle2FASetup` |
+| `GET` | `/api/access` | session | `handleAccessGet` |
+| `POST` | `/api/access` | session + CSRF | `handleAccessPost` |
 | `POST` | `/api/action` | session + CSRF | `handleAction` |
 | `GET` | `/api/alerts` | session | `handleAlertsGet` |
 | `POST` | `/api/alerts` | session + CSRF | `handleAlertsPost` |
@@ -112,8 +114,12 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/tls` | session | `handleTLSGet` |
 | `POST` | `/api/tls` | session + CSRF | `handleTLSIssue` |
 | `POST` | `/api/tls/check` | session + CSRF | `handleTLSCheck` |
+| `POST` | `/api/tls/custom` | session + CSRF | `handleTLSCustomPost` |
+| `POST` | `/api/tls/ip` | session + CSRF | `handleTLSIPPost` |
+| `GET` | `/api/tls/ip/ca` | session | `handleTLSIPCAGet` |
 | `GET` | `/api/tls/proxy-config` | session | `handleReverseProxyConfig` |
 | `POST` | `/api/tls/renew` | session + CSRF | `handleTLSRenew` |
+| `GET` | `/api/traffic/usage` | session | `handleUsageGet` |
 | `GET` | `/api/tunnel-health` | session | `handleTunnelHealthGet` |
 | `POST` | `/api/tunnel-health/run` | session + CSRF | `handleTunnelHealthRun` |
 | `POST` | `/api/update` | session + CSRF | `handleUpdate` |

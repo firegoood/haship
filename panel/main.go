@@ -89,7 +89,7 @@ var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
 	// go build -ldflags "-X main.panelVersion=panel-rN"
-	panelVersion = "v1.1.0"
+	panelVersion = "v1.3.3"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -597,11 +597,14 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/logs", requireAuth(handleLogs))
 	mux.HandleFunc("GET "+base+"/api/errors", requireAuth(handleErrors))
 	mux.HandleFunc("GET "+base+"/api/audit", requireAuth(handleAuditGet))
+	mux.HandleFunc("GET "+base+"/api/access", requireAuth(handleAccessGet))
+	mux.HandleFunc("POST "+base+"/api/access", requireAuth(requireCSRF(handleAccessPost)))
 	mux.HandleFunc("GET "+base+"/api/session-settings", requireAuth(handleSessionSettingsGet))
 	mux.HandleFunc("POST "+base+"/api/session-settings", requireAuth(requireCSRF(handleSessionSettingsPost)))
 	mux.HandleFunc("GET "+base+"/api/alerts", requireAuth(handleAlertsGet))
 	mux.HandleFunc("POST "+base+"/api/alerts", requireAuth(requireCSRF(handleAlertsPost)))
 	mux.HandleFunc("GET "+base+"/api/history", requireAuth(handleHistoryGet))
+	mux.HandleFunc("GET "+base+"/api/traffic/usage", requireAuth(handleUsageGet))
 	mux.HandleFunc("GET "+base+"/metrics", handleMetrics)
 	mux.HandleFunc("GET "+base+"/api/metrics-token", requireAuth(handleMetricsTokenGet))
 	mux.HandleFunc("POST "+base+"/api/metrics-token", requireAuth(requireCSRF(handleMetricsTokenPost)))
@@ -628,6 +631,9 @@ func main() {
 	mux.HandleFunc("DELETE "+base+"/api/tls", requireAuth(requireCSRF(handleTLSRemove)))
 	mux.HandleFunc("POST "+base+"/api/tls/renew", requireAuth(requireCSRF(handleTLSRenew)))
 	mux.HandleFunc("POST "+base+"/api/tls/check", requireAuth(requireCSRF(handleTLSCheck)))
+	mux.HandleFunc("POST "+base+"/api/tls/custom", requireAuth(requireCSRF(handleTLSCustomPost)))
+	mux.HandleFunc("POST "+base+"/api/tls/ip", requireAuth(requireCSRF(handleTLSIPPost)))
+	mux.HandleFunc("GET "+base+"/api/tls/ip/ca", requireAuth(handleTLSIPCAGet))
 	mux.HandleFunc("GET "+base+"/api/tls/proxy-config", requireAuth(handleReverseProxyConfig))
 	mux.HandleFunc("GET "+base+"/api/watchdog", requireAuth(handleWatchdogGet))
 	mux.HandleFunc("POST "+base+"/api/watchdog", requireAuth(requireCSRF(handleWatchdogPost)))
@@ -711,6 +717,7 @@ func main() {
 	histStop := make(chan struct{})
 	loadLicenseFromDisk()
 	startHistoryPersistence(histStop)
+	startUsagePersistence(histStop)
 	startSnapshotCollector(context.Background())
 	startSdWatchdog(context.Background())
 	go startHTTPSListener()

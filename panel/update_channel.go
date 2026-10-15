@@ -159,11 +159,22 @@ func getJSON(path string, out any) error {
 }
 
 func fetchReleases() ([]ghRelease, error) {
-	var rels []ghRelease
-	if err := getJSON("?per_page=30", &rels); err != nil {
-		return nil, err
+	var all []ghRelease
+	// ponytail: 10 pages x 100 = 1000 releases ceiling; raise if the repo ever outgrows it.
+	for page := 1; page <= 10; page++ {
+		var rels []ghRelease
+		if err := getJSON(fmt.Sprintf("?per_page=100&page=%d", page), &rels); err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			break // keep what we have
+		}
+		all = append(all, rels...)
+		if len(rels) < 100 {
+			break
+		}
 	}
-	return rels, nil
+	return all, nil
 }
 
 func fetchLatestTag() (string, error) {
@@ -310,7 +321,7 @@ func handleVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleReleases lists the last 20 releases of a channel for the UI.
+// handleReleases lists every release of a channel (newest first) for the UI.
 func handleReleases(w http.ResponseWriter, r *http.Request) {
 	ch := r.URL.Query().Get("channel")
 	if ch == "" {
@@ -341,9 +352,6 @@ func handleReleases(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"tag": rel.Tag, "name": rel.Name, "date": rel.PublishedAt, "prerelease": rel.Prerelease,
 		})
-		if len(out) == 20 {
-			break
-		}
 	}
 	writeJSON(w, map[string]any{"channel": ch, "releases": out})
 }

@@ -5868,15 +5868,161 @@ except Exception:
     pass
 PYEOF
 
+
+# panel_cfg_set KEY VALUE — atomic JSON edit of /etc/gre-panel/panel.json (python3), 0600.
+panel_cfg_set() {
+    local KEY="$1" VAL="$2"
+    [[ -f /etc/gre-panel/panel.json ]] || { echo -e "${RED}[!] Panel is not installed (no /etc/gre-panel/panel.json).${NC}"; return 1; }
+    command -v python3 >/dev/null 2>&1 || { echo -e "${RED}[!] python3 is required.${NC}"; return 1; }
+    python3 - "$KEY" "$VAL" <<'PYEOF' || return 1
+import json, os, sys
+p = '/etc/gre-panel/panel.json'
+k, v = sys.argv[1], sys.argv[2]
+try:
+    d = json.load(open(p))
+except Exception as e:
+    print("cannot read panel.json: %s" % e, file=sys.stderr); sys.exit(1)
+if k == 'port':
+    try: v = int(v)
+    except ValueError: print("port must be a number", file=sys.stderr); sys.exit(1)
+d[k] = v
+tmp = p + ".tmp"
+json.dump(d, open(tmp, 'w'), indent=2)
+os.replace(tmp, p)
+os.chmod(p, 0o600)
+PYEOF
     chmod 600 /etc/gre-panel/panel.json 2>/dev/null || true
+}
+
+# cli_panel_port PORT — change panel HTTP port (1-65535, not 80/443, not a tunnel port), restart only gre-panel.
+cli_panel_port() {
+    check_root
+    local PORT="${1:-}"
+    [[ -z "$PORT" ]] && read -p "New panel HTTP port (1-65535, current kept if busy-check fails): " PORT
+    [[ "$PORT" =~ ^[0-9]+$ ]] && [[ "$PORT" -ge 1 && "$PORT" -le 65535 ]] || { echo -e "${RED}[!] Port must be 1-65535.${NC}"; return 1; }
+    [[ "$PORT" == "80" || "$PORT" == "443" ]] && { echo -e "${RED}[!] Ports 80/443 are reserved — use a reverse proxy or the HTTPS listener instead.${NC}"; return 1; }
+    local TPORT; TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*')
+    [[ -n "$TPORT" && "$PORT" == "$TPORT" ]] && { echo -e "${RED}[!] Port $PORT is already the panel HTTPS port.${NC}"; return 1; }
+    panel_cfg_set port "$PORT" || return 1
     systemctl restart gre-panel 2>/dev/null || true
-    PANEL_PASS="$PASS"
+    echo -e "${GREEN}[✔️] Panel HTTP port set to ${CYAN}${PORT}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    show_panel_url
+}
+
+# cli_panel_user USERNAME — change panel login username (3-64 chars), restart only gre-panel.
+cli_panel_user() {
+    check_root
+    local USER="${1:-}"
+    [[ -z "$USER" ]] && read -p "New panel username (3-64 chars, letters/digits/._-): " USER
+    [[ "$USER" =~ ^[A-Za-z0-9._-]{3,64}$ ]] || { echo -e "${RED}[!] Invalid username (3-64 chars: letters, digits, . _ -).${NC}"; return 1; }
+    panel_cfg_set username "$USER" || return 1
+    systemctl restart gre-panel 2>/dev/null || true
+    echo -e "${GREEN}[✔️] Panel username set to ${CYAN}${USER}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    show_panel_url
+}
+
+# cli_panel_path PATH — change panel URL base path (4-64 chars), restart only gre-panel.
+cli_panel_path() {
+    check_root
+    local BASE="${1:-}"
+    [[ -z "$BASE" ]] && read -p "New panel path (4-64 chars, letters/digits/_/-, e.g. my-panel-1): " BASE
+    [[ "$BASE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{2,62}[A-Za-z0-9]$ ]] || { echo -e "${RED}[!] Invalid path (4-64 chars, letters/digits/_/-, cannot start/end with -).${NC}"; return 1; }
+    panel_cfg_set base_path "$BASE" || return 1
+    systemctl restart gre-panel 2>/dev/null || true
+    echo -e "${GREEN}[✔️] Panel path set to ${CYAN}${BASE}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    show_panel_url
+}
     echo ""
     echo -e "${GREEN}[✔️] Web panel password successfully updated!${NC}"
     echo -e "${GREEN}Username:     ${CYAN}admin${NC}"
     echo -e "${GREEN}New Password: ${CYAN}${PASS}${NC}"
     echo -e "${YELLOW}Please save this password securely.${NC}"
     echo ""
+}
+
+# panel_tls_custom: install the admin's own cert/key (files or server paths).
+# panel-tls-custom <cert> <key> — copies into /etc/gre-panel/tls, keeps .bak, restarts only gre-panel.
+panel_tls_custom() {
+    local CERT="${1:-}" KEY="${2:-}"
+    [[ -z "$CERT" ]] && read -p "Certificate file (PEM, .crt/.pem): " CERT
+    [[ -z "$KEY" ]] && read -p "Private key file (PEM, .key/.pem): " KEY
+    [[ -f "$CERT" ]] || { echo -e "${RED}[!] Certificate file not found: $CERT${NC}"; return 1; }
+    [[ -f "$KEY" ]] || { echo -e "${RED}[!] Key file not found: $KEY${NC}"; return 1; }
+    command -v python3 >/dev/null 2>&1 || { echo -e "${RED}[!] python3 is required (keypair check).${NC}"; return 1; }
+    python3 - "$CERT" "$KEY" <<'PYEOF' || return 1
+import ssl, sys
+try:
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(sys.argv[1], sys.argv[2])
+except Exception as e:
+    print("cert/key do not match: %s" % e, file=sys.stderr); sys.exit(1)
+PYEOF
+    mkdir -p /etc/gre-panel/tls
+    [[ -f /etc/gre-panel/tls/server.crt ]] && cp -f /etc/gre-panel/tls/server.crt /etc/gre-panel/tls/server.crt.bak
+    [[ -f /etc/gre-panel/tls/server.key ]] && cp -f /etc/gre-panel/tls/server.key /etc/gre-panel/tls/server.key.bak
+    [[ -f /etc/gre-panel/tls/meta.json ]] && cp -f /etc/gre-panel/tls/meta.json /etc/gre-panel/tls/meta.json.bak
+    cp -f "$CERT" /etc/gre-panel/tls/server.crt && cp -f "$KEY" /etc/gre-panel/tls/server.key || {
+        echo -e "${RED}[!] Copy failed — previous configuration kept intact.${NC}"
+        [[ -f /etc/gre-panel/tls/server.crt.bak ]] && mv -f /etc/gre-panel/tls/server.crt.bak /etc/gre-panel/tls/server.crt
+        [[ -f /etc/gre-panel/tls/server.key.bak ]] && mv -f /etc/gre-panel/tls/server.key.bak /etc/gre-panel/tls/server.key
+        return 1
+    }
+    chmod 600 /etc/gre-panel/tls/server.key
+    echo "{\"label\":\"custom cert\",\"issued_at\":\"$(date '+%F %T')\"}" > /etc/gre-panel/tls/meta.json
+    rm -f /etc/gre-panel/tls/*.bak
+    systemctl restart gre-panel 2>/dev/null || true
+    sleep 2
+    local PORT BASE TPORT
+    PORT=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); PORT=${PORT:-7777}
+    BASE=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
+    TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); TPORT=${TPORT:-7443}
+    echo -e "${GREEN}[✔️] Custom certificate installed: ${CYAN}https://<this-server-ip>:${TPORT}/${BASE}${NC}"
+    echo -e "${GREEN}    HTTP still works: ${CYAN}http://<this-server-ip>:${PORT}/${BASE}${NC}"
+    echo -e "${GREEN}    Tunnel infrastructure continues running without interruption.${NC}"
+}
+
+# panel_tls_ip: self-signed HTTPS on the server IP via a persistent local CA.
+# panel-tls-ip [IP] — CA kept 10y in /etc/gre-panel/tls, server cert 825d, restarts only gre-panel.
+panel_tls_ip() {
+    local IP="${1:-}"
+    if [[ -z "$IP" ]]; then
+        IP=$(ip route get 1.1.1.1 2>/dev/null | awk "/src/ {for (i=1; i<=NF; i++) if (\$i==\"src\") {print \$(i+1); exit}}")
+        [[ -z "$IP" ]] && read -p "Server IP for the certificate: " IP
+    fi
+    [[ "$IP" =~ ^[0-9a-fA-F.:]+$ ]] || { echo -e "${RED}[!] Not a valid IP: $IP${NC}"; return 1; }
+    command -v openssl >/dev/null 2>&1 || { echo -e "${RED}[!] openssl is required.${NC}"; return 1; }
+    mkdir -p /etc/gre-panel/tls
+    if [[ ! -f /etc/gre-panel/tls/hashem-ca.crt ]]; then
+        echo -e "${CYAN}[*] Creating local CA (10 years, install once in your browser/OS)...${NC}"
+        openssl req -x509 -newkey rsa:3072 -keyout /etc/gre-panel/tls/hashem-ca.key -out /etc/gre-panel/tls/hashem-ca.crt -days 3650 -nodes -subj "/O=Hashem Panel Local CA/CN=Hashem Panel Local CA" 2>/dev/null || return 1
+        chmod 600 /etc/gre-panel/tls/hashem-ca.key
+    fi
+    [[ -f /etc/gre-panel/tls/server.crt ]] && cp -f /etc/gre-panel/tls/server.crt /etc/gre-panel/tls/server.crt.bak
+    [[ -f /etc/gre-panel/tls/server.key ]] && cp -f /etc/gre-panel/tls/server.key /etc/gre-panel/tls/server.key.bak
+    [[ -f /etc/gre-panel/tls/meta.json ]] && cp -f /etc/gre-panel/tls/meta.json /etc/gre-panel/tls/meta.json.bak
+    local TMP; TMP=$(mktemp -d)
+    openssl req -newkey rsa:2048 -nodes -keyout "$TMP/server.key" -out "$TMP/server.csr" -subj "/O=Hashem Panel/CN=$IP" 2>/dev/null || { rm -rf "$TMP"; return 1; }
+    printf "subjectAltName=IP:%s\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n" "$IP" > "$TMP/ext.cnf"
+    openssl x509 -req -in "$TMP/server.csr" -CA /etc/gre-panel/tls/hashem-ca.crt -CAkey /etc/gre-panel/tls/hashem-ca.key -CAcreateserial -out "$TMP/server.crt" -days 825 -extfile "$TMP/ext.cnf" 2>/dev/null || {
+        echo -e "${RED}[!] Signing failed — previous configuration kept intact.${NC}"
+        rm -rf "$TMP"; return 1
+    }
+    cp -f "$TMP/server.crt" /etc/gre-panel/tls/server.crt && cp -f "$TMP/server.key" /etc/gre-panel/tls/server.key || {
+        echo -e "${RED}[!] Install failed — previous configuration kept intact.${NC}"
+        rm -rf "$TMP"; return 1
+    }
+    rm -rf "$TMP"
+    chmod 600 /etc/gre-panel/tls/server.key
+    echo "{\"domain\":\"$IP\",\"issuer\":\"Hashem Panel Local CA (self-signed)\",\"issued_at\":\"$(date '+%F %T')\"}" > /etc/gre-panel/tls/meta.json
+    rm -f /etc/gre-panel/tls/*.bak
+    systemctl restart gre-panel 2>/dev/null || true
+    sleep 2
+    local BASE TPORT
+    BASE=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
+    TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); TPORT=${TPORT:-7443}
+    echo -e "${GREEN}[✔️] Self-signed HTTPS ready: ${CYAN}https://${IP}:${TPORT}/${BASE}${NC}"
+    echo -e "${GREEN}    Install once to remove the browser warning: ${CYAN}/etc/gre-panel/tls/hashem-ca.crt${NC}"
+    echo -e "${GREEN}    Tunnel infrastructure continues running without interruption.${NC}"
 }
 
 # Dedicated backup key for encrypted backups (CWE-256: decouples backup key from login password)
@@ -7204,11 +7350,16 @@ remove_legacy_units() {
 }
 
 update_all() {
+    local WANT_TAG="${1:-}"
+    if [[ -n "$WANT_TAG" ]]; then
+        update_tag_ok "$WANT_TAG" || { echo -e "${RED}[!] Bad tag: $WANT_TAG (want vX.Y.Z, dev-rN or panel-rN)${NC}"; return 1; }
+        echo -e "${YELLOW}[!] Installing ${WANT_TAG} even if older than running (downgrade).${NC}"
+    fi
     echo -e "${CYAN}[*] Updating Hashem (script + panel binary)...${NC}"
     TMP_U="$(mktemp -d)"
     trap 'rm -rf "$TMP_U"' RETURN
     # 1. fresh script from the channel's release (main only if the tag has no asset)
-    UPD_TAG=$(update_pick_tag)
+    UPD_TAG="${WANT_TAG:-$(update_pick_tag)}"
     echo -e "${CYAN}[*] Channel: $(update_get_channel)${UPD_TAG:+ (release ${UPD_TAG})}${NC}"
     if [[ -n "$UPD_TAG" ]]; then
         download_with_fallback "$TMP_U/hashem.sh" "https://github.com/pdnczone/hashem-panel/releases/download/${UPD_TAG}/hashem.sh" 30 || rm -f "$TMP_U/hashem.sh"
@@ -8054,10 +8205,11 @@ Usage:
   hashem setup-gre-backhaul-foreign --bundle gh1_... | --remote-pub IP --port P --token K [--transport tcpmux]
   hashem add-backhaul-peer      --remote-pub IP --port P --transport T --token K --ports "..." [--no-gre]
   hashem status | remove-tunnel [--force] | show-panel-url | reset-password [new_pass]
+  hashem panel-port <port> | panel-user <name> | panel-path <path>
   hashem uninstall [--force]                   # full wipe: tunnel + panel + 'hashem' itself
   hashem add-peer --local-pub IP --remote-pub IP [--frp-port N] --token T --local-gre IP --peer-gre IP --ports "443, 2083" [--name LABEL] [--bundle hsh1_...]
   hashem remove-peer --id N [--force] | edit-peer --id N [--name L] [--remote-pub IP] [--carrier C] [--ports "..."] | edit-peer-ports --id N --ports "443, 2083" | peer-list | peer-token --id N
-  hashem logs | restart | panel-tls [domain] [email]   # (also: bash hashem.sh ...)
+  hashem logs | restart | panel-tls [domain] [email] | panel-tls-custom <cert> <key> | panel-tls-ip [IP]   # (also: bash hashem.sh ...)
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
   hashem ssh-fwd [status|enable|disable|gen-key|clear-dnat] # SSH port forward carrier
@@ -9090,7 +9242,7 @@ if [[ $# -gt 0 ]]; then
         watchdog) shift; cli_watchdog "$@" ;;
         backup) shift; cli_backup "$@" ;;
         tgsend) shift; watchdog_send "$1" ;;
-        update|update-all) update_all ;;
+        update|update-all) shift; update_all "$@" ;;
         update-channel) shift; cli_update_channel "$@" ;;
         cleanup-legacy) remove_legacy_units ;;
         peer-token)
@@ -9103,6 +9255,8 @@ if [[ $# -gt 0 ]]; then
         doctor|test|diagnose) shift; cli_doctor "$@" ;;
         stress-test|test-load|stress) shift; cli_stress_test "$@" ;;
         panel-tls) shift; panel_tls_issue "$@" ;;
+        panel-tls-custom) shift; panel_tls_custom "$@" ;;
+        panel-tls-ip) shift; panel_tls_ip "${1:-}" ;;
         panel-remove-domain|panel-tls-remove) panel_tls_remove ;;
         carrier) shift; cli_carrier "$@" ;;
         bagher|hashem-bagher|ssh-fwd|sshfwd) shift; cli_bagher "$@" ;;

@@ -296,6 +296,9 @@ type HubSnapshot struct {
 	Main    *peerLive
 	Peers   []peerLive
 	Traffic map[string]any
+	// DevData is the raw /proc/net/dev this snapshot was built from (the
+	// traffic ledger sums tunnel interfaces from it).
+	DevData string
 	// LocalSession/LocalRTT: this machine's own tunnel session. On a hub it is
 	// the main tunnel's control session; on a spoke, the outbound client
 	// connection to the hub's control port.
@@ -426,6 +429,7 @@ func buildSnapshot() *HubSnapshot {
 
 	timedStep("traffic", func() {
 		s.Traffic = greTrafficFrom(v.devData)
+		s.DevData = v.devData
 		s.ActiveConns = activeConns()
 	})
 	s.PublicIP = detectPublicIPCached()
@@ -504,6 +508,7 @@ func snapshotTick() bool {
 	snapTicks.Add(1)
 	alertsOnSnapshot(snap)
 	historyOnSnapshot(snap)
+	usageOnSnapshot(snap)
 	carrierAdvisorOnSnapshot(snap)
 	return true
 }
