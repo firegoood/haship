@@ -44,13 +44,15 @@ func TestHardeningWriteTimeoutCutsSlowHandlerButNotExempt(t *testing.T) {
 	ts.Start()
 	defer ts.Close()
 
-	if resp, err := http.Get(ts.URL + "/slow"); err == nil {
+	testClient := &http.Client{Timeout: 5 * time.Second}
+
+	if resp, err := testClient.Get(ts.URL + "/slow"); err == nil {
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		t.Fatalf("handler past the write timeout must be cut, got %q", b)
 	}
 	for path, want := range map[string]string{"/exempt": "late but fine", "/api/doctor": "doctor"} {
-		resp, err := http.Get(ts.URL + path)
+		resp, err := testClient.Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("%s must be exempt from the write timeout: %v", path, err)
 		}
@@ -104,11 +106,12 @@ func TestInflightLimiter(t *testing.T) {
 
 	var wg sync.WaitGroup
 	codes := make(chan int, maxInFlight)
+	testClient := &http.Client{Timeout: 5 * time.Second}
 	for i := 0; i < maxInFlight; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, err := http.Get(ts.URL + "/work")
+			resp, err := testClient.Get(ts.URL + "/work")
 			if err != nil {
 				codes <- -1
 				return
@@ -125,7 +128,7 @@ func TestInflightLimiter(t *testing.T) {
 		}
 	}
 	// the 65th is refused with 503 + Retry-After and the usual JSON error shape
-	resp, err := http.Get(ts.URL + "/work")
+	resp, err := testClient.Get(ts.URL + "/work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +142,7 @@ func TestInflightLimiter(t *testing.T) {
 		t.Fatal("503 body must be JSON")
 	}
 	// selfstats stays reachable while the panel is saturated
-	resp, err = http.Get(ts.URL + "/api/selfstats")
+	resp, err = testClient.Get(ts.URL + "/api/selfstats")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +166,7 @@ func TestInflightLimiter(t *testing.T) {
 		t.Fatalf("counter must return to 0, got %d", got)
 	}
 	// capacity is back
-	resp, err = http.Get(ts.URL + "/api/selfstats")
+	resp, err = testClient.Get(ts.URL + "/api/selfstats")
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("after release: %v", err)
 	}

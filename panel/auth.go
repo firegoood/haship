@@ -1,8 +1,9 @@
 package main
 
 // Auth: cookie session + login/logout/password.
-// Session token = sha256(nonce + pass_hash); nonce is generated at startup
-// (see main.go). Changing the password invalidates all sessions.
+// Session tokens are cryptographically random 256-bit values stored server-side
+// in sessions.json with a 24-hour absolute expiry (see session.go/password.go).
+// Changing the password invalidates all sessions.
 
 import (
 	"crypto/rand"
