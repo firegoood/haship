@@ -20,13 +20,22 @@ import (
 // Master Ed25519 public key embedded in binary
 var defaultMasterPublicKeyB64 = "/TiHHU2gO8abW0rZhj782elZbeeJMnLaPJrGHXxqMX8="
 
+// List of trusted master public keys.
+// Includes the primary active key and legacy keys for backwards compatibility,
+// ensuring previously activated licenses remain valid upon panel upgrades.
+var defaultTrustedMasterPublicKeysB64 = []string{
+	"/TiHHU2gO8abW0rZhj782elZbeeJMnLaPJrGHXxqMX8=", // Current active licensor master key
+	"U2gUVDmihrylZPVlScgPGP28pFMkEwAXtJODjAKoFLs=", // Legacy v2.3.4 master public key
+}
+
 var (
-	masterPublicKeyB64 = defaultMasterPublicKeyB64
-	activeLicense      *LicensePayload
-	activeLicenseMu    sync.RWMutex
-	cachedMachineHash  string
-	machineHashOnce    sync.Once
-	licenseCheckedAt   time.Time
+	masterPublicKeyB64         = defaultMasterPublicKeyB64
+	trustedMasterPublicKeysB64 = defaultTrustedMasterPublicKeysB64
+	activeLicense              *LicensePayload
+	activeLicenseMu            sync.RWMutex
+	cachedMachineHash          string
+	machineHashOnce            sync.Once
+	licenseCheckedAt           time.Time
 )
 
 func init() {
@@ -74,6 +83,31 @@ func getMachineHash() string {
 	return cachedMachineHash
 }
 
+// getTrustedPublicKeys compiles the list of trusted master public keys to check against.
+// It checks masterPublicKeyB64 (or test overrides) and trustedMasterPublicKeysB64.
+func getTrustedPublicKeys() [][]byte {
+	candidates := make([]string, 0, len(trustedMasterPublicKeysB64)+1)
+	if strings.TrimSpace(masterPublicKeyB64) != "" {
+		candidates = append(candidates, strings.TrimSpace(masterPublicKeyB64))
+	}
+	candidates = append(candidates, trustedMasterPublicKeysB64...)
+
+	seen := make(map[string]bool)
+	var keys [][]byte
+	for _, c := range candidates {
+		c = strings.TrimSpace(c)
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		b, err := base64.StdEncoding.DecodeString(c)
+		if err == nil && len(b) == ed25519.PublicKeySize {
+			keys = append(keys, b)
+		}
+	}
+	return keys
+}
+
 // verifyLicenseKey checks the token format, signature, expiry, and machine-hash.
 func verifyLicenseKey(token string) (*LicensePayload, error) {
 	token = strings.TrimSpace(token)
@@ -102,12 +136,20 @@ func verifyLicenseKey(token string) (*LicensePayload, error) {
 		return nil, fmt.Errorf("invalid signature length: %d (expected %d)", len(sigBytes), ed25519.SignatureSize)
 	}
 
-	pubBytes, err := base64.StdEncoding.DecodeString(masterPublicKeyB64)
-	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
+	keys := getTrustedPublicKeys()
+	if len(keys) == 0 {
 		return nil, errors.New("invalid master public key")
 	}
 
-	if !ed25519.Verify(pubBytes, payloadBytes, sigBytes) {
+	var verified bool
+	for _, pubBytes := range keys {
+		if ed25519.Verify(pubBytes, payloadBytes, sigBytes) {
+			verified = true
+			break
+		}
+	}
+
+	if !verified {
 		return nil, errors.New("license signature verification failed")
 	}
 

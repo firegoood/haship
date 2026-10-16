@@ -178,3 +178,113 @@ func TestLicenseAPI(t *testing.T) {
 		t.Errorf("license status mismatch: %+v", status)
 	}
 }
+
+func TestDualKeyVerification(t *testing.T) {
+	// Key 1: simulates legacy master key (e.g., v2.3.4)
+	pub1, priv1, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed generating key 1: %v", err)
+	}
+
+	// Key 2: simulates new master key (e.g., dedicated licensor)
+	pub2, priv2, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed generating key 2: %v", err)
+	}
+
+	// Key 3: untrusted / rogue key
+	_, priv3, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed generating key 3: %v", err)
+	}
+
+	origMaster := masterPublicKeyB64
+	origTrusted := trustedMasterPublicKeysB64
+	masterPublicKeyB64 = base64.StdEncoding.EncodeToString(pub2)
+	trustedMasterPublicKeysB64 = []string{
+		base64.StdEncoding.EncodeToString(pub2),
+		base64.StdEncoding.EncodeToString(pub1),
+	}
+	defer func() {
+		masterPublicKeyB64 = origMaster
+		trustedMasterPublicKeysB64 = origTrusted
+		activeLicenseMu.Lock()
+		activeLicense = nil
+		licenseCheckedAt = time.Now()
+		activeLicenseMu.Unlock()
+		_ = os.Remove(filepath.Join(configDir, "license.key"))
+		_ = os.Remove("/etc/hashem/license.key")
+	}()
+
+	mHash := getMachineHash()
+	expFuture := time.Now().Add(30 * 24 * time.Hour).Unix()
+
+	// 1. Token signed with legacy key (Key 1)
+	legacyToken := generateTestToken(t, "LegacyCustomer", mHash, []string{"legacy_feature"}, expFuture, priv1)
+	p1, err := verifyLicenseKey(legacyToken)
+	if err != nil {
+		t.Fatalf("legacy token failed verification: %v", err)
+	}
+	if p1.Customer != "LegacyCustomer" {
+		t.Errorf("legacy customer mismatch: %s", p1.Customer)
+	}
+
+	// 2. Token signed with new key (Key 2)
+	newToken := generateTestToken(t, "NewCustomer", mHash, []string{"new_feature"}, expFuture, priv2)
+	p2, err := verifyLicenseKey(newToken)
+	if err != nil {
+		t.Fatalf("new token failed verification: %v", err)
+	}
+	if p2.Customer != "NewCustomer" {
+		t.Errorf("new customer mismatch: %s", p2.Customer)
+	}
+
+	// 3. Token signed with untrusted key (Key 3)
+	untrustedToken := generateTestToken(t, "Attacker", mHash, []string{"hack"}, expFuture, priv3)
+	if _, err := verifyLicenseKey(untrustedToken); err == nil {
+		t.Fatalf("expected untrusted token to fail verification, but it succeeded")
+	}
+
+	// 4. Test loading existing legacy license from disk (simulating upgrade)
+	_ = os.MkdirAll(configDir, 0755)
+	if err := os.WriteFile(filepath.Join(configDir, "license.key"), []byte(legacyToken), 0600); err != nil {
+		t.Fatalf("failed writing legacy license file: %v", err)
+	}
+	loadLicenseFromDisk()
+	if !HasFeature("legacy_feature") {
+		t.Errorf("expected legacy_feature to be active after loading from disk upon upgrade")
+	}
+
+	// 5. Test activating new token via API
+	body, _ := json.Marshal(map[string]string{"key": newToken})
+	reqPost := httptest.NewRequest("POST", "/api/license", bytes.NewReader(body))
+	rrPost := httptest.NewRecorder()
+	handleLicensePost(rrPost, reqPost)
+	if rrPost.Code != http.StatusOK {
+		t.Fatalf("failed activating new token via API: %d %s", rrPost.Code, rrPost.Body.String())
+	}
+	if !HasFeature("new_feature") {
+		t.Errorf("expected new_feature to be active after activating new token")
+	}
+
+	// 6. Test activating legacy token via API
+	bodyLegacy, _ := json.Marshal(map[string]string{"key": legacyToken})
+	reqPostLegacy := httptest.NewRequest("POST", "/api/license", bytes.NewReader(bodyLegacy))
+	rrPostLegacy := httptest.NewRecorder()
+	handleLicensePost(rrPostLegacy, reqPostLegacy)
+	if rrPostLegacy.Code != http.StatusOK {
+		t.Fatalf("failed activating legacy token via API: %d %s", rrPostLegacy.Code, rrPostLegacy.Body.String())
+	}
+	if !HasFeature("legacy_feature") {
+		t.Errorf("expected legacy_feature to be active after activating legacy token")
+	}
+
+	// 7. Test activating untrusted token via API (must fail with 400 Bad Request)
+	bodyUntrusted, _ := json.Marshal(map[string]string{"key": untrustedToken})
+	reqPostUntrusted := httptest.NewRequest("POST", "/api/license", bytes.NewReader(bodyUntrusted))
+	rrPostUntrusted := httptest.NewRecorder()
+	handleLicensePost(rrPostUntrusted, reqPostUntrusted)
+	if rrPostUntrusted.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for untrusted token, got %d", rrPostUntrusted.Code)
+	}
+}
