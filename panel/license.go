@@ -18,7 +18,7 @@ import (
 )
 
 // Master Ed25519 public key embedded in binary
-var defaultMasterPublicKeyB64 = "U2gUVDmihrylZPVlScgPGP28pFMkEwAXtJODjAKoFLs="
+var defaultMasterPublicKeyB64 = "/TiHHU2gO8abW0rZhj782elZbeeJMnLaPJrGHXxqMX8="
 
 var (
 	masterPublicKeyB64 = defaultMasterPublicKeyB64
