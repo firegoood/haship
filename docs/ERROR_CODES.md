@@ -211,4 +211,13 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-SSHFWD-05` | 409 | peer not configured or unreachable | Configure peer link or install public key manually on remote host. |
 | `E-SSHFWD-06` | 500 | failed installing authorized_keys on remote | Ensure remote user authorized_keys is writable. |
 
-Total: 113 codes.
+## E-ACCESS-xx — ACCESS
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-ACCESS-00` | — | access settings changed | Informational: panel port/username/path saved; gre-panel restarts, tunnels unaffected. |
+| `E-ACCESS-01` | 400 | bad access-settings request | Send current_password plus at least one of port, username, base_path. |
+| `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
+| `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
+
+Total: 119 codes.
