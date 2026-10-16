@@ -29,9 +29,9 @@ func rotateNonce() {
 }
 
 const (
-	loginFailWindow = 15 * time.Minute
-	loginLockoutDur = 15 * time.Minute
-	loginMaxFails   = 5
+	loginFailWindow     = 15 * time.Minute
+	loginLockoutDur     = 15 * time.Minute
+	loginMaxFails       = 5
 	loginUserMaxFails   = 10
 	loginUserLockoutDur = 15 * time.Minute
 	// repeat offenders: every further lockout doubles, up to maxLockoutDur;
@@ -56,9 +56,9 @@ type usernameAttempts struct {
 }
 
 var (
-	attemptMu   sync.Mutex
-	attempts    = map[string]*ipAttempts{}
-	lockStrikes = map[string]*lockStrike{}
+	attemptMu           sync.Mutex
+	attempts            = map[string]*ipAttempts{}
+	lockStrikes         = map[string]*lockStrike{}
 	usernameAttemptsMap = map[string]*usernameAttempts{}
 )
 

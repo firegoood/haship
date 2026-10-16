@@ -1751,14 +1751,16 @@ download_with_fallback() {
     rm -f "$DEST" 2>/dev/null
 
     # Try direct URL first (use fast connect-timeout for GitHub since it is often blocked in Iran)
+    # Blocked hosts fail fast on connect; slow-but-alive links (big binaries over a
+    # throttled route) are NOT killed by a short absolute cap — only by a stall
+    # (<2KB/s for 10s). ponytail: TIMEOUT is the absolute ceiling per attempt.
     local DIRECT_CONNECT_TO=8
-    local DIRECT_MAX_TO="$TIMEOUT"
+    local STALL=(--speed-limit 2048 --speed-time 10)
     if [[ "$URL" == https://github.com/* || "$URL" == https://raw.githubusercontent.com/* ]]; then
         DIRECT_CONNECT_TO=5
-        DIRECT_MAX_TO=12
     fi
 
-    if curl -fsSL --connect-timeout "$DIRECT_CONNECT_TO" --max-time "$DIRECT_MAX_TO" -o "$DEST" "$URL" 2>/dev/null && is_valid_download "$DEST"; then
+    if curl -fsSL --connect-timeout "$DIRECT_CONNECT_TO" --max-time "$TIMEOUT" "${STALL[@]}" -o "$DEST" "$URL" 2>/dev/null && is_valid_download "$DEST"; then
         return 0
     fi
     rm -f "$DEST" 2>/dev/null
@@ -1775,7 +1777,7 @@ download_with_fallback() {
         )
         for M in "${MIRRORS[@]}"; do
             rm -f "$DEST" 2>/dev/null
-            if curl -fsSL --connect-timeout 6 --max-time 30 -o "$DEST" "$M" 2>/dev/null && is_valid_download "$DEST"; then
+            if curl -fsSL --connect-timeout 6 --max-time "$TIMEOUT" "${STALL[@]}" -o "$DEST" "$M" 2>/dev/null && is_valid_download "$DEST"; then
                 echo -e "${GREEN}[✔️] Download succeeded via mirror: ${M%/*}${NC}"
                 return 0
             fi
@@ -4352,7 +4354,12 @@ ensure_doctor_tools() {
     done
     if [[ "$NEED_INSTALL" -eq 1 ]]; then
         echo -e "${CYAN}[*] Installing diagnostic tools (iperf3, iputils-ping, curl)...${NC}"
-        apt-get update -qq && apt-get install -y -qq iperf3 iputils-ping curl || echo -e "${YELLOW}[!] Warning: failed to install some diagnostic tools.${NC}"
+        # bounded + non-interactive: a blocked apt mirror or a debconf prompt must not
+        # freeze the installer (output is logged, so a hang looks like "stuck at 70%").
+        # ponytail: fixed timeouts; make configurable only if slow mirrors still trip them.
+        export DEBIAN_FRONTEND=noninteractive
+        { timeout 30 apt-get update -qq </dev/null && timeout 120 apt-get install -y -qq iperf3 iputils-ping curl </dev/null; } \
+            || echo -e "${YELLOW}[!] Warning: failed to install some diagnostic tools.${NC}"
     fi
 }
 
@@ -5644,7 +5651,8 @@ install_panel() {
     [[ -z "$HASHEMSH_URL" ]] && HASHEMSH_URL="https://github.com/pdnczone/hashem-panel/releases/latest/download/hashem.sh"
     [[ -z "$HASHEM_URL" ]] && HASHEM_URL="https://github.com/pdnczone/hashem-panel/releases/latest/download/hashem"
 
-    if download_with_fallback "$TMP_PANEL/gre-panel" "$DL_URL" 60 && [[ -s "$TMP_PANEL/gre-panel" ]]; then
+    echo -e "${CYAN}[*] Downloading panel binary (may take a while on slow links)...${NC}"
+    if download_with_fallback "$TMP_PANEL/gre-panel" "$DL_URL" 240 && [[ -s "$TMP_PANEL/gre-panel" ]]; then
         if head -c 4 "$TMP_PANEL/gre-panel" 2>/dev/null | grep -q "ELF"; then
             DL_OK=1
             echo -e "${GREEN}[✔️] Downloaded prebuilt panel ($(du -h "$TMP_PANEL/gre-panel" | cut -f1)).${NC}"
@@ -5661,10 +5669,6 @@ install_panel() {
         chmod +x "$HASHEM_SCRIPT" 2>/dev/null || true
         cp "$HASHEM_SCRIPT" "$HASHEM_BIN" 2>/dev/null && chmod +x "$HASHEM_BIN" || true
         ln -sf "$HASHEM_SCRIPT" /usr/local/bin/gre.sh 2>/dev/null || true
-    fi
-
-    if download_with_fallback "/usr/local/bin/hashem" "$HASHEM_URL" 30; then
-        chmod +x /usr/local/bin/hashem 2>/dev/null || true
     fi
 
     if [[ "$DL_OK" -ne 1 ]]; then
