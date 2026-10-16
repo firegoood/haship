@@ -7367,13 +7367,17 @@ window.copyMachineHashClick = copyMachineHashClick;
   if (typeof origTabSwitch === 'function') {
     window.switchTab = function(name) {
       origTabSwitch(name);
-      if (name === 'settings') loadLicense();
+      if (name === 'settings') {
+        loadLicense();
+        loadSentinelState();
+      }
     };
   }
   document.addEventListener('DOMContentLoaded', () => {
     loadLicense();
+    loadSentinelState();
   });
-  setTimeout(loadLicense, 500);
+  setTimeout(() => { loadLicense(); loadSentinelState(); }, 500);
 })();
 
 // ==========================================
@@ -7833,3 +7837,163 @@ window.generateClusterSecret = generateClusterSecret;
 window.submitClusterConfig = submitClusterConfig;
 window.triggerClusterFailover = triggerClusterFailover;
 window.revertClusterFailover = revertClusterFailover;
+
+// ==========================================
+// Sentinel Infrastructure & Node Health Addon
+// ==========================================
+let _sentinelData = null;
+
+async function loadSentinelState() {
+  try {
+    const d = await api('/api/sentinel');
+    _sentinelData = d;
+    renderSentinel(d);
+  } catch (err) {
+    console.warn('Failed loading sentinel state:', err);
+  }
+}
+
+function renderSentinel(d) {
+  if (!d) return;
+
+  // Sidebar Nav Badge
+  const navBadge = $('sentinelNavBadge');
+  if (navBadge) {
+    if (d.running) {
+      navBadge.classList.remove('hidden');
+      navBadge.textContent = 'LIVE ↗';
+    } else {
+      navBadge.classList.add('hidden');
+    }
+  }
+
+  // Header Badges in Settings
+  const licBadge = $('sentinelLicBadge');
+  if (licBadge) {
+    if (d.has_license) {
+      licBadge.textContent = 'PRO LICENSE ✓';
+      licBadge.style.background = '#10b981';
+      licBadge.style.color = '#fff';
+    } else {
+      licBadge.textContent = 'LICENSE REQUIRED';
+      licBadge.style.background = '#ef4444';
+      licBadge.style.color = '#fff';
+    }
+  }
+
+  const regBadge = $('sentinelRegionBadge');
+  if (regBadge) {
+    if (d.is_iran) {
+      regBadge.textContent = '🇮🇷 IRAN SERVER';
+      regBadge.style.background = '#0ea5e9';
+      regBadge.style.color = '#fff';
+    } else {
+      regBadge.textContent = 'NON-IRAN (BLOCKED)';
+      regBadge.style.background = '#f59e0b';
+      regBadge.style.color = '#000';
+    }
+  }
+
+  const sec = $('sentinelBodySection');
+  if (!sec) return;
+
+  if (!d.has_license) {
+    sec.innerHTML = `
+      <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); padding:12px; border-radius:6px; color:#ef4444; font-size:13px;">
+        ⚠️ <b>License Gate:</b> Sentinel requires a license with the <code>sentinel</code> feature unlocked. Please activate a valid key above.
+      </div>`;
+    return;
+  }
+
+  if (!d.is_iran) {
+    sec.innerHTML = `
+      <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); padding:12px; border-radius:6px; color:#f59e0b; font-size:13px;">
+        🛡️ <b>Locality Policy:</b> Sentinel monitors nodes from inside Iran and can only be deployed on confirmed Iran servers.
+      </div>`;
+    return;
+  }
+
+  if (!d.installed) {
+    sec.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background:rgba(255,255,255,0.02); padding:14px; border-radius:6px; border:1px dashed var(--ln);">
+        <div>
+          <div style="font-size:13px; font-weight:600; color:var(--tx);">Sentinel is ready to install on this Iran server.</div>
+          <div style="font-size:12px; color:var(--mu); margin-top:2px;">A random secure port (30000–39999) will be assigned automatically.</div>
+        </div>
+        <button class="hashem-btn hashem-btn-primary" id="btnInstallSentinel">⚡ Install Sentinel Addon</button>
+      </div>`;
+    const btn = $('btnInstallSentinel');
+    if (btn) btn.onclick = installSentinelClick;
+  } else {
+    const isRunning = d.running;
+    sec.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background:rgba(14,165,233,0.06); padding:12px; border-radius:6px; border:1px solid rgba(14,165,233,0.2);">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="badge" style="background:${isRunning ? '#10b981' : '#ef4444'}; color:#fff; font-size:10px; font-weight:700;">${isRunning ? 'ACTIVE / RUNNING' : 'STOPPED'}</span>
+              <span style="font-size:13px; font-weight:600;">Port: <code>${d.port}</code></span>
+            </div>
+            <div style="font-size:12px; color:var(--mu); margin-top:4px;">Endpoint: <code>${d.path || '/'}</code></div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="hashem-btn hashem-btn-primary" id="btnOpenSentinel">🔗 Open Sentinel (New Tab)</button>
+            <button class="hashem-btn hashem-btn-secondary" id="btnRestartSentinel">Restart</button>
+            <button class="hashem-btn hashem-btn-danger" id="btnUninstallSentinel">Uninstall</button>
+          </div>
+        </div>
+      </div>`;
+
+    const openBtn = $('btnOpenSentinel');
+    if (openBtn) openBtn.onclick = () => window.open(d.url, '_blank');
+    const rstBtn = $('btnRestartSentinel');
+    if (rstBtn) rstBtn.onclick = () => controlSentinelAction('restart');
+    const unBtn = $('btnUninstallSentinel');
+    if (unBtn) unBtn.onclick = () => controlSentinelAction('uninstall');
+  }
+}
+
+async function installSentinelClick() {
+  const btn = $('btnInstallSentinel');
+  if (btn) { btn.disabled = true; btn.textContent = 'Installing… (configuring core & random port)'; }
+  try {
+    const r = await api('/api/sentinel', { action: 'install' });
+    toastMsg('ok', r.message || 'Sentinel installed successfully!');
+    loadSentinelState();
+  } catch (err) {
+    toastMsg('err', 'Failed to install Sentinel: ' + (err.message || err));
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Install Sentinel Addon'; }
+  }
+}
+
+async function controlSentinelAction(action) {
+  if (action === 'uninstall') {
+    if (!await entConfirm('Uninstall Sentinel', 'Disable and remove the Sentinel monitor service?', 'Uninstall')) return;
+  }
+  try {
+    const r = await api('/api/sentinel', { action });
+    toastMsg('ok', r.message || `Sentinel ${action} executed`);
+    loadSentinelState();
+  } catch (err) {
+    toastMsg('err', `Sentinel ${action} failed: ` + (err.message || err));
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const navBtn = $('sentinelNav');
+  if (navBtn) {
+    navBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (_sentinelData && _sentinelData.running && _sentinelData.url) {
+        window.open(_sentinelData.url, '_blank');
+      } else {
+        if (typeof window.switchTab === 'function') {
+          window.switchTab('settings');
+        }
+        const card = $('sentinelAddonCard');
+        if (card) card.scrollIntoView({ behavior: 'smooth' });
+        toastMsg('info', 'Install Sentinel from Settings to open dashboard');
+      }
+    });
+  }
+});

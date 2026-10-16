@@ -93,6 +93,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/revpath/fixes` | session | `handleRevPathFixes` |
 | `POST` | `/api/revpath/run` | session + CSRF | `handleRevPathRun` |
 | `GET` | `/api/selfstats` | session | `handleSelfStats` |
+| `GET` | `/api/sentinel` | session | `handleSentinelGet` |
+| `POST` | `/api/sentinel` | session + CSRF | `handleSentinelPost` |
 | `GET` | `/api/session-settings` | session | `handleSessionSettingsGet` |
 | `POST` | `/api/session-settings` | session + CSRF | `handleSessionSettingsPost` |
 | `GET` | `/api/setup` | session | `handleSetupGet` |
@@ -132,4 +134,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 108 routes.
+Total: 110 routes.

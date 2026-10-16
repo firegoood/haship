@@ -684,6 +684,8 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/rescue", requireAuth(requireCSRF(handleRescuePost)))
 	mux.HandleFunc("GET "+base+"/api/sshfwd", requireAuth(handleSSHFwdGet))
 	mux.HandleFunc("POST "+base+"/api/sshfwd", requireAuth(requireCSRF(handleSSHFwdPost)))
+	mux.HandleFunc("GET "+base+"/api/sentinel", requireAuth(handleSentinelGet))
+	mux.HandleFunc("POST "+base+"/api/sentinel", requireAuth(requireCSRF(handleSentinelPost)))
 
 	// Iran-to-Iran Mesh Cluster endpoints
 	mux.HandleFunc("GET "+base+"/api/cluster/status", requireAuth(handleClusterStatus))
