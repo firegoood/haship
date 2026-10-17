@@ -220,4 +220,15 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
 | `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
 
-Total: 119 codes.
+## E-SENTINEL-xx — Sentinel addon
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-SENTINEL-01` | 403 | license missing the sentinel feature | Activate a license that includes the 'sentinel' feature. |
+| `E-SENTINEL-02` | 500 | sentinel install failed | The installer output is appended; check internet access for dependencies and Xray. |
+| `E-SENTINEL-03` | 500 | sentinel service failed | Check: journalctl -u sentinel -n 50 |
+| `E-SENTINEL-04` | 409 | sentinel is not installed | Install Sentinel first. |
+| `E-SENTINEL-05` | 409 | a sentinel install is already running | Wait for the current install to finish, then refresh. |
+| `E-SENTINEL-06` | 400 | bad sentinel request | Reload the page and try again. |
+
+Total: 125 codes.

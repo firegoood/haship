@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -33,7 +32,19 @@ type SentinelConfig struct {
 	Version       string `json:"version"`
 }
 
-var sentinelMu sync.Mutex
+// sentinelMu guards the locality config file. Installs take sentinelInstallMu
+// instead, so a multi-minute install never blocks GET /api/sentinel.
+var (
+	sentinelMu        sync.Mutex
+	sentinelInstallMu sync.Mutex
+)
+
+const (
+	sentinelDir         = "/opt/sentinel"
+	sentinelUnitPath    = "/etc/systemd/system/sentinel.service"
+	sentinelInstallTime = 15 * time.Minute
+	sentinelStartWait   = 25 * time.Second
+)
 
 // CheckSentinelEligibility validates that the license has "sentinel" feature.
 // Region blocking is removed so Sentinel works smoothly anywhere.
@@ -69,7 +80,84 @@ func PickRandomSentinelPort(minPort, maxPort int) (int, error) {
 }
 
 func sentinelCredentialsPath() string {
-	return "/opt/sentinel/credentials.txt"
+	return filepath.Join(sentinelDir, "credentials.txt")
+}
+
+// sentinelInstalled reports whether the systemd unit exists. Uninstall removes
+// only the unit and keeps /opt/sentinel (database, credentials), so file
+// presence alone does not mean installed.
+func sentinelInstalled() bool {
+	st, err := os.Stat(sentinelUnitPath)
+	return err == nil && !st.IsDir()
+}
+
+// readSentinelCredentials parses credentials.txt written by app.py.
+func readSentinelCredentials() (port int, path, password string, ok bool) {
+	data, err := os.ReadFile(sentinelCredentialsPath())
+	if err != nil {
+		return 0, "", "", false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(parts[0])) {
+		case "port":
+			fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &port)
+		case "path":
+			path = strings.TrimSpace(parts[1])
+		case "password":
+			password = strings.TrimSpace(parts[1])
+		}
+	}
+	return port, path, password, true
+}
+
+func sentinelPortOpen(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 400*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// waitSentinelPort polls until the panel port reaches the wanted state. The
+// port is re-read each round because a fresh install writes credentials.txt
+// only once app.py has started.
+func waitSentinelPort(want bool, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		port, _, _, _ := readSentinelCredentials()
+		if port > 0 && sentinelPortOpen(port) == want {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// sentinelJournalTail returns the last service log lines for error messages.
+func sentinelJournalTail() string {
+	out, err := runCmdTimeout(5*time.Second, "journalctl", "-u", "sentinel.service", "-n", "25", "--no-pager")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func sentinelSystemctl(action string) error {
+	out, err := runCmdTimeout(30*time.Second, "systemctl", action, "sentinel.service")
+	if err != nil {
+		return fmt.Errorf("systemctl %s sentinel: %v %s", action, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func sentinelConfigPath() string {
@@ -131,24 +219,22 @@ func extractEmbeddedSentinel(destDir string) error {
 	return nil
 }
 
+// ensureSentinelInstallScript unpacks the embedded bundle over /opt/sentinel on
+// every install so a reinstall also upgrades stale code. The bundle carries no
+// database or credentials, so user data is preserved.
 func ensureSentinelInstallScript() (string, error) {
-	candidates := []string{
-		"/root/projects/sentinel/install.sh",
-		"/opt/sentinel/install.sh",
+	p := filepath.Join(sentinelDir, "install.sh")
+	if err := os.MkdirAll(sentinelDir, 0755); err != nil {
+		return "", fmt.Errorf("cannot create %s: %v", sentinelDir, err)
 	}
-	for _, p := range candidates {
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+	if err := extractEmbeddedSentinel(sentinelDir); err != nil {
+		// Fall back to files left by an earlier install.
+		if st, statErr := os.Stat(p); statErr == nil && !st.IsDir() {
 			_ = os.Chmod(p, 0755)
 			return p, nil
 		}
-	}
-
-	_ = os.MkdirAll("/opt/sentinel", 0755)
-	if err := extractEmbeddedSentinel("/opt/sentinel"); err != nil {
 		return "", fmt.Errorf("failed unpacking embedded sentinel files: %v", err)
 	}
-
-	p := "/opt/sentinel/install.sh"
 	if st, err := os.Stat(p); err == nil && !st.IsDir() {
 		_ = os.Chmod(p, 0755)
 		return p, nil
@@ -158,12 +244,12 @@ func ensureSentinelInstallScript() (string, error) {
 
 // GetSentinelStatus gathers current Sentinel state and credentials.
 func GetSentinelStatus() SentinelConfig {
-	sentinelMu.Lock()
-	defer sentinelMu.Unlock()
-
 	st := localStatus()
 	isIran := true
-	if pData, err := os.ReadFile(sentinelConfigPath()); err == nil {
+	sentinelMu.Lock()
+	pData, err := os.ReadFile(sentinelConfigPath())
+	sentinelMu.Unlock()
+	if err == nil {
 		var pState struct {
 			IsIran *bool `json:"is_iran"`
 		}
@@ -183,36 +269,17 @@ func GetSentinelStatus() SentinelConfig {
 		Version:       "1.2.0",
 	}
 
-	credsPath := sentinelCredentialsPath()
-	if data, err := os.ReadFile(credsPath); err == nil {
-		cfg.Installed = true
-		lines := strings.Split(string(data), "\n")
-		for _, line := range lines {
-			parts := strings.SplitN(strings.TrimSpace(line), "=", 2)
-			if len(parts) == 2 {
-				switch strings.ToLower(parts[0]) {
-				case "port":
-					fmt.Sscanf(parts[1], "%d", &cfg.Port)
-				case "path":
-					cfg.Path = parts[1]
-				case "password":
-					cfg.Password = parts[1]
-				}
-			}
-		}
-	} else if _, err := os.Stat("/opt/sentinel/app.py"); err == nil {
-		cfg.Installed = true
+	cfg.Installed = sentinelInstalled()
+	if !cfg.Installed {
+		return cfg
 	}
+	cfg.Port, cfg.Path, cfg.Password, _ = readSentinelCredentials()
 
 	if cfg.Port > 0 {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.Port), 400*time.Millisecond)
-		if err == nil {
-			cfg.Running = true
-			conn.Close()
-		}
-		pubHost := detectPublicIP()
+		cfg.Running = sentinelPortOpen(cfg.Port)
+		pubHost := st.LocalPub
 		if pubHost == "" {
-			pubHost = st.LocalPub
+			pubHost = detectPublicIPCached()
 		}
 		if pubHost == "" {
 			pubHost = "127.0.0.1"
@@ -237,7 +304,7 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 		IsIran *bool  `json:"is_iran"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeAPIError(w, r, "E-REQ-01", "invalid json body")
+		writeAPIError(w, r, "E-SENTINEL-06", "invalid json body")
 		return
 	}
 
@@ -256,7 +323,7 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 
 	case "set_locality":
 		if body.IsIran == nil {
-			writeAPIError(w, r, "E-REQ-02", "missing is_iran boolean field")
+			writeAPIError(w, r, "E-SENTINEL-06", "missing is_iran boolean field")
 			return
 		}
 		sentinelMu.Lock()
@@ -266,7 +333,7 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 		})
 		if err := os.WriteFile(sentinelConfigPath(), pData, 0600); err != nil {
 			sentinelMu.Unlock()
-			writeAPIError(w, r, "E-FILE-01", fmt.Sprintf("failed writing sentinel config: %v", err))
+			writeAPIError(w, r, "E-SENTINEL-03", fmt.Sprintf("failed writing sentinel config: %v", err))
 			return
 		}
 		sentinelMu.Unlock()
@@ -278,68 +345,78 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "install":
-		sentinelMu.Lock()
+		if !sentinelInstallMu.TryLock() {
+			writeAPIError(w, r, "E-SENTINEL-05", "")
+			return
+		}
+		defer sentinelInstallMu.Unlock()
 
 		port, err := PickRandomSentinelPort(30000, 39999)
 		if err != nil {
-			sentinelMu.Unlock()
-			writeAPIError(w, r, "E-PORT-01", fmt.Sprintf("failed allocating random port: %v", err))
+			writeAPIError(w, r, "E-SENTINEL-02", fmt.Sprintf("failed allocating random port: %v", err))
 			return
 		}
 
 		installScript, err := ensureSentinelInstallScript()
 		if err != nil {
-			sentinelMu.Unlock()
-			writeAPIError(w, r, "E-INSTALL-01", fmt.Sprintf("Sentinel setup failed: %v", err))
+			writeAPIError(w, r, "E-SENTINEL-02", fmt.Sprintf("Sentinel setup failed: %v", err))
 			return
 		}
 
-		cmd := exec.Command("bash", installScript, "--yes", "--port", fmt.Sprintf("%d", port))
-		out, err := cmd.CombinedOutput()
+		// The installer only honors --port on the first install; an existing
+		// database keeps its port, so the reported port is read back below.
+		out, err := runCmdTimeout(sentinelInstallTime, "bash", installScript, "--yes", "--port", fmt.Sprintf("%d", port))
 		if err != nil {
-			sentinelMu.Unlock()
-			writeAPIError(w, r, "E-INSTALL-01", fmt.Sprintf("Sentinel install failed: %s", string(out)))
+			writeAPIError(w, r, "E-SENTINEL-02", fmt.Sprintf("Sentinel install failed: %v\n%s", err, trimLen(strings.TrimSpace(string(out)), 2000)))
 			return
 		}
 
-		// Wait up to 5s for credentials.txt to be created by app.py
-		credsPath := sentinelCredentialsPath()
-		for i := 0; i < 10; i++ {
-			if _, err := os.Stat(credsPath); err == nil {
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
+		if !waitSentinelPort(true, sentinelStartWait) {
+			writeAPIError(w, r, "E-SENTINEL-03", "Sentinel was installed but its web panel did not start listening.\n"+sentinelJournalTail())
+			return
 		}
-		sentinelMu.Unlock()
 
+		stNow := GetSentinelStatus()
 		writeJSON(w, map[string]any{
 			"status":  "ok",
-			"message": fmt.Sprintf("Sentinel successfully installed on random port %d", port),
+			"message": fmt.Sprintf("Sentinel successfully installed on port %d", stNow.Port),
+			"data":    stNow,
+		})
+
+	case "start", "stop", "restart":
+		if !sentinelInstalled() {
+			writeAPIError(w, r, "E-SENTINEL-04", "")
+			return
+		}
+		if err := sentinelSystemctl(act); err != nil {
+			writeAPIError(w, r, "E-SENTINEL-03", err.Error())
+			return
+		}
+		want := act != "stop"
+		if !waitSentinelPort(want, 10*time.Second) && want {
+			writeAPIError(w, r, "E-SENTINEL-03", "Sentinel service did not come up.\n"+sentinelJournalTail())
+			return
+		}
+		writeJSON(w, map[string]any{"status": "ok", "message": "Sentinel " + act + " done", "data": GetSentinelStatus()})
+
+	case "uninstall":
+		if !sentinelInstalled() {
+			writeAPIError(w, r, "E-SENTINEL-04", "")
+			return
+		}
+		_, _ = runCmdTimeout(30*time.Second, "systemctl", "disable", "--now", "sentinel.service")
+		if err := os.Remove(sentinelUnitPath); err != nil && !os.IsNotExist(err) {
+			writeAPIError(w, r, "E-SENTINEL-03", fmt.Sprintf("cannot remove %s: %v", sentinelUnitPath, err))
+			return
+		}
+		_, _ = runCmdTimeout(30*time.Second, "systemctl", "daemon-reload")
+		writeJSON(w, map[string]any{
+			"status":  "ok",
+			"message": "Sentinel uninstalled. Its data is kept in " + sentinelDir + " and is reused on reinstall.",
 			"data":    GetSentinelStatus(),
 		})
 
-	case "start":
-		_ = exec.Command("systemctl", "start", "sentinel.service").Run()
-		time.Sleep(400 * time.Millisecond)
-		writeJSON(w, map[string]any{"status": "ok", "data": GetSentinelStatus()})
-
-	case "stop":
-		_ = exec.Command("systemctl", "stop", "sentinel.service").Run()
-		time.Sleep(200 * time.Millisecond)
-		writeJSON(w, map[string]any{"status": "ok", "data": GetSentinelStatus()})
-
-	case "restart":
-		_ = exec.Command("systemctl", "restart", "sentinel.service").Run()
-		time.Sleep(500 * time.Millisecond)
-		writeJSON(w, map[string]any{"status": "ok", "data": GetSentinelStatus()})
-
-	case "uninstall":
-		_ = exec.Command("systemctl", "disable", "--now", "sentinel.service").Run()
-		_ = os.Remove("/etc/systemd/system/sentinel.service")
-		_ = exec.Command("systemctl", "daemon-reload").Run()
-		writeJSON(w, map[string]any{"status": "ok", "message": "Sentinel uninstalled successfully"})
-
 	default:
-		writeAPIError(w, r, "E-ACT-01", fmt.Sprintf("unsupported action %q", act))
+		writeAPIError(w, r, "E-SENTINEL-06", fmt.Sprintf("unsupported action %q", act))
 	}
 }

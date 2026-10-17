@@ -91,6 +91,13 @@ var errCatalog = map[string]errInfo{
 	"E-LIC-03": {400, "license key signature invalid", "This license token has been tampered with or issued by an unrecognized authority."},
 	"E-LIC-04": {400, "license key expired", "This license has expired. Contact your provider for renewal."},
 	"E-LIC-05": {400, "license machine id mismatch", "This license is bound to a different server. Machine hash does not match."},
+	// sentinel addon
+	"E-SENTINEL-01": {403, "license missing the sentinel feature", "Activate a license that includes the 'sentinel' feature."},
+	"E-SENTINEL-02": {500, "sentinel install failed", "The installer output is appended; check internet access for dependencies and Xray."},
+	"E-SENTINEL-03": {500, "sentinel service failed", "Check: journalctl -u sentinel -n 50"},
+	"E-SENTINEL-04": {409, "sentinel is not installed", "Install Sentinel first."},
+	"E-SENTINEL-05": {409, "a sentinel install is already running", "Wait for the current install to finish, then refresh."},
+	"E-SENTINEL-06": {400, "bad sentinel request", "Reload the page and try again."},
 	// log diagnostics (annotation only, also reused by status hints)
 	"E-GRE-01":     {0, "GRE interface missing / down", "Tunnel setup did not create it, or it was deleted — reinstall that peer."},
 	"E-GRE-02":     {0, "GRE ping failed (100% loss / unreachable)", "Peers cannot reach each other: firewall, wrong public IP, or GRE blocked."},

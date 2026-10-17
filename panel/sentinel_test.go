@@ -1,7 +1,10 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +72,70 @@ func TestSentinelEligibility_LicenseGating(t *testing.T) {
 	okWildcard, _ := CheckSentinelEligibility("iran (backhaul)", "IR")
 	if !okWildcard {
 		t.Errorf("expected wildcard license to be eligible")
+	}
+}
+
+// The panel passes --port to the bundled installer; the installer and app.py
+// must actually honor it, otherwise the reported port is wrong.
+func TestSentinel_BundleHonorsPort(t *testing.T) {
+	dir := t.TempDir()
+	if err := extractEmbeddedSentinel(dir); err != nil {
+		t.Fatalf("extract bundle: %v", err)
+	}
+	inst, err := os.ReadFile(filepath.Join(dir, "install.sh"))
+	if err != nil {
+		t.Fatalf("install.sh missing from bundle: %v", err)
+	}
+	if !strings.Contains(string(inst), "--port)") || !strings.Contains(string(inst), "SENTINEL_PORT") {
+		t.Errorf("install.sh does not handle --port / SENTINEL_PORT")
+	}
+	app, err := os.ReadFile(filepath.Join(dir, "app.py"))
+	if err != nil {
+		t.Fatalf("app.py missing from bundle: %v", err)
+	}
+	if !strings.Contains(string(app), `os.getenv("SENTINEL_PORT"`) {
+		t.Errorf("app.py does not read SENTINEL_PORT")
+	}
+	if strings.Contains(string(inst), "\r") || strings.Contains(string(app), "\r") {
+		t.Errorf("bundle scripts must use LF line endings")
+	}
+}
+
+func TestSentinel_ConcurrentInstallRejected(t *testing.T) {
+	activeLicenseMu.Lock()
+	activeLicense = &LicensePayload{Customer: "t", Features: []string{"sentinel"}, ExpiresAt: time.Now().Add(time.Hour).Unix()}
+	licenseCheckedAt = time.Now()
+	activeLicenseMu.Unlock()
+
+	sentinelInstallMu.Lock()
+	defer sentinelInstallMu.Unlock()
+
+	rr := httptest.NewRecorder()
+	handleSentinelPost(rr, httptest.NewRequest("POST", "/api/sentinel", strings.NewReader(`{"action":"install"}`)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 while an install is running, got %d", rr.Code)
+	}
+
+	// Status must not block behind the install lock.
+	done := make(chan struct{})
+	go func() { GetSentinelStatus(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("GetSentinelStatus blocked while install lock was held")
+	}
+}
+
+func TestSentinel_UnlicensedInstallIs403(t *testing.T) {
+	activeLicenseMu.Lock()
+	activeLicense = nil
+	licenseCheckedAt = time.Now()
+	activeLicenseMu.Unlock()
+
+	rr := httptest.NewRecorder()
+	handleSentinelPost(rr, httptest.NewRequest("POST", "/api/sentinel", strings.NewReader(`{"action":"install"}`)))
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "E-SENTINEL-01") {
+		t.Fatalf("expected 403 E-SENTINEL-01, got %d %s", rr.Code, rr.Body.String())
 	}
 }
 

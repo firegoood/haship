@@ -7881,6 +7881,15 @@ window.revertClusterFailover = revertClusterFailover;
 // ==========================================
 let _sentinelData = null;
 
+// The browser already reached this server by window.location.hostname, which is
+// more reliable than the IP the backend detects (often a private/NAT address).
+function sentinelDisplayUrl(d) {
+  if (!d || !d.port) return '';
+  const host = window.location.hostname || '127.0.0.1';
+  const h = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `http://${h}:${d.port}${d.path || '/'}`;
+}
+
 async function loadSentinelState() {
   try {
     const d = await api('/api/sentinel');
@@ -7969,7 +7978,7 @@ function renderSentinel(d) {
       </div>`;
 
     const openBtn = $('btnOpenSentinel');
-    if (openBtn) openBtn.onclick = () => window.open(d.url, '_blank');
+    if (openBtn) openBtn.onclick = () => { const u = sentinelDisplayUrl(d); if (u) window.open(u, '_blank'); };
     const rstBtn = $('btnRestartSentinel');
     if (rstBtn) rstBtn.onclick = () => controlSentinelAction('restart');
     const unBtn = $('btnUninstallSentinel');
@@ -7992,15 +8001,16 @@ async function installSentinelClick() {
 
 async function controlSentinelAction(action) {
   if (action === 'uninstall') {
-    if (!await entConfirm('Uninstall Sentinel', 'Disable and remove the Sentinel monitor service?', 'Uninstall')) return;
+    if (!await entConfirm('Uninstall Sentinel', 'Stop and remove the Sentinel service? Its data (configs, password) stays in /opt/sentinel and is reused if you install again.', 'Uninstall')) return;
   }
   try {
     const r = await api('/api/sentinel', { action });
     toastMsg('ok', r.message || `Sentinel ${action} executed`);
-    loadSentinelState();
   } catch (err) {
     toastMsg('err', `Sentinel ${action} failed: ` + (err.message || err));
   }
+  await loadSentinelState();
+  renderSentinelModal();
 }
 
 // Sentinel Modal & Installation Flow
@@ -8076,14 +8086,8 @@ function renderSentinelModal() {
         bEl.style.background = d.running ? '#10b981' : '#ef4444';
       }
 
-      // Compute display URL
-      let displayUrl = d.url;
-      if (!displayUrl || displayUrl.includes('127.0.0.1')) {
-        const host = window.location.hostname || '127.0.0.1';
-        displayUrl = `http://${host}:${d.port || 32836}${d.path || '/'}`;
-      }
       const urlInp = $('sentinelModalUrl');
-      if (urlInp) urlInp.value = displayUrl;
+      if (urlInp) urlInp.value = sentinelDisplayUrl(d);
 
       const passInp = $('sentinelModalPass');
       if (passInp && d.password) {
@@ -8116,7 +8120,11 @@ function copySentinelPassClick() {
 
 function openSentinelDashboardClick() {
   const urlInp = $('sentinelModalUrl');
-  const targetUrl = (urlInp && urlInp.value) ? urlInp.value : (_sentinelData && _sentinelData.url ? _sentinelData.url : 'http://' + window.location.hostname + ':32836/');
+  const targetUrl = (urlInp && urlInp.value) ? urlInp.value : sentinelDisplayUrl(_sentinelData);
+  if (!targetUrl) {
+    toastMsg('err', 'آدرس سنتینال هنوز آماده نیست؛ چند ثانیه بعد دوباره امتحان کنید.');
+    return;
+  }
   window.open(targetUrl, '_blank');
 }
 
