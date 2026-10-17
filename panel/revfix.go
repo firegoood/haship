@@ -360,13 +360,23 @@ func sysctlPersist(key, value string) (rollback func(), err error) {
 		return nil, err
 	}
 	conf := revpathSysctlConf
+	prev, prevErr := os.ReadFile(conf)
+	// The rollback must undo the persisted line too, or the reverted value
+	// comes back on the next reboot.
 	rb := func() {
 		_, _ = runCmdTimeout(5*time.Second, "sysctl", "-w", key+"="+oldVal)
+		if oldVal == value {
+			return
+		}
+		if prevErr != nil {
+			_ = os.Remove(conf)
+		} else {
+			_ = os.WriteFile(conf, prev, 0644)
+		}
 	}
 	if oldVal == value {
 		return rb, nil
 	}
-	prev, _ := os.ReadFile(conf)
 	lines := []string{}
 	for _, l := range strings.Split(string(prev), "\n") {
 		if strings.TrimSpace(l) == "" || strings.HasPrefix(strings.TrimSpace(l), "#") {
@@ -465,15 +475,21 @@ func fixPlan(p peerRecord, snap LocalSnapshot, d RevPathDiagnosis) []fixAction {
 		}}
 	case VerdictFwInput:
 		return []fixAction{{
-			desc: "allow proto 47 + ICMP + " + p.GreIf + " in " + revChain,
+			desc: "allow proto 47 + ICMP from " + fwSourceDesc(p) + " + " + p.GreIf + " in " + revChain,
 			apply: func() (func(), error) {
 				if err := chainEnsure(); err != nil {
 					return nil, err
 				}
 				added := [][]string{}
+				// Only from the peer: these rules sit at the top of INPUT,
+				// so an unrestricted ACCEPT would open GRE/ICMP to everyone.
+				src := []string{}
+				if net.ParseIP(p.RemotePub) != nil {
+					src = []string{"-s", p.RemotePub}
+				}
 				rules := [][]string{
-					{"-p", "47", "-j", "ACCEPT"},
-					{"-p", "icmp", "-j", "ACCEPT"},
+					append(append([]string{}, src...), "-p", "47", "-j", "ACCEPT"),
+					append(append([]string{}, src...), "-p", "icmp", "-j", "ACCEPT"),
 				}
 				if p.GreIf != "" {
 					rules = append(rules, []string{"-i", p.GreIf, "-j", "ACCEPT"})
@@ -550,13 +566,46 @@ type fixAction struct {
 	apply func() (rollback func(), err error)
 }
 
+// fwSourceDesc names who the FW_INPUT fix opens proto 47/ICMP to.
+func fwSourceDesc(p peerRecord) string {
+	if net.ParseIP(p.RemotePub) != nil {
+		return p.RemotePub
+	}
+	return "any (peer public IP unknown)"
+}
+
 // worseAfter reports whether the re-probe is worse than before: a verdict
-// that moved away from HEALTHY, or (same verdict class) still failing.
+// that moved away from HEALTHY.
 func worseAfter(before, after RevPathDiagnosis) bool {
 	if before.Verdict == VerdictHealthy && after.Verdict != VerdictHealthy {
 		return true
 	}
 	return false
+}
+
+// failedLayers counts measured probe failures; -1 when nothing was measured.
+func failedLayers(m ProbeMatrix) int {
+	if len(m.Results) == 0 {
+		return -1
+	}
+	n := 0
+	for _, r := range m.Results {
+		if !r.OK {
+			n++
+		}
+	}
+	return n
+}
+
+// fixMadeWorse decides the rollback. A fix only runs when the verdict is not
+// HEALTHY, so worseAfter alone never fired; comparing how many probe layers
+// fail before and after catches a fix that broke more than it repaired.
+func fixMadeWorse(before RevPathDiagnosis, beforeFails int, after *revPathEntry) bool {
+	if worseAfter(before, after.Diagnosis) {
+		return true
+	}
+	afterFails := failedLayers(after.Matrix)
+	return beforeFails >= 0 && afterFails > beforeFails
 }
 
 // applyFix runs the plan for one peer: dry-run builds the plan only;
@@ -579,6 +628,13 @@ func applyFix(p peerRecord, snap LocalSnapshot, d RevPathDiagnosis, auto bool, d
 		steps = append(steps, FixStep{At: now, Verdict: d.Verdict, Action: "rate-limited", Detail: "max 1 fix / peer / 10 min, 3 / hour; skipped", OK: false})
 		return steps, d
 	}
+	// Failing probe layers in the diagnosis this fix responds to.
+	beforeFails := -1
+	revPathMu.Lock()
+	if e := revPathCache[p.ID]; e != nil {
+		beforeFails = failedLayers(e.Matrix)
+	}
+	revPathMu.Unlock()
 	type applied struct {
 		desc string
 		rb   func()
@@ -614,7 +670,7 @@ func applyFix(p peerRecord, snap LocalSnapshot, d RevPathDiagnosis, auto bool, d
 		revPathCache[p.ID] = after
 		revPathMu.Unlock()
 	}
-	if worseAfter(d, after.Diagnosis) {
+	if fixMadeWorse(d, beforeFails, after) {
 		rollbackAll()
 		steps = append(steps, FixStep{At: now, Verdict: d.Verdict, Action: "rollback", Detail: "re-probe worse (" + string(after.Diagnosis.Verdict) + "); reverted", OK: true})
 		for _, s := range steps {

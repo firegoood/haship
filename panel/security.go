@@ -192,21 +192,22 @@ func CleanHost(input string) string {
 	return input
 }
 
-// IsTrustedProxy checks whether a given IP address belongs to TRUSTED_PROXY_IPS or is local loopback.
+// IsTrustedProxy checks whether a given IP address belongs to TRUSTED_PROXY_IPS.
+//
+// Loopback is NOT trusted implicitly: tunnels (frps, backhaul, tls-proxy) also
+// deliver outside clients from 127.0.0.1, and trusting it let anyone set
+// X-Forwarded-For to dodge the per-IP login lockout and the terminal allowlist.
+// A local nginx/Caddy needs TRUSTED_PROXY_IPS=127.0.0.1 (see the generated
+// reverse-proxy config).
 func IsTrustedProxy(ipStr string) bool {
 	ipStr = strings.TrimSpace(ipStr)
 	if ipStr == "" {
 		return false
 	}
-
-	// Always trust local loopback (reverse proxies like Nginx or Caddy on same machine)
-	if ipStr == "127.0.0.1" || ipStr == "::1" || strings.EqualFold(ipStr, "localhost") {
-		return true
+	if strings.EqualFold(ipStr, "localhost") {
+		ipStr = "127.0.0.1"
 	}
 	parsedIP := net.ParseIP(ipStr)
-	if parsedIP != nil && parsedIP.IsLoopback() {
-		return true
-	}
 
 	raw := os.Getenv("TRUSTED_PROXY_IPS")
 	if raw == "" {

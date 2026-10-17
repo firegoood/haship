@@ -5604,6 +5604,28 @@ cli_panel_limits() { # [--apply] [--mem MB]: print (default) or apply panel limi
     echo -e "${GREEN}[✔️] Panel limits applied (RAM ${mem}MB -> ${high}/${max}).${NC}"
 }
 
+# Release integrity (H12): checksums.txt is fetched from GitHub only, never via
+# a mirror (a mirror could serve a forged binary and a matching manifest).
+# Prints the manifest; $1 = release tag, empty for the latest release.
+release_manifest_fetch() {
+    local base="https://github.com/pdnczone/hashem-panel/releases/latest/download" n
+    [[ -n "$1" ]] && base="https://github.com/pdnczone/hashem-panel/releases/download/$1"
+    for n in checksums.txt SHA256SUMS; do
+        curl -fsSL --connect-timeout 8 --max-time 30 "${base}/${n}" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+# release_verify FILE ASSET MANIFEST: 0 = match, 1 = mismatch, 2 = no entry.
+release_verify() {
+    local want got
+    want=$(printf '%s\n' "$3" | awk -v a="$2" '{n=$2; sub(/^\*/, "", n); if (n == a) {print tolower($1); exit}}')
+    [[ -n "$want" ]] || return 2
+    got=$(sha256sum "$1" 2>/dev/null | awk '{print tolower($1)}')
+    [[ "$got" == "$want" ]] && return 0
+    return 1
+}
+
 install_panel() {
     echo -e "${CYAN}[*] Installing Hashem web panel...${NC}"
     ensure_doctor_tools
@@ -5653,22 +5675,54 @@ install_panel() {
     [[ -z "$HASHEMSH_URL" ]] && HASHEMSH_URL="https://github.com/pdnczone/hashem-panel/releases/latest/download/hashem.sh"
     [[ -z "$HASHEM_URL" ]] && HASHEM_URL="https://github.com/pdnczone/hashem-panel/releases/latest/download/hashem"
 
+    # Everything downloaded below may come through a third-party mirror, so
+    # it is checked against the release's checksums.txt from GitHub itself.
+    # Without a manifest nothing is installed, unless the admin opts out with
+    # GRE_PANEL_ALLOW_UNVERIFIED_UPDATE=1 (same switch as the panel's updater).
+    local MANIFEST="" ALLOW_UNVERIFIED="${GRE_PANEL_ALLOW_UNVERIFIED_UPDATE:-0}" VRC
+    MANIFEST=$(release_manifest_fetch "$UPD_TAG") || MANIFEST=""
+    if [[ -z "$MANIFEST" && "$ALLOW_UNVERIFIED" != "1" ]]; then
+        echo -e "${RED}[!] Cannot fetch the release checksums from github.com — refusing to install unverified files.${NC}"
+        echo -e "${YELLOW}    Retry when GitHub is reachable, or set GRE_PANEL_ALLOW_UNVERIFIED_UPDATE=1 to accept the risk.${NC}"
+        rm -rf "$TMP_PANEL"
+        return 1
+    fi
+    # verify_asset FILE ASSET: 0 = ok to install, 1 = reject
+    verify_asset() {
+        [[ -n "$MANIFEST" ]] || return 0   # only reached with the explicit opt-out
+        release_verify "$1" "$2" "$MANIFEST"; VRC=$?
+        case "$VRC" in
+            0) return 0 ;;
+            2) [[ "$ALLOW_UNVERIFIED" == "1" ]] && return 0
+               echo -e "${RED}[!] No checksum entry for $2 — not installing it.${NC}"; return 1 ;;
+            *) echo -e "${RED}[!] Checksum MISMATCH for $2 — the download was altered. Not installing it.${NC}"; return 1 ;;
+        esac
+    }
+
     echo -e "${CYAN}[*] Downloading panel binary (may take a while on slow links)...${NC}"
+    rm -f "$TMP_PANEL/gre-panel"
     if download_with_fallback "$TMP_PANEL/gre-panel" "$DL_URL" 240 && [[ -s "$TMP_PANEL/gre-panel" ]]; then
+        if ! verify_asset "$TMP_PANEL/gre-panel" "$PANEL_ASSET"; then
+            rm -rf "$TMP_PANEL"
+            return 1
+        fi
         if head -c 4 "$TMP_PANEL/gre-panel" 2>/dev/null | grep -q "ELF"; then
             DL_OK=1
-            echo -e "${GREEN}[✔️] Downloaded prebuilt panel ($(du -h "$TMP_PANEL/gre-panel" | cut -f1)).${NC}"
+            echo -e "${GREEN}[✔️] Downloaded and verified prebuilt panel ($(du -h "$TMP_PANEL/gre-panel" | cut -f1)).${NC}"
         else
             echo -e "${YELLOW}[!] Downloaded file is not a binary — falling back to source build.${NC}"
+            rm -f "$TMP_PANEL/gre-panel"
         fi
     fi
 
-    if download_with_fallback "/usr/local/bin/grepanel" "$GREPANEL_URL" 30; then
-        chmod +x /usr/local/bin/grepanel 2>/dev/null || true
+    if download_with_fallback "$TMP_PANEL/grepanel" "$GREPANEL_URL" 30 && verify_asset "$TMP_PANEL/grepanel" "grepanel"; then
+        install -m 0755 "$TMP_PANEL/grepanel" /usr/local/bin/grepanel 2>/dev/null || true
     fi
 
-    if download_with_fallback "$HASHEM_SCRIPT" "$HASHEMSH_URL" 30; then
-        chmod +x "$HASHEM_SCRIPT" 2>/dev/null || true
+    local NEW_SCRIPT=0
+    if download_with_fallback "$TMP_PANEL/hashem.sh" "$HASHEMSH_URL" 30 && verify_asset "$TMP_PANEL/hashem.sh" "hashem.sh" \
+            && bash -n "$TMP_PANEL/hashem.sh" 2>/dev/null; then
+        install -m 0755 "$TMP_PANEL/hashem.sh" "$HASHEM_SCRIPT" 2>/dev/null && NEW_SCRIPT=1
         cp "$HASHEM_SCRIPT" "$HASHEM_BIN" 2>/dev/null && chmod +x "$HASHEM_BIN" || true
         ln -sf "$HASHEM_SCRIPT" /usr/local/bin/gre.sh 2>/dev/null || true
     fi
@@ -5692,7 +5746,8 @@ install_panel() {
             apt-get update -qq || true
             apt-get install -y -qq golang-go || true
         fi
-        if ! download_with_fallback "$TMP_PANEL/panel.tgz" "https://github.com/pdnczone/hashem-panel/archive/refs/heads/main.tar.gz" 60; then
+        # The source archive has no checksum: fetch it from GitHub only.
+        if ! curl -fsSL --connect-timeout 8 --max-time 120 -o "$TMP_PANEL/panel.tgz" "https://github.com/pdnczone/hashem-panel/archive/refs/heads/main.tar.gz"; then
             echo -e "${RED}[!] Failed to download panel sources.${NC}"
             [[ -n "$TMP_SWAP" && -f "$TMP_SWAP" ]] && { swapoff "$TMP_SWAP" 2>/dev/null || true; rm -f "$TMP_SWAP" 2>/dev/null || true; }
             rm -rf "$TMP_PANEL"
@@ -5717,11 +5772,19 @@ install_panel() {
     # stop the running panel BEFORE overwriting its binary: cp over a live
     # executable fails with ETXTBSY ("Text file busy") and leaves the old
     # version in place. The restart at the end of this function brings it back.
+    # Only touch the running panel once a valid new binary exists (M4): the
+    # old order stopped it first and left it down when the build had failed.
+    if [[ ! -s "$TMP_PANEL/gre-panel" ]] || ! head -c 4 "$TMP_PANEL/gre-panel" 2>/dev/null | grep -q "ELF"; then
+        echo -e "${RED}[!] No valid panel binary was produced — keeping the running version.${NC}"
+        rm -rf "$TMP_PANEL"
+        return 1
+    fi
     if systemctl is-active --quiet gre-panel 2>/dev/null; then
         systemctl stop gre-panel 2>/dev/null || true
     fi
     if ! cp "$TMP_PANEL/gre-panel" "$PANEL_BIN"; then
-        echo -e "${RED}[!] Failed to install panel binary — keeping the running version.${NC}"
+        echo -e "${RED}[!] Failed to install panel binary — restarting the previous version.${NC}"
+        systemctl start gre-panel 2>/dev/null || true
         rm -rf "$TMP_PANEL"
         return 1
     fi
@@ -5729,7 +5792,16 @@ install_panel() {
     rm -rf "$TMP_PANEL"
     # /usr/local/bin/hashem IS this script now (no shortcut file anymore):
     # install a copy plus a legacy gre.sh symlink so old muscle memory works.
-    cp "$0" "$HASHEM_BIN" 2>/dev/null || cp ./hashem.sh "$HASHEM_BIN" 2>/dev/null || cp "$SRC/hashem.sh" "$HASHEM_BIN" 2>/dev/null || true
+    # Only when no verified release script was installed above: copying "$0"
+    # over it put the old (running) script back, and with $0 = hashem it
+    # copied ./hashem.sh from whatever the current directory was (M4).
+    if [[ "$NEW_SCRIPT" -ne 1 ]]; then
+        if [[ -n "${SRC:-}" && -f "$SRC/../hashem.sh" ]]; then
+            cp "$SRC/../hashem.sh" "$HASHEM_BIN" 2>/dev/null || true
+        elif [[ -f "$0" && "$(readlink -f "$0")" != "$(readlink -f "$HASHEM_BIN")" ]]; then
+            cp "$0" "$HASHEM_BIN" 2>/dev/null || true
+        fi
+    fi
     chmod +x "$HASHEM_BIN" 2>/dev/null || true
     ln -sf "$HASHEM_SCRIPT" /usr/local/bin/gre.sh 2>/dev/null || true
 

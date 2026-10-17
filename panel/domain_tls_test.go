@@ -39,17 +39,27 @@ func TestCleanHost(t *testing.T) {
 	}
 }
 
-// Test 2: IsTrustedProxy auto-trusts loopback (127.0.0.1, ::1, localhost)
+// Test 2: loopback is trusted only when TRUSTED_PROXY_IPS lists it (H11):
+// tunnels deliver outside clients from 127.0.0.1 too.
 func TestTrustedProxyLoopback(t *testing.T) {
-	// Loopback must always be trusted by default
-	if !IsTrustedProxy("127.0.0.1") {
-		t.Errorf("expected 127.0.0.1 to be trusted proxy by default")
+	t.Setenv("TRUSTED_PROXY_IPS", "")
+	for _, ip := range []string{"127.0.0.1", "::1", "localhost"} {
+		if IsTrustedProxy(ip) {
+			t.Errorf("%s must not be trusted without TRUSTED_PROXY_IPS", ip)
+		}
 	}
-	if !IsTrustedProxy("::1") {
-		t.Errorf("expected ::1 to be trusted proxy by default")
+	spoof := httptest.NewRequest("GET", "/test", nil)
+	spoof.RemoteAddr = "127.0.0.1:54321"
+	spoof.Header.Set("X-Forwarded-For", "203.0.113.195")
+	if got := ClientIP(spoof); got != "127.0.0.1" {
+		t.Errorf("X-Forwarded-For via untrusted loopback honoured: %q", got)
 	}
-	if !IsTrustedProxy("localhost") {
-		t.Errorf("expected localhost to be trusted proxy by default")
+
+	t.Setenv("TRUSTED_PROXY_IPS", "127.0.0.1, ::1")
+	for _, ip := range []string{"127.0.0.1", "::1", "localhost"} {
+		if !IsTrustedProxy(ip) {
+			t.Errorf("%s listed in TRUSTED_PROXY_IPS but not trusted", ip)
+		}
 	}
 
 	// External untrusted IP should NOT be trusted by default
@@ -99,6 +109,7 @@ func TestWebSocketCheckOrigin(t *testing.T) {
 	}
 
 	// 3. Reverse proxy match: proxy forwards X-Forwarded-Host from 127.0.0.1
+	t.Setenv("TRUSTED_PROXY_IPS", "127.0.0.1")
 	req3 := httptest.NewRequest("GET", "/api/term/ws", nil)
 	req3.Host = "127.0.0.1:7777"
 	req3.Header.Set("Origin", "https://panel.example.com")

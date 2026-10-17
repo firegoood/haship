@@ -3,6 +3,11 @@ const at = p => BASE + p;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const escapeHtml = esc;
+// jsArg renders a value as a JS string literal for inline handlers
+// (onclick="fn(${jsArg(x)})"). esc() alone is not enough there: the browser
+// decodes &#39; back to ' before running the handler, so a quote in the value
+// broke out of the string literal.
+const jsArg = v => esc(JSON.stringify(String(v ?? '')));
 
 function toast(msg) { toastMsg('info', String(msg)); }
 function toastOk(title, sub) { toastMsg('ok', title, sub); }
@@ -1450,9 +1455,9 @@ function renderPeers(peers) {
       <div class="peer-acts u-peer-acts-bar">
         <button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="ping-${p.id}" onclick="peerAct('ping', ${p.id})">Ping</button>
         <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editPeerPortsClick(${p.id})">✏️ Edit Peer</button>
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="showPeerToken(${p.id}, '${esc(nm)}')">📦 Bundle</button>
+        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="showPeerToken(${p.id}, ${jsArg(nm)})">📦 Bundle</button>
         <button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="restart-frps-${p.id}" onclick="peerAct('restart-frps', ${p.id})">Restart</button>
-        <button class="hashem-btn hashem-btn-danger peer-remove-btn u-btn-30" data-peer-remove="${p.id}" onclick="peerRemoveClick(${p.id}, '${esc(nm)}')">Remove</button>
+        <button class="hashem-btn hashem-btn-danger peer-remove-btn u-btn-30" data-peer-remove="${p.id}" onclick="peerRemoveClick(${p.id}, ${jsArg(nm)})">Remove</button>
       </div>
       <div id="peer-confirm-${p.id}" class="peer-confirm warnbox hidden"></div>
     </div>`;
@@ -5996,7 +6001,7 @@ function renderEditPortsChips() {
   box.innerHTML = _editPortsList.map(p =>
     `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--ln);border-radius:8px;padding:4px 10px;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">` +
     esc(String(p)) +
-    `<button type="button" onclick="removeEditPort('${esc(String(p))}')" title="Remove port ${esc(String(p))}" ` +
+    `<button type="button" onclick="removeEditPort(${jsArg(String(p))})" title="Remove port ${esc(String(p))}" ` +
     `style="background:none;border:none;color:var(--er);cursor:pointer;padding:0 0 0 4px;font-size:14px;line-height:1;display:inline-flex">\u00d7</button></span>`
   ).join('');
 }
@@ -6406,7 +6411,7 @@ function renderBenchmark(bench, peer) {
       <td><span class="badge ${statusClass} u-fs-12">${esc(statusLabel)}</span></td>
       <td>
         ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs" disabled style="opacity:0.65;font-weight:600;padding:5px 12px;">Current Carrier</button>` :
-          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="smartApplyOrSetupCarrier('${esc(m.id)}', '${esc(m.name || m.id)}')">${isWinner ? '🚀 Top Pick' : 'Switch'}</button>`}
+          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="smartApplyOrSetupCarrier(${jsArg(m.id)}, ${jsArg(m.name || m.id)})">${isWinner ? '🚀 Top Pick' : 'Switch'}</button>`}
       </td>
     </tr>`;
   });
@@ -7493,7 +7498,7 @@ function renderClusterUI(data) {
   const actRouteEl = $('clusterActiveRouting');
   if (actRouteEl) {
     if (data.active_failover && data.failover_target) {
-      actRouteEl.innerHTML = `<span style="color:#f87171;">Rerouted \u2192 ${data.failover_target}</span>`;
+      actRouteEl.innerHTML = `<span style="color:#f87171;">Rerouted \u2192 ${esc(data.failover_target)}</span>`;
     } else {
       actRouteEl.innerHTML = `<span style="color:#34d399;">Local Tunnel (Direct)</span>`;
     }
@@ -7576,9 +7581,9 @@ function renderClusterUI(data) {
             <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
               ${isActive
                 ? `<span style="font-size:11px; color:#38bdf8; font-weight:700;">✓ In Use</span>`
-                : `<button class="hashem-btn" onclick="switchClusterForeign('${esc(fn.id)}')" style="font-size:11px; padding:4px 10px; background:rgba(2,132,199,0.2); border-color:#0284c7; color:#38bdf8;">Switch to This</button>`
+                : `<button class="hashem-btn" onclick="switchClusterForeign(${jsArg(fn.id)})" style="font-size:11px; padding:4px 10px; background:rgba(2,132,199,0.2); border-color:#0284c7; color:#38bdf8;">Switch to This</button>`
               }
-              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign('${esc(fn.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove foreign node">&#128465;</button>
+              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign(${jsArg(fn.id)})" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove foreign node">&#128465;</button>
             </div>
           </div>
         `;
@@ -7665,9 +7670,9 @@ function renderClusterUI(data) {
         <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
           ${isCurrentFailoverTarget
             ? `<button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="font-size:11px; padding:4px 10px;">Revert Reroute</button>`
-            : `<button class="hashem-btn" onclick="triggerClusterFailover('${esc(node.id)}')" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:11px; padding:4px 10px; background:rgba(124,58,237,0.2); border-color:#7c3aed; color:#c084fc;">\u2192 Failover Here</button>`
+            : `<button class="hashem-btn" onclick="triggerClusterFailover(${jsArg(node.id)})" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:11px; padding:4px 10px; background:rgba(124,58,237,0.2); border-color:#7c3aed; color:#c084fc;">\u2192 Failover Here</button>`
           }
-          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode('${esc(node.id)}')" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove peer">&#128465;</button>
+          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode(${jsArg(node.id)})" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove peer">&#128465;</button>
         </div>
       </div>
     `;

@@ -191,7 +191,10 @@ func verifyAssetChecksum(tmpPath, tag, asset string) error {
 	return nil
 }
 
-// fetchChecksumManifest attempts to download checksums.txt or SHA256SUMS from the release.
+// fetchChecksumManifest downloads checksums.txt or SHA256SUMS from the release.
+// Only from GitHub itself: the binary may come through a third-party mirror,
+// and a manifest from the same mirror could simply match a forged binary.
+// If GitHub is unreachable the update fails closed (see verifyAssetChecksum).
 func fetchChecksumManifest(tag string) (map[string]string, error) {
 	base := "https://github.com/pdnczone/hashem-panel/releases/download/" + tag + "/"
 	if tag == "latest" || tag == "" {
@@ -199,9 +202,7 @@ func fetchChecksumManifest(tag string) (map[string]string, error) {
 	}
 	var candidates []string
 	for _, name := range []string{"checksums.txt", "SHA256SUMS"} {
-		u := base + name
-		candidates = append(candidates, u,
-			"https://mirror.ghproxy.com/"+u, "https://ghproxy.net/"+u, "https://gh.ddlc.top/"+u)
+		candidates = append(candidates, base+name)
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	for _, u := range candidates {
@@ -229,8 +230,12 @@ func downloadFile(rawURL string, tmp *os.File) error {
 		return fmt.Errorf("untrusted download URL domain: %s", rawURL)
 	}
 
+	// Mirrors only for release assets, which are then checked against the
+	// checksum manifest fetched from GitHub directly. raw.githubusercontent.com
+	// files (hashem.sh from main) have no checksum, so for them GitHub's own
+	// TLS is the only integrity check and a mirror could serve anything.
 	urlsToTry := []string{rawURL}
-	if strings.HasPrefix(rawURL, "https://github.com/") || strings.HasPrefix(rawURL, "https://raw.githubusercontent.com/") {
+	if strings.HasPrefix(rawURL, "https://github.com/") {
 		urlsToTry = append(urlsToTry,
 			"https://mirror.ghproxy.com/"+rawURL,
 			"https://ghproxy.net/"+rawURL,

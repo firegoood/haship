@@ -535,6 +535,10 @@ func handleReverseProxyConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nginxConf := fmt.Sprintf(`# Nginx Reverse Proxy Configuration for Hashem Panel
+# The panel only trusts X-Forwarded-* from listed proxies. Allow this local one:
+#   systemctl edit gre-panel   ->  [Service]
+#                                  Environment=TRUSTED_PROXY_IPS=127.0.0.1
+#   systemctl restart gre-panel
 server {
     listen 80;
     server_name %s;
@@ -573,6 +577,7 @@ server {
 `, domain, domain, domain, domain, httpPort)
 
 	caddyConf := fmt.Sprintf(`# Caddyfile Configuration for Hashem Panel
+# Also set Environment=TRUSTED_PROXY_IPS=127.0.0.1 on gre-panel (systemctl edit gre-panel).
 %s {
     reverse_proxy 127.0.0.1:%d {
         header_up Host {host}
@@ -590,6 +595,9 @@ server {
 		"base_path": cfg.BasePath,
 		"nginx":     nginxConf,
 		"caddy":     caddyConf,
+		// Without it the panel sees every visitor as 127.0.0.1 behind the proxy.
+		"trusted_proxy_env": "TRUSTED_PROXY_IPS=127.0.0.1",
+		"trusted_proxy_set": IsTrustedProxy("127.0.0.1"),
 	})
 }
 

@@ -380,9 +380,14 @@ func handleTermEnable(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, "E-TERM-11", "")
 		return
 	}
+	// saveCfg writes atomically (tmp + rename, plus panel.json.bak); a plain
+	// WriteFile could leave a truncated panel.json on a crash.
+	mu.Lock()
 	cfg.TerminalEnabled = *body.Enabled
-	_ = os.WriteFile(cfgPath(), mustJSON(cfg), 0600)
-	writeJSON(w, map[string]any{"status": "ok", "enabled": cfg.TerminalEnabled})
+	saveCfg()
+	enabled := cfg.TerminalEnabled
+	mu.Unlock()
+	writeJSON(w, map[string]any{"status": "ok", "enabled": enabled})
 }
 
 // GET <base>/api/term/status — for the tab header (enabled flag + busy).

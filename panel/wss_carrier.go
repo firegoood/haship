@@ -361,6 +361,13 @@ func (m *wssCarrierManager) setErr(err error) {
 
 // runServer starts the WebSocket receiver and bridges to local UDP FOU
 func (m *wssCarrierManager) runServer() {
+	// Every accepted stream is injected into the local GRE/FOU path, so an
+	// unauthenticated listener would let anyone on the internet send packets
+	// into the tunnel. No token, no server.
+	if strings.TrimSpace(m.cfg.AuthToken) == "" {
+		m.setErr(fmt.Errorf("WSS carrier server needs an auth token (set auth_token in wss.json or re-run setup); not listening"))
+		return
+	}
 	var upgrader = websocket.Upgrader{
 		// Carrier peers are not browsers and never send Origin. Rejecting any
 		// browser-originated upgrade blocks cross-site WebSocket hijacking (M-02).
@@ -406,7 +413,7 @@ func (m *wssCarrierManager) runServer() {
 		if token == "" {
 			token = r.URL.Query().Get("token")
 		}
-		if m.cfg.AuthToken != "" && !wssTokenEqual(token, m.cfg.AuthToken) {
+		if !wssTokenEqual(token, m.cfg.AuthToken) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -574,6 +581,10 @@ func (m *wssCarrierManager) runClient() {
 // bridgePump forwards packets bi-directionally between WebSocket and local UDP FOU
 func (m *wssCarrierManager) bridgePump(ws *websocket.Conn, udpConn *net.UDPConn, targetUDP *net.UDPAddr) {
 	done := make(chan struct{})
+	// stop tells the UDP pump that the WebSocket is gone. Without it the pump
+	// only noticed on its next write, so with no local traffic bridgePump never
+	// returned and the client never reconnected.
+	stop := make(chan struct{})
 
 	// UDP -> WS pump
 	go func() {
@@ -586,6 +597,8 @@ func (m *wssCarrierManager) bridgePump(ws *websocket.Conn, udpConn *net.UDPConn,
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					select {
 					case <-m.ctx.Done():
+						return
+					case <-stop:
 						return
 					default:
 						continue
@@ -649,6 +662,7 @@ func (m *wssCarrierManager) bridgePump(ws *websocket.Conn, udpConn *net.UDPConn,
 		}
 	}
 
+	close(stop)
 	_ = ws.Close()
 	<-done
 }
