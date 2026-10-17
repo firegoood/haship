@@ -3,6 +3,27 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
+## Unreleased — design review (Apple HIG) and Persian UI
+
+Review of the panel UI against Apple's Human Interface Guidelines, then fixes in seven phases.
+
+### Upgrade notes
+- **FA mode is now Persian.** It used to switch the layout to right-to-left but keep English text. Switching language reloads the page.
+- **Theme follows the system** until you pick one with the theme button.
+- Before a tunnel is set up the dashboard and Diagnostics show a neutral "Not set up" state instead of red errors.
+
+### Fixed
+- Contrast: white text on the default blue was 3.6:1, light-theme status colors 2.3–3.7:1, several badges and the login button below 4.5:1. Every tab now passes 4.5:1 in both themes.
+- A Bagher button referenced a function that did not exist; the error stopped `app.js` during load, so Sentinel, Cluster, license and later handlers never initialised. Two more missing handlers defined.
+- Six dialogs ignored Escape and did not keep keyboard focus; all nine now do.
+- Performance, Settings and Benchmark scrolled sideways on phones; the light-theme chart tooltip was unreadable; the login page stayed dark in the light theme; undefined CSS variables rendered square corners and missing borders; the Diagnostics repair button could not be hidden.
+- Benchmark recommended a carrier that never answered (0/100, 100% loss); it now says no carrier answered and what to check.
+
+### Changed
+- Design tokens for every color (about 500 hard-coded colors replaced), 12px text floor, tabular figures, quieter depth (no glows or hover lifts), one primary button per card, Title Case buttons.
+- Emoji replaced by an SVG icon set; 470 inline styles moved to utility classes; 26 fields gained accessible labels.
+- Topbar link strip: this server ⇄ the other side · engine · latency, with one live dot.
+
 ## Unreleased — audit fixes (docs/audit/BUG_REPORT_2026-10-17.md)
 
 Fixes for the 61 findings of the 2026-10-17 code audit, plus the Sentinel addon. IDs (C1, H4, …) refer to the report.

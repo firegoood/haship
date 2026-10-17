@@ -28,6 +28,22 @@
   </div>
 
   <div class="ds-sec">
+    <h2>0 · Rules (2026-10 review against Apple's HIG)</h2>
+    <p>These hold for every screen; <span class="ent-code">panel/ui_a11y_test.go</span> and <span class="ent-code">panel/i18n_fa_test.go</span> enforce the ones a test can check.</p>
+    <ul>
+      <li><b>Color:</b> only tokens from <span class="ent-code">tokens.css</span>; one color, one meaning. Accent = primary action and current selection. Status colors = status only. Tints are <span class="ent-code">color-mix(var(--token) N%, transparent)</span>; white text sits on <span class="ent-code">--ac-fill</span> or a <span class="ent-code">--*-fill</span>. Text is at least 4.5:1 in both themes.</li>
+      <li><b>Type:</b> nothing below 12px; weights 400–700; numbers use tabular figures; Persian uses Vazirmatn one step larger.</li>
+      <li><b>Hierarchy:</b> one primary button per card; button labels in Title Case, descriptions in sentence case; one action keeps one name from button to dialog to confirmation.</li>
+      <li><b>Depth and motion:</b> two shadow levels (<span class="ent-code">--lift-sm</span>, <span class="ent-code">--lift</span>), no glows, no hover lifts; motion is brief and off under reduced motion.</li>
+      <li><b>Icons:</b> the SVG sprite in <span class="ent-code">index.html</span> (<span class="ent-code">#i-*</span>); no emoji.</li>
+      <li><b>Layout:</b> spacing on the 4/8 grid; utilities (<span class="ent-code">u-*</span>) instead of inline style; no horizontal scroll at 375px; card headers wrap.</li>
+      <li><b>States:</b> before setup nothing is red; empty states say what to do next; a result that never answered is not a recommendation.</li>
+      <li><b>Language:</b> UI source is English; Persian lives in <span class="ent-code">i18n-fa.js</span>; in RTL each text run takes its own direction and values sit in <span class="ent-code">&lt;bdi&gt;</span>.</li>
+      <li><b>Signature:</b> the topbar link strip (this server ⇄ the other side · engine · latency, one live dot) is the one distinctive element; everything around it stays quiet.</li>
+    </ul>
+  </div>
+
+  <div class="ds-sec">
     <h2>1 · Color system</h2>
     <p>Single accent hue (<span class="ent-code">--ac</span>, blue 217) + status quartet. Surfaces <span class="ent-code">--s1/--s2/--s3</span>, borders <span class="ent-code">--ln/--ln2</span>, text <span class="ent-code">--tx/--tx2/--mu/--dim</span> — dark default, light override, all body text ≥ 4.5:1.</p>
     <div class="ds-row">

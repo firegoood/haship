@@ -1165,8 +1165,34 @@ function peerRemoveClick(peerId, name) {
   if (armed) removePeer(peerId, name);
   else armRemovePeer(peerId, name);
 }
+// Signature: the topbar names the link itself: this server ⇄ the other side · engine ·
+// latency, with one live dot. Values sit in <bdi> so they keep their order in Persian.
+const LS_ENGINE = { frp: 'GRE + FRP', backhaul: 'Backhaul', 'gre-backhaul': 'GRE + Backhaul', bagher: 'Bagher' };
+function linkStrip(s) {
+  const el = $('roleLine');
+  if (!el || !s) return;
+  const L = s.local || {}, peers = s.peers || [];
+  if (window._hashemEmpty === true) {
+    el.innerHTML = '<span class="ls-dot" aria-hidden="true"></span>' + esc(tr('x_notcfg', 'Not configured'));
+    el.title = '';
+    return;
+  }
+  const iran = /iran/i.test(L.role || '') || L.frp_svc === 'frps' || peers.length > 0;
+  const here = iran ? tr('x002', 'Iran') : tr('x003', 'Foreign');
+  const there = peers.length > 1 ? peers.length + ' ' + tr('ls_servers', 'servers')
+    : (peers[0] && (peers[0].name || peers[0].remote_pub)) || L.remote_pub || L.gre_peer || (iran ? tr('x003', 'Foreign') : tr('x002', 'Iran'));
+  const eng = LS_ENGINE[L.engine || L.tunnel_engine] || '';
+  const up = !!(L.frp_up || (L.gre && L.gre.exists) || peers.some(p => p.frp_up || p.gre_up));
+  const pinged = L.ping_ok || peers.some(p => p.ping_ok);
+  const ms = L.ping_ok && parseFloat(L.ping_ms) > 0 ? Math.round(parseFloat(L.ping_ms)) + ' ms' : '';
+  const state = up ? (pinged ? 'ok' : 'warn') : 'err';
+  const sep = ' <span class="ls-sep" aria-hidden="true">·</span> ';
+  el.innerHTML = '<span class="ls-dot ' + state + '" aria-hidden="true"></span><bdi>' + esc(here) + '</bdi>' +
+    '<span class="ls-arrow" aria-hidden="true">⇄</span><bdi>' + esc(there) + '</bdi>' +
+    (eng ? sep + '<bdi>' + esc(eng) + '</bdi>' : '') + (ms ? sep + '<bdi>' + esc(ms) + '</bdi>' : '');
+  el.title = up ? tr('ls_up', 'Tunnel up') : tr('ls_down', 'Tunnel down');
+}
 function renderTunnel(st) {
-  $('roleLine').textContent = st.role || 'Not configured';
   const up = !!(st.gre.exists || st.frp_up);
   const d = $('tunnelDot');
   if (d) { d.className = 'status-indicator ' + (up ? 'active' : 'offline'); $('tunnelDotTxt').textContent = up ? 'up' : 'down'; }
@@ -1288,6 +1314,7 @@ async function refresh() {
     updatePeerHints(s);
     if (typeof supObserve === 'function') supObserve(s);
     if (typeof uiObserve === 'function') uiObserve(s);
+    linkStrip(s);
     if (s.local) {
       const isForeign = /foreign/i.test(s.local.role || '') || (s.local.frp_svc === 'frpc');
       const ap = $('setupAddPeerStep');
@@ -2882,7 +2909,9 @@ $('toggle').addEventListener('click', () => {
   const CELL_SIZE = 55, INFLUENCE_RADIUS = 260, MAX_WARP = 24;
   const INFLUENCE_RADIUS_SQ = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
   const DOT_SPACING = 28, LERP_SPEED = 0.08;
-  const LINE_BASE = { r: 255, g: 255, b: 255, a: 0.13 };
+  const LINE_BASE = { r: 255, g: 255, b: 255, a: 0.08 }; // set per theme in renderStaticBg
+  const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let bgTheme = '', drawnTheme = '';
   const NODE_BASE_RADIUS = 1.8, NODE_ACTIVE_RADIUS = 3.2;
   const lerpN = (a,b,t) => a + (b - a) * t;
   const lerpColor = (base,active,t) => {
@@ -2901,11 +2930,16 @@ $('toggle').addEventListener('click', () => {
   const bgCanvas = document.createElement('canvas');
   const bgCtx = bgCanvas.getContext('2d');
   function renderStaticBg() {
+    // Follow the panel theme: the login page was dark even in the light theme.
+    const light = document.body.dataset.t === 'light';
+    bgTheme = document.body.dataset.t || '';
+    drawnTheme = ''; // resize or theme change: draw the still frame again
+    Object.assign(LINE_BASE, light ? { r: 0, g: 0, b: 0, a: 0.07 } : { r: 255, g: 255, b: 255, a: 0.08 });
     bgCanvas.width = W;
     bgCanvas.height = H;
-    bgCtx.fillStyle = theme.bg;
+    bgCtx.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg').trim() || theme.bg;
     bgCtx.fillRect(0, 0, W, H);
-    bgCtx.fillStyle = 'rgba(255,255,255,0.05)';
+    bgCtx.fillStyle = light ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.05)';
     for (let x = DOT_SPACING/2; x < W; x += DOT_SPACING) {
       for (let y = DOT_SPACING/2; y < H; y += DOT_SPACING) {
         bgCtx.beginPath();
@@ -2943,7 +2977,7 @@ $('toggle').addEventListener('click', () => {
   }
   addEventListener('resize', setSize); setSize();
   addEventListener('mousemove', e => { targetMouse.x = e.clientX; targetMouse.y = e.clientY; });
-  addEventListener('click', e => { ripples.push({x:e.clientX,y:e.clientY,radius:0,opacity:1,born:performance.now()}); });
+  addEventListener('click', e => { if (!still) ripples.push({x:e.clientX,y:e.clientY,radius:0,opacity:1,born:performance.now()}); });
 
   function updateWarpedPoint(gx, gy, col, row, targetPt, rowIdx, colIdx){
     const edgeMargin = 1.5;
@@ -3049,9 +3083,15 @@ $('toggle').addEventListener('click', () => {
       requestAnimationFrame(animate);
       return;
     }
-    mouse.x = lerpN(mouse.x,targetMouse.x,LERP_SPEED);
-    mouse.y = lerpN(mouse.y,targetMouse.y,LERP_SPEED);
+    if (bgTheme !== (document.body.dataset.t || '')) renderStaticBg();
+    // Reduced motion: one still frame per theme, no warp toward the pointer.
+    if (still && drawnTheme === bgTheme) { requestAnimationFrame(animate); return; }
+    if (!still) {
+      mouse.x = lerpN(mouse.x,targetMouse.x,LERP_SPEED);
+      mouse.y = lerpN(mouse.y,targetMouse.y,LERP_SPEED);
+    }
     draw(now);
+    drawnTheme = bgTheme;
     requestAnimationFrame(animate);
   })(0);
 })();

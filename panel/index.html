@@ -79,6 +79,17 @@
   }
   .topbar h1 { font-size:var(--fs-h2); margin:0; }
   .topbar .sub { color:var(--mu); font-size:var(--fs-small); }
+  /* Signature: the link strip under the title. One quiet line, one live dot. */
+  .topbar #roleLine { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
+  #roleLine bdi { color:var(--tx2); font-weight:500; }
+  .ls-dot { width:7px; height:7px; border-radius:50%; background:var(--dim); flex:none; }
+  .ls-dot.ok { background:var(--ok); animation:lsBeat 2.4s ease-in-out infinite; }
+  .ls-dot.warn { background:var(--wr); }
+  .ls-dot.err { background:var(--er); }
+  .ls-arrow { color:var(--ac); font-weight:600; }
+  .ls-sep { color:var(--dim); }
+  @keyframes lsBeat { 0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 45%, transparent); } 50% { box-shadow:0 0 0 4px transparent; } }
+  @media (prefers-reduced-motion: reduce) { .ls-dot.ok { animation:none; } }
   .topbar .acts { margin-inline-start:auto; display:flex; gap:8px; }
   .page { max-width:1120px; margin:0 auto; padding:20px; width:100%; display:grid; grid-template-columns:minmax(0,1fr); gap:16px; padding-bottom:72px; }
   .tunnel-card, .qs { background:var(--s1); border:1px solid var(--ln); border-radius:var(--r-lg);
@@ -179,8 +190,7 @@
   .kpi-hero .kpi { padding:22px 20px; gap:14px; }
   .kpi-hero .kpi-label { font-size:12.5px; font-weight:600; letter-spacing:.02em; color:var(--mu); }
   /* Values shrink with the card instead of wrapping ("Not set up" in a narrow column). */
-  .kpi-hero .kpi-val { font-size:clamp(20px, 15cqi, 30px) !important; white-space:nowrap; font-weight:700; letter-spacing:-.03em; line-height:1.05;
-    text-shadow:0 1px 12px color-mix(in srgb, var(--ac) 25%, transparent); }
+  .kpi-hero .kpi-val { font-size:clamp(20px, 15cqi, 30px) !important; white-space:nowrap; font-weight:700; letter-spacing:-.03em; line-height:1.05; }
   .kpi-hero .kpi-val .badge { font-size:14px; padding:4px 10px; border-radius:9px; font-weight:700; }
   .kpi-hero .kpi-val .badge .dot { width:8px; height:8px; }
   .kpi-hero .kpi-ico { width:38px; height:38px; border-radius:12px;

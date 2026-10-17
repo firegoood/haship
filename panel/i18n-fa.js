@@ -1847,5 +1847,8 @@ window.FA_TEXT = {
 "Show & Copy Key": "نمایش و کپی کلید",
 "Step 3: Generated Connection Bundle (Copy & Paste into Foreign Server)": "قدم ۳: باندل اتصال ساخته‌شده (کپی و جای‌گذاری در سرور خارج)",
 "Token & apply": "توکن و اعمال",
-"Tunnel Diagnostics & Health": "عیب‌یابی و سلامت تونل"
+"Tunnel Diagnostics & Health": "عیب‌یابی و سلامت تونل",
+"servers": "سرور",
+"Tunnel up": "تونل وصل است",
+"Tunnel down": "تونل قطع است"
 };
