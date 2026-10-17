@@ -809,6 +809,64 @@ func checkPortListening(bind string, port int) bool {
 	return false
 }
 
+// bagherUnitNames are every unit name Bagher (or its predecessors) used.
+var bagherUnitNames = []string{"hashem-bagher", "hashem-bagher-frpc", "hashem-bagher-frps", "hashem-ssh-fwd", "hashem-frp-ssh-tunnel"}
+
+// bagherUnitInstalled reports whether any Bagher unit file exists (no fork).
+func bagherUnitInstalled() bool {
+	for _, n := range bagherUnitNames {
+		if _, err := os.Stat(filepath.Join("/etc/systemd/system", n+".service")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// getSSHFwdSnapshotStatus is the cheap status the 5s snapshot collects (M9).
+// The full getSSHFwdStatus also creates the SSH key (ssh-keygen on every
+// server, Bagher or not) and builds the bundle, which looks up the public IP
+// over HTTP; neither belongs in a 5-second loop. Without any Bagher config or
+// unit nothing is run at all.
+func getSSHFwdSnapshotStatus() map[string]any {
+	sshFwdMu.Lock()
+	defer sshFwdMu.Unlock()
+	cfg := loadSSHFwdConfigLocked()
+	configured := cfg.Enabled || (strings.TrimSpace(cfg.RemoteHost) != "" && len(cfg.Ports) > 0) || bagherUnitInstalled()
+	if !configured {
+		return map[string]any{"has_config": false, "enabled": false, "is_active": false, "connected": false}
+	}
+	isActive := false
+	for _, n := range bagherUnitNames {
+		if out, _ := runCmd("systemctl", "is-active", n+".service"); strings.TrimSpace(out) == "active" {
+			isActive = true
+			break
+		}
+	}
+	metrics := getBagherLiveMetrics(cfg)
+	return map[string]any{
+		"has_config":      true,
+		"enabled":         cfg.Enabled || isActive,
+		"is_active":       isActive,
+		"mode":            cfg.Mode,
+		"role":            cfg.Role,
+		"remote_host":     cfg.RemoteHost,
+		"ports":           cfg.Ports,
+		"frp_bind_port":   cfg.FRPBindPort,
+		"last_error":      cfg.LastError,
+		"connected":       metrics.Connected,
+		"status_text":     metrics.StatusText,
+		"latency_ms":      metrics.LatencyMs,
+		"rx_bytes":        metrics.RxBytes,
+		"tx_bytes":        metrics.TxBytes,
+		"total_bytes":     metrics.TotalBytes,
+		"rx_formatted":    metrics.RxFormatted,
+		"tx_formatted":    metrics.TxFormatted,
+		"total_formatted": metrics.TotalFormatted,
+		"cur_conns":       metrics.CurConns,
+		"client_counts":   metrics.ClientCounts,
+	}
+}
+
 // getSSHFwdStatus returns runtime status of the forwarder.
 func getSSHFwdStatus() map[string]any {
 	sshFwdMu.Lock()

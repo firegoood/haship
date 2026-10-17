@@ -630,7 +630,7 @@ func handleClusterHeartbeat(w http.ResponseWriter, r *http.Request) {
 		PublicIP:     cfg.PublicIP,
 		TunnelStatus: localStatus,
 		TunnelLoss:   localLoss,
-		IsFailing:    localStatus != "UP",
+		IsFailing:    localStatus == "DOWN",
 		Timestamp:    time.Now().Unix(),
 	}
 
@@ -772,14 +772,10 @@ func getLocalTunnelStatus() (status string, loss float64, latency float64) {
 		return "DOWN", 100.0, 0
 	}
 
-	// Active check: can we reach internet DNS / gateway?
-	conn, err := net.DialTimeout("tcp", "1.1.1.1:53", 2*time.Second)
-	if err == nil {
-		_ = conn.Close()
-		return "UP", 0, 5.0
-	}
-
-	return "DOWN", 100.0, 0
+	// Nothing above knows the tunnel (no foreign pool, Peer Link or health
+	// run). Internet reachability says nothing about the tunnel, so it was a
+	// misleading "UP" (L22): report UNKNOWN, which never triggers failover.
+	return "UNKNOWN", 0, 0
 }
 
 func ensureClusterChains() {
@@ -1016,7 +1012,7 @@ func startClusterMonitor() {
 		}
 
 		localStatus, localLoss, _ := getLocalTunnelStatus()
-		isLocalFailing := localStatus != "UP" || localLoss > 50.0
+		isLocalFailing := localStatus == "DOWN" || localLoss > 50.0
 
 		// Probe peer nodes concurrently
 		peerIDs := make([]string, 0, len(cfg.Nodes))

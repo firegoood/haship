@@ -41,7 +41,7 @@ AUTOPOOL_COOLDOWN="${AUTOPOOL_COOLDOWN:-60}"         # min seconds between autom
 AUTOPOOL_SEVERE_ERRS="${AUTOPOOL_SEVERE_ERRS:-20}"   # pool-full lines per tick that justify a restart under load
 AUTOPOOL_DOWN_QUIET="${AUTOPOOL_DOWN_QUIET:-3}"      # consecutive quiet ticks before scaling down
 AUTOPOOL_MIN_FREE_MB="${AUTOPOOL_MIN_FREE_MB:-150}"  # below this free RAM, never scale up
-BACKUP_DIR="/var/backups/hashem"
+BACKUP_DIR="${GRE_BACKUP_DIR:-/var/backups/hashem}"  # same override as the panel
 
 ensure_hashem_bin() {
     [[ ${EUID:-$(id -u 2>/dev/null || echo 1)} -eq 0 ]] || return 0

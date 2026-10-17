@@ -7,7 +7,8 @@ package main
 // (all user-confirmed choices):
 //   - single active PTY at a time (second dial gets E-TERM-07 busy)
 //   - idle kill after 10 minutes without client input (E-TERM-08)
-//   - absolute session cap 30 minutes, max 256 KB pending output
+//   - absolute session cap 30 minutes; a client that cannot take output for
+//     10s (write deadline) is disconnected
 //   - protocol is versioned (v=1) and session-ready: every connection gets
 //     a random resume id; reconnect-with-resume is a future upgrade, but
 //     the client already speaks the envelope so no rewrite is needed.
@@ -28,6 +29,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -42,11 +44,10 @@ import (
 )
 
 const (
-	termProtoV     = 1
-	termIdleKill   = 10 * time.Minute
-	termMaxAge     = 30 * time.Minute
-	termMaxPending = 256 * 1024
-	termShell      = "/bin/bash"
+	termProtoV   = 1
+	termIdleKill = 10 * time.Minute
+	termMaxAge   = 30 * time.Minute
+	termShell    = "/bin/bash"
 )
 
 type termMsg struct {
@@ -69,7 +70,6 @@ type termSess struct {
 	conn      *websocket.Conn
 	lastIn    time.Time
 	started   time.Time
-	pending   int
 	closed    chan struct{}
 	closeOnce sync.Once
 }
@@ -235,8 +235,19 @@ func handleTermWS(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		buf := make([]byte, 8192)
 		for {
+			// The deadline only lets the loop notice a closed session. Its
+			// timeout is not an exit: treating it as one ended every shell
+			// that printed nothing for 30s (H5).
 			_ = pf.SetReadDeadline(time.Now().Add(30 * time.Second))
 			n, err := pf.Read(buf)
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				select {
+				case <-s.closed:
+					return
+				default:
+					continue
+				}
+			}
 			if err != nil || n <= 0 {
 				code := 0
 				if cmd.ProcessState != nil {
@@ -246,27 +257,15 @@ func handleTermWS(w http.ResponseWriter, r *http.Request) {
 				termClose(s)
 				return
 			}
-			termMu.Lock()
-			s.pending += n
-			over := s.pending > termMaxPending
-			termMu.Unlock()
-			if over {
-				termSendErr(conn, "E-TERM-06", "")
-				termClose(s)
-				return
-			}
+			// Backpressure is the write deadline below: output is sent as soon
+			// as it is read, so a "pending bytes" counter could never exceed
+			// one 8 KB read and its 256 KB limit never fired (L5).
 			out := termMsg{V: termProtoV, T: "out", D: base64.StdEncoding.EncodeToString(buf[:n])}
 			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := conn.WriteJSON(out); err != nil {
 				termClose(s)
 				return
 			}
-			termMu.Lock()
-			s.pending -= n
-			if s.pending < 0 {
-				s.pending = 0
-			}
-			termMu.Unlock()
 		}
 	}()
 

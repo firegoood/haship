@@ -91,6 +91,15 @@ func isAlertWorthy(from, to string, degraded bool) bool {
 	return from == stateDown || to == stateDown
 }
 
+// reset forgets all recorded states; the next observe only primes.
+func (t *alertTracker) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.last = map[string]string{}
+	t.lastSent = map[string]time.Time{}
+	t.primed = false
+}
+
 // observe returns the events to send for this tick.
 func (t *alertTracker) observe(now time.Time, links []linkSnap, cfg alertConfig) []alertEvent {
 	t.mu.Lock()
@@ -312,6 +321,12 @@ func handleAlertsPost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.Enabled != nil {
+		if *body.Enabled && !c.Enabled {
+			// The tracker stopped observing while alerts were off; comparing
+			// against those old states fired alerts for changes that
+			// happened long ago (L9). Start from a fresh baseline.
+			alertTrk.reset()
+		}
 		c.Enabled = *body.Enabled
 	}
 	if body.Telegram != nil {

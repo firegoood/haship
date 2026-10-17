@@ -441,7 +441,7 @@ func buildSnapshot() *HubSnapshot {
 	s.At = time.Now()
 	s.BuildMs = ms(time.Since(t0))
 	recordSampler("snapshot", time.Since(t0))
-	s.Bagher = getSSHFwdStatus()
+	s.Bagher = getSSHFwdSnapshotStatus()
 	return s
 }
 

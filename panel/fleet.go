@@ -167,6 +167,11 @@ func healthName(s int) string {
 // fleetRecord appends one sample per live peer and drops history of peers
 // that no longer exist.
 func fleetRecord(peers []peerLive, now time.Time) {
+	// An empty list is a snapshot that failed or is not built yet, not "every
+	// peer was removed": pruning on it wiped all latency history (L16).
+	if len(peers) == 0 {
+		return
+	}
 	fleetMu.Lock()
 	defer fleetMu.Unlock()
 	fleetLoadLocked()

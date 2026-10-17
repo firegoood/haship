@@ -726,6 +726,7 @@ func main() {
 	startSnapshotCollector(context.Background())
 	startSdWatchdog(context.Background())
 	go startHTTPSListener()
+	startTLSRenewWatcher()
 	go startAutoPilotMonitor()
 	go startPeerSyncWorker()
 	go startTrafficRecorder()

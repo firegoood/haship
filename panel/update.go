@@ -86,6 +86,9 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
+	// downloadFile closes tmp only on success; this covers every failure path
+	// (L21). Deferred after Remove, so it runs first; a second Close is a no-op.
+	defer tmp.Close()
 
 	if err := downloadFile(dlURL, tmp); err != nil {
 		LogSecurityAudit("update_failed", cfg.Username, ClientIP(r), "download error: "+err.Error())

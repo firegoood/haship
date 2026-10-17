@@ -18,6 +18,7 @@ package main
 //    upgrade and real client IP forwarding.
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -34,6 +35,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -604,8 +606,12 @@ server {
 // In-process HTTPS listener management:
 // Avoids restarting the gre-panel systemd service, thus never dropping tunnels.
 var (
-	httpsSrv   *http.Server
-	httpsSrvMu sync.Mutex
+	httpsSrv     *http.Server
+	httpsSrvPort int
+	httpsSrvMu   sync.Mutex
+	// httpsCert is served through GetCertificate, so a new certificate takes
+	// effect on the next handshake without restarting the listener.
+	httpsCert atomic.Pointer[tls.Certificate]
 )
 
 func stopHTTPSListener() {
@@ -614,9 +620,14 @@ func stopHTTPSListener() {
 	if httpsSrv != nil {
 		_ = httpsSrv.Close()
 		httpsSrv = nil
+		httpsSrvPort = 0
 	}
 }
 
+// startHTTPSListener starts the HTTPS listener, or reloads its certificate
+// when it already runs on the configured port. It used to Close() the running
+// server first, which cut the very request (issue/renew/upload over HTTPS)
+// that asked for the reload, so the UI showed a network error (M7).
 func startHTTPSListener() {
 	httpsSrvMu.Lock()
 	defer httpsSrvMu.Unlock()
@@ -624,11 +635,27 @@ func startHTTPSListener() {
 	if !tlsHasCert() {
 		return
 	}
+	c, err := tls.LoadX509KeyPair(tlsCertFile(), tlsKeyFile())
+	if err != nil {
+		recordError("E-TLS-08", "HTTPS listener", "load certificate: "+err.Error())
+		return
+	}
+	httpsCert.Store(&c)
+
+	port := effectiveTLSPort()
+	if httpsSrv != nil && httpsSrvPort == port {
+		return // same port: the new certificate is already live
+	}
 	if httpsSrv != nil {
-		_ = httpsSrv.Close()
+		// Port changed: let in-flight requests finish on the old listener.
+		old := httpsSrv
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = old.Shutdown(ctx)
+		}()
 		httpsSrv = nil
 	}
-	port := effectiveTLSPort()
 	if !portFree(port) {
 		next := pickFreePort(port + 1)
 		log.Printf("panel https port %d busy — auto-switched to %d (saved to panel.json)", port, next)
@@ -641,14 +668,72 @@ func startHTTPSListener() {
 		Handler:           panelHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return httpsCert.Load(), nil
+			},
+		},
 	}
+	httpsSrvPort = port
 	applyServerLimits(httpsSrv)
 	srvToStart := httpsSrv
 	go func(srv *http.Server) {
-		if err := srv.ListenAndServeTLS(tlsCertFile(), tlsKeyFile()); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 			recordError("E-TLS-08", "HTTPS listener", err.Error())
 		}
 	}(srvToStart)
+}
+
+// letsencryptLiveDir is where certbot keeps the current certificate; tests
+// point it elsewhere.
+var letsencryptLiveDir = "/etc/letsencrypt/live"
+
+// tlsRenewTick keeps a Let's Encrypt certificate fresh (M7). The panel serves
+// a copy in <configDir>/tls, which certbot's own timer never updated, so the
+// panel's HTTPS expired after 90 days. Each tick installs certbot's copy when
+// it differs, and runs "certbot renew" itself (at most once a day) when the
+// certificate expires within 30 days, e.g. when certbot's timer is missing.
+func tlsRenewTick(now time.Time, lastRenewTry *time.Time) {
+	m := tlsMetaLoad()
+	if m == nil || m.Domain == "" {
+		return
+	}
+	live := filepath.Join(letsencryptLiveDir, m.Domain)
+	if exp, _, err := tlsCertExpiry(); err == nil && exp.Sub(now) < 30*24*time.Hour && now.Sub(*lastRenewTry) > 24*time.Hour {
+		*lastRenewTry = now
+		if _, lerr := exec.LookPath("certbot"); lerr == nil {
+			if out, rerr := runCmdTimeout(5*time.Minute, "certbot", "renew", "--cert-name", m.Domain, "--quiet"); rerr != nil {
+				recordError("E-TLS-05", "auto-renew", strings.TrimSpace(string(out)))
+			}
+		}
+	}
+	fresh, err := os.ReadFile(filepath.Join(live, "fullchain.pem"))
+	if err != nil {
+		return
+	}
+	cur, _ := os.ReadFile(tlsCertFile())
+	if bytes.Equal(fresh, cur) {
+		return
+	}
+	if err := tlsInstallFrom(live, m.Domain, m.Email); err != nil {
+		recordError("E-TLS-06", "auto-renew", err.Error())
+		return
+	}
+	startHTTPSListener()
+	LogSecurityAudit("DOMAIN_RENEWED", "system", "local", "certificate reloaded for "+m.Domain)
+}
+
+// startTLSRenewWatcher runs tlsRenewTick shortly after start and then hourly.
+func startTLSRenewWatcher() {
+	go func() {
+		var lastTry time.Time
+		time.Sleep(time.Minute)
+		for {
+			tlsRenewTick(time.Now(), &lastTry)
+			time.Sleep(time.Hour)
+		}
+	}()
 }
 
 // tlsInstallFrom copies fullchain/privkey into <configDir>/tls + writes meta.

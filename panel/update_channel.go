@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"sync"
+	"time"
 )
 
 const (
@@ -158,7 +160,32 @@ func getJSON(path string, out any) error {
 	return lastErr
 }
 
+var (
+	relCacheMu  sync.Mutex
+	relCache    []ghRelease
+	relCacheErr error
+	relCacheAt  time.Time
+)
+
+// fetchReleases returns the release list, cached for 10 minutes (failures
+// for 1 minute). Every /api/version GET used to walk up to 10 pages of the
+// GitHub API, whose unauthenticated limit is 60 requests an hour (L23).
 func fetchReleases() ([]ghRelease, error) {
+	relCacheMu.Lock()
+	defer relCacheMu.Unlock()
+	ttl := 10 * time.Minute
+	if relCacheErr != nil {
+		ttl = time.Minute
+	}
+	if !relCacheAt.IsZero() && time.Since(relCacheAt) < ttl {
+		return append([]ghRelease(nil), relCache...), relCacheErr
+	}
+	rels, err := fetchReleasesUncached()
+	relCache, relCacheErr, relCacheAt = rels, err, time.Now()
+	return append([]ghRelease(nil), rels...), err
+}
+
+func fetchReleasesUncached() ([]ghRelease, error) {
 	var all []ghRelease
 	// ponytail: 10 pages x 100 = 1000 releases ceiling; raise if the repo ever outgrows it.
 	for page := 1; page <= 10; page++ {

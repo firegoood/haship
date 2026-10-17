@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -56,12 +57,43 @@ func startSdWatchdog(ctx context.Context) {
 		for {
 			select {
 			case <-tk.C:
-				_ = sdNotify(fmt.Sprintf("MAINPID=%d\nWATCHDOG=1", os.Getpid()))
+				if panelAlive() {
+					_ = sdNotify(fmt.Sprintf("MAINPID=%d\nWATCHDOG=1", os.Getpid()))
+				}
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
+}
+
+// panelAlive is checked before each heartbeat (L6). A free-running ticker
+// goroutine kept beating while the rest of the panel was deadlocked, so
+// systemd's WatchdogSec never fired. Two cheap probes: the config lock most
+// handlers take must be obtainable, and the snapshot collector must still be
+// producing snapshots (nil = not built yet, i.e. still starting).
+var panelAlive = func() bool {
+	if !tryLockWithin(&mu, 5*time.Second) {
+		return false
+	}
+	mu.Unlock()
+	if s := snapPtr.Load(); s != nil && !s.At.IsZero() && time.Since(s.At) > 2*time.Minute {
+		return false
+	}
+	return true
+}
+
+func tryLockWithin(m *sync.Mutex, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		if m.TryLock() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // sdNotifyOnce is the seam for tests: send state to an explicit socket path.

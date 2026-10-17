@@ -548,7 +548,7 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	// add-peer pre-check: reject ports another tunnel already serves (409 + peer name)
 	if body.Role == "add-peer" {
 		if clash := peerDuplicateIPClash(body.RemotePub, -1); clash != "" {
-			writeAPIError(w, r, "E-PEER-04", "Foreign IP is already used by tunnel '"+clash+"' — you cannot add multiple tunnels to the exact same server")
+			writeAPIError(w, r, "E-PEER-08", "Foreign IP is already used by tunnel '"+clash+"' — you cannot add multiple tunnels to the exact same server")
 			return
 		}
 		if clash := peerPortClash(ports, -1); clash != "" {

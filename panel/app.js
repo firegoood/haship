@@ -7629,8 +7629,11 @@ function renderClusterUI(data) {
     const isHealthy = !!node.is_healthy;
     const isFailing = !!node.is_failing;
     const tunnelUp = (node.tunnel_status || 'UP').toUpperCase() === 'UP';
-    const latency = node.ping_ms ? `${node.ping_ms.toFixed(1)} ms` : '--';
-    const lastSeen = node.last_seen ? new Date(node.last_seen * 1000).toLocaleTimeString() : 'Never';
+    // The API sends latency_ms and last_seen as an RFC3339 time (Go's zero
+    // time, year 1, means never seen).
+    const latency = node.latency_ms > 0 ? `${node.latency_ms.toFixed(1)} ms` : '--';
+    const seenAt = node.last_seen ? Date.parse(node.last_seen) : NaN;
+    const lastSeen = (Number.isFinite(seenAt) && new Date(seenAt).getUTCFullYear() > 2000) ? new Date(seenAt).toLocaleTimeString() : 'Never';
 
     let statusBadgeClass = 'ok';
     let statusText = 'HEALTHY';
@@ -7642,7 +7645,8 @@ function renderClusterUI(data) {
       statusText = 'TUNNEL DOWN';
     }
 
-    const isCurrentFailoverTarget = data.active_failover && data.failover_target === node.id;
+    // active_failover holds the target node id; failover_target is its IP.
+    const isCurrentFailoverTarget = !!data.active_failover && data.active_failover === node.id;
 
     html += `
       <div style="background:rgba(15,23,42,0.7); border:1px solid ${isCurrentFailoverTarget ? '#ef4444' : 'rgba(168,85,247,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">

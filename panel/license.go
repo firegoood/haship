@@ -345,14 +345,31 @@ func (w *licenseStatusWriter) Header() http.Header         { return w.header }
 func (w *licenseStatusWriter) Write(b []byte) (int, error) { return w.body.Write(b) }
 func (w *licenseStatusWriter) WriteHeader(int)             {}
 
+// licenseErrCode maps a verifyLicenseKey error to its catalog code.
+func licenseErrCode(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "format"), strings.Contains(msg, "encoding"), strings.Contains(msg, "corrupt"):
+		return "E-LIC-02" // before "signature": the format error mentions payload.signature
+	case strings.Contains(msg, "expired"):
+		return "E-LIC-04"
+	case strings.Contains(msg, "locked to machine"):
+		return "E-LIC-05"
+	case strings.Contains(msg, "signature"), strings.Contains(msg, "master public key"):
+		return "E-LIC-03"
+	}
+	return "E-LIC-02"
+}
+
 // handleLicensePost handles POST /api/license.
 func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Key string `json:"key"`
 	}
+	// L3: errors go through writeAPIError. WriteHeader before writeJSON sent
+	// no JSON Content-Type and no error_code, so the UI showed raw JSON.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]any{"error": "invalid JSON"})
+		writeAPIError(w, r, "E-LIC-02", "invalid JSON")
 		return
 	}
 
@@ -365,17 +382,13 @@ func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 
 	payload, err := verifyLicenseKey(key)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]any{
-			"error": err.Error(),
-		})
+		writeAPIError(w, r, licenseErrCode(err), err.Error())
 		return
 	}
 
 	_ = os.MkdirAll(configDir, 0755)
 	if err := os.WriteFile(filepath.Join(configDir, "license.key"), []byte(key), 0600); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		writeJSON(w, map[string]any{"error": "failed saving license to disk"})
+		writeAPIError(w, r, "E-LIC-06", "failed saving license to disk: "+err.Error())
 		return
 	}
 	_ = os.MkdirAll("/etc/hashem", 0755)

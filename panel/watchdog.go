@@ -173,7 +173,7 @@ func formatRestartSchedule(c watchdogConfig) string {
 }
 
 func listBackups() []backupItem {
-	dir := "/var/backups/hashem"
+	dir := getBackupDir() // same dir as download (L8)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return []backupItem{}
@@ -417,7 +417,7 @@ func handleWatchdogPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-WD-01", "invalid backup file name")
 			return
 		}
-		path := filepath.Join("/var/backups/hashem", base)
+		path := filepath.Join(getBackupDir(), base)
 		if _, err := os.Stat(path); err != nil {
 			writeAPIError(w, r, "E-WD-01", "backup file not found")
 			return
@@ -436,11 +436,17 @@ func handleWatchdogPost(w http.ResponseWriter, r *http.Request) {
 		if body.BotToken != "" && !strings.Contains(body.BotToken, "...") {
 			c.TGBotToken = strings.TrimSpace(body.BotToken)
 		}
-		c.TGChatID = strings.TrimSpace(body.ChatID)
+		// Only fields that were sent change (L7): a request updating just the
+		// token or route used to wipe the chat id and tunnel port.
+		if id := strings.TrimSpace(body.ChatID); id != "" {
+			c.TGChatID = id
+		}
 		if body.Route == "direct" || body.Route == "tunnel" {
 			c.TGRoute = body.Route
 		}
-		c.TGTunnelPort = body.TunnelPort
+		if body.TunnelPort > 0 && body.TunnelPort <= 65535 {
+			c.TGTunnelPort = body.TunnelPort
+		}
 		if err := saveWatchdogConfig(c); err != nil {
 			writeAPIError(w, r, "E-WD-01", "failed to save config: "+err.Error())
 			return

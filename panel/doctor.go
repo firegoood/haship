@@ -162,7 +162,16 @@ func runFullDiagnostics() *doctorReport {
 	}
 
 	// 1. Check Interface & Service status
-	if !rep.InterfaceUp {
+	if !rep.InterfaceUp && !greExpected(st) {
+		// Standalone Backhaul / Bagher: no GRE interface is the normal state.
+		rep.Recommendations = append(rep.Recommendations, "No GRE interface: this server runs without GRE ("+engineLabel(st)+"), GRE checks skipped")
+		if !rep.FRPUp {
+			rep.Score -= 30
+			rep.Issues = append(rep.Issues, "Tunnel engine service is NOT active")
+			rep.Recommendations = append(rep.Recommendations, "Restart the tunnel engine via Tunnel tab")
+			rep.FixAvailable = true
+		}
+	} else if !rep.InterfaceUp {
 		rep.Score = 0
 		rep.Rating = "critical"
 		rep.Issues = append(rep.Issues, "GRE tunnel interface is DOWN")
@@ -460,22 +469,37 @@ func executeKernelAudit() kernelAudit {
 		}
 	}
 
-	// 7. LimitNOFILE from process limits
-	if data, err := os.ReadFile("/proc/self/limits"); err == nil {
+	// 7. LimitNOFILE of the running tunnel engine (L12). /proc/self is the
+	// panel, whose limit says nothing about frps/frpc running out of sockets.
+	// 0 (unknown) when no engine runs.
+	res.LimitNOFILE = engineNOFILE()
+
+	return res
+}
+
+// engineNOFILE returns the soft "Max open files" of the first running engine.
+func engineNOFILE() int {
+	for _, svc := range []string{"frps", "frpc", "backhaul-server", "backhaul-client"} {
+		out, err := runCmdTimeoutOut(3*time.Second, "systemctl", "show", "-p", "MainPID", "--value", svc)
+		pid := strings.TrimSpace(string(out))
+		if err != nil || pid == "" || pid == "0" {
+			continue
+		}
+		data, err := os.ReadFile("/proc/" + pid + "/limits")
+		if err != nil {
+			continue
+		}
 		for _, line := range strings.Split(string(data), "\n") {
 			if strings.HasPrefix(line, "Max open files") {
-				fields := strings.Fields(line)
-				if len(fields) >= 5 {
-					if v, err := strconv.Atoi(fields[3]); err == nil {
-						res.LimitNOFILE = v
+				if f := strings.Fields(line); len(f) >= 5 {
+					if v, err := strconv.Atoi(f[3]); err == nil {
+						return v
 					}
 				}
-				break
 			}
 		}
 	}
-
-	return res
+	return 0
 }
 
 func executeThroughputTest(peerIP string, ifUp bool) speedSummary {
@@ -638,14 +662,38 @@ func applyDoctorFixes() map[string]any {
 	ensureFRPServiceUnits("frpc")
 	fixes = append(fixes, "Configured FRP systemd service limits (LimitNOFILE=1048576, LimitNPROC=512000, Restart=always)")
 
-	// 5. Interface & routing health check
-	fixes = append(fixes, interfaceFixes(localStatus(), func() error {
-		return exec.Command("systemctl", "restart", "gre-tunnel").Run()
-	})...)
+	// 5. Interface & routing health check (only where GRE is used: restarting
+	// gre-tunnel on a standalone Backhaul / Bagher server makes no sense)
+	if fst := localStatus(); greExpected(fst) {
+		fixes = append(fixes, interfaceFixes(fst, func() error {
+			return exec.Command("systemctl", "restart", "gre-tunnel").Run()
+		})...)
+	}
 
 	return map[string]any{
 		"applied": fixes,
 	}
+}
+
+// greExpected reports whether this server's tunnel needs the GRE interface
+// (M11): standalone Backhaul and Bagher setups have none, and Doctor used to
+// call that "Critical" and restart a non-existent gre-tunnel.
+func greExpected(st tunnelStatus) bool {
+	if st.Gre.Exists {
+		return true
+	}
+	if st.Engine == "backhaul" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(engineUnitDir, "gre-tunnel.service"))
+	return err == nil
+}
+
+func engineLabel(st tunnelStatus) string {
+	if st.Engine != "" {
+		return st.Engine
+	}
+	return "no GRE unit"
 }
 
 // interfaceFixes is step 5 of applyDoctorFixes. It restarts gre-tunnel only when
