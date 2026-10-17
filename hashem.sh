@@ -3548,9 +3548,14 @@ peer_write_frps() {
     local SUF=$1 BIND_PORT=$2 TOKEN=$3
     local _POOL MAX_POOL
     read -r _POOL MAX_POOL <<< "$(pool_effective_values)"
+    # same kcp/quic listeners as setup-iran, so kcp/quic peers can connect
+    local QUIC_PORT=$((BIND_PORT + 1))
+    (( QUIC_PORT > 65535 )) && QUIC_PORT=$((BIND_PORT - 1))
     cat <<EOF > "${CONFIG_DIR}/frps${SUF}.toml"
 bindAddr = "0.0.0.0"
 bindPort = ${BIND_PORT}
+kcpBindPort = ${BIND_PORT}
+quicBindPort = ${QUIC_PORT}
 auth.method = "token"
 auth.token = "${TOKEN}"
 $(perf_tcpmux_lines)
@@ -3599,9 +3604,11 @@ EOF
 # explicit flags always win.
 cli_add_peer() {
     local NAME="" LOCAL_PUB="" REMOTE_PUB="" FRP_PORT="" TOKEN="" LOCAL_GRE="" PEER_GRE="" PORTS="" FORCE=0 BUNDLE=""
+    local PEER_FRP_TRANSPORT=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --name) NAME="$2"; shift 2 ;;
+            --frp-transport) PEER_FRP_TRANSPORT="$2"; shift 2 ;;
             --local-pub) LOCAL_PUB="$2"; shift 2 ;;
             --remote-pub) REMOTE_PUB="$2"; shift 2 ;;
             --frp-port) FRP_PORT="$2"; shift 2 ;;
@@ -3611,7 +3618,7 @@ cli_add_peer() {
             --ports) PORTS="$2"; shift 2 ;;
             --bundle) BUNDLE="$2"; shift 2 ;;
             --force) FORCE=1; shift ;;
-            -h|--help) echo 'Usage: hashem.sh add-peer --local-pub IP --remote-pub IP [--frp-port N] --token T --local-gre IP --peer-gre IP --ports "443, 2083" [--name LABEL] [--bundle hsh1_...] [--force]'; return 0 ;;
+            -h|--help) echo 'Usage: hashem.sh add-peer --local-pub IP --remote-pub IP [--frp-port N] --token T --local-gre IP --peer-gre IP --ports "443, 2083" [--name LABEL] [--frp-transport tcp|kcp|quic|websocket|wss] [--bundle hsh1_...] [--force]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
         esac
     done
@@ -3625,8 +3632,13 @@ cli_add_peer() {
         [[ -z "$PEER_GRE" ]] && PEER_GRE=$B_FOREIGN_GRE
         [[ -z "$TOKEN" ]] && TOKEN=$B_TOKEN
         [[ -z "$PORTS" ]] && PORTS=$B_PORTS
-        PEER_FRP_TRANSPORT="${B_TRANSPORT:-tcp}"
+        [[ -z "$PEER_FRP_TRANSPORT" ]] && PEER_FRP_TRANSPORT="${B_TRANSPORT:-tcp}"
     fi
+    PEER_FRP_TRANSPORT="${PEER_FRP_TRANSPORT:-tcp}"
+    case "$PEER_FRP_TRANSPORT" in
+        tcp|kcp|quic|websocket|wss) ;;
+        *) echo -e "${RED}[!] Unknown --frp-transport '${PEER_FRP_TRANSPORT}' (want tcp, kcp, quic, websocket or wss).${NC}"; return 1 ;;
+    esac
     FRP_PORT=${FRP_PORT:-$(gen_random_port)}
     validate_setup_common "$LOCAL_PUB" "$REMOTE_PUB" "$FRP_PORT" "$LOCAL_GRE" || return 1
     is_valid_ip "$PEER_GRE" || { echo -e "${RED}[!] Invalid peer GRE IP: '$PEER_GRE'${NC}"; return 1; }
@@ -3694,15 +3706,18 @@ cli_add_peer() {
     # registry record (ports as JSON array)
     local PORTS_JSON
     PORTS_JSON=$(echo "$CLEANED" | python3 -c 'import json,sys; print(json.dumps([int(x) for x in sys.stdin.read().split()]))')
-    PEERS_F="$PEERS_FILE" python3 - "$ID" "$NAME" "$LOCAL_PUB" "$REMOTE_PUB" "$FRP_PORT" "$TOKEN" "$LOCAL_GRE" "$PEER_GRE" "$PORTS_JSON" "$GRE_IF" "$FRPS_SVC" "$LEGACY" <<'PYEOF'
+    PEERS_F="$PEERS_FILE" FRP_TRANS="$PEER_FRP_TRANSPORT" python3 - "$ID" "$NAME" "$LOCAL_PUB" "$REMOTE_PUB" "$FRP_PORT" "$TOKEN" "$LOCAL_GRE" "$PEER_GRE" "$PORTS_JSON" "$GRE_IF" "$FRPS_SVC" "$LEGACY" <<'PYEOF'
 import json, os, sys
 f = os.environ["PEERS_F"]
 iid, name, lip, rip, fport, tok, lgre, pgre, pjson, gif, svc, leg = sys.argv[1:]
 d = json.load(open(f))
-d.setdefault("peers", []).append({"id": int(iid), "name": name, "local_pub": lip,
+rec = {"id": int(iid), "name": name, "local_pub": lip,
   "remote_pub": rip, "frp_port": int(fport), "token": tok, "local_gre": lgre,
   "peer_gre": pgre, "ports": json.loads(pjson), "gre_if": gif, "frps_svc": svc,
-  "legacy": leg == "true"})
+  "legacy": leg == "true"}
+if os.environ.get("FRP_TRANS", "tcp") != "tcp":
+    rec["frp_transport"] = os.environ["FRP_TRANS"]
+d.setdefault("peers", []).append(rec)
 json.dump(d, open(f, "w"), indent=2)
 PYEOF
     echo -e "${GREEN}[✔️] Peer '${NAME}' (id ${ID}) added: GRE ${LOCAL_PUB} <-> ${REMOTE_PUB} (${LOCAL_GRE} peer ${PEER_GRE} on ${GRE_IF}), ${FRPS_SVC} :${FRP_PORT}${NC}"

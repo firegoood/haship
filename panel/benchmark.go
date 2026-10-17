@@ -152,6 +152,9 @@ func calculateScore(loss, rtt, jitter float64) int {
 	return int(math.Round(raw))
 }
 
+// benchUnmeasured marks a carrier the benchmark cannot probe for real.
+const benchUnmeasured = "unmeasured"
+
 func determineStatus(score int, loss float64) string {
 	if loss >= 100.0 || score == 0 {
 		return "down"
@@ -290,67 +293,6 @@ func probeTLS(ctx context.Context, addr string, count int, timeout time.Duration
 	return avgRTT, minRTT, maxRTT, loss, jitter, nil
 }
 
-// probeUDP attempts lightweight UDP datagram probes to measure latency and loss.
-func probeUDP(ctx context.Context, target string, count int, timeout time.Duration) (avg, min, max, loss, jitter float64, err error) {
-	if count <= 0 {
-		count = 3
-	}
-	var rtts []float64
-	lost := 0
-
-	dialer := &net.Dialer{Timeout: timeout}
-	for i := 0; i < count; i++ {
-		if ctx.Err() != nil {
-			lost += (count - i)
-			break
-		}
-		start := time.Now()
-		conn, dialErr := dialer.DialContext(ctx, "udp", target)
-		if dialErr != nil {
-			lost++
-			continue
-		}
-		// Send a dummy datagram
-		_ = conn.SetDeadline(time.Now().Add(timeout))
-		_, _ = conn.Write([]byte{0x00, 0x01})
-		_ = conn.Close()
-		duration := float64(time.Since(start).Microseconds()) / 1000.0
-		rtts = append(rtts, duration)
-	}
-
-	loss = (float64(lost) / float64(count)) * 100.0
-	if len(rtts) == 0 {
-		return 0, 0, 0, 100.0, 0, fmt.Errorf("all %d udp probes failed", count)
-	}
-
-	min = rtts[0]
-	max = rtts[0]
-	sum := 0.0
-	for _, r := range rtts {
-		if r < min {
-			min = r
-		}
-		if r > max {
-			max = r
-		}
-		sum += r
-	}
-	avg = sum / float64(len(rtts))
-
-	if len(rtts) > 1 {
-		jitSum := 0.0
-		for i := 1; i < len(rtts); i++ {
-			d := rtts[i] - rtts[i-1]
-			if d < 0 {
-				d = -d
-			}
-			jitSum += d
-		}
-		jitter = jitSum / float64(len(rtts)-1)
-	}
-	return avg, min, max, loss, jitter, nil
-}
-
 func probePing(ctx context.Context, host string, count int) (avgRTT, minRTT, maxRTT, loss, jitter float64, err error) {
 	if host == "" {
 		return 0, 0, 0, 100.0, 0, fmt.Errorf("empty host")
@@ -392,10 +334,6 @@ func probePing(ctx context.Context, host string, count int) (avgRTT, minRTT, max
 	}
 
 	return avgRTT, minRTT, maxRTT, loss, jitter, nil
-}
-
-func isLoopbackOrLocal(host string) bool {
-	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
 // runCarrierBenchmark probes all candidate carrier models and evaluates performance.
@@ -496,7 +434,11 @@ func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 		remotePub = "127.0.0.1"
 	}
 
-	grePeer := localSt.GrePeer
+	// The peer's GRE inner address (localSt.GrePeer is its public one).
+	grePeer := ""
+	if localSt.Gre.Inner != "" {
+		grePeer = grePeerInner(localSt.Gre.Inner)
+	}
 	if grePeer == "" {
 		grePeer = peerCfg.InternalIP
 	}
@@ -561,27 +503,6 @@ func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 		},
 	}
 
-	isIran := strings.Contains(strings.ToLower(targetRole), "iran")
-	baseLatency := peerCfg.LatencyMs
-	if baseLatency <= 0 {
-		pctx, pcancel := context.WithTimeout(context.Background(), 2*time.Second)
-		pAvg, _, _, pLoss, _, pErr := probePing(pctx, grePeer, 2)
-		pcancel()
-		if pErr == nil && pLoss < 100 {
-			baseLatency = pAvg
-		} else {
-			pctx2, pcancel2 := context.WithTimeout(context.Background(), 2*time.Second)
-			pAvg, _, _, pLoss, _, pErr = probePing(pctx2, remotePub, 2)
-			pcancel2()
-			if pErr == nil && pLoss < 100 {
-				baseLatency = pAvg
-			}
-		}
-	}
-	if baseLatency <= 0 && isIran && isLoopbackOrLocal(remotePub) {
-		baseLatency = 1.0
-	}
-
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
 
@@ -600,17 +521,12 @@ func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 
 			switch c.Type {
 			case "gre":
+				// Measured results only: the old code invented numbers for a
+				// loopback target, which ranked carriers that were never tested.
 				avg, min, max, loss, jit, err := probePing(cctx, grePeer, probeCount)
 				if err != nil {
 					// Fallback probe to remote public IP if GRE link down
-					avg, min, max, loss, jit, _ = probePing(cctx, remotePub, probeCount)
-				}
-				if err != nil && isLoopbackOrLocal(remotePub) && isIran {
-					avg, min, max, loss, jit = 0.5, 0.4, 0.6, 0.0, 0.1
-					err = nil
-				} else if err != nil && isLoopbackOrLocal(remotePub) && baseLatency > 0 {
-					avg, min, max, loss, jit = baseLatency, baseLatency-0.5, baseLatency+0.5, 0.0, 0.5
-					err = nil
+					avg, min, max, loss, jit, err = probePing(cctx, remotePub, probeCount)
 				}
 				c.AvgRTTMs = math.Round(avg*10) / 10
 				c.MinRTTMs = math.Round(min*10) / 10
@@ -628,25 +544,6 @@ func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 				if err != nil {
 					avg, min, max, loss, jit, err = probeTCP(cctx, addr, probeCount, timeout)
 				}
-				if err != nil && isLoopbackOrLocal(targetHost) && isIran {
-					wssSt := getWSSStatus()
-					if wssSt.Running {
-						avg = 1.2
-						min = 0.8
-						max = 1.6
-						loss = 0.0
-						jit = 0.4
-						err = nil
-					}
-				}
-				if err != nil && isLoopbackOrLocal(targetHost) && baseLatency > 0 {
-					avg = baseLatency + 2.0
-					min = avg - 0.5
-					max = avg + 1.2
-					loss = 0.0
-					jit = 1.0
-					err = nil
-				}
 				c.AvgRTTMs = math.Round(avg*10) / 10
 				c.MinRTTMs = math.Round(min*10) / 10
 				c.MaxRTTMs = math.Round(max*10) / 10
@@ -657,42 +554,17 @@ func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 				}
 
 			case "frp_kcp", "frp_quic":
-				targetHost := remotePub
-				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
-				avg, min, max, loss, jit, err := probeUDP(cctx, addr, probeCount, timeout)
-				if err != nil && isLoopbackOrLocal(targetHost) && baseLatency > 0 {
-					offset := 0.4
-					if c.Type == "frp_kcp" {
-						offset = 0.2 // KCP ARQ typically has superior stability
-					}
-					avg = baseLatency + offset
-					min = avg - 0.2
-					max = avg + 0.5
-					loss = 0.0
-					jit = 0.6
-					err = nil
-				}
-				c.AvgRTTMs = math.Round(avg*10) / 10
-				c.MinRTTMs = math.Round(min*10) / 10
-				c.MaxRTTMs = math.Round(max*10) / 10
-				c.PacketLoss = math.Round(loss*10) / 10
-				c.JitterMs = math.Round(jit*10) / 10
-				if err != nil {
-					c.ErrorDetail = err.Error()
-				}
+				// A UDP "probe" without a protocol handshake always succeeds
+				// (UDP is connectionless), so it measured nothing and always
+				// won. Report these as unmeasured instead of inventing a score.
+				c.Status = benchUnmeasured
+				c.ErrorDetail = "not measurable without a KCP/QUIC handshake; switch to it only if TCP carriers are blocked"
+				return
 
 			case "frp_tcp", "frp_ws", "backhaul", "frp", "bagher":
 				targetHost := remotePub
 				addr := net.JoinHostPort(targetHost, strconv.Itoa(c.Port))
 				avg, min, max, loss, jit, err := probeTCP(cctx, addr, probeCount, timeout)
-				if err != nil && isLoopbackOrLocal(targetHost) && baseLatency > 0 {
-					avg = baseLatency + 0.8
-					min = avg - 0.3
-					max = avg + 0.9
-					loss = 0.0
-					jit = 0.9
-					err = nil
-				}
 				c.AvgRTTMs = math.Round(avg*10) / 10
 				c.MinRTTMs = math.Round(min*10) / 10
 				c.MaxRTTMs = math.Round(max*10) / 10
@@ -715,9 +587,13 @@ func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 	})
 
 	// Determine best recommended carrier
+	// Only measured carriers can be recommended.
 	bestCarrier := ""
 	bestCarrierName := ""
 	for i := range candidates {
+		if candidates[i].Status == benchUnmeasured {
+			continue
+		}
 		id := candidates[i].ID
 		if id == "direct" || strings.HasPrefix(id, "wss:") || strings.HasPrefix(id, "frp:") || strings.HasPrefix(id, "backhaul:") || strings.HasPrefix(id, "bagher:") {
 			if bestCarrier == "" && candidates[i].Score >= 10 {
@@ -728,10 +604,15 @@ func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 			}
 		}
 	}
-	if bestCarrier == "" && len(candidates) > 0 {
-		bestCarrier = candidates[0].ID
-		bestCarrierName = candidates[0].Name
-		candidates[0].IsRecommended = true
+	if bestCarrier == "" {
+		for i := range candidates {
+			if candidates[i].Status != benchUnmeasured {
+				bestCarrier = candidates[i].ID
+				bestCarrierName = candidates[i].Name
+				candidates[i].IsRecommended = true
+				break
+			}
+		}
 	}
 
 	duration := float64(time.Since(startTime).Milliseconds()) / 1000.0
@@ -778,23 +659,40 @@ func runCarrierBenchmark(customReq ...BenchmarkRunRequest) *BenchmarkReport {
 	return report
 }
 
-// applyBenchmarkCarrier synchronizes the selected carrier to the remote worker
-// and applies it to the local system.
-func applyBenchmarkCarrier(target string) error {
+// applyBenchmarkCarrier applies the selected carrier locally and then on the
+// Peer Link worker. It returns a short description of what was done.
+func applyBenchmarkCarrier(target string) (string, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return fmt.Errorf("empty carrier target")
+		return "", fmt.Errorf("empty carrier target")
 	}
 
-	// 1. Tell remote worker to apply
-	if err := syncCarrierToPeer(target); err != nil {
-		log.Printf("[BenchmarkApply] Warning: sync to peer returned: %v (applying locally)", err)
+	if err := carrierApplicable(target); err != nil {
+		return "", err
 	}
+	prev := loadCarrierConfig().ActiveCarrier
 
-	// 2. Apply locally
+	// 1. Apply locally first: if that fails nothing has changed anywhere. The
+	// old order switched the peer first and then could fail here, leaving the
+	// two ends on different carriers.
 	out, err := applyCarrierMode(target)
 	if err != nil && !strings.Contains(err.Error(), "script not found") {
-		return fmt.Errorf("failed applying carrier %s locally: %v (%s)", target, err, out)
+		return "", fmt.Errorf("failed applying carrier %s locally: %v (%s)", target, err, out)
+	}
+
+	// 2. Then the peer. Both ends must match, so undo the local change when the
+	// peer cannot follow. Without a Peer Link that ever connected there is
+	// no peer to command: the admin applies the same carrier there.
+	detail := "Synchronized and applied carrier: " + target
+	if pc := loadPeerConfig(); pc.Role == "master" && pc.PeerSecret != "" && (pc.IsConnected || pc.LastSync != "") {
+		if err := syncCarrierToPeer(target); err != nil {
+			if prev != "" && prev != target {
+				_, _ = applyCarrierMode(prev)
+			}
+			return "", fmt.Errorf("peer could not apply %s (%v); this server was switched back to %s", target, err, prev)
+		}
+	} else {
+		detail = "Applied carrier " + target + " on this server only (no Peer Link): apply the same carrier on the other server"
 	}
 
 	// 3. Update report if loaded
@@ -808,7 +706,7 @@ func applyBenchmarkCarrier(target string) error {
 	benchmarkMu.Unlock()
 
 	LogSecurityAudit("carrier_switched", "admin", "127.0.0.1", "target="+target)
-	return nil
+	return detail, nil
 }
 
 // GET /api/benchmark
@@ -844,7 +742,8 @@ func handleBenchmarkApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := applyBenchmarkCarrier(carrier); err != nil {
+	detail, err := applyBenchmarkCarrier(carrier)
+	if err != nil {
 		writeAPIError(w, r, "E-CARRIER-01", err.Error())
 		return
 	}
@@ -852,7 +751,7 @@ func handleBenchmarkApply(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"status":         "ok",
 		"active_carrier": carrier,
-		"detail":         "Synchronized and applied carrier: " + carrier,
+		"detail":         detail,
 	})
 }
 

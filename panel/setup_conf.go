@@ -6,11 +6,63 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// backhaulCoreVersion returns the first line of `backhaul -v` for the
+// installed core ("" when unknown); swappable for tests.
+var backhaulCoreVersion = func() string {
+	cands := []string{}
+	for _, d := range engineBinDirs {
+		cands = append(cands, filepath.Join(d, "backhaul"))
+	}
+	cands = append(cands, backhaulExtraBins...)
+	for _, bin := range cands {
+		if !executableFile(bin) {
+			continue
+		}
+		out, err := runCmdTimeoutOut(5*time.Second, bin, "-v")
+		if err != nil {
+			continue
+		}
+		line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+		return strings.TrimSpace(line)
+	}
+	return ""
+}
+
+// backhaulIsV2 mirrors backhaul_is_v2 in hashem.sh: the "Modified v2.x" core
+// shipped by hashem uses a sectioned TOML schema ([listener]/[dialer]/...)
+// and rejects the flat v0.x [server]/[client] one.
+func backhaulIsV2() bool {
+	v := strings.TrimPrefix(backhaulCoreVersion(), "v")
+	return strings.HasPrefix(v, "2.")
+}
+
+// ensureBackhaulTLS creates the self-signed cert the wss transports need,
+// like backhaul_ensure_tls in hashem.sh.
+func ensureBackhaulTLS() {
+	crt, key := filepath.Join(backhaulDir, "server.crt"), filepath.Join(backhaulDir, "server.key")
+	if _, err := os.Stat(crt); err == nil {
+		if _, err := os.Stat(key); err == nil {
+			return
+		}
+	}
+	_ = os.MkdirAll(backhaulDir, 0755)
+	_, _ = runCmdTimeout(30*time.Second, "openssl", "req", "-x509", "-nodes", "-newkey", "rsa:2048", "-days", "3650",
+		"-keyout", key, "-out", crt, "-subj", "/CN=backhaul")
+	_ = os.Chmod(key, 0600)
+}
 
 func writeBackhaulServerConfig(path string, bindAddr string, transport string, token string, ports []string) error {
 	if transport == "" {
 		transport = "tcpmux"
+	}
+	if transport == "wss" || transport == "wssmux" {
+		ensureBackhaulTLS()
+	}
+	if backhaulIsV2() {
+		return writeBackhaulFile(path, backhaulServerConfigV2(bindAddr, transport, token, ports))
 	}
 	var sb strings.Builder
 	sb.WriteString("[server]\n")
@@ -28,8 +80,8 @@ func writeBackhaulServerConfig(path string, bindAddr string, transport string, t
 	sb.WriteString("sniffer_log = \"\"\n")
 	sb.WriteString("log_level = \"info\"\n")
 	if transport == "wss" || transport == "wssmux" {
-		sb.WriteString("tls_cert = \"/etc/backhaul/server.crt\"\n")
-		sb.WriteString("tls_key = \"/etc/backhaul/server.key\"\n")
+		sb.WriteString(fmt.Sprintf("tls_cert = %q\n", filepath.Join(backhaulDir, "server.crt")))
+		sb.WriteString(fmt.Sprintf("tls_key = %q\n", filepath.Join(backhaulDir, "server.key")))
 	}
 	sb.WriteString("ports = [\n")
 	for i, p := range ports {
@@ -40,17 +92,61 @@ func writeBackhaulServerConfig(path string, bindAddr string, transport string, t
 		sb.WriteString(fmt.Sprintf("  %q%s\n", strings.TrimSpace(p), comma))
 	}
 	sb.WriteString("]\n")
+	return writeBackhaulFile(path, sb.String())
+}
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+// backhaulServerConfigV2 is backhaul_write_server_conf_v2 from hashem.sh.
+func backhaulServerConfigV2(bindAddr, transport, token string, ports []string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "[listener]\nbind_addr = %q\n\n", bindAddr)
+	fmt.Fprintf(&sb, "[transport]\ntype = %q\nnodelay = true\nkeepalive_period = 75\n\n", transport)
+	fmt.Fprintf(&sb, "[security]\ntoken = %q\n\n", token)
+	if strings.HasSuffix(transport, "mux") {
+		sb.WriteString("[mux]\nmux_version = 1\n\n")
+	}
+	if transport == "wss" || transport == "wssmux" {
+		fmt.Fprintf(&sb, "[tls]\ntls_cert = %q\ntls_key = %q\n\n", filepath.Join(backhaulDir, "server.crt"), filepath.Join(backhaulDir, "server.key"))
+	}
+	sb.WriteString("[logging]\nlog_level = \"info\"\n\n[ports]\nmapping = [\n")
+	for _, p := range ports {
+		if p = strings.TrimSpace(p); p != "" {
+			fmt.Fprintf(&sb, "    %q,\n", p)
+		}
+	}
+	sb.WriteString("]\n")
+	return sb.String()
+}
+
+// backhaulClientConfigV2 is backhaul_write_client_conf_v2 from hashem.sh.
+func backhaulClientConfigV2(remoteAddr, transport, token string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "[dialer]\nremote_addr = %q\ndial_timeout = 10\nretry_interval = 3\n\n", remoteAddr)
+	fmt.Fprintf(&sb, "[transport]\ntype = %q\nconnection_pool = 8\nnodelay = true\nkeepalive_period = 75\n\n", transport)
+	fmt.Fprintf(&sb, "[security]\ntoken = %q\n\n", token)
+	if strings.HasSuffix(transport, "mux") {
+		sb.WriteString("[mux]\nmux_version = 1\n\n")
+	}
+	if transport == "wss" || transport == "wssmux" {
+		host, _, _ := strings.Cut(remoteAddr, ":")
+		fmt.Fprintf(&sb, "[tls]\nsni = %q\n\n", host)
+	}
+	sb.WriteString("[logging]\nlog_level = \"info\"\n")
+	return sb.String()
+}
+
+func writeBackhaulFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(sb.String()), 0600)
+	return writeTokenFile(path, []byte(content))
 }
 
 func writeBackhaulClientConfig(path string, remoteAddr string, transport string, token string) error {
 	if transport == "" {
 		transport = "tcpmux"
+	}
+	if backhaulIsV2() {
+		return writeBackhaulFile(path, backhaulClientConfigV2(remoteAddr, transport, token))
 	}
 	var sb strings.Builder
 	sb.WriteString("[client]\n")
@@ -67,12 +163,7 @@ func writeBackhaulClientConfig(path string, remoteAddr string, transport string,
 	sb.WriteString("web_port = 0\n")
 	sb.WriteString("sniffer_log = \"\"\n")
 	sb.WriteString("log_level = \"info\"\n")
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(sb.String()), 0600)
+	return writeBackhaulFile(path, sb.String())
 }
 
 func randomToken(n int) string {

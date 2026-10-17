@@ -6338,6 +6338,9 @@ function renderBenchmark(bench, peer) {
     } else if (m.status === 'critical' || m.status === 'down') {
       statusClass = 'err';
       statusLabel = 'Down';
+    } else if (m.status === 'unmeasured') {
+      statusClass = 'dim';
+      statusLabel = 'Not measured';
     }
 
     let lossClass = 'ok';

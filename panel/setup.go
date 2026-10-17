@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -640,6 +641,9 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 // Returns the Iran-side token + foreign-setup bundle (bundle holds the
 // token plus all addresses/ports, so one paste configures foreign).
 // ("", "", steps, nil) for foreign (nothing generated there).
+// installerTimeout bounds one hashem.sh setup/add-peer run.
+const installerTimeout = 15 * time.Minute
+
 func runInstaller(b setupRequest, ports []int, rawPorts []string) (string, string, []string, error) {
 	script, err := greScriptPath()
 	if err != nil {
@@ -818,7 +822,11 @@ func runInstaller(b setupRequest, ports []int, rawPorts []string) (string, strin
 		args = append(args, "--force")
 	}
 	// token is used verbatim as an argv element (no shell), safe from injection.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// The installer downloads FRP/Backhaul (45s per mirror, several mirrors and
+	// a fallback version) and waits for services; on slow links 60s killed it
+	// half-way and left a half-installed server. POST requests carry no server
+	// write deadline (see isLongRunning), so the reply still arrives.
+	ctx, cancel := context.WithTimeout(context.Background(), installerTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", append([]string{script}, args...)...)
 	cmd.Env = append(os.Environ(), "GRE_SKIP_PANEL=1", "TERM=dumb", "GRE_PANEL_DIR="+configDir)
@@ -852,6 +860,9 @@ func runInstaller(b setupRequest, ports []int, rawPorts []string) (string, strin
 
 	if runErr != nil {
 		errText := runErr.Error()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			errText = fmt.Sprintf("timed out after %s (slow download?); the server may be half-installed, re-run setup", installerTimeout)
+		}
 		if len(steps) > 0 {
 			var failDetails []string
 			for _, s := range steps {

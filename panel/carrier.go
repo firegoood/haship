@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -226,8 +227,7 @@ func handleCarrierPost(w http.ResponseWriter, r *http.Request) {
 		cfg.LastSwitch = time.Now().Format("2006-01-02 15:04:05")
 		cfg.SwitchCount++
 		if strings.HasPrefix(m, "wss") {
-			wssCfg := loadWSSConfig()
-			wssCfg.Enabled = true
+			wssCfg := wssConfigForCarrier(m)
 			_ = saveWSSConfig(wssCfg)
 			_ = startWSSCarrier(wssCfg)
 		} else {
@@ -242,7 +242,10 @@ func handleCarrierPost(w http.ResponseWriter, r *http.Request) {
 		if t == "" && req.Mode != "" {
 			t = strings.TrimSpace(req.Mode)
 		}
-		_, _ = applyCarrierMode(t)
+		if out, err := applyCarrierMode(t); err != nil && !strings.Contains(err.Error(), "script not found") {
+			writeAPIError(w, r, "E-CARRIER-01", fmt.Sprintf("%v %s", err, strings.TrimSpace(out)))
+			return
+		}
 		cfg = loadCarrierConfig()
 		writeJSON(w, map[string]any{"status": "ok", "active": cfg.ActiveCarrier, "active_carrier": cfg.ActiveCarrier, "detail": "Applied carrier " + cfg.ActiveCarrier})
 
@@ -348,6 +351,36 @@ func updateFrpcTransport(proto string) error {
 		return err
 	}
 	lines := strings.Split(string(data), "\n")
+	// frps listens for QUIC on bindPort+1 (bindPort-1 at 65535), so the
+	// client's serverPort moves with the protocol.
+	curProto, portLine, curPort := "tcp", -1, 0
+	for i, line := range lines {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
+			switch strings.TrimSpace(k) {
+			case "transport.protocol":
+				curProto = strings.Trim(strings.TrimSpace(v), `"'`)
+			case "serverPort":
+				if portLine < 0 {
+					portLine = i
+					curPort, _ = strconv.Atoi(strings.TrimSpace(v))
+				}
+			}
+		}
+	}
+	if portLine >= 0 && curPort > 0 {
+		bind := curPort
+		if curProto == "quic" {
+			bind = curPort - 1
+		}
+		want := bind
+		if proto == "quic" {
+			want = bind + 1
+			if want > 65535 {
+				want = bind - 1
+			}
+		}
+		lines[portLine] = fmt.Sprintf("serverPort = %d", want)
+	}
 	found := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -381,18 +414,107 @@ func updateFrpcTransport(proto string) error {
 	return nil
 }
 
+// wssConfigForCarrier enables the WSS carrier and applies the port from a
+// "wss:PORT" carrier, which used to be ignored (the old port stayed in use).
+func wssConfigForCarrier(t string) wssConfig {
+	c := loadWSSConfig()
+	c.Enabled = true
+	if ps, ok := strings.CutPrefix(strings.TrimSpace(t), "wss:"); ok {
+		if p, err := strconv.Atoi(ps); err == nil && p >= 1 && p <= 65535 {
+			c.ListenPort = p
+			if host, _, err := net.SplitHostPort(c.RemoteAddr); err == nil && host != "" {
+				c.RemoteAddr = net.JoinHostPort(host, ps)
+			}
+		}
+	}
+	return c
+}
+
+// ensureFrpsUDPListeners adds kcpBindPort/quicBindPort to frps configs that
+// lack them (written by older versions) and restarts those frps units, so a
+// switch to frp:kcp or frp:quic has something to connect to.
+func ensureFrpsUDPListeners() error {
+	files, _ := filepath.Glob(filepath.Join(frpDir, "frps*.toml"))
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		if strings.Contains(content, "kcpBindPort") && strings.Contains(content, "quicBindPort") {
+			continue
+		}
+		bind := 0
+		lines := strings.Split(content, "\n")
+		at := -1
+		for i, l := range lines {
+			if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok && strings.TrimSpace(k) == "bindPort" {
+				bind, _ = strconv.Atoi(strings.TrimSpace(v))
+				at = i
+				break
+			}
+		}
+		if bind <= 0 || at < 0 {
+			continue
+		}
+		quic := bind + 1
+		if quic > 65535 {
+			quic = bind - 1
+		}
+		var add []string
+		if !strings.Contains(content, "kcpBindPort") {
+			add = append(add, fmt.Sprintf("kcpBindPort = %d", bind))
+		}
+		if !strings.Contains(content, "quicBindPort") {
+			add = append(add, fmt.Sprintf("quicBindPort = %d", quic))
+		}
+		lines = append(lines[:at+1], append(add, lines[at+1:]...)...)
+		if err := writeTokenFile(f, []byte(strings.Join(lines, "\n"))); err != nil {
+			return fmt.Errorf("update %s: %w", filepath.Base(f), err)
+		}
+		svc := strings.TrimSuffix(filepath.Base(f), ".toml") // frps or frps-N
+		if err := runSystemctl("restart", svc); err != nil {
+			return fmt.Errorf("restart %s: %w", svc, err)
+		}
+	}
+	return nil
+}
+
+// carrierApplicable reports whether t is a carrier applyCarrierMode can switch
+// to live. Backhaul and Bagher are engines, not GRE carriers: hashem.sh
+// carrier_apply has no branch for them and used to rebuild the GRE interface
+// and record a meaningless carrier.
+func carrierApplicable(t string) error {
+	t = strings.TrimSpace(t)
+	switch {
+	case t == "direct", strings.HasPrefix(t, "fou:"), t == "wss", strings.HasPrefix(t, "wss:"):
+		return nil
+	case strings.HasPrefix(t, "frp:"):
+		switch strings.TrimPrefix(t, "frp:") {
+		case "tcp", "kcp", "quic", "ws", "websocket", "wss":
+			return nil
+		}
+		return fmt.Errorf("unknown FRP transport in %q", t)
+	case strings.HasPrefix(t, "backhaul:"), strings.HasPrefix(t, "bagher:"):
+		return fmt.Errorf("%s is a tunnel engine, not a carrier: use Switch Engine (Backhaul) or the Bagher page", t)
+	}
+	return fmt.Errorf("unknown carrier %q", t)
+}
+
 func applyCarrierMode(t string) (string, error) {
 	cfg := loadCarrierConfig()
 	t = strings.TrimSpace(t)
-	if t != "direct" && !strings.HasPrefix(t, "fou:") && !strings.HasPrefix(t, "wss") && !strings.HasPrefix(t, "frp:") && !strings.HasPrefix(t, "backhaul:") && !strings.HasPrefix(t, "bagher:") {
+	if strings.HasPrefix(t, "backhaul:") || strings.HasPrefix(t, "bagher:") {
+		return "", carrierApplicable(t)
+	}
+	if t != "direct" && !strings.HasPrefix(t, "fou:") && !strings.HasPrefix(t, "wss") && !strings.HasPrefix(t, "frp:") {
 		t = cfg.ActiveCarrier
 	}
 	cfg.ActiveCarrier = t
 	cfg.LastSwitch = time.Now().Format("2006-01-02 15:04:05")
 	cfg.SwitchCount++
 	if strings.HasPrefix(t, "wss") {
-		wssCfg := loadWSSConfig()
-		wssCfg.Enabled = true
+		wssCfg := wssConfigForCarrier(t)
 		_ = saveWSSConfig(wssCfg)
 		_ = startWSSCarrier(wssCfg)
 	} else {
@@ -404,7 +526,16 @@ func applyCarrierMode(t string) (string, error) {
 		if proto == "ws" {
 			proto = "websocket"
 		}
-		_ = updateFrpcTransport(proto)
+		// Iran (frps): make sure the UDP listeners exist. Foreign (frpc):
+		// switch the client protocol. A server has one or the other.
+		if proto == "kcp" || proto == "quic" {
+			if err := ensureFrpsUDPListeners(); err != nil {
+				return "", err
+			}
+		}
+		if err := updateFrpcTransport(proto); err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("update frpc transport: %w", err)
+		}
 		return "switched to " + t, nil
 	}
 	out, err := runHashemCarrierCmd("set", t)
