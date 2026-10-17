@@ -1,11 +1,15 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/tls"
+	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -72,6 +76,86 @@ func sentinelCredentialsPath() string {
 
 func sentinelConfigPath() string {
 	return filepath.Join(configDir, "sentinel.json")
+}
+
+//go:embed sentinel_bundle.tar.gz
+var sentinelBundleFS []byte
+
+func extractEmbeddedSentinel(destDir string) error {
+	if len(sentinelBundleFS) == 0 {
+		return fmt.Errorf("embedded sentinel bundle is empty")
+	}
+	gzr, err := gzip.NewReader(bytes.NewReader(sentinelBundleFS))
+	if err != nil {
+		return fmt.Errorf("invalid gzip bundle: %v", err)
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("tar read error: %v", err)
+		}
+
+		cleanRel := filepath.Clean(header.Name)
+		if strings.HasPrefix(cleanRel, "..") || strings.HasPrefix(cleanRel, "/") {
+			continue
+		}
+		target := filepath.Join(destDir, cleanRel)
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			f.Close()
+			if strings.HasSuffix(target, ".sh") || strings.HasSuffix(target, ".py") {
+				_ = os.Chmod(target, 0755)
+			}
+		}
+	}
+	return nil
+}
+
+func ensureSentinelInstallScript() (string, error) {
+	candidates := []string{
+		"/root/projects/sentinel/install.sh",
+		"/opt/sentinel/install.sh",
+	}
+	for _, p := range candidates {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			_ = os.Chmod(p, 0755)
+			return p, nil
+		}
+	}
+
+	_ = os.MkdirAll("/opt/sentinel", 0755)
+	if err := extractEmbeddedSentinel("/opt/sentinel"); err != nil {
+		return "", fmt.Errorf("failed unpacking embedded sentinel files: %v", err)
+	}
+
+	p := "/opt/sentinel/install.sh"
+	if st, err := os.Stat(p); err == nil && !st.IsDir() {
+		_ = os.Chmod(p, 0755)
+		return p, nil
+	}
+	return "", fmt.Errorf("installer not found after bundle extraction")
 }
 
 // GetSentinelStatus gathers current Sentinel state and credentials.
@@ -197,9 +281,11 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		installScript := "/root/projects/sentinel/install.sh"
-		if _, err := os.Stat(installScript); err != nil {
-			installScript = "/opt/sentinel/install.sh"
+		installScript, err := ensureSentinelInstallScript()
+		if err != nil {
+			sentinelMu.Unlock()
+			writeAPIError(w, r, "E-INSTALL-01", fmt.Sprintf("Sentinel setup failed: %v", err))
+			return
 		}
 
 		cmd := exec.Command("bash", installScript, "--yes", "--port", fmt.Sprintf("%d", port))
