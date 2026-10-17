@@ -79,7 +79,7 @@
   .topbar h1 { font-size:var(--fs-h2); margin:0; }
   .topbar .sub { color:var(--mu); font-size:var(--fs-small); }
   .topbar .acts { margin-inline-start:auto; display:flex; gap:8px; }
-  .page { max-width:1120px; margin:0 auto; padding:20px; width:100%; display:grid; gap:16px; padding-bottom:72px; }
+  .page { max-width:1120px; margin:0 auto; padding:20px; width:100%; display:grid; grid-template-columns:minmax(0,1fr); gap:16px; padding-bottom:72px; }
   .tunnel-card, .qs { background:var(--s1); border:1px solid var(--ln); border-radius:var(--r-lg);
     padding:18px; display:flex; flex-direction:column; gap:12px;
     box-shadow:var(--lift-sm); transition:border-color .2s ease, box-shadow .25s ease, transform .25s var(--spring); }
@@ -94,7 +94,8 @@
   #dashGrid > .tunnel-card:nth-child(4) { animation-delay:.15s; }
   #dashGrid > .tunnel-card:nth-child(5) { animation-delay:.2s; }
   #dashGrid > .tunnel-card:nth-child(n+6) { animation-delay:.25s; }
-  .tc-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .tc-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+  .tc-header > div { flex-wrap:wrap; } /* actions wrap under the title on phones */
   .tc-title { font-size:15px; font-weight:600; color:var(--tx); margin:0; }
   .status-indicator { display:inline-flex; align-items:center; gap:8px; font-size:var(--fs-small); font-weight:500; }
   .status-indicator .dot { width:7px; height:7px; border-radius:50%; }
@@ -159,7 +160,7 @@
     font-family:var(--font-mono); color:var(--tx2); margin:0; white-space:pre-wrap;
     box-shadow:inset 0 2px 8px rgba(0,0,0,.12); }
   .dash-grid { display:grid; grid-template-columns:repeat(12,1fr); gap:12px; }
-  .kpi { grid-column:span 3; }
+  .kpi { grid-column:span 3; container-type:inline-size; }
   .dash-span { grid-column:1 / -1; }
   @media (max-width:900px) { .kpi { grid-column:span 6; } }
   @media (max-width:560px) { .kpi { grid-column:1 / -1; } }
@@ -176,7 +177,8 @@
    * glossy icon, tighter label, roomier card */
   .kpi-hero .kpi { padding:22px 20px; gap:14px; }
   .kpi-hero .kpi-label { font-size:12.5px; font-weight:600; letter-spacing:.02em; color:var(--mu); }
-  .kpi-hero .kpi-val { font-size:30px !important; font-weight:700; letter-spacing:-.03em; line-height:1.05;
+  /* Values shrink with the card instead of wrapping ("Not set up" in a narrow column). */
+  .kpi-hero .kpi-val { font-size:clamp(20px, 15cqi, 30px) !important; white-space:nowrap; font-weight:700; letter-spacing:-.03em; line-height:1.05;
     text-shadow:0 1px 12px color-mix(in srgb, var(--ac) 25%, transparent); }
   .kpi-hero .kpi-val .badge { font-size:14px; padding:4px 10px; border-radius:9px; font-weight:700; }
   .kpi-hero .kpi-val .badge .dot { width:8px; height:8px; }
@@ -336,7 +338,7 @@
   @media (max-width:640px) {
     .chart-card { padding:14px; }
     #trafficChart { height:200px; }
-    .page { padding:12px 10px 72px; }
+    .page { padding:12px 16px 72px; }
     .tunnel-card, .qs { padding:14px; gap:10px; }
     .peer-acts { flex-wrap:wrap; }
     .peer-acts .hashem-btn { flex:1 1 45%; min-width:140px; }
@@ -489,12 +491,9 @@
   #login .toggle:hover { color:var(--info); }
   #login #loginBtn { margin-top:6px; min-height:44px; padding:0 16px; font-size:14px;
     font-weight:600; color:#fff; cursor:pointer; width:100%;
-    background:linear-gradient(135deg,var(--info-fill) 0%,var(--ac-fill) 100%); border:none; border-radius:10px;
-    transition:transform .2s, box-shadow .2s, opacity .2s;
-    box-shadow:0 6px 20px color-mix(in srgb, var(--info) 30%, transparent); touch-action:manipulation; }
-  #login #loginBtn:hover {
-    box-shadow:0 8px 24px color-mix(in srgb, var(--info) 45%, transparent); opacity:.96; }
-  #login #loginBtn:active { transform:translateY(0) scale(.99); }
+    background:var(--ac-fill); border:none; border-radius:var(--ctl-r);
+    transition:background-color var(--dur-fast) ease; box-shadow:var(--lift-sm); touch-action:manipulation; }
+  #login #loginBtn:hover { background:var(--ac-hover); }
   #loginErr { color:var(--er); font-size:13px; min-height:20px; margin:12px 0 0; }
   #login .foot { margin-top:22px; color:var(--dim); font-size:12px; letter-spacing:.02em; }
   #login .foot b { color:var(--tx2); font-weight:600; }
@@ -536,7 +535,7 @@
   .doc-score-total { font-size:12px; color:var(--mu); font-weight:600; margin-top:2px; }
   .doc-hero-meta { display:flex; flex-direction:column; gap:6px; min-width:0; }
   .doc-hero-acts { display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
-  .doc-hero-acts .hashem-btn { display:inline-flex !important; align-items:center !important; justify-content:center !important; gap:8px !important; white-space:nowrap; padding:8px 16px !important; }
+  .doc-hero-acts .hashem-btn { display:inline-flex; align-items:center !important; justify-content:center !important; gap:8px !important; white-space:nowrap; padding:8px 16px !important; }
   html[dir="rtl"] .doc-hero-acts { align-items:flex-start; }
   .doc-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px; margin-top:14px; }
   .doc-card { background:var(--s2); border:1px solid var(--ln); border-radius:var(--r-md); padding:16px; display:flex; flex-direction:column; gap:12px; }
@@ -747,20 +746,6 @@
   #login .field input:focus {
     border-color: var(--ac) !important;
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--ac) 25%, transparent) !important;
-  }
-  #loginBtn {
-    background: linear-gradient(90deg, color-mix(in srgb, var(--ac) 15%, var(--ac)), var(--ac)) !important;
-    color: white !important;
-    border-radius: 12px !important;
-    padding: 14px !important;
-    font-size: 16px !important;
-    font-weight: 700 !important;
-    box-shadow: 0 8px 24px color-mix(in srgb, var(--ac) 35%, transparent) !important;
-    transition: all 0.25s ease !important;
-    border: 1px solid color-mix(in srgb, var(--ac) 50%, color-mix(in srgb, var(--tx) 20%, transparent)) !important;
-  }
-  #loginBtn:hover {
-    box-shadow: 0 12px 32px color-mix(in srgb, var(--ac) 45%, transparent) !important;
   }
 
   /* RTL / Persian (Farsi) Layout Overrides */
@@ -1054,6 +1039,7 @@
   .u-w-44 { width:44px; }
   .u-wrap { flex-wrap:wrap !important; }
   .u-bg-field { background:var(--field); }
+  .u-self-start { justify-self:start !important; align-self:start !important; }
 </style>
 
 </head>
@@ -1413,7 +1399,7 @@
             <button class="hashem-btn hashem-btn-secondary" data-act="restart-gre">Restart GRE</button>
             <button class="hashem-btn hashem-btn-secondary" data-act="restart-frps" id="frpRestartBtn">Restart frps</button>
             <button class="hashem-btn hashem-btn-secondary" id="tunnelCarrierCycleBtn" title="Cycle encapsulation carrier (Direct GRE / WSS)">Carrier: <span id="tunnelCarrierTxt">GRE</span></button>
-            <button class="hashem-btn hashem-btn-primary" id="optimizeBtn">Optimize Tunnel</button>
+            <button class="hashem-btn hashem-btn-secondary" id="optimizeBtn">Optimize Tunnel</button>
             <button class="hashem-btn hashem-btn-secondary hidden" id="restoreBtn">Restore Pre-optimize</button>
             <button class="hashem-btn hashem-btn-danger" id="removeTunnelBtn">Remove Tunnel</button>
           </div>
@@ -2630,7 +2616,7 @@
             <div class="u-flex u-ai-c u-jc-sb u-wrap u-gap-16">
               <div>
                 <div class="u-flex u-ai-c u-gap-8">
-                  <span class="badge ok">Recommended Protocol</span>
+                  <span class="badge ok" id="benchRecBadge">Recommended Protocol</span>
                   <span class="badge info" id="benchWinnerBadge">Highest Stability</span>
                 </div>
                 <h3 id="benchWinnerTitle" class="u-m-8x0x4x0 u-fs-20 u-fw-700 u-c-tx u-flex u-ai-c u-gap-8">—</h3>
@@ -3002,7 +2988,7 @@
             <div class="qs-hint" data-i18n="tls_ip_hint">No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.</div>
             <div class="fg"><label for="tlsIP">Server IP</label><input class="hashem-input" id="tlsIP" placeholder="1.2.3.4" autocomplete="off" spellcheck="false"></div>
             <div class="qs-actions u-flex u-wrap u-gap-8">
-              <button class="hashem-btn hashem-btn-primary" id="tlsIPBtn">Issue IP Certificate</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsIPBtn">Issue IP Certificate</button>
               <button class="hashem-btn hashem-btn-secondary" id="tlsIPRegenBtn">Regenerate</button>
               <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (Install Once)</button>
             </div>
@@ -3016,7 +3002,7 @@
             <div class="fg"><label for="tlsCustomCertPath">…or server paths</label><input class="hashem-input" id="tlsCustomCertPath" placeholder="/etc/ssl/my.crt" autocomplete="off" spellcheck="false"></div>
             <div class="fg"><label for="tlsCustomKeyPath">Key path</label><input class="hashem-input" id="tlsCustomKeyPath" placeholder="/etc/ssl/my.key" autocomplete="off" spellcheck="false"></div>
             <div class="qs-actions u-flex u-wrap u-gap-8">
-              <button class="hashem-btn hashem-btn-primary" id="tlsCustomBtn">Install Custom Certificate</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsCustomBtn">Install Custom Certificate</button>
             </div>
           </div>
           <div id="tlsProxyBox" class="u-none u-mt-12 u-p-12 u-bd-ln u-r-8 u-bg-field">

@@ -2261,7 +2261,8 @@ async function refreshDash() {
       }
       if (greUp || frpUp || !bagherUp) {
         if (linksHtml) linksHtml += ' ';
-        linksHtml += '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP</span>';
+        const off = unset ? 'dim' : 'err'; // nothing configured yet: not a failure
+        linksHtml += '<span class="badge ' + (greUp ? 'ok' : off) + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : off) + '"><span class="dot"></span>FRP</span>';
       }
       if (kpiLinks) kpiLinks.innerHTML = linksHtml;
     }
@@ -2275,6 +2276,8 @@ async function refreshDash() {
     } else {
       if (bagherUp && !g.exists && !f.up) {
         set('kpiLinksSub', 'Bagher stealth tunnel · ' + ((bObj.ports || []).length ? bObj.ports.length + ' forwarded ports' : 'active link') + ' · ' + (bObj.remote_host || 'connected'));
+      } else if (unset) {
+        set('kpiLinksSub', 'Not configured');
       } else {
         set('kpiLinksSub', (f.svc || 'no frp') + ((f.proxies || []).length ? ' · ' + f.proxies.length + ' proxies' : '') + ' · ' + (g.inner || 'no gre ip'));
       }
@@ -2757,12 +2760,12 @@ function renderSetupLock() {
   const show = (id, on) => { const el = $(id); if (el) el.classList.toggle('hidden', !on); };
   if (!iran) { show('setupBtn', false); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', false); return; }
   if (!setupExists) {
-    $('setupBtn').textContent = 'Apply setup';
+    $('setupBtn').textContent = 'Apply Setup';
     show('setupBtn', true); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', false);
   } else if (locked) {
     show('setupBtn', false); show('setupUnlockBtn', true); show('setupAddBtn', true); show('setupRelockBtn', false);
   } else {
-    $('setupBtn').textContent = 'Apply setup (replace)';
+    $('setupBtn').textContent = 'Apply Setup (Replace)';
     show('setupBtn', true); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', true);
   }
 }
@@ -3586,7 +3589,7 @@ async function loadVersion() {
     if (dot) { dot.className = 'status-indicator ' + (v.update_available ? 'offline' : 'active'); $('updDotTxt').textContent = v.update_available ? 'update available' : 'up to date'; }
     const btn = $('updateBtn');
     if (v.update_available) { btn.disabled = false; btn.textContent = 'Update to ' + v.latest; }
-    else { btn.disabled = true; btn.textContent = 'Check for updates'; }
+    else { btn.disabled = true; btn.textContent = 'Check for Updates'; }
     loadRollback();
     $('updateMsg').textContent = v.update_available ? 'A newer release (' + v.latest + ') is ready. Press Update to install it here.' : 'You are on the latest release.';
   } catch(e) {
@@ -3631,7 +3634,7 @@ $('updateBtn').onclick = async () => {
   const btn = $('updateBtn');
   // First click = check; second click (when update known) = install.
   if (btn.disabled) return;
-  if (/^Check/.test(btn.textContent)) { btn.disabled = true; btn.textContent = 'Checking…'; loadVersion(); setTimeout(() => { if (/^Checking/.test(btn.textContent)) { btn.disabled = false; btn.textContent = 'Check for updates'; } }, 8000); return; }
+  if (/^Check/.test(btn.textContent)) { btn.disabled = true; btn.textContent = 'Checking…'; loadVersion(); setTimeout(() => { if (/^Checking/.test(btn.textContent)) { btn.disabled = false; btn.textContent = 'Check for Updates'; } }, 8000); return; }
   if (!await entConfirm('Update Panel?', 'Update panel to the latest release? The panel will restart (a few seconds downtime). Tunnel services keep running.', 'Update')) return;
   btn.disabled = true;
   $('updateMsg').textContent = 'Updating… the panel will restart. This page refreshes automatically.';
@@ -4832,16 +4835,16 @@ $('tlsIssueBtn').onclick = async () => {
     const chk = await api('/api/tls/check', { domain });
     if (chk.port_conflict) {
       toastErr('Port Conflict', chk.port_conflict_error || 'Port conflict with active tunnel detected.');
-      b.disabled = false; b.textContent = 'Get certificate';
+      b.disabled = false; b.textContent = 'Get Certificate';
       return;
     }
     if (chk.dns_ok === false) {
       toastErr('DNS Mismatch', chk.dns_error || 'Domain DNS does not point to this server.');
-      b.disabled = false; b.textContent = 'Get certificate';
+      b.disabled = false; b.textContent = 'Get Certificate';
       return;
     }
   } catch(e) { /* proceed if check endpoint unreachable */ }
-  b.disabled = false; b.textContent = 'Get certificate';
+  b.disabled = false; b.textContent = 'Get Certificate';
 
   if (!await entConfirm('Get HTTPS Certificate?', 'Certbot will issue a Let\'s Encrypt certificate for ' + domain + '. HTTP and active tunnels continue running without interruption.', 'Get Certificate')) return;
   b.disabled = true; b.textContent = 'Issuing… (up to 60s)';
@@ -4850,7 +4853,7 @@ $('tlsIssueBtn').onclick = async () => {
     toastOk('certificate installed', 'HTTPS: ' + (r.https_url || ''));
     tlsRefresh();
   } catch(e) { toastErr('certificate failed', e.message); }
-  b.disabled = false; b.textContent = 'Get certificate';
+  b.disabled = false; b.textContent = 'Get Certificate';
 };
 
 $('tlsRenewBtn').onclick = async () => {
@@ -4860,7 +4863,7 @@ $('tlsRenewBtn').onclick = async () => {
     toastOk('certificate renewed', 'Expires: ' + (r.expiry || ''));
     tlsRefresh();
   } catch(e) { toastErr('renew failed', e.message); }
-  b.disabled = false; b.textContent = 'Renew now';
+  b.disabled = false; b.textContent = 'Renew Now';
 };
 
 $('tlsRemoveBtn').onclick = async () => {
@@ -4872,7 +4875,7 @@ $('tlsRemoveBtn').onclick = async () => {
     $('tlsDomain').value = '';
     tlsRefresh();
   } catch(e) { toastErr('remove failed', e.message); }
-  b.disabled = false; b.textContent = 'Remove domain';
+  b.disabled = false; b.textContent = 'Remove Domain';
 };
 
 $('tlsProxyConfBtn').onclick = async () => {
@@ -4927,7 +4930,7 @@ if (_tlsCustomBtn) _tlsCustomBtn.onclick = async () => {
     toastOk('custom certificate installed', 'HTTPS: ' + (r.https_url || '') + (r.expiry ? ' · expires ' + r.expiry : ''));
     tlsRefresh();
   } catch(e) { toastErr('install failed', e.message); }
-  b.disabled = false; b.textContent = 'Install custom certificate';
+  b.disabled = false; b.textContent = 'Install Custom Certificate';
 };
 
 
@@ -4942,7 +4945,7 @@ if (_tlsIPBtn) _tlsIPBtn.onclick = async () => {
     toastOk('IP certificate installed', 'HTTPS: ' + (r.https_url || '') + (r.expiry ? ' · expires ' + r.expiry : ''));
     tlsRefresh();
   } catch(e) { toastErr('issue failed', e.message); }
-  b.disabled = false; b.textContent = 'Issue IP certificate';
+  b.disabled = false; b.textContent = 'Issue IP Certificate';
 };
 const _tlsIPRegenBtn = $('tlsIPRegenBtn');
 if (_tlsIPRegenBtn) _tlsIPRegenBtn.onclick = async () => {
@@ -4984,20 +4987,23 @@ async function loadDoctor(forceRun = false) {
 function renderDoctor(rep) {
   if (!rep) return;
   doctorData = rep;
+  // Fresh install: nothing to diagnose yet, so no score, no "issues", no auto-fix.
+  const unset = window._hashemEmpty === true;
 
   // Score & Rating
   const scoreVal = $('docScoreVal');
   const scoreCircle = $('docScoreCircle');
-  if (scoreVal) scoreVal.textContent = rep.score != null ? rep.score : '—';
+  if (scoreVal) scoreVal.textContent = !unset && rep.score != null ? rep.score : '—';
   if (scoreCircle) {
-    scoreCircle.className = 'doc-score-circle ' + (rep.rating || '');
+    scoreCircle.className = 'doc-score-circle ' + (unset ? '' : (rep.rating || ''));
   }
 
   const ratingBadge = $('docRatingBadge');
   if (ratingBadge) {
-    ratingBadge.textContent = (rep.rating || 'UNKNOWN').toUpperCase();
+    ratingBadge.textContent = unset ? 'NOT SET UP' : (rep.rating || 'UNKNOWN').toUpperCase();
     let bClass = 'dim';
-    if (rep.rating === 'excellent') bClass = 'ok';
+    if (unset) bClass = 'dim';
+    else if (rep.rating === 'excellent') bClass = 'ok';
     else if (rep.rating === 'good') bClass = 'info';
     else if (rep.rating === 'warning') bClass = 'warn';
     else if (rep.rating === 'critical') bClass = 'err';
@@ -5013,16 +5019,7 @@ function renderDoctor(rep) {
 
   // Fix button visibility: always keep visible in hero actions
   const fixBtn = $('docFixBtn');
-  if (fixBtn) {
-    fixBtn.classList.remove('hidden');
-    if (rep.issues && rep.issues.length > 0) {
-      fixBtn.style.boxShadow = '0 0 12px rgba(16,185,129,0.3)';
-      fixBtn.style.borderColor = 'rgba(52,211,153,0.6)';
-    } else {
-      fixBtn.style.boxShadow = 'none';
-      fixBtn.style.borderColor = 'rgba(16,185,129,0.35)';
-    }
-  }
+  if (fixBtn) fixBtn.classList.toggle('hidden', unset);
 
   // Ping Card
   const ping = rep.ping_result || {};
@@ -5084,9 +5081,12 @@ function renderDoctor(rep) {
   const issuesCount = $('docIssuesCount');
   const issues = rep.issues || [];
   const recs = rep.recommendations || [];
-  if (issuesCount) issuesCount.textContent = `${issues.length} issue${issues.length === 1 ? '' : 's'} detected`;
+  if (issuesCount) issuesCount.textContent = unset ? '' : `${issues.length} issue${issues.length === 1 ? '' : 's'} detected`;
   if (issuesBox) {
-    if (issues.length === 0) {
+    if (unset) {
+      issuesBox.innerHTML = '<div class="qs-hint">' + esc(tr('doc_unset', 'No tunnel on this server yet. Diagnostics start once one is set up.')) +
+        '</div><button type="button" class="hashem-btn hashem-btn-primary u-mt-12 u-self-start" onclick="goTab(&quot;setup&quot;)">' + esc(tr('onb_go', 'Open Setup')) + '</button>';
+    } else if (issues.length === 0) {
       issuesBox.innerHTML = '<div class="qs-hint u-color-ok">✓ ' + (tr('x014', "All diagnostic tests passed with zero bottlenecks. Connection is operating at peak performance.")) + '</div>';
     } else {
       let html = '';
@@ -5191,7 +5191,7 @@ async function runTunnelHealthClick() {
   if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
   try { renderTunnelHealth(await api('/api/tunnel-health/run', {})); }
   catch (e) { toastErr('Tunnel health test failed', e.message || e); reportErr('tunnel-health', e); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = 'Test all tunnels'; } }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Test All Tunnels'; } }
 }
 (function initTunnelHealthEvents() {
   const b = $('thRunBtn');
@@ -5777,7 +5777,7 @@ function uiObserve(s) {
   window._hashemEmpty = empty; // refreshDash shows a neutral "not set up" state instead of errors
   const c = $('onbCard'); if (c) c.hidden = !empty || dismissed;
 }
-{ const _rd = renderDoctor; renderDoctor = function (rep) { _rd(rep); try { navBadge('doctor', ((rep && rep.issues) || []).length, rep && rep.rating === 'critical' ? 'err' : 'warn', 'badge_doctor'); } catch (e) { /* cosmetic */ } }; }
+{ const _rd = renderDoctor; renderDoctor = function (rep) { _rd(rep); try { navBadge('doctor', window._hashemEmpty === true ? 0 : ((rep && rep.issues) || []).length, rep && rep.rating === 'critical' ? 'err' : 'warn', 'badge_doctor'); } catch (e) { /* cosmetic */ } }; }
 $('onbGo').onclick = () => goTab('setup');
 function onbHide() { try { localStorage.setItem('hashem_onb_done', '1'); } catch (e) { /* session only */ } $('onbCard').hidden = true; }
 $('onbLater').onclick = onbHide; $('onbX').onclick = onbHide;
@@ -6300,7 +6300,21 @@ function renderBenchmark(bench, peer) {
 
     // Winner Banner Showcase
     const winnerBanner = $('benchWinnerBanner');
-    if (winner && winnerBanner) {
+    // A "winner" that never answered (score 0 / 100% loss) is not a recommendation.
+    const usable = !!winner && winner.score > 0 && winner.packet_loss < 100;
+    const runB = $('benchRunBtn');
+    if (runB) { runB.classList.toggle('hashem-btn-primary', !usable); runB.classList.toggle('hashem-btn-secondary', usable); }
+    if ($('benchRecBadge')) $('benchRecBadge').classList.toggle('hidden', !usable);
+    if (winnerBanner) { winnerBanner.classList.toggle('u-bd-ok', usable); winnerBanner.classList.toggle('u-bd-ln', !usable); }
+    if ($('benchWinnerScore')) { $('benchWinnerScore').classList.toggle('u-c-ok', usable); $('benchWinnerScore').classList.toggle('u-c-mu', !usable); }
+    if ($('benchApplyWinnerBtn')) $('benchApplyWinnerBtn').classList.toggle('hidden', !usable);
+    if (winner && !usable && winnerBanner) {
+      winnerBanner.classList.remove('hidden');
+      $('benchWinnerTitle').textContent = tr('bench_none_t', 'No Carrier Answered');
+      $('benchWinnerScore').textContent = '— / 100';
+      $('benchWinnerBadge').className = 'badge dim'; $('benchWinnerBadge').textContent = tr('bench_none_b', 'No Result');
+      $('benchWinnerDesc').textContent = tr('bench_none_d', 'Every probe was lost. Check the destination address and that the other server is online, then run the benchmark again.');
+    } else if (winner && winnerBanner) {
       winnerBanner.classList.remove('hidden');
       if ($('benchWinnerTitle')) $('benchWinnerTitle').textContent = winner.name || winner.id;
       if ($('benchWinnerScore')) $('benchWinnerScore').textContent = `${winner.score} / 100`;
@@ -6321,8 +6335,8 @@ function renderBenchmark(bench, peer) {
       winnerBanner.classList.add('hidden');
     }
 
-    if ($('benchStatWinner')) $('benchStatWinner').textContent = winnerName;
-    if ($('benchStatWinnerSub')) $('benchStatWinnerSub').textContent = winner ? `Score: ${winner.score}/100 · ${winner.avg_rtt_ms} ms` : 'Top Recommendation';
+    if ($('benchStatWinner')) $('benchStatWinner').textContent = usable ? winnerName : '—';
+    if ($('benchStatWinnerSub')) $('benchStatWinnerSub').textContent = usable ? `Score: ${winner.score}/100 · ${winner.avg_rtt_ms} ms` : tr('bench_none_b', 'No Result');
     if ($('benchStatActive')) $('benchStatActive').textContent = activeName;
     if ($('benchStatActiveSub')) $('benchStatActiveSub').textContent = 'Active Network Carrier';
     if ($('benchStatMinRtt')) $('benchStatMinRtt').textContent = minRtt > 0 ? `${minRtt.toFixed(1)} ms` : (winner && winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} ms` : '—');

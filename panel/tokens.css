@@ -260,6 +260,7 @@ body[data-t="dark"], body {
   font-weight: var(--ctl-fw);
   transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
   cursor: pointer;
+  white-space: nowrap; /* a label that wraps reads as two buttons */
   border: 1px solid transparent;
   text-decoration: none;
 }
