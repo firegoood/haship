@@ -895,6 +895,19 @@
 
 </head>
 <body data-t="dark">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></symbol>
+  <symbol id="i-antenna" viewBox="0 0 24 24"><path d="M12 12v9M8.5 8.5a5 5 0 0 1 7 0M5.6 5.6a9 9 0 0 1 12.8 0"/><circle cx="12" cy="11" r="1"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+</svg>
 
 <div id="login" class="hidden">
   <canvas id="kineticGrid" aria-hidden="true"></canvas>
@@ -936,7 +949,7 @@
       <div class="field hidden" id="codeField">
         <input id="totpCode" maxlength="16" inputmode="numeric" placeholder="2FA code or recovery code" autocomplete="one-time-code" aria-label="Two-factor code">
       </div>
-      <button type="submit" id="loginBtn" data-i18n="login_signin">Sign in</button>
+      <button type="submit" id="loginBtn" data-i18n="login_signin">Sign In</button>
     </form>
     <p id="loginErr"></p>
     <div class="foot"><b>Hashem Tunnel</b> · Infrastructure<br><span class="u-foot-sub">DNC MADE THIS</span></div>
@@ -974,7 +987,7 @@
       <button role="tab" aria-selected="false" aria-controls="tab-terminal" tabindex="-1" class="nav-item hidden" data-tab="terminal" id="termNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg><span data-i18n="nav_terminal">Terminal</span><span class="term-live hidden u-ml-auto" id="termLiveDot" ></span></button>
     </nav>
     <div class="sidebar-foot">
-      <button class="hashem-btn hashem-btn-secondary u-flex-1" id="themeBtn" aria-label="Theme" data-i18n-aria="theme"><svg class="sf-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg><span class="sf-t" data-i18n="theme">Theme</span></button>
+      <button class="hashem-btn hashem-btn-secondary u-flex-1" id="themeBtn" aria-label="Theme" data-i18n-aria="theme"><svg class="sf-ic" aria-hidden="true"><use href="#i-moon"/></svg><span class="sf-t" data-i18n="theme">Theme</span></button>
       <button class="hashem-btn hashem-btn-ghost" id="langToggleBtn" aria-label="Language"><span class="sf-t">FA / EN</span></button>
       <button class="hashem-btn hashem-btn-ghost" id="logoutBtn" aria-label="Logout" data-i18n-aria="logout"><svg class="sf-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg><span class="sf-t" data-i18n="logout">Logout</span></button>
     </div>
@@ -1009,7 +1022,7 @@
             <li><span class="onb-n">2</span><div><b data-i18n="onb_s2">Link the other server</b><span data-i18n="onb_s2d">Create the tunnel and paste the connection bundle on the other side.</span></div></li>
             <li><span class="onb-n">3</span><div><b data-i18n="onb_s3">Verify and optimise</b><span data-i18n="onb_s3d">Run Diagnostics, then Optimize in the Tunnel tab.</span></div></li>
           </ol>
-          <div class="onb-acts"><button type="button" class="hashem-btn hashem-btn-primary" id="onbGo" data-i18n="onb_go">Open Setup</button><button type="button" class="hashem-btn hashem-btn-secondary" id="onbLater" data-i18n="onb_later">Not now</button></div>
+          <div class="onb-acts"><button type="button" class="hashem-btn hashem-btn-primary" id="onbGo" data-i18n="onb_go">Open Setup</button><button type="button" class="hashem-btn hashem-btn-secondary" id="onbLater" data-i18n="onb_later">Not Now</button></div>
         </div>
 
         <!-- Bagher PRO Dedicated Tunnel Banner / Hero Card in Dashboard -->
@@ -1022,21 +1035,21 @@
               <div>
                 <div style="display:flex; align-items:center; gap:8px;">
                   <h3 style="margin:0; font-size:17px; font-weight:700; color:var(--tx); letter-spacing:-0.02em;">Bagher Tunnel</h3>
-                  <span class="badge" style="background:var(--ok-fill); color:#fff; font-weight:700; font-size:12px; padding:2px 8px; border-radius:20px;">ACTIVE TUNNEL</span>
+                  <span class="badge ok">ACTIVE TUNNEL</span>
                   <span class="badge ok" id="dashBagherStatusBadge"><span class="dot"></span><span id="dashBagherStatusText">Active</span></span>
                 </div>
                 <div style="font-size:12px; color:var(--mu); margin-top:2px;" id="dashBagherRoleSub">Stealth Hybrid Tunnel · Role: Iran Server</div>
               </div>
             </div>
             <div style="display:flex; align-items:center; gap:10px;">
-              <button type="button" class="hashem-btn" onclick="openBagherQuickEdit()" style="padding:6px 14px; font-size:12px; font-weight:700; background:color-mix(in srgb, var(--info) 12%, transparent); border:1px solid color-mix(in srgb, var(--info) 35%, transparent); color:var(--info);">
-                ✏️ Edit Tunnel
+              <button type="button" class="hashem-btn u-btn-30" onclick="openBagherQuickEdit()">
+                Edit Tunnel
               </button>
-              <button type="button" class="hashem-btn" onclick="cleanBagherTunnelClick()" style="padding:6px 14px; font-size:12px; font-weight:700; background:color-mix(in srgb, var(--er) 14%, transparent); border:1px solid color-mix(in srgb, var(--er) 38%, transparent); color:var(--er);">
-                🗑️ Clean Tunnel
+              <button type="button" class="hashem-btn u-btn-30 hashem-btn-danger" onclick="cleanBagherTunnelClick()">
+                Clean Tunnel
               </button>
-              <button type="button" class="hashem-btn hashem-btn-primary" onclick="goTab('sshfwd')" style="padding:6px 16px; font-size:12px; font-weight:700;">
-                ⚙️ Manage Bagher
+              <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="goTab('sshfwd')">
+                Manage Bagher
               </button>
             </div>
           </div>
@@ -1094,7 +1107,7 @@
                 </div>
               </div>
             </div>
-            <div class="chart-down hidden" id="chartDown">🔴 Tunnel is down — no live traffic. History below is stale until the tunnel comes back up.</div>
+            <div class="chart-down hidden" id="chartDown">Tunnel is down — no live traffic. History below is stale until the tunnel comes back up.</div>
             <canvas id="trafficChart" height="260"></canvas>
             <div class="chart-legend"><span><i class="sw sw-dl"></i><span data-i18n="download">Download</span></span><span><i class="sw sw-ul"></i><span data-i18n="upload">Upload</span></span></div>
             <div class="warnbox hidden" id="tunnelWarn"></div>
@@ -1165,7 +1178,7 @@
         <div class="tunnel-card rsc-banner" id="rscBanner" hidden role="alert">
           <span class="rsc-ic warn" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg></span>
           <div class="rsc-ban-t"><b data-i18n="rsc_ban_t">This server cannot connect to its peer</b><span data-i18n="rsc_ban_d">Ping works but every TCP connection is dropped on the way. A one-click fix reverses the connection direction.</span></div>
-          <button type="button" class="hashem-btn hashem-btn-primary" id="rscBanGo" data-i18n="rsc_ban_go">Fix it</button>
+          <button type="button" class="hashem-btn hashem-btn-primary" id="rscBanGo" data-i18n="rsc_ban_go">Fix It</button>
         </div>
         <div class="tunnel-card" id="dialCard" hidden>
           <div class="tc-header"><p class="tc-title" data-i18n="dial_title">Route to the Iran hub</p><span class="badge" id="dialBadge"><span class="dot"></span><span id="dialBadgeTxt">—</span></span></div>
@@ -1188,20 +1201,20 @@
         <div class="tunnel-card hidden" id="tunnelBagherCard" style="background: linear-gradient(135deg, color-mix(in srgb, var(--s1) 90%, transparent) 0%, color-mix(in srgb, var(--bg) 45%, transparent) 100%); border: 1px solid color-mix(in srgb, var(--info) 40%, transparent); box-shadow: 0 8px 24px -4px color-mix(in srgb, var(--info) 22%, transparent); border-radius: 12px; padding: 18px; margin-bottom: 16px;">
           <div class="tc-header" style="margin-bottom:12px;">
             <div style="display:flex; align-items:center; gap:10px;">
-              <span style="color:var(--info); font-size:20px;">⚡</span>
+              <span style="color:var(--info); font-size:20px;"><svg class="i" aria-hidden="true"><use href="#i-bolt"/></svg></span>
               <div>
                 <p class="tc-title" style="margin:0; font-size:15px; font-weight:700; color:var(--tx);">Bagher Hybrid Tunnel</p>
                 <div class="qs-hint" style="font-size:12px;">High-speed stealth carrier · Forwarding &amp; Multiplexing</div>
               </div>
-              <span class="badge" style="background:var(--ok-fill); color:#fff; font-weight:700; font-size:12px; padding:2px 8px; border-radius:20px;">HYBRID</span>
+              <span class="badge ok">HYBRID</span>
             </div>
             <div style="display:flex; align-items:center; gap:8px;">
               <span class="badge ok" id="tunBagherStatusBadge"><span class="dot"></span><span id="tunBagherStatusText">Active</span></span>
-              <button type="button" class="hashem-btn" onclick="openBagherQuickEdit()" style="padding:5px 14px; font-size:12px; font-weight:700; background:color-mix(in srgb, var(--info) 15%, transparent); border:1px solid color-mix(in srgb, var(--info) 40%, transparent); color:var(--info);">
-                ✏️ Quick Edit
+              <button type="button" class="hashem-btn u-btn-30" onclick="openBagherQuickEdit()">
+                Quick Edit
               </button>
-              <button type="button" class="hashem-btn" onclick="cleanBagherTunnelClick()" style="padding:5px 14px; font-size:12px; font-weight:700; background:color-mix(in srgb, var(--er) 14%, transparent); border:1px solid color-mix(in srgb, var(--er) 38%, transparent); color:var(--er);">
-                🗑️ Clean
+              <button type="button" class="hashem-btn u-btn-30 hashem-btn-danger" onclick="cleanBagherTunnelClick()">
+                Clean
               </button>
             </div>
           </div>
@@ -1233,13 +1246,13 @@
           <div class="ent-sec-label u-mt-6" >Peer tunnels</div>
           <div id="peerCards" class="det-grid"></div>
           <div class="u-flex-gap-8 u-mt-4" id="tunnelActs">
-            <button class="hashem-btn hashem-btn-secondary" data-act="ping">Ping peer</button>
+            <button class="hashem-btn hashem-btn-secondary" data-act="ping">Ping Peer</button>
             <button class="hashem-btn hashem-btn-secondary" data-act="restart-gre">Restart GRE</button>
             <button class="hashem-btn hashem-btn-secondary" data-act="restart-frps" id="frpRestartBtn">Restart frps</button>
-            <button class="hashem-btn hashem-btn-secondary" id="tunnelCarrierCycleBtn" title="Cycle encapsulation carrier (Direct GRE / WSS)">⚡ Carrier: <span id="tunnelCarrierTxt">GRE</span></button>
-            <button class="hashem-btn hashem-btn-primary" id="optimizeBtn">⚡ Optimize tunnel</button>
-            <button class="hashem-btn hashem-btn-secondary hidden" id="restoreBtn">Restore pre-optimize</button>
-            <button class="hashem-btn hashem-btn-danger" id="removeTunnelBtn">Remove tunnel</button>
+            <button class="hashem-btn hashem-btn-secondary" id="tunnelCarrierCycleBtn" title="Cycle encapsulation carrier (Direct GRE / WSS)">Carrier: <span id="tunnelCarrierTxt">GRE</span></button>
+            <button class="hashem-btn hashem-btn-primary" id="optimizeBtn">Optimize Tunnel</button>
+            <button class="hashem-btn hashem-btn-secondary hidden" id="restoreBtn">Restore Pre-optimize</button>
+            <button class="hashem-btn hashem-btn-danger" id="removeTunnelBtn">Remove Tunnel</button>
           </div>
           <pre id="actOut" class="logs hidden u-mt-4" ></pre>
           <div class="qs-hint" id="tuneHint">Optimize: FQ+BBR + 16MB TCP buffers + MTU 1380 + MSS clamp 1340 + keepalive. Backs up current settings first — Restore brings them back.</div>
@@ -1261,14 +1274,14 @@
           </div>
           <div id="thBox"><div class="qs-hint">Click &quot;Test all tunnels&quot; to check the service, control session and a data probe of every tunnel.</div></div>
           <div class="u-flex-gap-8 u-mt-4">
-            <button class="hashem-btn hashem-btn-secondary" id="thRunBtn">Test all tunnels</button>
+            <button class="hashem-btn hashem-btn-secondary" id="thRunBtn">Test All Tunnels</button>
           </div>
         </div>
 
         <!-- Live Tunnel Engine Switcher -->
         <div class="tunnel-card u-mt-4" id="liveEngineCard" style="border:1px solid color-mix(in srgb, var(--info) 25%, transparent); background:linear-gradient(180deg, color-mix(in srgb, var(--bg) 60%, transparent) 0%, color-mix(in srgb, var(--s1) 80%, transparent) 100%);">
           <div class="tc-header">
-            <p class="tc-title">⚡ Live Tunnel Engine Switcher</p>
+            <p class="tc-title">Live Tunnel Engine Switcher</p>
             <span class="badge info" id="activeEngineBadge">FRP</span>
           </div>
           <div style="font-size:12px;color:var(--mu);margin-bottom:12px">
@@ -1278,9 +1291,9 @@
             <div>
               <label for="liveEngineSelect" style="font-size:12px;text-transform:uppercase;color:var(--mu);display:block;margin-bottom:4px">Target Engine</label>
               <select class="hashem-input u-w-full" id="liveEngineSelect">
-                <option value="frp">🚀 GRE + FRP Reverse Tunnel</option>
-                <option value="backhaul">🌐 Standalone Backhaul (Multiplexed)</option>
-                <option value="gre-backhaul">⚡ GRE + Backhaul Dual-Layer</option>
+                <option value="frp">GRE + FRP Reverse Tunnel</option>
+                <option value="backhaul">Standalone Backhaul (Multiplexed)</option>
+                <option value="gre-backhaul">GRE + Backhaul Dual-Layer</option>
               </select>
             </div>
             <div id="liveTransportWrap">
@@ -1296,7 +1309,7 @@
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn" style="padding:6px 18px">Switch Tunnel Engine Now</button>
+            <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn">Switch Tunnel Engine Now</button>
             <span class="u-hint-12" id="liveEngineStatusTxt"></span>
           </div>
         </div>
@@ -1305,13 +1318,13 @@
         <input type="hidden" id="sshfwdMode" value="bagher" />
         <!-- Locked Banner (shown when un-licensed and modal is closed) -->
         <div id="bagherLockedBanner" class="hidden" style="text-align:center; padding:60px 20px; background:linear-gradient(180deg, color-mix(in srgb, var(--s1) 85%, transparent) 0%, color-mix(in srgb, var(--s1) 95%, transparent) 100%); border:1px solid color-mix(in srgb, var(--info) 22%, transparent); border-radius:12px; margin-bottom:20px;">
-          <div style="font-size:42px; margin-bottom:14px;">🔒</div>
+          <div style="font-size:42px; margin-bottom:14px;"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></div>
           <h3 style="font-size:18px; font-weight:700; color:var(--info); margin-bottom:8px;">Bagher Engine Requires a Premium License</h3>
           <p style="font-size:13px; color:var(--mu); max-width:500px; margin:0 auto 20px auto; line-height:1.6;">
             Stealth obfuscation and multiplexed SSH key pool tunneling is exclusively provided in the Premium edition. Enter your license key to unlock.
           </p>
-          <button class="hashem-btn hashem-btn-primary" id="bagherOpenLicModalBtn" onclick="openBagherLicModal()" style="padding:8px 24px; font-size:14px; font-weight:600;">
-            🔑 Activate Bagher License
+          <button class="hashem-btn hashem-btn-primary" id="bagherOpenLicModalBtn" onclick="openBagherLicModal()">
+            Activate Bagher License
           </button>
         </div>
 
@@ -1325,13 +1338,13 @@
                   </span>
                   Bagher Stealth Tunnel
                 </span>
-                <span class="badge" style="background:var(--ok-fill); color:#fff; font-weight:700; font-size:12px; padding:2px 8px; border-radius:20px; white-space:nowrap;">TUNNEL ENGINE</span>
-                <span class="badge" id="sshfwdStatusBadge" style="white-space:nowrap;">Checking...</span>
+                <span class="badge ok" style="white-space:nowrap;">TUNNEL ENGINE</span>
+                <span class="badge dim" id="sshfwdStatusBadge" style="white-space:nowrap;">Checking...</span>
               </div>
               <div class="qs-hint u-mt-4" id="sshfwdSubTxt" style="color:var(--mu); font-size:12px;">High-speed stealth carrier · Forwarding &amp; Multiplexing directly to Foreign server inbound ports</div>
             </div>
             <div class="qs-actions">
-              <span class="badge" id="bagherActiveRoleBadge" style="font-size:12px; font-weight:700; padding:6px 14px; background:color-mix(in srgb, var(--info) 15%, transparent); color:var(--info); border:1px solid color-mix(in srgb, var(--info) 35%, transparent);">Role: Iran Server</span>
+              <span class="badge info" id="bagherActiveRoleBadge">Role: Iran Server</span>
             </div>
           </div>
 
@@ -1362,10 +1375,10 @@
             </label>
             <div class="qs-seg" role="group" aria-label="Bagher Server Role">
               <button type="button" id="bagherRoleIran" onclick="setBagherRole('iran')" aria-pressed="true" style="font-weight:700; padding:10px 20px; font-size:13px;">
-                🇮🇷 Iran Server (Receives User Traffic)
+                Iran Server (Receives User Traffic)
               </button>
               <button type="button" id="bagherRoleForeign" onclick="setBagherRole('foreign')" aria-pressed="false" style="font-weight:700; padding:10px 20px; font-size:13px;">
-                🌍 Foreign Server (Exit & Service Host)
+                Foreign Server (Exit & Service Host)
               </button>
             </div>
             <input type="hidden" id="bagherRoleInput" value="iran">
@@ -1378,7 +1391,7 @@
           <div id="bagherIranWrap">
             <div class="tc-box" style="background:var(--sunk); border:1px solid color-mix(in srgb, var(--info) 18%, transparent); padding:16px; border-radius:10px; margin-bottom:16px;">
               <h4 style="font-size:14px; font-weight:700; color:var(--info); margin-bottom:12px; display:flex; align-items:center; gap:8px;">
-                ⚙️ Step 2: Foreign Server Details & Forwarded Ports (Iran Setup)
+                Step 2: Foreign Server Details & Forwarded Ports (Iran Setup)
               </h4>
               <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:14px; margin-bottom:14px;">
                 <div>
@@ -1390,9 +1403,9 @@
                   <label for="sshfwdPorts" class="u-lbl-dim">Forwarded Ports <span style="color:var(--er);">*</span></label>
                   <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="e.g. 443, 8443, 2083" style="width:100%;">
                   <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
-                    <button type="button" class="hashem-btn hashem-btn-sm" onclick="document.getElementById('sshfwdPorts').value='443, 8443';" style="font-size:12px; padding:2px 8px; background:color-mix(in srgb, var(--info) 12%, transparent); border:1px solid color-mix(in srgb, var(--info) 30%, transparent); color:var(--info);">🌐 Web (443, 8443)</button>
-                    <button type="button" class="hashem-btn hashem-btn-sm" onclick="document.getElementById('sshfwdPorts').value='443, 8443, 2053, 2083, 2087';" style="font-size:12px; padding:2px 8px; background:color-mix(in srgb, var(--info) 12%, transparent); border:1px solid color-mix(in srgb, var(--info) 30%, transparent); color:var(--info);">⚡ CDN/V2Ray (443, 8443, 2053, 2083, 2087)</button>
-                    <button type="button" class="hashem-btn hashem-btn-sm" onclick="document.getElementById('sshfwdPorts').value='443';" style="font-size:12px; padding:2px 8px; background:color-mix(in srgb, var(--info) 12%, transparent); border:1px solid color-mix(in srgb, var(--info) 30%, transparent); color:var(--info);">🔒 Single (443)</button>
+                    <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443, 8443';">Web (443, 8443)</button>
+                    <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443, 8443, 2053, 2083, 2087';">CDN/V2Ray (443, 8443, 2053, 2083, 2087)</button>
+                    <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443';">Single (443)</button>
                   </div>
                   <div class="u-hint-11">Ports opened on Iran server that route client traffic to the foreign server.</div>
                 </div>
@@ -1401,7 +1414,7 @@
               <!-- Advanced Iran Settings -->
               <details style="margin-bottom:14px; background:color-mix(in srgb, var(--bg) 25%, transparent); border:1px solid color-mix(in srgb, var(--tx) 6%, transparent); border-radius:6px; padding:8px 12px;">
                 <summary style="cursor:pointer; font-size:12px; font-weight:600; color:var(--mu); user-select:none;">
-                  ⚙️ Advanced Settings (SSH Port, Pool Sockets, FRP)
+                  Advanced Settings (SSH Port, Pool Sockets, FRP)
                 </summary>
                 <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:10px;">
                   <div>
@@ -1424,16 +1437,16 @@
               </details>
 
               <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn" style="padding:10px 24px; font-size:14px; font-weight:700;">
-                  🚀 Initialize Iran Server &amp; Issue Bundle
+                <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn">
+                  Initialize Iran Server &amp; Issue Bundle
                 </button>
-                <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherIranStopBtn" style="padding:10px 20px; font-size:13px; font-weight:600;">
-                  🛑 Stop Iran Tunnel
+                <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherIranStopBtn">
+                  Stop Iran Tunnel
                 </button>
-                <button type="button" class="hashem-btn" id="bagherIranCleanBtn" style="padding:10px 18px; font-size:13px; font-weight:700; background:color-mix(in srgb, var(--er) 15%, transparent); border:1px solid color-mix(in srgb, var(--er) 40%, transparent); color:var(--er);">
-                  🗑️ Clean Tunnel
+                <button type="button" class="hashem-btn hashem-btn-danger" id="bagherIranCleanBtn">
+                  Clean Tunnel
                 </button>
-                <button type="button" class="hashem-btn" id="sshfwdClearDnatBtn" style="padding:10px 16px; font-size:12px;">
+                <button type="button" class="hashem-btn u-btn-30" id="sshfwdClearDnatBtn">
                   Clear DNAT Conflicts
                 </button>
               </div>
@@ -1443,14 +1456,14 @@
             <div class="tc-box" id="bagherIranBundleCard" style="background:color-mix(in srgb, var(--info) 6%, transparent); border:1px solid color-mix(in srgb, var(--info) 22%, transparent); padding:16px; border-radius:10px; margin-bottom:16px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
                 <span style="font-weight:700; font-size:15px; color:var(--info); display:flex; align-items:center; gap:8px;">
-                  📦 Step 3: Generated Connection Bundle (Copy &amp; Paste into Foreign Server)
+                  Step 3: Generated Connection Bundle (Copy &amp; Paste into Foreign Server)
                 </span>
-                <button type="button" class="hashem-btn" id="bagherCopyBundleBtn" style="padding:7px 20px; font-size:13px; font-weight:700; background:var(--info-fill); color:#fff; border-color:var(--info);">
-                  📋 Copy Bundle
+                <button type="button" class="hashem-btn" id="bagherCopyBundleBtn">
+                  Copy Bundle
                 </button>
               </div>
               <div class="u-hint-12" style="margin-bottom:8px; line-height:1.5;">
-                💡 <b>Connection Guide:</b> This bundle contains security keys and tunnel parameters. Copy and paste it on the Foreign Server web panel under Foreign Server role.
+                <b>Connection Guide:</b> This bundle contains security keys and tunnel parameters. Copy and paste it on the Foreign Server web panel under Foreign Server role.
               </div>
               <textarea id="bagherBundleText" aria-label="Connection bundle" class="hashem-input" rows="4" readonly placeholder="Fill in the fields above and click 'Initialize Iran Server &amp; Issue Bundle' to generate the connection bundle here..." style="width:100%; min-height:95px; font-family:monospace; font-size:12px; line-height:1.45; background:color-mix(in srgb, var(--bg) 55%, transparent); resize:vertical; color:var(--info); word-break:break-all; padding:10px; border-radius:6px;"></textarea>
             </div>
@@ -1461,9 +1474,9 @@
             <div class="tc-box" style="background:linear-gradient(180deg, color-mix(in srgb, var(--ok) 8%, transparent) 0%, color-mix(in srgb, var(--bg) 40%, transparent) 100%); border:1px solid color-mix(in srgb, var(--ok) 25%, transparent); padding:18px; border-radius:10px; margin-bottom:16px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
                 <span style="font-weight:700; font-size:15px; color:var(--ok); display:flex; align-items:center; gap:8px;">
-                  📥 Step 2: Paste Iran Connection Bundle & Start Tunnel
+                  Step 2: Paste Iran Connection Bundle & Start Tunnel
                 </span>
-                <span class="badge ok" style="font-size:12px;">1-Click Auto Connection</span>
+                <span class="badge ok">1-Click Auto Connection</span>
               </div>
               <div class="u-hint-12" style="margin-bottom:10px; line-height:1.5;">
                 Paste the connection code from Iran server (starts with <code style="color:var(--info);">BAGHER:</code>) below and click Connect:
@@ -1471,15 +1484,15 @@
               <div style="display:flex; flex-direction:column; gap:12px;">
                 <textarea id="bagherPasteBundleInput" aria-label="Connection bundle from the Iran server" class="hashem-input" rows="4" placeholder="BAGHER:eyJ2Ij...NDNd..." style="width:100%; min-height:90px; font-family:monospace; font-size:12px; background:color-mix(in srgb, var(--bg) 50%, transparent); resize:vertical; padding:10px; border-radius:6px; color:var(--ok); word-break:break-all;"></textarea>
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                  <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn" style="padding:10px 26px; font-weight:700; font-size:14px;">
-                    ⚡ Connect to Iran &amp; Start Foreign Tunnel
+                  <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn">
+                    Connect to Iran &amp; Start Foreign Tunnel
                   </button>
                   <div style="display:flex; align-items:center; gap:8px;">
-                    <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn" style="padding:10px 20px; font-size:13px; font-weight:600;">
-                      🛑 Stop Foreign Tunnel
+                    <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn">
+                      Stop Foreign Tunnel
                     </button>
-                    <button type="button" class="hashem-btn" id="bagherForeignCleanBtn" style="padding:10px 18px; font-size:13px; font-weight:700; background:color-mix(in srgb, var(--er) 15%, transparent); border:1px solid color-mix(in srgb, var(--er) 40%, transparent); color:var(--er);">
-                      🗑️ Clean Tunnel
+                    <button type="button" class="hashem-btn hashem-btn-danger" id="bagherForeignCleanBtn">
+                      Clean Tunnel
                     </button>
                   </div>
                 </div>
@@ -1489,18 +1502,18 @@
             <!-- Manual Terminal Fallback Details -->
             <details style="margin-bottom:16px; background:color-mix(in srgb, var(--bg) 25%, transparent); border:1px solid color-mix(in srgb, var(--tx) 6%, transparent); border-radius:8px; padding:10px 14px;">
               <summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--mu); user-select:none;">
-                🛠️ Manual Terminal Command (For Headless Remote Servers)
+                Manual Terminal Command (For Headless Remote Servers)
               </summary>
               <div style="margin-top:12px;">
                 <div class="u-hint-12" style="margin-bottom:6px;">One-line Bash command to execute on headless Foreign server:</div>
                 <div style="position:relative; margin-bottom:12px;">
                   <textarea id="sshfwdForeignCmd" aria-label="Install command for the foreign server" class="hashem-input" rows="3" readonly style="width:100%; font-family:monospace; font-size:12px; background:color-mix(in srgb, var(--bg) 60%, transparent);"></textarea>
-                  <button type="button" class="hashem-btn" id="sshfwdCopyForeignBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:12px;">Copy</button>
+                  <button type="button" class="hashem-btn u-btn-30" id="sshfwdCopyForeignBtn" style="position:absolute; top:8px; left:8px;">Copy</button>
                 </div>
                 <div class="u-hint-12" style="margin-bottom:6px;">Foreign server authorized_keys configuration line:</div>
                 <div style="position:relative;">
                   <textarea id="sshfwdAuthLine" aria-label="authorized_keys line for the foreign server" class="hashem-input" rows="2" readonly style="width:100%; font-family:monospace; font-size:12px; background:color-mix(in srgb, var(--bg) 60%, transparent);"></textarea>
-                  <button type="button" class="hashem-btn" id="sshfwdCopyAuthBtn" style="position:absolute; top:8px; left:8px; padding:4px 10px; font-size:12px;">Copy</button>
+                  <button type="button" class="hashem-btn u-btn-30" id="sshfwdCopyAuthBtn" style="position:absolute; top:8px; left:8px;">Copy</button>
                 </div>
               </div>
             </details>
@@ -1537,13 +1550,13 @@
       <section id="tab-cluster" role="tabpanel" hidden>
         <!-- Locked Banner (shown when un-licensed) -->
         <div id="clusterLockedBanner" class="hidden" style="text-align:center; padding:60px 20px; background:linear-gradient(180deg, color-mix(in srgb, var(--s1) 85%, transparent) 0%, color-mix(in srgb, var(--s1) 95%, transparent) 100%); border:1px solid color-mix(in srgb, var(--sc) 30%, transparent); border-radius:12px; margin-bottom:20px;">
-          <div style="font-size:42px; margin-bottom:14px;">🔒</div>
+          <div style="font-size:42px; margin-bottom:14px;"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></div>
           <h3 style="font-size:18px; font-weight:700; color:var(--sc); margin-bottom:8px;">Iran Mesh Cluster Requires an Active License</h3>
           <p style="font-size:13px; color:var(--mu); max-width:520px; margin:0 auto 20px auto; line-height:1.6;">
             Autonomous Iran-to-Iran health gossip, latency probing, and automated zero-downtime failover rerouting is exclusively unlocked with a Bagher or Cluster license.
           </p>
-          <button class="hashem-btn hashem-btn-primary" onclick="openBagherLicModal()" style="padding:8px 24px; font-size:14px; font-weight:600;">
-            🔑 Activate License
+          <button class="hashem-btn hashem-btn-primary" onclick="openBagherLicModal()">
+            Activate License
           </button>
         </div>
 
@@ -1557,14 +1570,14 @@
                   </span>
                   Iran Hub Mesh Cluster
                 </span>
-                <span class="badge" style="background:var(--sc-fill); color:#fff; font-weight:700; font-size:12px; padding:2px 8px; border-radius:20px; white-space:nowrap;">MULTI-HUB HA</span>
-                <span class="badge" id="clusterStatusBadge" style="white-space:nowrap;">Checking...</span>
+                <span class="badge u-pill-violet" style="white-space:nowrap;">MULTI-HUB HA</span>
+                <span class="badge dim" id="clusterStatusBadge" style="white-space:nowrap;">Checking...</span>
               </div>
               <div class="qs-hint u-mt-4" style="color:var(--mu); font-size:12px;">Real-time gossip heartbeats across Iran nodes · Automatic zero-downtime client failover upon foreign tunnel drop</div>
             </div>
             <div class="qs-actions" style="display:flex; gap:8px; align-items:center;">
-              <button class="hashem-btn" onclick="openClusterConfigModal()" style="font-size:12px; padding:6px 14px; background:color-mix(in srgb, var(--tx) 6%, transparent);">⚙️ Settings</button>
-              <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddNodeModal()" style="font-size:12px; padding:6px 14px;">+ Add Peer Node</button>
+              <button class="hashem-btn u-btn-30" onclick="openClusterConfigModal()">Settings</button>
+              <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddNodeModal()">+ Add Peer Node</button>
             </div>
           </div>
 
@@ -1591,22 +1604,22 @@
           <!-- Active Failover Alert Bar (Visible only when rerouted) -->
           <div id="clusterFailoverBar" class="hidden" style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:linear-gradient(90deg, color-mix(in srgb, var(--er) 20%, transparent), color-mix(in srgb, var(--wr) 20%, transparent)); border:1px solid color-mix(in srgb, var(--er) 50%, transparent); border-radius:8px; padding:12px 16px; margin-bottom:18px;">
             <div style="display:flex; align-items:center; gap:10px;">
-              <span style="font-size:20px;">⚠️</span>
+              <span style="font-size:20px;"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
               <div>
                 <b style="color:var(--er); font-size:13px;">FAILOVER ACTIVE:</b>
                 <span style="color:var(--tx); font-size:13px; margin-left:6px;" id="clusterFailoverBarText">Local tunnel dropped. All client traffic is currently rerouted through Iran peer.</span>
               </div>
             </div>
-            <button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="padding:4px 12px; font-size:12px; white-space:nowrap;">Revert to Local</button>
+            <button class="hashem-btn hashem-btn-danger u-btn-30" onclick="revertClusterFailover()">Revert to Local</button>
           </div>
 
           <!-- Foreign Exit Nodes Pool (Multi-Kharej HA) -->
           <div style="margin-bottom:22px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <h4 style="font-size:14px; font-weight:700; color:var(--tx2); margin:0; display:flex; align-items:center; gap:8px;">
-                <span>🌐</span> Foreign Exit Nodes Pool (<span id="clusterForeignCount">0</span>)
+                <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> Foreign Exit Nodes Pool (<span id="clusterForeignCount">0</span>)
               </h4>
-              <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddForeignModal()" style="font-size:12px; padding:4px 12px;">+ Add Foreign Server</button>
+              <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddForeignModal()">+ Add Foreign Server</button>
             </div>
             <div id="clusterForeignList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
               <!-- Dynamic Foreign Node Cards -->
@@ -1617,7 +1630,7 @@
           <div style="margin-bottom:18px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
               <h4 style="font-size:14px; font-weight:700; color:var(--tx2); margin:0;">Connected Iran Hubs (<span id="clusterNodeCount">0</span>)</h4>
-              <button class="hashem-btn" onclick="loadClusterStatus()" style="font-size:12px; padding:4px 10px;">↻ Ping Now</button>
+              <button class="hashem-btn u-btn-30" onclick="loadClusterStatus()">↻ Ping Now</button>
             </div>
             <div id="clusterNodesList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
               <!-- Dynamic Peer Node Cards -->
@@ -1640,8 +1653,8 @@
           <div class="qs-step"><span class="qs-num">1</span><div class="qs-body">
             <label class="qs-label" data-i18n="setup_step1">Which server am I on right now?</label>
             <div class="qs-seg" role="group" aria-label="Server role">
-              <button id="roleIran" aria-pressed="true" data-i18n="setup_role_iran">Iran — users connect here</button>
-              <button id="roleForeign" aria-pressed="false" data-i18n="setup_role_foreign">Foreign — service runs here</button>
+              <button id="roleIran" aria-pressed="true" data-i18n="setup_role_iran">Iran — Users Connect Here</button>
+              <button id="roleForeign" aria-pressed="false" data-i18n="setup_role_foreign">Foreign — Service Runs Here</button>
             </div>
             <input type="hidden" id="sRole" value="iran">
             <div class="qs-hint">Pick one. Iran always listens; Foreign always dials.</div>
@@ -1650,9 +1663,9 @@
             <div class="qs-step"><span class="qs-num">2</span><div class="qs-body">
               <label class="qs-label" data-i18n="setup_step2_engine">Tunnel Engine</label>
               <div class="qs-seg" role="group" aria-label="Tunnel Engine" id="iranEngineSeg">
-                <button type="button" id="engGreFrp" aria-pressed="true" data-i18n="setup_eng_frp">🚀 GRE + FRP</button>
-                <button type="button" id="engGreBh" aria-pressed="false" data-i18n="setup_eng_grebh">⚡ GRE + Backhaul</button>
-                <button type="button" id="engBh" aria-pressed="false" data-i18n="setup_eng_bh">🌐 Backhaul (No-GRE)</button>
+                <button type="button" id="engGreFrp" aria-pressed="true" data-i18n="setup_eng_frp">GRE + FRP</button>
+                <button type="button" id="engGreBh" aria-pressed="false" data-i18n="setup_eng_grebh">GRE + Backhaul</button>
+                <button type="button" id="engBh" aria-pressed="false" data-i18n="setup_eng_bh">Backhaul (No-GRE)</button>
               </div>
               <input type="hidden" id="sEngine" value="frp">
               <div class="qs-hint" id="engHint">High-stability Linux GRE kernel tunnel paired with FRP reverse proxy.</div>
@@ -1691,10 +1704,10 @@
               <div id="setupToken" class="tokenbox hidden"></div>
               <div id="setupBundle" class="tokenbox hidden"></div>
               <div class="qs-actions">
-                <button class="hashem-btn hashem-btn-primary" id="setupBtn" data-i18n="setup_apply_btn">Apply setup</button>
-                <button class="hashem-btn hashem-btn-secondary hidden" id="setupUnlockBtn" data-i18n="setup_unlock_btn">Unlock to replace</button>
-                <button class="hashem-btn hashem-btn-primary hidden" id="setupAddBtn">Add another server instead</button>
-                <button class="hashem-btn hashem-btn-secondary hidden" id="setupRelockBtn" data-i18n="setup_relock_btn">Keep locked</button>
+                <button class="hashem-btn hashem-btn-primary" id="setupBtn" data-i18n="setup_apply_btn">Apply Setup</button>
+                <button class="hashem-btn hashem-btn-secondary hidden" id="setupUnlockBtn" data-i18n="setup_unlock_btn">Unlock to Replace</button>
+                <button class="hashem-btn hashem-btn-primary hidden" id="setupAddBtn">Add Another Server Instead</button>
+                <button class="hashem-btn hashem-btn-secondary hidden" id="setupRelockBtn" data-i18n="setup_relock_btn">Keep Locked</button>
               </div>
               <pre id="setupOut" class="logs hidden"></pre>
             </div></div>
@@ -1755,17 +1768,17 @@
           <div class="qs-step" id="setupAddPeerStep"><span class="qs-num">+</span><div class="qs-body">
             <label class="qs-label">Add another foreign server (keeps this tunnel)</label>
             <div class="tunnel-card" id="addPeerCard">
-              <div class="tc-header"><p class="tc-title">➕ Connect another foreign server</p><span class="qs-hint" id="peerCountHint"></span></div>
-              <div class="qs-hint u-hint-accent" >✅ <b>This is the safe way to add a server.</b> It creates a <b>separate</b> tunnel with its own token — existing tunnels keep running untouched. (Re-running the Iran form above instead would replace this server's tunnel and disconnect old Foreign sides.)</div>
+              <div class="tc-header"><p class="tc-title">Connect another foreign server</p><span class="qs-hint" id="peerCountHint"></span></div>
+              <div class="qs-hint u-hint-accent" >✓ <b>This is the safe way to add a server.</b> It creates a <b>separate</b> tunnel with its own token — existing tunnels keep running untouched. (Re-running the Iran form above instead would replace this server's tunnel and disconnect old Foreign sides.)</div>
               <div class="qs-body u-grid-gap-10" >
                 <div class="fg"><label for="pName">Name (label for this tunnel)</label><input class="hashem-input" id="pName" placeholder="e.g. germany-1" maxlength="32"></div>
                 <div class="qs-row">
                   <div class="fg u-col-span-2">
                     <label for="pEngine">Tunnel Engine</label>
                     <select class="hashem-input" id="pEngine">
-                      <option value="frp" selected>🚀 GRE + FRP</option>
-                      <option value="gre-backhaul">⚡ GRE + Backhaul</option>
-                      <option value="backhaul">🌐 Backhaul Standalone (No-GRE)</option>
+                      <option value="frp" selected>GRE + FRP</option>
+                      <option value="gre-backhaul">GRE + Backhaul</option>
+                      <option value="backhaul">Backhaul Standalone (No-GRE)</option>
                     </select>
                   </div>
                   <div class="fg u-col-span-2" id="wrapPeerTransport">
@@ -1789,7 +1802,7 @@
                 <div id="peerWarn" class="warnbox hidden"></div>
                 <div id="peerToken" class="tokenbox hidden"></div>
                 <div class="qs-actions">
-                  <button class="hashem-btn hashem-btn-primary" id="addPeerBtn">Add tunnel</button>
+                  <button class="hashem-btn hashem-btn-primary" id="addPeerBtn">Add Tunnel</button>
                 </div>
                 <pre id="peerOut" class="logs hidden"></pre>
               </div>
@@ -1909,9 +1922,9 @@
           </div>
 
           <div class="qs-actions u-mt-16" >
-            <button class="hashem-btn hashem-btn-primary" id="perfApplyBtn">Apply &amp; restart tunnels</button>
+            <button class="hashem-btn hashem-btn-primary" id="perfApplyBtn">Apply &amp; Restart Tunnels</button>
             <button class="hashem-btn hashem-btn-secondary" id="perfSaveOnlyBtn">Save Settings</button>
-            <button class="hashem-btn hashem-btn-danger" id="perfResetBtn" title="Reset all performance settings to clean wire-speed defaults">🛡️ Reset to Safe Defaults</button>
+            <button class="hashem-btn hashem-btn-danger" id="perfResetBtn" title="Reset all performance settings to clean wire-speed defaults">Reset to Safe Defaults</button>
           </div>
           <div class="qs-hint" id="perfApplyMsg"></div>
         </div>
@@ -1967,7 +1980,7 @@
           </div>
           <div class="qs-actions u-mt-12" style="display:flex;gap:12px;align-items:center;">
             <button class="hashem-btn hashem-btn-primary" id="perfSaveTuningBtn" type="button" data-i18n="perf_save_tuning">
-              💾 Save &amp; Apply Capacity
+              Save &amp; Apply Capacity
             </button>
             <span class="u-hint-12" id="perfTuningStatus"></span>
           </div>
@@ -1978,10 +1991,10 @@
           <div class="tc-header">
             <div class="u-flex-center-gap10">
               <p class="tc-title">Carrier &amp; UDP Encapsulation (FOU)</p>
-              <span class="badge info" id="carrierActiveBadge">🟢 Direct GRE</span>
+              <span class="badge info" id="carrierActiveBadge">Direct GRE</span>
             </div>
             <div class="u-flex-center-gap8">
-              <button class="hashem-btn hashem-btn-secondary" id="carrierCycleBtn" title="Switch immediately to next carrier">⚡ Cycle Carrier</button>
+              <button class="hashem-btn hashem-btn-secondary" id="carrierCycleBtn" title="Switch immediately to next carrier">Cycle Carrier</button>
               <button class="hashem-btn hashem-btn-primary" id="carrierApplyBtn">Apply Active</button>
             </div>
           </div>
@@ -2012,8 +2025,8 @@
             <label for="carrierModeSelect">Carrier Selection / Policy</label>
             <div class="u-flex-center-wrap10">
               <select class="hashem-input u-max-w-260" id="carrierModeSelect" >
-                <option value="direct" selected>🟢 Direct GRE (Protocol 47)</option>
-                <option value="wss:8443">🛡️ Obfuscated WSS (TLS 8443)</option>
+                <option value="direct" selected>Direct GRE (Protocol 47)</option>
+                <option value="wss:8443">Obfuscated WSS (TLS 8443)</option>
               </select>
               <button class="hashem-btn hashem-btn-secondary" id="carrierSaveModeBtn">Save Mode</button>
               <span class="status-indicator" id="carrierStatusInd"><span class="dot"></span><span id="carrierStatusTxt">—</span></span>
@@ -2084,7 +2097,7 @@
             <label for="wdBotToken">Bot Token</label>
             <div class="u-flex-center-gap8">
               <input class="hashem-input u-flex-1" id="wdBotToken" type="password" placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" autocomplete="off" spellcheck="false" >
-              <button type="button" class="hashem-btn hashem-btn-secondary u-btn-input-h" id="wdShowTokenBtn" title="Toggle visibility" aria-label="Toggle visibility" data-i18n-aria="aria_toggle_visibility" >👁</button>
+              <button type="button" class="hashem-btn hashem-btn-secondary u-btn-input-h" id="wdShowTokenBtn" title="Toggle visibility" aria-label="Toggle visibility" data-i18n-aria="aria_toggle_visibility" ><svg class="i" aria-hidden="true"><use href="#i-eye"/></svg></button>
             </div>
           </div>
           <div class="fg">
@@ -2199,7 +2212,7 @@
             <div class="qs-hint u-mb-8">Backups are encrypted with a key stored only on this server. Keep a copy elsewhere, or a downloaded backup cannot be opened if the server is lost.</div>
             <div class="u-flex-center-gap8">
               <input class="hashem-input u-max-w-180" id="wdKeyPass" aria-label="Panel password" type="password" autocomplete="current-password" placeholder="Panel password">
-              <button class="hashem-btn hashem-btn-secondary" id="wdKeyBtn">Show &amp; copy key</button>
+              <button class="hashem-btn hashem-btn-secondary" id="wdKeyBtn">Show &amp; Copy Key</button>
             </div>
           </div>
         </div>
@@ -2237,7 +2250,7 @@
                 <svg viewBox="0 0 24 24" width="16" height="16"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                 <span data-i18n="doc_run_btn">Run Diagnostics</span>
               </button>
-              <button class="hashem-btn hashem-btn-secondary" id="docFixBtn" style="border:1px solid color-mix(in srgb, var(--ok) 35%, transparent);background:color-mix(in srgb, var(--ok) 10%, transparent);color:var(--ok);">
+              <button class="hashem-btn hashem-btn-secondary" id="docFixBtn">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                 <span data-i18n="doc_fix_btn">Quick Repair &amp; Optimize</span>
               </button>
@@ -2388,9 +2401,9 @@
               <div class="qs-hint u-mt-4" id="benchMetaSub">Independent end-to-end benchmark across all 7 Hashem protocols before establishing tunnel</div>
             </div>
             <div class="qs-actions">
-              <button class="hashem-btn hashem-btn-primary" id="benchRunBtn" style="padding:10px 20px;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:8px;">
+              <button class="hashem-btn hashem-btn-primary" id="benchRunBtn" style="display:flex; align-items:center; gap:8px;">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span id="benchRunBtnTxt" data-i18n="bench_run_btn">⚡ Run Smart Benchmark</span>
+                <span id="benchRunBtnTxt" data-i18n="bench_run_btn">Run Smart Benchmark</span>
               </button>
             </div>
           </div>
@@ -2400,11 +2413,11 @@
             <div>
               <label class="qs-label" style="margin-bottom:8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
                 <span>Current Server Role</span>
-                <span class="badge info" style="font-size:12px;padding:1px 6px;">Role</span>
+                <span class="badge info">Role</span>
               </label>
               <div class="qs-seg" role="group" aria-label="Server Role Selection" style="margin-bottom:8px;">
-                <button type="button" id="benchRoleIranBtn" class="active" aria-pressed="true" style="font-weight:600;">🇮🇷 Iran Server</button>
-                <button type="button" id="benchRoleForeignBtn" aria-pressed="false" style="font-weight:600;">🌍 Foreign Server</button>
+                <button type="button" id="benchRoleIranBtn" class="active" aria-pressed="true" style="font-weight:600;">Iran Server</button>
+                <button type="button" id="benchRoleForeignBtn" aria-pressed="false" style="font-weight:600;">Foreign Server</button>
               </div>
               <input type="hidden" id="benchTargetRole" value="iran">
               <div class="qs-hint" id="benchRoleHint">On Iran server, enter foreign server address to probe all 7 protocols outwards.</div>
@@ -2413,7 +2426,7 @@
             <div>
               <label class="qs-label" for="benchTargetHost" style="margin-bottom:8px;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                 <span>Foreign Server Public IP or Domain (Destination)</span>
-                <span class="badge dim" id="benchAutoDetectBadge" style="display:none;font-size:12px;">Auto Detect</span>
+                <span class="badge dim" id="benchAutoDetectBadge" style="display:none;">Auto Detect</span>
               </label>
               <input class="hashem-input" id="benchTargetHost" placeholder="e.g. 195.201.55.10 or foreign.mydomain.com" inputmode="decimal" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:13.5px;padding:9px 12px;">
               <div class="qs-hint u-mt-4" id="benchTargetHint">Enter destination host to benchmark and discover the best protocol for lowest packet loss.</div>
@@ -2454,8 +2467,8 @@
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;">
               <div>
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span class="badge ok" style="font-size:12px;padding:3px 9px;font-weight:700;">🏆 Recommended Protocol</span>
-                  <span class="badge info" id="benchWinnerBadge" style="font-size:12px;padding:3px 8px;">Highest Stability</span>
+                  <span class="badge ok">Recommended Protocol</span>
+                  <span class="badge info" id="benchWinnerBadge">Highest Stability</span>
                 </div>
                 <h3 id="benchWinnerTitle" style="margin:8px 0 4px 0;font-size:19px;font-weight:700;color:var(--tx);display:flex;align-items:center;gap:8px;">—</h3>
                 <div id="benchWinnerDesc" style="font-size:13px;color:var(--mu);">Based on live probe metrics, this carrier offers maximum throughput with lowest drop rate.</div>
@@ -2465,8 +2478,8 @@
                   <div style="font-size:12px;color:var(--mu);">Quality Score</div>
                   <div id="benchWinnerScore" style="font-size:18px;font-weight:700;color:var(--ok);font-family:var(--font-mono);">— / 100</div>
                 </div>
-                <button class="hashem-btn hashem-btn-primary" id="benchApplyWinnerBtn" style="padding:11px 22px;font-size:13.5px;font-weight:700;">
-                  🚀 Apply This Protocol
+                <button class="hashem-btn hashem-btn-primary" id="benchApplyWinnerBtn">
+                  Apply This Protocol
                 </button>
               </div>
             </div>
@@ -2644,26 +2657,26 @@
           <div class="warnbox hidden" id="updChannelWarn" data-i18n="upd_dev_warn">Dev channel: test builds, may break. Not for production tunnels.</div>
           <div id="verRowsUpd" class="u-grid-gap-0 u-mt-4"><div class="qs-hint">Press Check to load release info.</div></div>
           <div class="qs-actions u-mt-8" >
-            <button class="hashem-btn hashem-btn-primary" id="updateBtn">Check for updates</button>
+            <button class="hashem-btn hashem-btn-primary" id="updateBtn">Check for Updates</button>
           </div>
           <div class="qs-hint" id="updateMsg">Press Check to see if a newer release is available.</div>
           <div class="fg u-mt-8"><label for="rbTag">Install a specific version (downgrade)</label>
             <select class="hashem-input" id="rbTag"><option value="">Loading…</option></select>
           </div>
-          <div class="qs-actions u-mt-4"><button class="hashem-btn" id="rbBtn" disabled>Install selected version</button></div>
+          <div class="qs-actions u-mt-4"><button class="hashem-btn" id="rbBtn" disabled>Install Selected Version</button></div>
         </div>
       </section>
       <section id="tab-settings" role="tabpanel" hidden>
         <div class="tunnel-card" id="licenseCard">
           <div class="tc-header" style="display:flex; justify-content:space-between; align-items:center;">
             <p class="tc-title">License &amp; Premium Features</p>
-            <span id="licBadge" class="badge" style="background:color-mix(in srgb, var(--tx) 10%, transparent); padding:4px 8px; border-radius:4px; font-size:12px; font-weight:600;">FREE EDITION</span>
+            <span id="licBadge" class="badge dim">FREE EDITION</span>
           </div>
           <div class="fg">
             <label for="licMachineHash">Server Hardware Fingerprint (Machine Hash)</label>
             <div style="display:flex; gap:8px;">
               <input class="hashem-input" id="licMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%;" placeholder="Calculating…">
-              <button class="hashem-btn" id="licCopyMachineBtn" onclick="copyMachineHashClick()" style="white-space:nowrap;">Copy</button>
+              <button class="hashem-btn" id="licCopyMachineBtn" onclick="copyMachineHashClick()">Copy</button>
             </div>
             <div class="ent-help">Provide this fingerprint to your provider to issue or renew a hardware-locked license.</div>
           </div>
@@ -2692,8 +2705,8 @@
               <p class="tc-title" style="margin:0;">Sentinel — Infrastructure &amp; Node Health Monitor</p>
             </div>
             <div style="display:flex; gap:6px;" id="sentinelHeaderBadges">
-              <span id="sentinelLicBadge" class="badge" style="background:color-mix(in srgb, var(--tx) 10%, transparent); padding:3px 7px; border-radius:4px; font-size:12px; font-weight:600;">CHECKING</span>
-              <span id="sentinelRegionBadge" class="badge" style="background:color-mix(in srgb, var(--tx) 10%, transparent); padding:3px 7px; border-radius:4px; font-size:12px; font-weight:600;">REGION</span>
+              <span id="sentinelLicBadge" class="badge dim">CHECKING</span>
+              <span id="sentinelRegionBadge" class="badge dim">REGION</span>
             </div>
           </div>
           <div class="ent-help" style="margin-bottom:12px;">Multi-protocol health monitor, dynamic subscription feeds, and 24h SLA tracker. Restricted to verified Iran servers with a licensed key.</div>
@@ -2707,7 +2720,7 @@
           <div class="fg"><label for="newPass">New panel password</label><input class="hashem-input" id="newPass" type="password" autocomplete="new-password" minlength="12" placeholder="••••••••••••"></div>
           <div class="ent-help">Minimum 12 characters, uppercase, lowercase, numbers, and symbols (NIST 800-63B). Changing it invalidates all other sessions.</div>
           <div id="passStrengthMeter" style="font-size:12px; margin-top:6px; margin-bottom:8px; color:var(--mu);"></div>
-          <div><button class="hashem-btn hashem-btn-primary" id="savePass">Change password</button></div>
+          <div><button class="hashem-btn hashem-btn-primary" id="savePass">Change Password</button></div>
         </div>
         <div class="tunnel-card" id="advisorCard">
           <div class="tc-header"><p class="tc-title">Carrier advisor</p></div>
@@ -2729,7 +2742,7 @@
           <div class="ent-help" id="metricsState">Disabled. Rotate a token to enable <code>GET …/metrics</code> for your scraper (header <code>Authorization: Bearer &lt;token&gt;</code>). The token is shown once.</div>
           <pre class="ent-help hidden" id="metricsTok" style="user-select:all"></pre>
           <div>
-            <button class="hashem-btn hashem-btn-primary" id="metricsRotate">Generate / rotate token</button>
+            <button class="hashem-btn hashem-btn-primary" id="metricsRotate">Generate / Rotate Token</button>
             <button class="hashem-btn hashem-btn-secondary" id="metricsOff">Disable</button>
           </div>
         </div>
@@ -2743,7 +2756,7 @@
           <div class="fg"><label for="alGap">Minimum seconds between alerts per link</label><input class="hashem-input" id="alGap" type="number" min="10" max="86400" value="120"></div>
           <div>
             <button class="hashem-btn hashem-btn-primary" id="alSave">Save</button>
-            <button class="hashem-btn hashem-btn-secondary" id="alTest">Send test</button>
+            <button class="hashem-btn hashem-btn-secondary" id="alTest">Send Test</button>
           </div>
         </div>
         <div class="tunnel-card" id="accessCard">
@@ -2754,7 +2767,7 @@
           <div class="fg"><label for="accBase" data-i18n="acc_base">Address path (after IP:port/…)</label><input class="hashem-input" id="accBase" autocomplete="off" spellcheck="false" placeholder="a1b2c3d4e5f6"></div>
           <div class="ent-help" id="accCurrent">—</div>
           <div class="fg"><label for="accPass" data-i18n="acc_pass">Current password (confirm)</label><input class="hashem-input" id="accPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>
-          <div><button class="hashem-btn hashem-btn-primary" id="accSave" data-i18n="acc_save">Save & restart panel</button></div>
+          <div><button class="hashem-btn hashem-btn-primary" id="accSave" data-i18n="acc_save">Save & Restart Panel</button></div>
         </div>
         <div class="tunnel-card" id="idleCard">
           <div class="tc-header"><p class="tc-title">Session idle timeout</p></div>
@@ -2799,10 +2812,10 @@
         <div class="tunnel-card">
           <div class="tc-header"><p class="tc-title">Interactive terminal</p><span class="status-indicator" id="termFlagDot"><span class="dot"></span><span id="termFlagTxt">—</span></span></div>
           <div class="qs-hint">Root shell in the browser over WebSocket + PTY — same login session, single shell at a time, auto-killed after 10 idle minutes (30 min cap). Enable only after testing; toggle is the rollback switch.</div>
-          <div class="qs-actions"><button class="hashem-btn hashem-btn-secondary" id="termToggleBtn">Enable terminal</button></div>
+          <div class="qs-actions"><button class="hashem-btn hashem-btn-secondary" id="termToggleBtn">Enable Terminal</button></div>
           <div class="qs-hint" id="termFlagMsg">Terminal tab is hidden until enabled.</div>
           <div class="fg"><label for="termAllow">Allowed IPs / CIDRs (one per line, empty = any)</label><textarea class="hashem-input" id="termAllow" rows="3" placeholder="203.0.113.7&#10;198.51.100.0/24"></textarea></div>
-          <div class="qs-actions"><button class="hashem-btn hashem-btn-secondary" id="termAllowSave">Save allowlist</button></div>
+          <div class="qs-actions"><button class="hashem-btn hashem-btn-secondary" id="termAllowSave">Save Allowlist</button></div>
           <div class="qs-hint" id="termAllowMsg"></div>
         </div>
         <div class="tunnel-card">
@@ -2815,9 +2828,9 @@
           <div class="fg"><label for="tlsEmail">Email for expiry notices (optional)</label><input class="hashem-input" id="tlsEmail" placeholder="you@example.com" autocomplete="off" spellcheck="false"></div>
           <div id="tlsInfo" class="qs-hint">Not checked yet.</div>
           <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
-            <button class="hashem-btn hashem-btn-primary" id="tlsIssueBtn">Get certificate</button>
-            <button class="hashem-btn hashem-btn-secondary" id="tlsRenewBtn">Renew now</button>
-            <button class="hashem-btn hashem-btn-danger" id="tlsRemoveBtn" style="display:none">Remove domain</button>
+            <button class="hashem-btn hashem-btn-primary" id="tlsIssueBtn">Get Certificate</button>
+            <button class="hashem-btn hashem-btn-secondary" id="tlsRenewBtn">Renew Now</button>
+            <button class="hashem-btn hashem-btn-danger" id="tlsRemoveBtn" style="display:none;">Remove Domain</button>
             <button class="hashem-btn hashem-btn-secondary" id="tlsProxyConfBtn">Reverse Proxy Config</button>
           </div>
           <div class="qs-hint" id="tlsMsg">HTTPS serves on dedicated port 7443 alongside HTTP on port 7777.</div>
@@ -2826,9 +2839,9 @@
             <div class="qs-hint" data-i18n="tls_ip_hint">No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.</div>
             <div class="fg"><label for="tlsIP">Server IP</label><input class="hashem-input" id="tlsIP" placeholder="1.2.3.4" autocomplete="off" spellcheck="false"></div>
             <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
-              <button class="hashem-btn hashem-btn-primary" id="tlsIPBtn">Issue IP certificate</button>
+              <button class="hashem-btn hashem-btn-primary" id="tlsIPBtn">Issue IP Certificate</button>
               <button class="hashem-btn hashem-btn-secondary" id="tlsIPRegenBtn">Regenerate</button>
-              <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (install once)</button>
+              <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (Install Once)</button>
             </div>
           </div>
           <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
@@ -2840,13 +2853,13 @@
             <div class="fg"><label for="tlsCustomCertPath">…or server paths</label><input class="hashem-input" id="tlsCustomCertPath" placeholder="/etc/ssl/my.crt" autocomplete="off" spellcheck="false"></div>
             <div class="fg"><label for="tlsCustomKeyPath">Key path</label><input class="hashem-input" id="tlsCustomKeyPath" placeholder="/etc/ssl/my.key" autocomplete="off" spellcheck="false"></div>
             <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
-              <button class="hashem-btn hashem-btn-primary" id="tlsCustomBtn">Install custom certificate</button>
+              <button class="hashem-btn hashem-btn-primary" id="tlsCustomBtn">Install Custom Certificate</button>
             </div>
           </div>
           <div id="tlsProxyBox" style="display:none; margin-top:12px; padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <b>Reverse Proxy Configuration (Nginx & Caddy)</b>
-              <button class="hashem-btn hashem-btn-ghost" id="tlsProxyCloseBtn" aria-label="Close proxy configuration" data-i18n-aria="aria_close_proxy" style="padding:2px 8px;">×</button>
+              <button class="hashem-btn hashem-btn-ghost u-btn-30" id="tlsProxyCloseBtn" aria-label="Close proxy configuration" data-i18n-aria="aria_close_proxy">×</button>
             </div>
             <div class="qs-hint u-mb-8">Copy and paste into your Nginx or Caddy server on this machine. Real client IPs and WebSocket upgrades are automatically supported.</div>
             <div class="u-mb-8">
@@ -2875,7 +2888,7 @@
             <button class="hashem-btn hashem-btn-secondary" id="termSearchBtn" title="Search in buffer">Search</button>
             <button class="hashem-btn hashem-btn-secondary" id="termCopyBtn" title="Copy selection">Copy</button>
             <button class="hashem-btn hashem-btn-secondary" id="termClearBtn" title="Clear screen">Clear</button>
-            <button class="hashem-btn hashem-btn-secondary" id="termFullBtn" title="Fullscreen" aria-label="Fullscreen" data-i18n-aria="aria_fullscreen">⛶</button>
+            <button class="hashem-btn hashem-btn-secondary" id="termFullBtn" title="Fullscreen" aria-label="Fullscreen" data-i18n-aria="aria_fullscreen"><svg class="i" aria-hidden="true"><use href="#i-expand"/></svg></button>
             <button class="hashem-btn hashem-btn-danger" id="termKillBtn" title="Kill shell">Kill</button>
           </div>
           <div class="term-search hidden" id="termSearchBar">
@@ -2893,8 +2906,8 @@
           <div class="term-quick" role="group" aria-label="Hashem quick commands">
             <button data-q="hashem status">Status</button>
             <button data-q="hashem show-panel-url">Panel URL</button>
-            <button data-q="check">GRE ping</button>
-            <button data-q="logs">FRP logs</button>
+            <button data-q="check">GRE Ping</button>
+            <button data-q="logs">FRP Logs</button>
             <button data-q="update">Update</button>
           </div>
           <div class="qs-hint" id="termFoot">Idle kill 10m · cap 30m · commands are audit-logged (secrets redacted) in Logs → Panel errors.</div>
@@ -2929,9 +2942,9 @@
   </div>
   <div class="sup-acts">
     <a class="hashem-btn hashem-btn-primary" id="supGo" href="https://www.pdnczone.ir" target="_blank" rel="noopener noreferrer" data-i18n="sup_donate">Donate</a>
-    <button type="button" class="hashem-btn hashem-btn-secondary" id="supLater" data-i18n="sup_later">Maybe later</button>
+    <button type="button" class="hashem-btn hashem-btn-secondary" id="supLater" data-i18n="sup_later">Maybe Later</button>
   </div>
-  <button type="button" class="sup-link" id="supSnooze" data-i18n="sup_snooze">Don't remind me for 30 days</button>
+  <button type="button" class="sup-link" id="supSnooze" data-i18n="sup_snooze">Don't Remind Me for 30 Days</button>
 </div>
 <div class="ent-modal-ov" id="entModal" hidden>
   <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="entModalTitle">
@@ -2951,7 +2964,7 @@
       <div class="fg"><label for="termAuthPass">Password</label><input class="hashem-input" id="termAuthPass" type="password" autocomplete="current-password"></div>
       <div class="fg hidden" id="termAuthCodeBox"><label for="termAuthCode">2FA code</label><input class="hashem-input" id="termAuthCode" inputmode="numeric" maxlength="16"></div>
     </div>
-    <div class="ent-modal-f"><button class="hashem-btn hashem-btn-ghost" id="termAuthNo">Cancel</button><button class="hashem-btn hashem-btn-primary" id="termAuthYes">Open terminal</button></div>
+    <div class="ent-modal-f"><button class="hashem-btn hashem-btn-ghost" id="termAuthNo">Cancel</button><button class="hashem-btn hashem-btn-primary" id="termAuthYes">Open Terminal</button></div>
   </div>
 </div>
 <!-- Edit Peer Modal -->
@@ -2979,9 +2992,9 @@
         <div class="fg">
           <label class="u-label-up" for="editPeerEngine">Tunnel Engine</label>
           <select class="hashem-input u-mt-6" id="editPeerEngine">
-            <option value="frp">🚀 GRE + FRP</option>
-            <option value="gre-backhaul">⚡ GRE + Backhaul</option>
-            <option value="backhaul">🌐 Backhaul (No-GRE)</option>
+            <option value="frp">GRE + FRP</option>
+            <option value="gre-backhaul">GRE + Backhaul</option>
+            <option value="backhaul">Backhaul (No-GRE)</option>
           </select>
         </div>
         <div class="fg" id="wrapEditTransport">
@@ -3041,7 +3054,7 @@
           <label class="u-label-up" for="editPortsNew">Add Port / Range / Mapping</label>
           <input class="hashem-input u-mt-6" id="editPortsNew" type="text" placeholder="e.g. 8080, 10000-10050, 2083=8443">
         </div>
-        <button class="hashem-btn hashem-btn-secondary" id="editPortsAddBtn" type="button" style="height:38px;padding:0 14px;font-size:13px;flex-shrink:0">&#xFF0B; Add</button>
+        <button class="hashem-btn hashem-btn-secondary" id="editPortsAddBtn" type="button" style="flex-shrink:0;">&#xFF0B; Add</button>
       </div>
 
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--s2);border:1px solid var(--ln);border-radius:10px">
@@ -3053,7 +3066,7 @@
     </div>
     <div class="ent-modal-f">
       <button class="hashem-btn hashem-btn-ghost" id="editPortsCancel" type="button">Cancel</button>
-      <button class="hashem-btn hashem-btn-primary" id="editPortsSave" type="button">&#x1F4BE; Save &amp; Apply</button>
+      <button class="hashem-btn hashem-btn-primary" id="editPortsSave" type="button">Save &amp; Apply</button>
     </div>
   </div>
 </div>
@@ -3070,7 +3083,7 @@
     </div>
     <div class="ent-modal-b" style="gap:14px; padding:20px;">
       <div style="background:color-mix(in srgb, var(--wr) 10%, transparent); border:1px solid color-mix(in srgb, var(--wr) 25%, transparent); border-radius:8px; padding:12px 14px; display:flex; align-items:flex-start; gap:10px;">
-        <span style="font-size:20px; line-height:1;">👑</span>
+        <span style="font-size:20px; line-height:1;"><svg class="i" aria-hidden="true"><use href="#i-star"/></svg></span>
         <div style="font-size:13px; line-height:1.5; color:var(--wr);">
           <b>Bagher Stealth Tunnel</b> is an exclusive <b>Hashem Pro</b> feature. To configure and operate stealth tunnels, an active license is required.
         </div>
@@ -3081,7 +3094,7 @@
         </label>
         <div style="display:flex; gap:8px;">
           <input class="hashem-input" id="bagherLicMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:var(--info); background:color-mix(in srgb, var(--bg) 40%, transparent);" placeholder="Checking...">
-          <button type="button" class="hashem-btn" id="bagherLicCopyMachineBtn" onclick="bagherLicCopyMachineClick()" style="white-space:nowrap; padding:6px 14px;">📋 Copy Hash</button>
+          <button type="button" class="hashem-btn" id="bagherLicCopyMachineBtn" onclick="bagherLicCopyMachineClick()">Copy Hash</button>
         </div>
         <div class="u-hint-12 u-mt-4">Provide this machine hash to obtain your license key.</div>
       </div>
@@ -3095,10 +3108,10 @@
     <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:12px 18px; gap:8px; flex-wrap:wrap;">
       <div style="display:flex; gap:8px;">
         <button type="button" class="hashem-btn hashem-btn-ghost" id="bagherLicCancelBtn" onclick="cancelBagherLicModal()">Close</button>
-        <button type="button" class="hashem-btn hashem-btn-secondary" onclick="openBagherLicenseSettings()">⚙️ Settings</button>
+        <button type="button" class="hashem-btn hashem-btn-secondary" onclick="openBagherLicenseSettings()">Settings</button>
       </div>
-      <button type="button" class="hashem-btn hashem-btn-primary" id="bagherLicSubmitBtn" onclick="activateBagherLicenseClick()" style="padding:8px 22px; font-weight:600;">
-        ⚡ Activate License
+      <button type="button" class="hashem-btn hashem-btn-primary" id="bagherLicSubmitBtn" onclick="activateBagherLicenseClick()">
+        Activate License
       </button>
     </div>
   </div>
@@ -3117,7 +3130,7 @@
     <div class="ent-modal-b" id="sentinelModalBody" style="gap:14px; padding:20px;">
       <!-- Warning Header Box (Always visible) -->
       <div style="background:color-mix(in srgb, var(--wr) 12%, transparent); border:1px solid color-mix(in srgb, var(--wr) 35%, transparent); border-radius:10px; padding:14px; display:flex; align-items:flex-start; gap:12px;">
-        <span style="font-size:22px; line-height:1;">⚠️</span>
+        <span style="font-size:22px; line-height:1;"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
         <div>
           <b style="color:var(--wr); font-size:13px;">هشدار مهم پیش‌نیاز سنتینال:</b>
           <div style="font-size:13px; color:var(--wr); margin-top:3px; line-height:1.6;">
@@ -3129,7 +3142,7 @@
       <!-- License Required Section -->
       <div id="sentinelLicSection" class="hidden">
         <div style="background:color-mix(in srgb, var(--er) 8%, transparent); border:1px solid color-mix(in srgb, var(--er) 25%, transparent); border-radius:10px; padding:14px; display:flex; align-items:flex-start; gap:12px; margin-bottom:12px;">
-          <span style="font-size:20px; line-height:1;">🔒</span>
+          <span style="font-size:20px; line-height:1;"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span>
           <div style="font-size:13px; line-height:1.5; color:var(--er);">
             <b>لایسنس پرمیوم سنتینال مورد نیاز است</b><br>
             سنتینال نیازمند لایسنس فعال با ویژگی <code>sentinel</code> می‌باشد.
@@ -3141,7 +3154,7 @@
           </label>
           <div style="display:flex; gap:8px;">
             <input class="hashem-input" id="sentinelModalMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:var(--info); background:color-mix(in srgb, var(--bg) 40%, transparent);" placeholder="در حال محاسبه هش…">
-            <button type="button" class="hashem-btn" id="btnCopySentinelHash" onclick="copySentinelHashClick()" style="white-space:nowrap; padding:6px 14px;">📋 کپی کد</button>
+            <button type="button" class="hashem-btn" id="btnCopySentinelHash" onclick="copySentinelHashClick()">کپی کد</button>
           </div>
           <div class="u-hint-12 u-mt-4">این کد را برای صدور لایسنس در سایت وارد کنید.</div>
         </div>
@@ -3151,8 +3164,8 @@
           </label>
           <textarea class="hashem-input" id="sentinelModalKeyInput" rows="2" placeholder="کلید لایسنس خود را اینجا Paste کنید..." style="font-family:monospace; font-size:12px; width:100%; resize:vertical; padding:8px; line-height:1.4;"></textarea>
         </div>
-        <button type="button" class="hashem-btn hashem-btn-primary" id="btnSentinelActivateModal" onclick="activateSentinelLicenseModalClick()" style="width:100%; padding:10px 22px; font-weight:700; margin-top:8px;">
-          ⚡ فعال‌سازی لایسنس
+        <button type="button" class="hashem-btn hashem-btn-primary" id="btnSentinelActivateModal" onclick="activateSentinelLicenseModalClick()" style="width:100%; margin-top:8px;">
+          فعال‌سازی لایسنس
         </button>
       </div>
 
@@ -3172,8 +3185,8 @@
             <div style="font-size:14px; font-weight:700; color:var(--info);">نصب و راه‌اندازی سنتینال</div>
             <div style="font-size:12px; color:var(--tx2); margin-top:3px; line-height:1.5;">سرویس سنتینال با هسته Xray و تخصیص خودکار پورت رندوم امن نصب می‌گردد.</div>
           </div>
-          <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" onclick="installSentinelModalClick()" style="padding:10px 24px; font-weight:700; font-size:13px;">
-            ⚡ نصب خودکار سنتینال
+          <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" onclick="installSentinelModalClick()">
+            نصب خودکار سنتینال
           </button>
         </div>
 
@@ -3181,39 +3194,39 @@
         <div id="sentinelInstalledCard" class="hidden" style="background:color-mix(in srgb, var(--info) 6%, transparent); border:1px solid color-mix(in srgb, var(--info) 25%, transparent); border-radius:10px; padding:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
             <div style="display:flex; align-items:center; gap:10px;">
-              <span class="badge" id="sentinelModalStatusBadge" style="background:var(--ok-fill); color:#fff; font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px;">
+              <span class="badge ok" id="sentinelModalStatusBadge">
                 ACTIVE / RUNNING
               </span>
               <span style="font-size:13px; font-weight:700; color:var(--tx2);">پورت: <code id="sentinelModalPort">32836</code></span>
             </div>
-            <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" onclick="openSentinelDashboardClick()" style="font-weight:700; padding:8px 18px; font-size:13px;">
-              🔗 ورود به داشبورد سنتینال ↗
+            <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" onclick="openSentinelDashboardClick()">
+              ورود به داشبورد سنتینال ↗
             </button>
           </div>
 
           <div class="fg" style="margin-bottom:12px;">
             <label for="sentinelModalUrl" style="font-size:12px; font-weight:700; color:var(--mu); display:block; margin-bottom:6px;">
-              🌐 آدرس کامل پنل سنتینال (Dashboard URL):
+              آدرس کامل پنل سنتینال (Dashboard URL):
             </label>
             <div style="display:flex; gap:8px;">
               <input class="hashem-input" id="sentinelModalUrl" readonly style="font-family:monospace; font-size:12px; width:100%; color:var(--info); background:color-mix(in srgb, var(--bg) 40%, transparent); direction:ltr;" placeholder="http://...">
-              <button type="button" class="hashem-btn" id="btnCopySentinelUrl" onclick="copySentinelUrlClick()" style="white-space:nowrap; padding:6px 14px;">📋 کپی آدرس</button>
+              <button type="button" class="hashem-btn" id="btnCopySentinelUrl" onclick="copySentinelUrlClick()">کپی آدرس</button>
             </div>
           </div>
 
           <div class="fg" id="sentinelModalPassRow" style="margin-bottom:14px;">
             <label for="sentinelModalPass" style="font-size:12px; font-weight:700; color:var(--mu); display:block; margin-bottom:6px;">
-              🔑 رمز عبور ورود (Admin Password):
+              رمز عبور ورود (Admin Password):
             </label>
             <div style="display:flex; gap:8px;">
               <input class="hashem-input" id="sentinelModalPass" readonly style="font-family:monospace; font-size:12px; width:100%; color:var(--wr); background:color-mix(in srgb, var(--bg) 40%, transparent); direction:ltr;" placeholder="••••••••">
-              <button type="button" class="hashem-btn" id="btnCopySentinelPass" onclick="copySentinelPassClick()" style="white-space:nowrap; padding:6px 14px;">📋 کپی رمز</button>
+              <button type="button" class="hashem-btn" id="btnCopySentinelPass" onclick="copySentinelPassClick()">کپی رمز</button>
             </div>
           </div>
 
           <div style="display:flex; gap:10px;">
-            <button type="button" class="hashem-btn hashem-btn-secondary" id="btnModalRestartSentinel" onclick="controlSentinelAction('restart')" style="font-size:12px;">🔄 ریستارت</button>
-            <button type="button" class="hashem-btn hashem-btn-danger" id="btnModalUninstallSentinel" onclick="controlSentinelAction('uninstall')" style="font-size:12px;">🗑️ حذف سنتینال</button>
+            <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="btnModalRestartSentinel" onclick="controlSentinelAction('restart')">ریستارت</button>
+            <button type="button" class="hashem-btn hashem-btn-danger u-btn-30" id="btnModalUninstallSentinel" onclick="controlSentinelAction('uninstall')">حذف سنتینال</button>
           </div>
         </div>
       </div>
@@ -3229,7 +3242,7 @@
   <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="bagherQuickEditTitle" style="max-width:540px; width:100%; border:1px solid color-mix(in srgb, var(--info) 35%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--info) 25%, transparent);">
     <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--info) 25%, transparent); background:color-mix(in srgb, var(--info) 10%, transparent);">
       <b id="bagherQuickEditTitle" style="display:flex; align-items:center; gap:8px; color:var(--info); font-size:15px; font-weight:700;">
-        ⚡ Quick Edit Bagher Tunnel
+        Quick Edit Bagher Tunnel
       </b>
       <button class="ent-x" onclick="closeBagherQuickEdit()" aria-label="Close">&#xD7;</button>
     </div>
@@ -3266,8 +3279,8 @@
     </div>
     <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:14px 20px;">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeBagherQuickEdit()">Cancel</button>
-      <button type="button" class="hashem-btn hashem-btn-primary" onclick="saveBagherQuickEdit()" style="font-weight:700; padding:8px 22px;">
-        💾 Save &amp; Apply Changes
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="saveBagherQuickEdit()">
+        Save &amp; Apply Changes
       </button>
     </div>
   </div>
@@ -3312,8 +3325,8 @@
     </div>
     <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:14px 20px;">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddNodeModal()">Cancel</button>
-      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddNode()" style="font-weight:700; padding:8px 22px;">
-        🔗 Handshake &amp; Save Node
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddNode()">
+        Handshake &amp; Save Node
       </button>
     </div>
   </div>
@@ -3324,7 +3337,7 @@
   <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="clusterForeignModalTitle" style="max-width:520px; width:100%; border:1px solid color-mix(in srgb, var(--info) 35%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--info) 20%, transparent);">
     <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--info) 25%, transparent); background:color-mix(in srgb, var(--info) 10%, transparent);">
       <b id="clusterForeignModalTitle" style="display:flex; align-items:center; gap:8px; color:var(--info); font-size:15px; font-weight:700;">
-        <span>🌐</span> Add Foreign Exit Server (Kharej)
+        <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> Add Foreign Exit Server (Kharej)
       </b>
       <button class="ent-x" onclick="closeClusterAddForeignModal()" aria-label="Close">&#xD7;</button>
     </div>
@@ -3380,8 +3393,8 @@
     </div>
     <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:14px 20px;">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddForeignModal()">Cancel</button>
-      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddForeign()" style="font-weight:700; padding:8px 22px;">
-        💾 Save Foreign Exit
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddForeign()">
+        Save Foreign Exit
       </button>
     </div>
   </div>
@@ -3392,7 +3405,7 @@
   <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="clusterConfigModalTitle" style="max-width:540px; width:100%; border:1px solid color-mix(in srgb, var(--sc) 35%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--sc) 20%, transparent);">
     <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--sc) 25%, transparent); background:color-mix(in srgb, var(--sc) 10%, transparent);">
       <b id="clusterConfigModalTitle" style="display:flex; align-items:center; gap:8px; color:var(--sc); font-size:15px; font-weight:700;">
-        ⚙️ Cluster Mesh Configuration
+        Cluster Mesh Configuration
       </b>
       <button class="ent-x" onclick="closeClusterConfigModal()" aria-label="Close">&#xD7;</button>
     </div>
@@ -3438,7 +3451,7 @@
         </label>
         <div style="display:flex; gap:8px;">
           <input type="text" class="hashem-input" id="clusterCfgSecret" style="width:100%; font-family:monospace;" placeholder="Must match across all Iran servers">
-          <button type="button" class="hashem-btn" onclick="generateClusterSecret()" style="white-space:nowrap; padding:6px 12px;">🎲 Gen</button>
+          <button type="button" class="hashem-btn" onclick="generateClusterSecret()">Gen</button>
         </div>
       </div>
 
@@ -3452,8 +3465,8 @@
     </div>
     <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:14px 20px;">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterConfigModal()">Cancel</button>
-      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterConfig()" style="font-weight:700; padding:8px 22px;">
-        💾 Save Settings
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterConfig()">
+        Save Settings
       </button>
     </div>
   </div>

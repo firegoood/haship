@@ -90,3 +90,20 @@ func TestUINoHardcodedColors(t *testing.T) {
 		}
 	}
 }
+
+// Icons come from the SVG sprite (#i-*), not emoji: emoji render differently on
+// every OS, cannot follow the theme color and read as noise in labels.
+// The typographic marks check and cross stay.
+func TestUINoEmoji(t *testing.T) {
+	emoji := regexp.MustCompile("[\U0001F300-\U0001FAFF☀-➿⭐⏩-⏺]")
+	for _, f := range []string{"index.html", "app.js"} {
+		for i, line := range strings.Split(readUI(t, f), "\n") {
+			for _, m := range emoji.FindAllString(line, -1) {
+				if m == "✓" || m == "✗" || m == "☰" { // check, cross, menu
+					continue
+				}
+				t.Errorf("%s:%d: emoji %q in UI", f, i+1, m)
+			}
+		}
+	}
+}

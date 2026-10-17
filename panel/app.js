@@ -355,10 +355,11 @@ function setTheme(t, persist = true) {
   document.documentElement.dataset.t = t; document.body.dataset.t = t;
   if (persist) { try { localStorage.setItem('gre_theme', t); } catch(e) { /* storage blocked (private mode): theme just won't persist */ } }
   const b = $('themeBtn');
-  if (b) { const lab = t === 'dark' ? '☀️ Light' : '🌙 Dark', sp = b.querySelector('.sf-t');
+  if (b) { const lab = t === 'dark' ? 'Light' : 'Dark', sp = b.querySelector('.sf-t');
     if (sp) { sp.textContent = lab; sp.removeAttribute('data-i18n'); } else b.textContent = lab;
-    b.setAttribute('aria-label', lab.replace(/^\S+\s/, '')); b.removeAttribute('data-i18n-aria'); }
-  const bm = $('themeBtnM'); if (bm) bm.textContent = t === 'dark' ? '☀️ Light' : '🌙 Dark';
+    const u = b.querySelector('use'); if (u) u.setAttribute('href', t === 'dark' ? '#i-sun' : '#i-moon');
+    b.setAttribute('aria-label', 'Switch to ' + lab.toLowerCase() + ' theme'); b.removeAttribute('data-i18n-aria'); }
+  const bm = $('themeBtnM'); if (bm) bm.textContent = t === 'dark' ? 'Light' : 'Dark';
   try { if (typeof refreshDash === 'function') refreshDash(); } catch(e) { /* dashboard not ready yet; polling repaints it */ }
 }
 $('themeBtn').onclick = () => setTheme(document.body.dataset.t === 'dark' ? 'light' : 'dark');
@@ -398,7 +399,7 @@ const I18N = {
     acc_title: "Panel access (port / login / address)",
     acc_hint: "Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.",
     acc_user: "Login username", acc_port: "HTTP port (1–65535)", acc_base: "Address path (after IP:port/…)",
-    acc_pass: "Current password (confirm)", acc_save: "Save & restart panel",
+    acc_pass: "Current password (confirm)", acc_save: "Save & Restart Panel",
     nav_terminal: "Terminal",
     sec_overview: "Overview",
     sec_tunnel: "Tunnel",
@@ -476,7 +477,7 @@ const I18N = {
     tun_sub: "Live link metrics, peer inventory, and interface health",
     tun_main_card: "Main Link (Hub / Spoke 1)",
     tun_add_peer_btn: "+ Connect Another Server",
-    tun_view_bundle_btn: "📦 View Setup Bundle",
+    tun_view_bundle_btn: "View Setup Bundle",
 
     // Setup Tab
     setup_title: "Quick setup — GRE + FRP tunnel",
@@ -485,9 +486,9 @@ const I18N = {
     setup_role_iran: "Iran — users connect here",
     setup_role_foreign: "Foreign — service runs here",
     setup_step2_engine: "2. Tunnel Engine",
-    setup_eng_frp: "🚀 GRE + FRP",
-    setup_eng_grebh: "⚡ GRE + Backhaul",
-    setup_eng_bh: "🌐 Backhaul (No-GRE)",
+    setup_eng_frp: "GRE + FRP",
+    setup_eng_grebh: "GRE + Backhaul",
+    setup_eng_bh: "Backhaul (No-GRE)",
     setup_step3_params: "3. Connection Parameters",
     setup_local_pub: "Iran public IP (auto, editable)",
     setup_remote_pub: "Remote public IP (the other server)",
@@ -497,16 +498,16 @@ const I18N = {
     setup_transport: "Transport Protocol",
     setup_forward_ports: "Forwarded Ports (single, ranges, mappings)",
     setup_step4_token: "4. Token & apply",
-    setup_apply_btn: "Apply setup",
-    setup_unlock_btn: "Unlock to replace",
-    setup_relock_btn: "Keep locked",
-    setup_bundle_title: "📦 Setup Bundle (Copy to Foreign server)",
+    setup_apply_btn: "Apply Setup",
+    setup_unlock_btn: "Unlock to Replace",
+    setup_relock_btn: "Keep Locked",
+    setup_bundle_title: "Setup Bundle (Copy to Foreign server)",
     setup_foreign_step2: "2. Join tunnel (from Iran bundle)",
     setup_bundle_paste_lbl: "Setup bundle or token (from Iran side)",
     setup_bundle_paste_ph: "paste hsh1_..., bh1_..., or gh1_... bundle",
     setup_join_btn: "Connect to Iran",
     setup_foreign_step3: "3. Advanced (optional)",
-    setup_add_peer_title: "➕ Connect another foreign server",
+    setup_add_peer_title: "Connect another foreign server",
     setup_peer_name_lbl: "Name (label for this tunnel)",
     setup_add_tunnel_btn: "Add tunnel",
 
@@ -530,7 +531,7 @@ const I18N = {
     perf_pool_sub: "Pre-opened work connections on foreign spokes.",
     perf_max_pool: "Max Pool Count (frps)",
     perf_max_sub: "Server-side maximum work connection headroom (always at least 1.5 × poolCount).",
-    perf_save_tuning: "💾 Save & Apply Capacity",
+    perf_save_tuning: "Save & Apply Capacity",
     perf_carrier_title: "Carrier & UDP Encapsulation (FOU)",
     perf_carrier_save: "Save Mode",
 
@@ -618,11 +619,11 @@ const I18N = {
     login_sub: "Sign in with your username and password",
     login_user_ph: "Username",
     login_pass_ph: "Password",
-    login_signin: "Sign in",
+    login_signin: "Sign In",
     rs_header: "Live Activity Stream",
     rsc_title: "Connectivity Rescue", rsc_remote: "Reachable server (the one that can connect to this server)", rsc_ports: "Ports to connect (TCP + UDP)",
     rsc_code: "Rescue code from the blocked server", rsc_ban_t: "This server cannot connect to its peer",
-    rsc_ban_d: "Ping works but every TCP connection is dropped on the way. A one-click fix reverses the connection direction.", rsc_ban_go: "Fix it",
+    rsc_ban_d: "Ping works but every TCP connection is dropped on the way. A one-click fix reverses the connection direction.", rsc_ban_go: "Fix It",
     rsc_idle_ok: "No problem detected. If a peer can ping you but connections time out, this tool reverses the direction automatically.",
     rsc_idle_warn: "A one-way block was detected: ping works but TCP is dropped. Enable Rescue to reverse the direction.",
     rsc_b_off: "Off", rsc_b_susp: "Block detected", rsc_b_on: "Active", rsc_b_on_auto: "Active (Auto)", rsc_b_wait: "Waiting for peer", rsc_b_lift: "Block lifted",
@@ -650,7 +651,7 @@ const I18N = {
     onb_s1: "Choose this server's role", onb_s1d: "Iran hub (server) or foreign server (client) from the Setup tab.",
     onb_s2: "Link the other server", onb_s2d: "Create the tunnel and paste the connection bundle on the other side.",
     onb_s3: "Verify and optimise", onb_s3d: "Run Diagnostics, then Optimize in the Tunnel tab.",
-    onb_go: "Open Setup", onb_later: "Not now", onb_dismiss: "Dismiss",
+    onb_go: "Open Setup", onb_later: "Not Now", onb_dismiss: "Dismiss",
     badge_tunnel: "{n} tunnel(s) need attention", badge_doctor: "{n} diagnostic issue(s)",
     fleet_title: "Fleet health",
     fleet_all_ok: "All servers healthy",
@@ -682,8 +683,8 @@ const I18N = {
     sup_title: "Enjoying a stable tunnel?",
     sup_body: "Hashem is free and built by one developer. If it keeps your connection alive, a small donation helps keep it improving.",
     sup_donate: "Donate",
-    sup_later: "Maybe later",
-    sup_snooze: "Don't remind me for 30 days",
+    sup_later: "Maybe Later",
+    sup_snooze: "Don't Remind Me for 30 Days",
     sup_card_title: "Support Hashem",
     sup_card_hint: "Hashem is free. If it helps you, you can support its development any time.",
     appear_title: "Appearance",
@@ -893,7 +894,7 @@ const I18N = {
     tun_sub: "Live link metrics, peer inventory, and interface health",
     tun_main_card: "Main Link (Hub / Spoke 1)",
     tun_add_peer_btn: "+ Connect Another Server",
-    tun_view_bundle_btn: "📦 View Setup Bundle",
+    tun_view_bundle_btn: "View Setup Bundle",
 
     // Setup Tab
     setup_title: "Quick setup — GRE + FRP tunnel",
@@ -902,9 +903,9 @@ const I18N = {
     setup_role_iran: "Iran — users connect here",
     setup_role_foreign: "Foreign — service runs here",
     setup_step2_engine: "2. Tunnel Engine",
-    setup_eng_frp: "🚀 GRE + FRP",
-    setup_eng_grebh: "⚡ GRE + Backhaul",
-    setup_eng_bh: "🌐 Backhaul (No-GRE)",
+    setup_eng_frp: "GRE + FRP",
+    setup_eng_grebh: "GRE + Backhaul",
+    setup_eng_bh: "Backhaul (No-GRE)",
     setup_step3_params: "3. Connection Parameters",
     setup_local_pub: "Iran public IP (auto, editable)",
     setup_remote_pub: "Remote public IP (the other server)",
@@ -917,13 +918,13 @@ const I18N = {
     setup_apply_btn: "Apply setup",
     setup_unlock_btn: "Unlock to replace",
     setup_relock_btn: "Keep locked",
-    setup_bundle_title: "📦 Setup Bundle (Copy to Foreign server)",
+    setup_bundle_title: "Setup Bundle (Copy to Foreign server)",
     setup_foreign_step2: "2. Join tunnel (from Iran bundle)",
     setup_bundle_paste_lbl: "Setup bundle or token (from Iran side)",
     setup_bundle_paste_ph: "paste hsh1_..., bh1_..., or gh1_... bundle",
     setup_join_btn: "Connect to Iran",
     setup_foreign_step3: "3. Advanced (optional)",
-    setup_add_peer_title: "➕ Connect another foreign server",
+    setup_add_peer_title: "Connect another foreign server",
     setup_peer_name_lbl: "Name (label for this tunnel)",
     setup_add_tunnel_btn: "Add tunnel",
 
@@ -947,7 +948,7 @@ const I18N = {
     perf_pool_sub: "Pre-opened work connections on foreign spokes.",
     perf_max_pool: "Max Pool Count (frps)",
     perf_max_sub: "Server-side maximum work connection headroom (always at least 1.5 × poolCount).",
-    perf_save_tuning: "💾 Save & Apply Capacity",
+    perf_save_tuning: "Save & Apply Capacity",
     perf_carrier_title: "Carrier & UDP Encapsulation (FOU)",
     perf_carrier_save: "Save Mode",
 
@@ -1317,7 +1318,7 @@ function armRemovePeer(peerId, name) {
   const box = $('peer-confirm-' + peerId);
   if (!box) return;
   const btns = document.querySelectorAll(`[data-peer-remove="${peerId}"]`);
-  btns.forEach(b => { b.classList.add('armed'); b.innerHTML = '⚠️ Confirm 5s <span class="peer-count" data-peer-n="' + peerId + '">5</span>'; });
+  btns.forEach(b => { b.classList.add('armed'); b.innerHTML = 'Confirm 5s <span class="peer-count" data-peer-n="' + peerId + '">5</span>'; });
   box.classList.remove('hidden');
   box.innerHTML = `<div class="peer-confirm-in">Remove <b>${esc(name)} (#${peerId})</b>? GRE + frps go away; other tunnels keep running. <button class="hashem-btn hashem-btn-ghost u-btn-28" onclick="disarmRemovePeer(${peerId})">Undo</button></div>`;
   clearTimeout(peerRemoveTimers[peerId]); clearInterval(peerRemoveTimers[peerId + '_n']);
@@ -1372,8 +1373,8 @@ function renderPeers(peers) {
           <span class="status-indicator ${bagherUp ? 'active' : 'offline'}"><span class="dot"></span></span>
           <b class="u-fs-16-tx">Bagher Tunnel</b>
           <span class="qs-hint mono">#stealth</span>
-          <span class="badge" style="background:color-mix(in srgb, var(--ok) 18%, transparent);color:var(--ok);border:1px solid color-mix(in srgb, var(--ok) 35%, transparent);font-weight:700">🟢 Bagher Engine</span>
-          <span class="badge" style="background:color-mix(in srgb, var(--tx) 6%, transparent);color:var(--mu);font-size:12px">${esc(roleLabel)}</span>
+          <span class="badge ok">Bagher Engine</span>
+          <span class="badge dim">${esc(roleLabel)}</span>
           <span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'active' : 'inactive'}</span>
         </div>
       </div>
@@ -1385,16 +1386,16 @@ function renderPeers(peers) {
           <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(fwdPorts)}</span></div>
         </div>
         <div class="det-card">
-          <div class="det-card-head">⚡ <span>Link Status</span></div>
+          <div class="det-card-head"><span>Link Status</span></div>
           <div class="det-row"><span class="det-k">Status</span><span class="det-v"><span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'Running' : 'Stopped'}</span></span></div>
           <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono" style="color:var(--info)">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : (bagherUp ? 'Optimal' : '—')}</span></div>
           <div class="det-row"><span class="det-k">Services</span><span class="det-v mono">${esc(b.active_services || (bagherUp ? 'frps, frpc, ssh-fwd' : 'none'))}</span></div>
         </div>
       </div>
       <div class="tc-acts u-flex-gap-8 u-mt-4">
-        <button class="hashem-btn hashem-btn-secondary" onclick="openBagherQuickEdit()">✏️ Quick Edit</button>
-        <button class="hashem-btn hashem-btn-secondary" onclick="goTab('sshfwd')">⚙️ Manage</button>
-        <button class="hashem-btn hashem-btn-danger" onclick="cleanBagherTunnelClick()">🗑️ Clean</button>
+        <button class="hashem-btn hashem-btn-secondary" onclick="openBagherQuickEdit()">Quick Edit</button>
+        <button class="hashem-btn hashem-btn-secondary" onclick="goTab('sshfwd')">Manage</button>
+        <button class="hashem-btn hashem-btn-danger" onclick="cleanBagherTunnelClick()">Clean</button>
       </div>
     </div>`;
   }
@@ -1417,11 +1418,11 @@ function renderPeers(peers) {
     const isBh = p.engine === 'backhaul' || (p.frps_svc && p.frps_svc.includes('backhaul') && p.no_gre);
     const isGreBh = p.engine === 'gre-backhaul' || (p.frps_svc && p.frps_svc.includes('backhaul') && !p.no_gre);
     const engBadge = isBh
-      ? `<span class="badge u-pill-sky">⚡ Backhaul</span>`
+      ? `<span class="badge u-pill-sky">Backhaul</span>`
       : (isGreBh
-         ? `<span class="badge u-pill-violet">⚡ GRE+Backhaul</span>`
-         : `<span class="badge" style="background:color-mix(in srgb, var(--wr) 15%, transparent);color:var(--wr);border:1px solid color-mix(in srgb, var(--wr) 30%, transparent)">🚀 FRP</span>`);
-    const transBadge = p.transport ? `<span class="badge" style="background:color-mix(in srgb, var(--tx) 6%, transparent);color:var(--mu);font-size:12px">${esc(p.transport)}</span>` : '';
+         ? `<span class="badge u-pill-violet">GRE+Backhaul</span>`
+         : `<span class="badge warn">FRP</span>`);
+    const transBadge = p.transport ? `<span class="badge dim">${esc(p.transport)}</span>` : '';
     const fwdPorts = p.raw_ports || (p.ports || []).join(', ') || '—';
     const greIfLabel = isBh ? 'N/A (Standalone)' : (p.gre_if || 'gre-t' + p.id);
     const svcTitle = (isBh || isGreBh) ? 'Backhaul & Traffic' : 'FRP & Traffic';
@@ -1441,7 +1442,7 @@ function renderPeers(peers) {
           <div class="det-card-head">${ICO_SRV} <span>Foreign Server</span></div>
           <div class="det-row"><span class="det-k">Foreign IP</span><span class="det-v mono">${esc(p.remote_pub || '—')}<button type="button" class="det-copy" data-copy="${esc(p.remote_pub || '')}" title="Copy" aria-label="Copy">⧉</button></span></div>
           <div class="det-row"><span class="det-k">Iran IP</span><span class="det-v mono">${esc(p.local_pub || '—')}<button type="button" class="det-copy" data-copy="${esc(p.local_pub || '')}" title="Copy" aria-label="Copy">⧉</button></span></div>
-          <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(fwdPorts)}<button type="button" class="det-copy u-ml-5" onclick="editPeerPortsClick(${p.id})" title="Edit Ports" aria-label="Edit ports">✏️</button></span></div>
+          <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(fwdPorts)}<button type="button" class="det-copy u-ml-5" onclick="editPeerPortsClick(${p.id})" title="Edit Ports" aria-label="Edit ports"><svg class="i" aria-hidden="true"><use href="#i-edit"/></svg></button></span></div>
         </div>
         <div class="det-card">
           <div class="det-card-head">${ICO_GRE} <span>GRE Tunnel</span></div>
@@ -1450,7 +1451,7 @@ function renderPeers(peers) {
           <div class="det-row"><span class="det-k">Ping / Latency</span><span class="det-v">${isBh ? '<span class="badge ok">Direct</span>' : pingBadge(p)}</span></div>
         </div>
         <div class="det-card">
-          <div class="det-card-head">${(isBh || isGreBh) ? '⚡' : ICO_FRP} <span>${svcTitle}</span></div>
+          <div class="det-card-head">${(isBh || isGreBh) ? '<svg class="i" aria-hidden="true"><use href="#i-bolt"/></svg>' : ICO_FRP} <span>${svcTitle}</span></div>
           <div class="det-row"><span class="det-k">Service</span><span class="det-v">${stBadge(p.frp_up, p.frps_svc || 'service')}</span></div>
           <div class="det-row"><span class="det-k">Control Port</span><span class="det-v mono">${esc(String(p.frp_port || '—'))}<button type="button" class="det-copy" data-copy="${esc(String(p.frp_port || ''))}" title="Copy" aria-label="Copy">⧉</button></span></div>
           <div class="det-row"><span class="det-k">Traffic</span><span class="det-v mono">${esc(traffic)}</span></div>
@@ -1458,8 +1459,8 @@ function renderPeers(peers) {
       </div>
       <div class="peer-acts u-peer-acts-bar">
         <button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="ping-${p.id}" onclick="peerAct('ping', ${p.id})">Ping</button>
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editPeerPortsClick(${p.id})">✏️ Edit Peer</button>
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="showPeerToken(${p.id}, ${jsArg(nm)})">📦 Bundle</button>
+        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editPeerPortsClick(${p.id})">Edit Peer</button>
+        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="showPeerToken(${p.id}, ${jsArg(nm)})">Bundle</button>
         <button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="restart-frps-${p.id}" onclick="peerAct('restart-frps', ${p.id})">Restart</button>
         <button class="hashem-btn hashem-btn-danger peer-remove-btn u-btn-30" data-peer-remove="${p.id}" onclick="peerRemoveClick(${p.id}, ${jsArg(nm)})">Remove</button>
       </div>
@@ -1508,7 +1509,7 @@ function renderTunnel(st) {
         <div class="det-card">
           <div class="det-card-head">${ICO_SRV} <span>Server</span></div>
           <div class="det-row"><span class="det-k">GRE Path</span><span class="det-v mono">${esc(st.gre.local || '?')} → ${esc(st.gre.peer_ip || st.gre_peer || '?')}</span></div>
-          <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(((st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || [])).join(', ') || '—')}<button type="button" class="det-copy u-ml-5" onclick="editMainPortsClick()" title="Edit Ports" aria-label="Edit ports">✏️</button></span></div>
+          <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(((st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || [])).join(', ') || '—')}<button type="button" class="det-copy u-ml-5" onclick="editMainPortsClick()" title="Edit Ports" aria-label="Edit ports"><svg class="i" aria-hidden="true"><use href="#i-edit"/></svg></button></span></div>
         </div>
         <div class="det-card">
           <div class="det-card-head">${ICO_GRE} <span>GRE Tunnel</span></div>
@@ -1523,8 +1524,8 @@ function renderTunnel(st) {
       </div>
       <div class="peer-acts u-peer-acts-bar">
         <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="peerAct('ping', 0)">Ping</button>
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editMainPortsClick()">✏️ Edit Tunnel</button>
-        ${st.role === 'iran' ? '<button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyMainIranBundle()">📦 Copy Bundle</button>' : ''}
+        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editMainPortsClick()">Edit Tunnel</button>
+        ${st.role === 'iran' ? '<button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyMainIranBundle()">Copy Bundle</button>' : ''}
         <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="peerAct('restart-gre', 0)">Restart GRE</button>
         <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="peerAct('restart-frps', 0)">Restart FRP</button>
       </div>
@@ -1667,7 +1668,7 @@ $('addPeerBtn').onclick = async () => {
       // tell the user to update instead of a bare failure.
       if (/already served|already used|peer table full/i.test(e.message)) {
         const w = $('peerWarn');
-        w.innerHTML = '⚠️ ' + esc(e.message);
+        w.innerHTML = '' + esc(e.message);
         w.classList.remove('hidden');
         toastWarn('pick a different port', e.code ? '[' + e.code + ']' : '');
         b.disabled = false;
@@ -1676,7 +1677,7 @@ $('addPeerBtn').onclick = async () => {
       }
       if (/Unknown command|old version/i.test(e.message)) {
         const w = $('peerWarn');
-        w.innerHTML = '⚠️ ' + esc(e.message) + '<br>Go to <b>Update</b> tab → install latest, then add the server again.';
+        w.innerHTML = '' + esc(e.message) + '<br>Go to <b>Update</b> tab → install latest, then add the server again.';
         w.classList.remove('hidden');
         toastWarn('panel files outdated', e.code ? '[' + e.code + ']' : '');
         b.disabled = false;
@@ -1691,7 +1692,7 @@ $('addPeerBtn').onclick = async () => {
     if (r.bundle || r.token) {
       const t = $('peerToken');
       const show = r.bundle || r.token;
-      t.innerHTML = '📦 Bundle (paste on the Foreign side — fills everything): <b>' + esc(show) + '</b>';
+      t.innerHTML = 'Bundle (paste on the Foreign side — fills everything): <b>' + esc(show) + '</b>';
       t.classList.remove('hidden');
     }
     toastOk('tunnel added', $('pName').value.trim() || 'peer');
@@ -2237,14 +2238,14 @@ async function refreshDash() {
       const greUp = peers.filter(p => p.gre_up).length, frpUp = peers.filter(p => p.frp_up).length;
       let multiLinks = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE ' + greUp + '/' + nPeers + '</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP ' + frpUp + '/' + nPeers + '</span>';
       if (bagherUp) {
-        multiLinks += ' <span class="badge ok" style="background:color-mix(in srgb, var(--ok) 18%, transparent);color:var(--ok);border:1px solid color-mix(in srgb, var(--ok) 35%, transparent);font-weight:700"><span class="dot"></span>Bagher</span>';
+        multiLinks += ' <span class="badge ok"><span class="dot"></span>Bagher</span>';
       }
       if (kpiLinks) kpiLinks.innerHTML = multiLinks;
     } else {
       const greUp = !!g.exists, frpUp = !!f.up;
       let linksHtml = '';
       if (bagherUp) {
-        linksHtml += '<span class="badge ok" style="background:color-mix(in srgb, var(--ok) 18%, transparent);color:var(--ok);border:1px solid color-mix(in srgb, var(--ok) 35%, transparent);font-weight:700"><span class="dot"></span>Bagher</span>';
+        linksHtml += '<span class="badge ok"><span class="dot"></span>Bagher</span>';
       }
       if (greUp || frpUp || !bagherUp) {
         if (linksHtml) linksHtml += ' ';
@@ -2480,7 +2481,7 @@ async function refreshDash() {
     if (cv && d.history) cv._hist = d.history;
     const w = $('tunnelWarn');
     if (w) {
-      if (!on && !unset) { w.innerHTML = '⚠️ <b>Tunnel is not running.</b> Go to Setup to configure GRE + FRP, or check the Tunnel tab.'; w.classList.remove('hidden'); }
+      if (!on && !unset) { w.innerHTML = '<b>Tunnel is not running.</b> Go to Setup to configure GRE + FRP, or check the Tunnel tab.'; w.classList.remove('hidden'); }
       else w.classList.add('hidden');
     }
     const s = d.system || {};
@@ -2515,7 +2516,7 @@ async function refreshDash() {
       `<div class="det-card"><div class="det-head"><span class="det-ico">${icon}</span>${esc(title)}</div><div class="det-rows">${rows}</div></div>`;
     const detRow = (k, cell) => `<div class="det-row"><span class="det-k">${esc(k)}</span>${cell}</div>`;
     const frpBadge = f.up ? dbadge(f.svc || tr('status_running', 'running'), 'ok') : dbadge(tr('status_down', 'down'), 'err');
-    const roleBadge = d.role === 'iran' ? dbadge('🇮🇷 ' + (tr('x002', "Iran")), 'ok') : d.role === 'foreign' ? dbadge('🌍 ' + (tr('x003', "Foreign")), '') : dval(d.role);
+    const roleBadge = d.role === 'iran' ? dbadge('' + (tr('x002', "Iran")), 'ok') : d.role === 'foreign' ? dbadge('' + (tr('x003', "Foreign")), '') : dval(d.role);
     const bindPort = (f.port && f.port !== NA) ? String(f.port) : '';
     const proxyPorts = (f.proxy_ports || []).filter(p => p && String(p) !== bindPort);
     const isFrpc = (f.svc === 'frpc') || /foreign/i.test(d.role || '');
@@ -2737,7 +2738,7 @@ function renderSetupLock() {
   const lw = $('setupLockWarn');
   if (lw) {
     if (locked) {
-      lw.innerHTML = '⛔ A tunnel <b>already exists</b> on this server — the form is <b>locked</b> so it can\'t be replaced by accident. Applying a new setup generates a <b>new token</b> and old Foreign sides disconnect.';
+      lw.innerHTML = 'A tunnel <b>already exists</b> on this server — the form is <b>locked</b> so it can\'t be replaced by accident. Applying a new setup generates a <b>new token</b> and old Foreign sides disconnect.';
       lw.classList.remove('hidden');
     } else lw.classList.add('hidden');
   }
@@ -2761,8 +2762,8 @@ function renderIranBundleBox(bundleStr) {
   window._currentIranBundle = bundleStr;
   bb.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <span style="font-weight:600;color:var(--tx)">📦 Setup Bundle (Copy to Foreign server)</span>
-      <button type="button" class="hashem-btn hashem-btn-primary" id="copyIranBundleBtn" style="padding:4px 14px;font-size:12px">📋 Copy Bundle</button>
+      <span style="font-weight:600;color:var(--tx)">Setup Bundle (Copy to Foreign server)</span>
+      <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" id="copyIranBundleBtn">Copy Bundle</button>
     </div>
     <div style="font-family:var(--font-mono);font-size:12px;background:color-mix(in srgb, var(--bg) 35%, transparent);padding:10px 12px;border-radius:var(--r-sm);word-break:break-all;color:var(--cyan);user-select:all;border:1px solid color-mix(in srgb, var(--info) 25%, transparent)">${esc(bundleStr)}</div>
     <div style="font-size:12px;color:var(--mu);margin-top:6px">Paste this single string into the Foreign server token box to establish the tunnel and peer link automatically.</div>
@@ -2773,8 +2774,8 @@ function renderIranBundleBox(bundleStr) {
     btn.onclick = () => {
       (navigator.clipboard ? navigator.clipboard.writeText(bundleStr) : Promise.reject())
         .then(() => {
-          btn.textContent = '✔️ Copied!';
-          setTimeout(() => { btn.textContent = '📋 Copy Bundle'; }, 2000);
+          btn.textContent = '✓ Copied!';
+          setTimeout(() => { btn.textContent = 'Copy Bundle'; }, 2000);
           toastOk('Bundle Copied!', 'Paste into Foreign server');
         })
         .catch(() => {
@@ -2859,7 +2860,7 @@ async function doSetup() {
       r = await api('/api/setup', body);
     } catch(e) {
       const w = $('setupWarn');
-      w.innerHTML = '⚠️ ' + esc(e.message);
+      w.innerHTML = '' + esc(e.message);
       w.classList.remove('hidden');
       toastErr('setup failed', e.message);
       btn.disabled = false;
@@ -2877,7 +2878,7 @@ async function doSetup() {
     }
     if (r.token) {
       const t = $('setupToken');
-      t.innerHTML = '🔑 Token (legacy 32-char, for old panels): <b>' + esc(r.token) + '</b>';
+      t.innerHTML = 'Token (legacy 32-char, for old panels): <b>' + esc(r.token) + '</b>';
       t.classList.remove('hidden');
     }
     toastOk('setup done', 'iran');
@@ -3025,7 +3026,7 @@ $('jToken').addEventListener('input', () => {
   if (!isBundle) return;
   const b = parseBundleClient(raw);
   if (!b || b.error) {
-    w.innerHTML = '⚠️ ' + esc(b ? b.error : 'bad bundle') + ' — check the paste, or use a legacy token + manual fields.';
+    w.innerHTML = '' + esc(b ? b.error : 'bad bundle') + ' — check the paste, or use a legacy token + manual fields.';
     w.classList.remove('hidden');
     return;
   }
@@ -3037,7 +3038,7 @@ $('jToken').addEventListener('input', () => {
     forceSet('fFrpPort', String(b.port));
     const adv = $('foreignAdv');
     if (adv && !adv.open) adv.open = true;
-    w.innerHTML = '⚡ Backhaul Standalone bundle detected (Iran: <b>' + esc(b.iranPub) + '</b>, Port: <b>' + b.port + '</b>, Transport: <b>' + esc(b.transport) + '</b>).';
+    w.innerHTML = 'Backhaul Standalone bundle detected (Iran: <b>' + esc(b.iranPub) + '</b>, Port: <b>' + b.port + '</b>, Transport: <b>' + esc(b.transport) + '</b>).';
     w.classList.remove('hidden');
     w.style.color = '#38bdf8';
   } else if (b.engine === 'gre-backhaul') {
@@ -3048,7 +3049,7 @@ $('jToken').addEventListener('input', () => {
     forceSet('fFrpPort', String(b.port));
     const adv = $('foreignAdv');
     if (adv && !adv.open) adv.open = true;
-    w.innerHTML = '⚡ GRE+Backhaul bundle detected (Iran: <b>' + esc(b.iranPub) + '</b>, Port: <b>' + b.port + '</b>, Transport: <b>' + esc(b.transport) + '</b>).';
+    w.innerHTML = 'GRE+Backhaul bundle detected (Iran: <b>' + esc(b.iranPub) + '</b>, Port: <b>' + b.port + '</b>, Transport: <b>' + esc(b.transport) + '</b>).';
     w.classList.remove('hidden');
     w.style.color = '#c084fc';
   } else {
@@ -3083,7 +3084,7 @@ $('joinBtn').onclick = async () => {
       bundle = parseBundleClient(rawToken);
       if (!bundle || bundle.error) {
         const w = $('joinWarn');
-        w.innerHTML = '⚠️ ' + esc(bundle ? bundle.error : 'bad bundle') + ' — check the paste, or use a legacy token + manual fields.';
+        w.innerHTML = '' + esc(bundle ? bundle.error : 'bad bundle') + ' — check the paste, or use a legacy token + manual fields.';
         w.classList.remove('hidden');
         b.disabled = false; b.textContent = oldTxt; return;
       }
@@ -3095,7 +3096,7 @@ $('joinBtn').onclick = async () => {
     const ports = $('jPorts').value.trim() || ((st.proxy_ports || []).join(', ') || (st.proxies || []).join(', '));
     if (!token) {
       const w = $('joinWarn');
-      w.innerHTML = '⚠️ Token is required — paste the bundle or token from the Iran side (Setup tab → step 4 bundle box, or Tunnel tab peer card → Bundle).';
+      w.innerHTML = 'Token is required — paste the bundle or token from the Iran side (Setup tab → step 4 bundle box, or Tunnel tab peer card → Bundle).';
       w.classList.remove('hidden');
       b.disabled = false; b.textContent = oldTxt; return;
     }
@@ -3137,8 +3138,8 @@ $('joinBtn').onclick = async () => {
       const w = $('joinWarn');
       const bundleNoPorts = bundle && bundle.ports.length === 0;
       w.innerHTML = bundleNoPorts
-        ? '⚠️ This bundle does not include ports — enter the reverse ports (e.g. 443, 2083) in the Reverse Ports field above.'
-        : '⚠️ Reverse ports are required (e.g. 443, 2083).';
+        ? 'This bundle does not include ports — enter the reverse ports (e.g. 443, 2083) in the Reverse Ports field above.'
+        : 'Reverse ports are required (e.g. 443, 2083).';
       w.classList.remove('hidden');
       b.disabled = false; b.textContent = oldTxt; return;
     }
@@ -3150,7 +3151,7 @@ $('joinBtn').onclick = async () => {
     refresh(); loadSetupDefaults();
   } catch(e) {
     const w = $('joinWarn');
-    w.innerHTML = '⚠️ ' + esc(e.message);
+    w.innerHTML = '' + esc(e.message);
     w.classList.remove('hidden');
     if (e.steps && e.steps.length) {
       const out = $('joinOut');
@@ -3372,7 +3373,7 @@ $('toggle').addEventListener('click', () => {
 $('logoutBtn').onclick = async () => { try { await api('/api/logout', {}); } catch(e){ /* logout best-effort: always fall through to login screen */ } showLogin(); };
 $('refreshBtn').onclick = refresh;
 $('removeTunnelBtn').onclick = async () => {
-  if (!await entConfirm('Remove tunnel?', 'Remove the tunnel from THIS server? GRE + FRP will be deleted; the panel stays.', 'Remove tunnel')) return;
+  if (!await entConfirm('Remove Tunnel?', 'Remove the tunnel from THIS server? GRE + FRP will be deleted; the panel stays.', 'Remove Tunnel')) return;
   const b = $('removeTunnelBtn');
   b.disabled = true;
   try {
@@ -3385,7 +3386,7 @@ $('removeTunnelBtn').onclick = async () => {
   b.disabled = false;
 };
 $('optimizeBtn').onclick = async () => {
-  if (!await entConfirm('Optimize network?', 'Optimize network for tunnel throughput? (BBR + buffers + MTU/MSS — current settings are backed up first)', 'Optimize')) return;
+  if (!await entConfirm('Optimize Network?', 'Optimize network for tunnel throughput? (BBR + buffers + MTU/MSS — current settings are backed up first)', 'Optimize')) return;
   const b = $('optimizeBtn');
   b.disabled = true;
   try {
@@ -3399,7 +3400,7 @@ $('optimizeBtn').onclick = async () => {
   b.disabled = false;
 };
 $('restoreBtn').onclick = async () => {
-  if (!await entConfirm('Restore settings?', 'Restore the settings from before optimization?', 'Restore')) return;
+  if (!await entConfirm('Restore Settings?', 'Restore the settings from before optimization?', 'Restore')) return;
   const b = $('restoreBtn');
   b.disabled = true;
   try {
@@ -3442,7 +3443,7 @@ function paintLogs() {
   if (!logFindings.length) { box.innerHTML = '<div class="qs-hint">\u2713 no known error signatures in these lines.</div>'; }
   else box.innerHTML = logFindings.map(f =>
     `<div style="border:1px solid color-mix(in srgb, var(--er) 35%, transparent);background:color-mix(in srgb, var(--er) 7%, transparent);border-radius:10px;padding:10px 12px">` +
-    `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge" style="border-color:color-mix(in srgb, var(--er) 50%, transparent);color:var(--er)"><span class="dot" style="background:var(--er)"></span>${esc(f.code)}${f.count > 1 ? ' ×' + f.count : ''}</span>` +
+    `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge err"><span class="dot" style="background:var(--er)"></span>${esc(f.code)}${f.count > 1 ? ' ×' + f.count : ''}</span>` +
     `<b>${esc(f.msg)}</b></div>` +
     (f.hint ? `<div class="qs-hint u-mt-4">\u21AA ${esc(f.hint)}</div>` : '') +
     (f.line ? `<div class="qs-hint" style="margin-top:4px;font-family:monospace">“${esc(f.line)}”</div>` : '') +
@@ -3619,7 +3620,7 @@ $('updateBtn').onclick = async () => {
   // First click = check; second click (when update known) = install.
   if (btn.disabled) return;
   if (/^Check/.test(btn.textContent)) { btn.disabled = true; btn.textContent = 'Checking…'; loadVersion(); setTimeout(() => { if (/^Checking/.test(btn.textContent)) { btn.disabled = false; btn.textContent = 'Check for updates'; } }, 8000); return; }
-  if (!await entConfirm('Update panel?', 'Update panel to the latest release? The panel will restart (a few seconds downtime). Tunnel services keep running.', 'Update')) return;
+  if (!await entConfirm('Update Panel?', 'Update panel to the latest release? The panel will restart (a few seconds downtime). Tunnel services keep running.', 'Update')) return;
   btn.disabled = true;
   $('updateMsg').textContent = 'Updating… the panel will restart. This page refreshes automatically.';
   try {
@@ -3684,7 +3685,7 @@ async function advisorRefresh() {
   try {
     const r = await api('/api/carrier/advice');
     const a = (r.advice || [])[0] || {};
-    $('advMsg').textContent = (a.level === 'warn' ? '⚠ ' : a.level === 'ok' ? '✓ ' : 'ℹ ') + (a.message || '') + (a.suggest ? '  → consider: ' + a.suggest : '');
+    $('advMsg').textContent = (a.level === 'warn' ? '' : a.level === 'ok' ? '✓ ' : 'ℹ ') + (a.message || '') + (a.suggest ? '  → consider: ' + a.suggest : '');
     $('advStats').textContent = (r.stats || []).map(x => x.carrier + ': ' + x.up_pct + '% up (' + x.samples + ' samples)').join(' · ');
     const [p, n] = await Promise.all([api('/api/suggest?kind=port&n=4'), api('/api/suggest?kind=sni&n=3')]);
     $('advSuggest').textContent = 'free ports: ' + ((p.ports || []).join(', ') || 'none') + ' · SNI: ' + ((n.sni || []).join(', ') || 'none');
@@ -3695,7 +3696,7 @@ async function metricsRefresh() {
   try { const r = await api('/api/metrics-token'); $('metricsState').firstChild && ($('metricsState').textContent = r.enabled ? 'Enabled. Scrape GET …/metrics with the bearer token (rotate to get a new one; the old one stops working).' : 'Disabled. Generate a token to enable GET …/metrics for your scraper (Authorization: Bearer <token>). The token is shown once.'); } catch(e) {}
 }
 $('metricsRotate').onclick = async () => {
-  if (!await entConfirm('Rotate metrics token?', 'The previous token stops working immediately. The new one is shown once.', 'Rotate')) return;
+  if (!await entConfirm('Rotate Metrics Token?', 'The previous token stops working immediately. The new one is shown once.', 'Rotate')) return;
   try { const r = await api('/api/metrics-token', {action: 'rotate'}); const p = $('metricsTok'); p.textContent = r.token; p.classList.remove('hidden'); metricsRefresh(); }
   catch(e) { toastErr('metrics token', e.message); }
 };
@@ -3774,7 +3775,7 @@ if (_accSave) _accSave.onclick = async () => {
   if (pt) body.port = parseInt(pt, 10);
   if (bp) body.base_path = bp;
   if (!body.username && !body.port && !body.base_path) { toastWarn('nothing to change', 'Edit the username, port, or path first.'); return; }
-  if (!await entConfirm('Save & restart panel?', 'Only the panel web service restarts — tunnels keep running. You will need to reopen the panel at the new address.', 'Save & restart')) return;
+  if (!await entConfirm('Save & Restart Panel?', 'Only the panel web service restarts — tunnels keep running. You will need to reopen the panel at the new address.', 'Save & Restart')) return;
   const b = $('accSave'); b.disabled = true; b.textContent = 'Saving…';
   try {
     const r = await api('/api/access', body);
@@ -3782,7 +3783,7 @@ if (_accSave) _accSave.onclick = async () => {
     toastOk('access saved — panel restarting', 'Reopen: ' + (r.http_url || ''));
     setTimeout(() => { window.location.href = r.http_url || '/'; }, 4000);
   } catch(e) { toastErr('save failed', e.message); }
-  b.disabled = false; b.textContent = tr('acc_save', 'Save & restart panel');
+  b.disabled = false; b.textContent = tr('acc_save', 'Save & Restart Panel');
 };
 
 async function idleRefresh() { try { const r = await api('/api/session-settings'); $('idleMin').value = r.idle_minutes; } catch(e) {} }
@@ -3862,9 +3863,9 @@ async function termFlagRefresh() {
 $('termToggleBtn').onclick = async () => {
   const want = !termState.enabled;
   if (want) {
-    if (!await entConfirm('Enable interactive terminal?', 'Opens a root shell in the browser tab. Same login session, single shell, 10-minute idle kill, commands audit-logged.', 'Enable')) return;
+    if (!await entConfirm('Enable Interactive Terminal?', 'Opens a root shell in the browser tab. Same login session, single shell, 10-minute idle kill, commands audit-logged.', 'Enable')) return;
   } else if (termState.ws) {
-    if (!await entConfirm('Disable terminal?', 'The active shell will be killed and the tab hidden. Other tabs keep working.', 'Disable')) return;
+    if (!await entConfirm('Disable Terminal?', 'The active shell will be killed and the tab hidden. Other tabs keep working.', 'Disable')) return;
     termDisconnect();
   }
   try {
@@ -3958,7 +3959,7 @@ $('termHashemBtn').onclick = () => termTypeCmd('hashem');
 document.querySelectorAll('#tab-terminal .term-quick button').forEach(b => b.onclick = () => termTypeCmd(termQuickMap[b.dataset.q] || b.dataset.q));
 $('termKillBtn').onclick = async () => {
   if (!termState.ws) { toastWarn('no active session', 'Nothing to kill — connect first.'); return; }
-  if (!await entConfirm('Kill terminal session?', 'The root shell ends immediately. Unsaved command-line state is lost.', 'Kill')) return;
+  if (!await entConfirm('Kill Terminal Session?', 'The root shell ends immediately. Unsaved command-line state is lost.', 'Kill')) return;
   try { await api('/api/term/kill', {}); toastOk('session killed'); } catch(e) { toastErr('kill failed', e.message); }
   termDisconnect();
 };
@@ -4193,13 +4194,13 @@ async function loadCarrier() {
     const badge = $('carrierActiveBadge');
     if (badge) {
       if (curActive.startsWith('wss')) {
-        badge.textContent = '🛡️ ' + curActive.toUpperCase() + ' (TLS)';
+        badge.textContent = '' + curActive.toUpperCase() + ' (TLS)';
         badge.className = 'badge ok';
       } else if (curActive.startsWith('fou:')) {
-        badge.textContent = '⚡ ' + curActive.toUpperCase();
+        badge.textContent = '' + curActive.toUpperCase();
         badge.className = 'badge ok';
       } else {
-        badge.textContent = '🟢 Direct GRE';
+        badge.textContent = 'Direct GRE';
         badge.className = 'badge info';
       }
     }
@@ -4221,8 +4222,8 @@ async function loadCarrier() {
     if (cms && document.activeElement !== cms) {
       const wp = s.wss_port || 8443;
       const opts = [
-        { v: 'direct', t: '🟢 Direct GRE (Protocol 47)' },
-        { v: `wss:${wp}`, t: `🛡️ Obfuscated WSS (TLS ${wp})` }
+        { v: 'direct', t: 'Direct GRE (Protocol 47)' },
+        { v: `wss:${wp}`, t: `Obfuscated WSS (TLS ${wp})` }
       ];
       cms.innerHTML = opts.map(o => `<option value="${o.v}" ${o.v === curActive ? 'selected' : ''}>${o.t}</option>`).join('');
     }
@@ -4232,8 +4233,8 @@ async function loadCarrier() {
     }
     if ($('carrierWSSTxt') && s.wss) {
       $('carrierWSSTxt').textContent = s.wss.running
-        ? (s.wss.connected ? `🟢 Connected (${s.wss.packets_sent || 0} pkts sent / ${s.wss.packets_recv || 0} recv)` : '🟡 Active / Listening')
-        : '⚪ Idle';
+        ? (s.wss.connected ? `Connected (${s.wss.packets_sent || 0} pkts sent / ${s.wss.packets_recv || 0} recv)` : 'Active / Listening')
+        : 'Idle';
     }
 
     const ind = $('carrierStatusInd');
@@ -4336,11 +4337,11 @@ if (liveSwitchEngineBtn) {
         target_transport: trans
       });
       toastOk('Engine Switched', `Active: ${eng.toUpperCase()} (${trans})`);
-      if (stTxt) stTxt.textContent = '✔️ Successfully switched to ' + eng.toUpperCase();
+      if (stTxt) stTxt.textContent = '✓ Successfully switched to ' + eng.toUpperCase();
       setTimeout(() => { refresh(); if (stTxt) stTxt.textContent = ''; }, 2500);
     } catch(e) {
       toastErr('Engine Switch Failed', e.message);
-      if (stTxt) stTxt.textContent = '⚠️ ' + e.message;
+      if (stTxt) stTxt.textContent = '' + e.message;
     } finally {
       liveSwitchEngineBtn.disabled = false;
       liveSwitchEngineBtn.textContent = oldTxt;
@@ -4638,10 +4639,10 @@ $('wdTestTgBtn').onclick = async () => {
   try {
     const res = await api('/api/watchdog', { action: 'test' });
     toastOk('Telegram test OK', res.detail);
-    $('wdTgMsg').textContent = '✅ ' + (res.detail || 'Test alert delivered');
+    $('wdTgMsg').textContent = '✓ ' + (res.detail || 'Test alert delivered');
   } catch(e) {
     toastErr('Telegram test failed', e.message);
-    $('wdTgMsg').textContent = '❌ ' + e.message;
+    $('wdTgMsg').textContent = '✗ ' + e.message;
   }
   btn.disabled = false;
   btn.textContent = 'Test Alert';
@@ -4793,7 +4794,7 @@ async function tlsRefresh() {
       if (s.enabled) {
         let txt = 'Domain <b>' + esc(s.domain || '') + '</b> · expires <b>' + esc(s.expiry || '') + '</b>' + (s.days_left != null ? ' (' + esc(String(s.days_left)) + ' days)' : '') + '<br>HTTPS: <b>' + esc(s.https_url || '') + '</b><br>HTTP IP access: ' + esc(s.http_url || '');
         if (s.port_conflict) {
-          txt += '<br><span style="color:var(--err);">⚠️ Port conflict: ' + esc(s.port_conflict_detail || '') + '</span>';
+          txt += '<br><span style="color:var(--err);">Port conflict: ' + esc(s.port_conflict_detail || '') + '</span>';
         }
         info.innerHTML = txt;
       } else {
@@ -4830,7 +4831,7 @@ $('tlsIssueBtn').onclick = async () => {
   } catch(e) { /* proceed if check endpoint unreachable */ }
   b.disabled = false; b.textContent = 'Get certificate';
 
-  if (!await entConfirm('Get HTTPS certificate?', 'Certbot will issue a Let\'s Encrypt certificate for ' + domain + '. HTTP and active tunnels continue running without interruption.', 'Get certificate')) return;
+  if (!await entConfirm('Get HTTPS Certificate?', 'Certbot will issue a Let\'s Encrypt certificate for ' + domain + '. HTTP and active tunnels continue running without interruption.', 'Get Certificate')) return;
   b.disabled = true; b.textContent = 'Issuing… (up to 60s)';
   try {
     const r = await api('/api/tls', {domain, email: $('tlsEmail').value.trim()});
@@ -4851,7 +4852,7 @@ $('tlsRenewBtn').onclick = async () => {
 };
 
 $('tlsRemoveBtn').onclick = async () => {
-  if (!await entConfirm('Remove domain?', 'This will disable HTTPS and return the panel to HTTP (IP:port) access. Active tunnels will NOT be affected.', 'Remove domain')) return;
+  if (!await entConfirm('Remove Domain?', 'This will disable HTTPS and return the panel to HTTP (IP:port) access. Active tunnels will NOT be affected.', 'Remove Domain')) return;
   const b = $('tlsRemoveBtn'); b.disabled = true; b.textContent = 'Removing…';
   try {
     const r = await api('/api/tls', { action: 'remove' });
@@ -4887,7 +4888,7 @@ if (_tlsCustomBtn) _tlsCustomBtn.onclick = async () => {
   const keyP = ($('tlsCustomKeyPath') ? $('tlsCustomKeyPath').value : '').trim();
   const modes = [certTxt && keyTxt ? 1 : 0, certF && keyF ? 1 : 0, certP && keyP ? 1 : 0].reduce((a, b) => a + b, 0);
   if (modes !== 1) { toastWarn('one input method', 'Paste both PEM texts, or pick both files, or fill both server paths — exactly one way.'); return; }
-  if (!await entConfirm('Install custom certificate?', 'The pair is validated before install. HTTPS reloads in-process; tunnels keep running.', 'Install')) return;
+  if (!await entConfirm('Install Custom Certificate?', 'The pair is validated before install. HTTPS reloads in-process; tunnels keep running.', 'Install')) return;
   const b = $('tlsCustomBtn'); b.disabled = true; b.textContent = 'Installing…';
   try {
     let r;
@@ -4922,7 +4923,7 @@ const _tlsIPBtn = $('tlsIPBtn');
 if (_tlsIPBtn) _tlsIPBtn.onclick = async () => {
   const ip = ($('tlsIP') ? $('tlsIP').value : '').trim();
   if (!ip) { toastWarn('IP required', 'Enter this server\'s IP address first.'); return; }
-  if (!await entConfirm('Issue self-signed IP certificate?', 'HTTPS will serve on the IP with a certificate from the panel\'s own authority. Tunnels keep running.', 'Issue')) return;
+  if (!await entConfirm('Issue Self-signed IP Certificate?', 'HTTPS will serve on the IP with a certificate from the panel\'s own authority. Tunnels keep running.', 'Issue')) return;
   const b = $('tlsIPBtn'); b.disabled = true; b.textContent = 'Issuing…';
   try {
     const r = await api('/api/tls/ip', { ip });
@@ -4933,7 +4934,7 @@ if (_tlsIPBtn) _tlsIPBtn.onclick = async () => {
 };
 const _tlsIPRegenBtn = $('tlsIPRegenBtn');
 if (_tlsIPRegenBtn) _tlsIPRegenBtn.onclick = async () => {
-  if (!await entConfirm('Regenerate server certificate?', 'Only the server certificate rotates — the CA stays the same, so browsers keep trusting it.', 'Regenerate')) return;
+  if (!await entConfirm('Regenerate Server Certificate?', 'Only the server certificate rotates — the CA stays the same, so browsers keep trusting it.', 'Regenerate')) return;
   const b = $('tlsIPRegenBtn'); b.disabled = true; b.textContent = 'Regenerating…';
   try {
     const r = await api('/api/tls/ip', { regenerate: true });
@@ -5090,7 +5091,7 @@ function renderDoctor(rep) {
       }
       html += `<div style="margin-top:14px;padding-top:12px;border-top:1px solid color-mix(in srgb, var(--tx) 8%, transparent);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <span class="qs-hint" style="color:var(--mu);">${tr('x015', "Recommendation: Run automated repair to resolve bottlenecks and optimize parameters.")}</span>
-        <button class="hashem-btn hashem-btn-primary u-btn-sm" id="docBoxFixBtn" onclick="fixDoctor()" style="font-weight:600;display:inline-flex;align-items:center;gap:6px;">
+        <button class="hashem-btn hashem-btn-primary u-btn-sm" id="docBoxFixBtn" onclick="fixDoctor()" style="display:inline-flex; align-items:center; gap:6px;">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
           <span data-i18n="doc_fix_box_btn">${tr('x016', "Auto-Fix Detected Issues")}</span>
         </button>
@@ -6299,7 +6300,7 @@ function renderBenchmark(bench, peer) {
       if ($('benchWinnerBadge')) {
         const wb = $('benchWinnerBadge');
         wb.className = 'badge ' + (winner.status === 'healthy' ? 'ok' : (winner.status === 'good' ? 'info' : 'warn'));
-        wb.textContent = winner.status === 'healthy' ? '⚡ Highest Stability' : (winner.status === 'good' ? '🟢 Good Quality' : '⚠️ Conditional');
+        wb.textContent = winner.status === 'healthy' ? 'Highest Stability' : (winner.status === 'good' ? 'Good Quality' : 'Conditional');
       }
       if ($('benchWinnerDesc')) {
         const rttTxt = winner.avg_rtt_ms > 0 ? `${winner.avg_rtt_ms} ms RTT` : 'Fast response';
@@ -6338,7 +6339,7 @@ function renderBenchmark(bench, peer) {
   if (!tbody) return;
 
   if (!bench || !bench.metrics || bench.metrics.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: 'No benchmark run yet', msg: 'Enter foreign server address and click Run Smart Benchmark.', actionKey: 'runbench', actionLabel: '⚡ Run Smart Benchmark', compact: true })}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: 'No benchmark run yet', msg: 'Enter foreign server address and click Run Smart Benchmark.', actionKey: 'runbench', actionLabel: 'Run Smart Benchmark', compact: true })}</td></tr>`;
     return;
   }
 
@@ -6396,8 +6397,8 @@ function renderBenchmark(bench, peer) {
       <td>
         <div class="u-flex-center-gap8">
           <strong style="color:var(--tx);font-size:13.5px;">${esc(cleanName)}</strong>
-          ${isActive ? `<span class="badge ok" style="font-size:12px;padding:2px 6px;">Active</span>` : ''}
-          ${isWinner ? `<span class="badge info" style="font-size:12px;padding:2px 6px;">Recommended</span>` : ''}
+          ${isActive ? `<span class="badge ok">Active</span>` : ''}
+          ${isWinner ? `<span class="badge info">Recommended</span>` : ''}
         </div>
         ${cleanSub ? `<div style="font-size:12px;color:var(--mu);margin-top:2px;">${esc(cleanSub)}</div>` : ''}
       </td>
@@ -6416,8 +6417,8 @@ function renderBenchmark(bench, peer) {
       </td>
       <td><span class="badge ${statusClass} u-fs-12">${esc(statusLabel)}</span></td>
       <td>
-        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs" disabled style="opacity:0.65;font-weight:600;padding:5px 12px;">Current Carrier</button>` :
-          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs" style="font-weight:600;padding:5px 12px;" onclick="smartApplyOrSetupCarrier(${jsArg(m.id)}, ${jsArg(m.name || m.id)})">${isWinner ? '🚀 Top Pick' : 'Switch'}</button>`}
+        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs u-btn-30" disabled style="opacity:0.65;">Current Carrier</button>` :
+          `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs u-btn-30" onclick="smartApplyOrSetupCarrier(${jsArg(m.id)}, ${jsArg(m.name || m.id)})">${isWinner ? 'Top Pick' : 'Switch'}</button>`}
       </td>
     </tr>`;
   });
@@ -6451,7 +6452,7 @@ async function runBenchmarkClick() {
   } finally {
     benchRunning = false;
     if (btn) btn.disabled = false;
-    if (txt) txt.textContent = '⚡ Run Carrier Benchmark';
+    if (txt) txt.textContent = 'Run Carrier Benchmark';
   }
 }
 
@@ -6738,14 +6739,14 @@ function renderSSHFwd() {
   const foreignStopBtn = $('bagherForeignStopBtn');
 
   if (active) {
-    if (iranApplyBtn) iranApplyBtn.textContent = '🔄 Update Iran Server & Re-issue Bundle';
+    if (iranApplyBtn) iranApplyBtn.textContent = 'Update Iran Server & Re-issue Bundle';
     if (iranStopBtn) iranStopBtn.classList.remove('hidden');
-    if (foreignConnectBtn) foreignConnectBtn.textContent = '🔄 Update Foreign Connection';
+    if (foreignConnectBtn) foreignConnectBtn.textContent = 'Update Foreign Connection';
     if (foreignStopBtn) foreignStopBtn.classList.remove('hidden');
   } else {
-    if (iranApplyBtn) iranApplyBtn.textContent = '🚀 Initialize Iran Server & Issue Bundle';
+    if (iranApplyBtn) iranApplyBtn.textContent = 'Initialize Iran Server & Issue Bundle';
     if (iranStopBtn) iranStopBtn.classList.add('hidden');
-    if (foreignConnectBtn) foreignConnectBtn.textContent = '⚡ Connect to Iran & Start Foreign Tunnel';
+    if (foreignConnectBtn) foreignConnectBtn.textContent = 'Connect to Iran & Start Foreign Tunnel';
     if (foreignStopBtn) foreignStopBtn.classList.add('hidden');
   }
 
@@ -7532,12 +7533,12 @@ function renderClusterUI(data) {
     if (foreignNodes.length === 0) {
       fContainer.innerHTML = `
         <div style="grid-column:1/-1; text-align:center; padding:24px 16px; background:color-mix(in srgb, var(--bg) 25%, transparent); border:1px dashed color-mix(in srgb, var(--info) 25%, transparent); border-radius:10px;">
-          <div style="font-size:22px; margin-bottom:6px;">🌐</div>
+          <div style="font-size:22px; margin-bottom:6px;"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></div>
           <div style="font-weight:700; color:var(--tx2); font-size:13px; margin-bottom:4px;">No Foreign Exit Servers Configured</div>
           <div style="font-size:12px; color:var(--mu); max-width:440px; margin:0 auto 10px auto;">
             Add your foreign servers here to monitor latency, auto-failover, or manually switch exit paths.
           </div>
-          <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddForeignModal()" style="font-size:12px; padding:5px 14px;">
+          <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddForeignModal()">
             + Add Foreign Exit Server
           </button>
         </div>`;
@@ -7554,12 +7555,12 @@ function renderClusterUI(data) {
               <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
                 <div>
                   <div style="font-weight:700; color:var(--tx); font-size:14px; display:flex; align-items:center; gap:6px;">
-                    <span>🌐</span> ${esc(fn.name || fn.id)}
+                    <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> ${esc(fn.name || fn.id)}
                   </div>
                   <div style="font-size:12px; font-family:monospace; color:var(--mu); margin-top:2px;">ID: ${esc(fn.id)}</div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
-                  ${isActive ? `<span class="badge info" style="font-size:12px; font-weight:700; background:var(--info-fill); color:#fff;">ACTIVE</span>` : ''}
+                  ${isActive ? `<span class="badge info">ACTIVE</span>` : ''}
                   <span class="badge ${isHealthy ? 'ok' : 'err'}" style="font-size:12px; font-weight:700;">${isHealthy ? 'UP' : 'DOWN'}</span>
                 </div>
               </div>
@@ -7587,9 +7588,9 @@ function renderClusterUI(data) {
             <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); margin-top:8px;">
               ${isActive
                 ? `<span style="font-size:12px; color:var(--info); font-weight:700;">✓ In Use</span>`
-                : `<button class="hashem-btn" onclick="switchClusterForeign(${jsArg(fn.id)})" style="font-size:12px; padding:4px 10px; background:color-mix(in srgb, var(--info) 20%, transparent); border-color:var(--info); color:var(--info);">Switch to This</button>`
+                : `<button class="hashem-btn u-btn-30" onclick="switchClusterForeign(${jsArg(fn.id)})">Switch to This</button>`
               }
-              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign(${jsArg(fn.id)})" style="font-size:12px; padding:4px 8px; color:var(--er);" title="Remove foreign node">&#128465;</button>
+              <button class="hashem-btn u-btn-30 hashem-btn-danger" onclick="deleteClusterForeign(${jsArg(fn.id)})" title="Remove foreign node">&#128465;</button>
             </div>
           </div>
         `;
@@ -7608,12 +7609,12 @@ function renderClusterUI(data) {
   if (nodes.length === 0) {
     container.innerHTML = `
       <div style="grid-column:1/-1; text-align:center; padding:32px 16px; background:color-mix(in srgb, var(--bg) 25%, transparent); border:1px dashed color-mix(in srgb, var(--sc) 25%, transparent); border-radius:10px;">
-        <div style="font-size:24px; margin-bottom:8px;">📡</div>
+        <div style="font-size:24px; margin-bottom:8px;"><svg class="i" aria-hidden="true"><use href="#i-antenna"/></svg></div>
         <div style="font-weight:700; color:var(--tx2); font-size:14px; margin-bottom:4px;">No Peer Iran Servers Configured</div>
         <div style="font-size:12px; color:var(--mu); max-width:440px; margin:0 auto 12px auto;">
           Connect at least one additional Iran server to establish a resilient intra-Iran failover mesh.
         </div>
-        <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddNodeModal()" style="font-size:12px; padding:6px 16px;">
+        <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddNodeModal()">
           + Add First Peer Node
         </button>
       </div>`;
@@ -7679,10 +7680,10 @@ function renderClusterUI(data) {
 
         <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); margin-top:8px;">
           ${isCurrentFailoverTarget
-            ? `<button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="font-size:12px; padding:4px 10px;">Revert Reroute</button>`
-            : `<button class="hashem-btn" onclick="triggerClusterFailover(${jsArg(node.id)})" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:12px; padding:4px 10px; background:color-mix(in srgb, var(--sc) 20%, transparent); border-color:var(--sc); color:var(--sc);">\u2192 Failover Here</button>`
+            ? `<button class="hashem-btn hashem-btn-danger u-btn-30" onclick="revertClusterFailover()">Revert Reroute</button>`
+            : `<button class="hashem-btn u-btn-30" onclick="triggerClusterFailover(${jsArg(node.id)})" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''}>\u2192 Failover Here</button>`
           }
-          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode(${jsArg(node.id)})" style="font-size:12px; padding:4px 8px; color:var(--er);" title="Remove peer">&#128465;</button>
+          <button class="hashem-btn u-btn-30 hashem-btn-danger" onclick="deleteClusterNode(${jsArg(node.id)})" title="Remove peer">&#128465;</button>
         </div>
       </div>
     `;
@@ -7803,7 +7804,7 @@ async function triggerClusterFailover(targetId) {
 }
 
 async function revertClusterFailover() {
-  if (!await entConfirm('Revert Failover', 'Revert failover: Restore traffic routing to the local tunnel?', 'Restore Local')) return;
+  if (!await entConfirm('Revert to Local?', 'Client traffic goes back through this server’s own tunnel.', 'Revert to Local')) return;
   try {
     await api('/api/cluster/failover/revert', {});
     toastMsg('ok', 'Failover reverted: Local routing restored');
@@ -7959,7 +7960,7 @@ function renderSentinel(d) {
 
   const regBadge = $('sentinelRegionBadge');
   if (regBadge) {
-    regBadge.textContent = d.is_iran ? '🇮🇷 IRAN SERVER' : 'SERVER NODE';
+    regBadge.textContent = d.is_iran ? 'IRAN SERVER' : 'SERVER NODE';
     regBadge.style.background = '#0ea5e9';
     regBadge.style.color = '#fff';
   }
@@ -7970,7 +7971,7 @@ function renderSentinel(d) {
   if (!d.has_license) {
     sec.innerHTML = `
       <div style="background:color-mix(in srgb, var(--er) 8%, transparent); border:1px solid color-mix(in srgb, var(--er) 20%, transparent); padding:12px; border-radius:6px; color:var(--er); font-size:13px;">
-        ⚠️ <b>License Gate:</b> Sentinel requires a license with the <code>sentinel</code> feature unlocked. Please activate a valid key above.
+        <b>License Gate:</b> Sentinel requires a license with the <code>sentinel</code> feature unlocked. Please activate a valid key above.
       </div>`;
     return;
   }
@@ -7982,7 +7983,7 @@ function renderSentinel(d) {
           <div style="font-size:13px; font-weight:600; color:var(--tx);">Sentinel is ready to install on this server.</div>
           <div style="font-size:12px; color:var(--mu); margin-top:2px;">A random secure port (30000–39999) will be assigned automatically.</div>
         </div>
-        <button class="hashem-btn hashem-btn-primary" id="btnInstallSentinel">⚡ Install Sentinel Addon</button>
+        <button class="hashem-btn hashem-btn-primary" id="btnInstallSentinel">Install Sentinel Addon</button>
       </div>`;
     const btn = $('btnInstallSentinel');
     if (btn) btn.onclick = installSentinelClick;
@@ -7999,7 +8000,7 @@ function renderSentinel(d) {
             <div style="font-size:12px; color:var(--mu); margin-top:4px;">Endpoint: <code>${d.path || '/'}</code></div>
           </div>
           <div style="display:flex; gap:8px;">
-            <button class="hashem-btn hashem-btn-primary" id="btnOpenSentinel">🔗 Open Sentinel (New Tab)</button>
+            <button class="hashem-btn hashem-btn-primary" id="btnOpenSentinel">Open Sentinel (New Tab)</button>
             <button class="hashem-btn hashem-btn-secondary" id="btnRestartSentinel">Restart</button>
             <button class="hashem-btn hashem-btn-danger" id="btnUninstallSentinel">Uninstall</button>
           </div>
@@ -8024,7 +8025,7 @@ async function installSentinelClick() {
     loadSentinelState();
   } catch (err) {
     toastMsg('err', 'Failed to install Sentinel: ' + (err.message || err));
-    if (btn) { btn.disabled = false; btn.textContent = '⚡ Install Sentinel Addon'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Install Sentinel Addon'; }
   }
 }
 
@@ -8175,7 +8176,7 @@ async function activateSentinelLicenseModalClick() {
     renderSentinelModal();
   } catch (err) {
     toastErr('خطا در فعال‌سازی', err.message || String(err));
-    if (btn) { btn.disabled = false; btn.textContent = '⚡ فعال‌سازی لایسنس'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'فعال‌سازی لایسنس'; }
   }
 }
 
@@ -8189,7 +8190,7 @@ async function installSentinelModalClick() {
     renderSentinelModal();
   } catch (err) {
     toastMsg('err', 'خطا در نصب سنتینال: ' + (err.message || err));
-    if (btn) { btn.disabled = false; btn.textContent = '⚡ نصب خودکار سنتینال'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'نصب خودکار سنتینال'; }
   }
 }
 

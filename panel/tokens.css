@@ -14,6 +14,8 @@
 button,input,select,textarea{font:inherit;color:inherit}
 svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 [hidden]{display:none!important}
+/* Sprite icons (#i-* in index.html) size to the surrounding text. */
+.i{width:1.15em;height:1.15em;vertical-align:-.2em;flex:none;display:inline-block}
 input[type="checkbox"],input[type="radio"]{width:18px;height:18px;flex:none;accent-color:var(--ac-fill)}
 
 *{box-sizing:border-box;margin:0;padding:0}

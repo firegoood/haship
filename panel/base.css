@@ -20,7 +20,7 @@
   .badge.err{background:var(--er-soft);color:var(--er);border-color:var(--er-badge-b)}
   .badge.warn{background:var(--wr-soft);color:var(--wr);border-color:var(--wr-badge-b)}
   .badge.info{background:var(--info-soft);color:var(--info);border-color:var(--info-badge-b)}
-  .badge.dim{background:var(--sunk);color:var(--dim);border-color:var(--ln)}
+  .badge.dim{background:var(--sunk);color:var(--mu);border-color:var(--ln)}
 
   /* Card section title */
   .card-title{font-size:var(--fs-h4);font-weight:600;color:var(--tx);margin:0;letter-spacing:-.01em}
