@@ -29,7 +29,7 @@ func TestSentinelEligibility_LicenseGating(t *testing.T) {
 		t.Errorf("expected license-related failure reason, got: %s", reason)
 	}
 
-	// 2. With sentinel feature but foreign server
+	// 2. With sentinel feature
 	activeLicenseMu.Lock()
 	activeLicense = &LicensePayload{
 		Customer:  "test-pro",
@@ -39,15 +39,12 @@ func TestSentinelEligibility_LicenseGating(t *testing.T) {
 	licenseCheckedAt = time.Now()
 	activeLicenseMu.Unlock()
 
-	okForeign, reasonForeign := CheckSentinelEligibility("foreign (client)", "DE")
-	if okForeign {
-		t.Errorf("expected foreign server to be rejected, got ok=true")
-	}
-	if !strings.Contains(reasonForeign, "Iran") {
-		t.Errorf("expected Iran restriction in failure reason, got: %s", reasonForeign)
+	okSentinel, _ := CheckSentinelEligibility("foreign (client)", "DE")
+	if !okSentinel {
+		t.Errorf("expected eligibility with sentinel feature to succeed regardless of region")
 	}
 
-	// 3. With sentinel feature on verified Iran server (role = iran)
+	// 3. With sentinel feature on Iran role
 	okIran, _ := CheckSentinelEligibility("iran (server)", "XX")
 	if !okIran {
 		t.Errorf("expected Iran role to be eligible")

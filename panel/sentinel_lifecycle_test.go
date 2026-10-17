@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 )
@@ -69,7 +68,7 @@ func TestSentinel_LifecycleAPI(t *testing.T) {
 		t.Errorf("expected 400 on set_locality without is_iran, got %d", rrLocMissing.Code)
 	}
 
-	// 5. Test POST /api/sentinel set_locality = false (Foreign server)
+	// 5. Test POST /api/sentinel set_locality = false
 	bodyLocForeign := bytes.NewBufferString(`{"action":"set_locality","is_iran":false}`)
 	reqLocForeign := httptest.NewRequest("POST", "/api/sentinel", bodyLocForeign)
 	rrLocForeign := httptest.NewRecorder()
@@ -79,17 +78,14 @@ func TestSentinel_LifecycleAPI(t *testing.T) {
 	}
 
 	stForeign := GetSentinelStatus()
-	if stForeign.IsIran != false || !stForeign.IsIranDecided {
-		t.Errorf("expected IsIran=false and IsIranDecided=true, got is_iran=%v, decided=%v", stForeign.IsIran, stForeign.IsIranDecided)
+	if stForeign.IsIran != false {
+		t.Errorf("expected IsIran=false, got is_iran=%v", stForeign.IsIran)
 	}
 
-	// Eligibility must reject when user explicitly chose foreign with the Persian warning
-	okElig, reasonElig := CheckSentinelEligibility("iran (server)", "IR")
-	if okElig {
-		t.Errorf("expected rejection when user explicitly set foreign server")
-	}
-	if !strings.Contains(reasonElig, "برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه") {
-		t.Errorf("expected warning 'برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه', got %q", reasonElig)
+	// Eligibility succeeds with sentinel license regardless of server locality
+	okElig, _ := CheckSentinelEligibility("iran (server)", "IR")
+	if !okElig {
+		t.Errorf("expected eligibility to succeed with sentinel feature")
 	}
 
 	// 6. Test POST /api/sentinel set_locality = true (Iran server)
@@ -102,8 +98,8 @@ func TestSentinel_LifecycleAPI(t *testing.T) {
 	}
 
 	stIran := GetSentinelStatus()
-	if stIran.IsIran != true || !stIran.IsIranDecided {
-		t.Errorf("expected IsIran=true and IsIranDecided=true, got is_iran=%v, decided=%v", stIran.IsIran, stIran.IsIranDecided)
+	if stIran.IsIran != true {
+		t.Errorf("expected IsIran=true, got is_iran=%v", stIran.IsIran)
 	}
 
 	okEligIran, _ := CheckSentinelEligibility("unknown", "XX")

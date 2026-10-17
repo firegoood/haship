@@ -7921,15 +7921,9 @@ function renderSentinel(d) {
 
   const regBadge = $('sentinelRegionBadge');
   if (regBadge) {
-    if (d.is_iran) {
-      regBadge.textContent = '🇮🇷 IRAN SERVER';
-      regBadge.style.background = '#0ea5e9';
-      regBadge.style.color = '#fff';
-    } else {
-      regBadge.textContent = 'NON-IRAN (BLOCKED)';
-      regBadge.style.background = '#f59e0b';
-      regBadge.style.color = '#000';
-    }
+    regBadge.textContent = d.is_iran ? '🇮🇷 IRAN SERVER' : 'SERVER NODE';
+    regBadge.style.background = '#0ea5e9';
+    regBadge.style.color = '#fff';
   }
 
   const sec = $('sentinelBodySection');
@@ -7943,19 +7937,11 @@ function renderSentinel(d) {
     return;
   }
 
-  if (!d.is_iran) {
-    sec.innerHTML = `
-      <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); padding:12px; border-radius:6px; color:#f59e0b; font-size:13px;">
-        🛡️ <b>Locality Policy:</b> Sentinel monitors nodes from inside Iran and can only be deployed on confirmed Iran servers.
-      </div>`;
-    return;
-  }
-
   if (!d.installed) {
     sec.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background:rgba(255,255,255,0.02); padding:14px; border-radius:6px; border:1px dashed var(--ln);">
         <div>
-          <div style="font-size:13px; font-weight:600; color:var(--tx);">Sentinel is ready to install on this Iran server.</div>
+          <div style="font-size:13px; font-weight:600; color:var(--tx);">Sentinel is ready to install on this server.</div>
           <div style="font-size:12px; color:var(--mu); margin-top:2px;">A random secure port (30000–39999) will be assigned automatically.</div>
         </div>
         <button class="hashem-btn hashem-btn-primary" id="btnInstallSentinel">⚡ Install Sentinel Addon</button>
@@ -8121,38 +8107,18 @@ function renderSentinelModal() {
       <span class="brand-premium-badge" style="margin:0;"><svg class="bp-gem" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="bp-label">PREMIUM</span></span>
     </div>
 
-    <!-- Critical Warning Box -->
+    <!-- Warning Box -->
     <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.35); border-radius:10px; padding:14px; display:flex; align-items:flex-start; gap:12px;">
       <span style="font-size:22px; line-height:1;">⚠️</span>
       <div>
-        <b style="color:#fbbf24; font-size:13px;">هشدار مهم پیش‌نیاز سنتینال:</b>
+        <b style="color:#fbbf24; font-size:13px;">هشدار مهم:</b>
         <div style="font-size:13px; color:#fef3c7; margin-top:3px; line-height:1.6;">
           برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه
         </div>
       </div>
     </div>
 
-    <!-- Locality Decision Buttons -->
-    <div style="background:rgba(255,255,255,0.03); border:1px solid var(--ln); border-radius:10px; padding:14px;">
-      <label style="font-size:13px; font-weight:700; color:#f8fafc; margin-bottom:10px; display:block;">
-        موقعیت جغرافیایی سرور:
-      </label>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-        <button type="button" class="hashem-btn ${isIran ? 'hashem-btn-primary' : 'hashem-btn-secondary'}" id="btnSentinelChooseIran" style="padding:10px; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;">
-          🇮🇷 این سرور ایران است ${isIran ? '✓' : ''}
-        </button>
-        <button type="button" class="hashem-btn ${!isIran ? 'hashem-btn-danger' : 'hashem-btn-secondary'}" id="btnSentinelChooseForeign" style="padding:10px; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;">
-          🌍 سرور خارج است ${!isIran ? '✓' : ''}
-        </button>
-      </div>
-    </div>
-
     <div id="sentinelModalOutcomeSec"></div>`;
-
-  const btnIran = $('btnSentinelChooseIran');
-  if (btnIran) btnIran.onclick = () => setSentinelLocalityClick(true);
-  const btnForeign = $('btnSentinelChooseForeign');
-  if (btnForeign) btnForeign.onclick = () => setSentinelLocalityClick(false);
 
   const outcomeSec = $('sentinelModalOutcomeSec');
   if (!outcomeSec) return;
@@ -8162,16 +8128,14 @@ function renderSentinelModal() {
       <div style="background:rgba(14,165,233,0.08); border:1px solid rgba(14,165,233,0.3); border-radius:10px; padding:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
         <div>
           <div style="font-size:14px; font-weight:700; color:#38bdf8;">نصب و راه‌اندازی سنتینال</div>
-          <div style="font-size:12px; color:#cbd5e1; margin-top:3px; line-height:1.5;">
-            ${isIran ? 'سرور ایران تایید شده؛ سرویس سنتینال با هسته Xray و پورت رندوم امن نصب می‌شود.' : 'توجه: برای تست کانفیگ‌ها باید روی سرور ایران باشد؛ با کلیک زیر نصب مستقیم شروع می‌شود.'}
-          </div>
+          <div style="font-size:12px; color:#cbd5e1; margin-top:3px; line-height:1.5;">سرویس سنتینال با هسته Xray و تخصیص خودکار پورت رندوم امن نصب می‌گردد.</div>
         </div>
-        <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" style="background:linear-gradient(135deg, #0284c7, #2563eb); border:none; padding:10px 22px; font-weight:700; font-size:13px;">
+        <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" style="background:linear-gradient(135deg, #0284c7, #2563eb); border:none; padding:10px 24px; font-weight:700; font-size:13px;">
           ⚡ نصب خودکار سنتینال
         </button>
       </div>`;
     const instBtn = $('btnModalInstallSentinel');
-    if (instBtn) instBtn.onclick = () => installSentinelModalClick(isIran);
+    if (instBtn) instBtn.onclick = () => installSentinelModalClick();
     if (acts) acts.innerHTML = '';
   } else {
     const isRunning = d.running;
@@ -8226,25 +8190,11 @@ async function activateSentinelLicenseModalClick() {
   }
 }
 
-async function setSentinelLocalityClick(isIran) {
-  try {
-    const r = await api('/api/sentinel', { action: 'set_locality', is_iran: isIran });
-    toastMsg('ok', isIran ? 'سرور به عنوان سرور ایران تنظیم شد' : 'سرور به عنوان سرور خارج تنظیم شد');
-    await loadSentinelState();
-    renderSentinelModal();
-  } catch (err) {
-    toastMsg('err', 'خطا در تغییر موقعیت: ' + (err.message || err));
-  }
-}
-
-async function installSentinelModalClick(isIran) {
+async function installSentinelModalClick() {
   const btn = $('btnModalInstallSentinel');
   if (btn) { btn.disabled = true; btn.textContent = 'در حال نصب و راه‌اندازی سنتینال…'; }
   try {
-    if (!isIran) {
-      await api('/api/sentinel', { action: 'set_locality', is_iran: true });
-    }
-    const r = await api('/api/sentinel', { action: 'install', is_iran: true });
+    const r = await api('/api/sentinel', { action: 'install' });
     toastMsg('ok', r.message || 'سنتینال با موفقیت نصب شد!');
     await loadSentinelState();
     renderSentinelModal();

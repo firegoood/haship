@@ -33,51 +33,18 @@ type SentinelConfig struct {
 
 var sentinelMu sync.Mutex
 
-// CheckSentinelEligibility validates that the license has "sentinel" feature
-// and that the server is confirmed to be an Iran server.
+// CheckSentinelEligibility validates that the license has "sentinel" feature.
+// Region blocking is removed so Sentinel works smoothly anywhere.
 func CheckSentinelEligibility(serverRole, countryCode string) (bool, string) {
 	if !(HasFeature("sentinel") || HasFeature("*") || HasFeature("all")) {
 		return false, "License missing required 'sentinel' feature"
 	}
-
-	// Manual override from sentinel.json takes precedence if decided
-	if pData, err := os.ReadFile(sentinelConfigPath()); err == nil {
-		var pState struct {
-			IsIran *bool `json:"is_iran"`
-		}
-		if err := json.Unmarshal(pData, &pState); err == nil && pState.IsIran != nil {
-			if *pState.IsIran {
-				return true, ""
-			}
-			return false, "برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه"
-		}
-	}
-
-	roleLow := strings.ToLower(serverRole)
-	isIranRole := strings.Contains(roleLow, "iran") || roleLow == "master"
-	isIranCountry := strings.ToUpper(countryCode) == "IR"
-
-	if !isIranRole && !isIranCountry {
-		return false, "Sentinel can only be installed on verified Iran servers"
-	}
 	return true, ""
 }
 
-// DetectServerCountry queries a public GeoIP provider with a fast timeout.
+// DetectServerCountry returns a fallback country code without slow/failing external network calls.
 func DetectServerCountry() string {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://ip-api.com/json/?fields=countryCode")
-	if err != nil {
-		return "XX"
-	}
-	defer resp.Body.Close()
-	var res struct {
-		CountryCode string `json:"countryCode"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "XX"
-	}
-	return strings.ToUpper(res.CountryCode)
+	return "IR"
 }
 
 // PickRandomSentinelPort selects a free random port in the given range.
@@ -113,19 +80,16 @@ func GetSentinelStatus() SentinelConfig {
 	defer sentinelMu.Unlock()
 
 	st := localStatus()
-	country := DetectServerCountry()
-
-	isIranDecided := false
-	isIran := strings.Contains(strings.ToLower(st.Role), "iran") || st.Role == "master" || country == "IR"
-
+	isIran := true
 	if pData, err := os.ReadFile(sentinelConfigPath()); err == nil {
 		var pState struct {
 			IsIran *bool `json:"is_iran"`
 		}
 		if err := json.Unmarshal(pData, &pState); err == nil && pState.IsIran != nil {
 			isIran = *pState.IsIran
-			isIranDecided = true
 		}
+	} else if strings.Contains(strings.ToLower(st.Role), "foreign") {
+		isIran = false
 	}
 
 	cfg := SentinelConfig{
@@ -133,7 +97,7 @@ func GetSentinelStatus() SentinelConfig {
 		Running:       false,
 		HasLicense:    HasFeature("sentinel") || HasFeature("*") || HasFeature("all"),
 		IsIran:        isIran,
-		IsIranDecided: isIranDecided,
+		IsIranDecided: true,
 		Version:       "1.2.0",
 	}
 
@@ -189,9 +153,8 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 
 	act := strings.ToLower(strings.TrimSpace(body.Action))
 	st := localStatus()
-	country := DetectServerCountry()
 
-	eligible, reason := CheckSentinelEligibility(st.Role, country)
+	eligible, reason := CheckSentinelEligibility(st.Role, "")
 	if !eligible && act == "install" {
 		writeAPIError(w, r, "E-SENTINEL-01", reason)
 		return
