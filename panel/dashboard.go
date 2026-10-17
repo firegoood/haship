@@ -221,11 +221,70 @@ var (
 	lifetimeDown     uint64
 	trafficStateInit bool
 	lastSampleTime   time.Time
+	lastStateSave    time.Time
 	speedDeltaUp     uint64
 	speedDeltaDown   uint64
 	currentSpeedUp   float64
 	currentSpeedDown float64
 )
+
+type persistentTrafficState struct {
+	LifetimeUp    uint64 `json:"lifetime_up"`
+	LifetimeDown  uint64 `json:"lifetime_down"`
+	LifetimeTotal uint64 `json:"lifetime_total"`
+	LastRawUp     uint64 `json:"last_raw_up"`
+	LastRawDown   uint64 `json:"last_raw_down"`
+	SavedAt       int64  `json:"saved_at"`
+}
+
+func trafficStateFile() string { return filepath.Join(configDir, "traffic_state.json") }
+
+func loadTrafficStateLocked() {
+	if trafficStateInit {
+		return
+	}
+	trafficStateInit = true
+
+	// 1. Try dedicated disk database state file
+	if data, err := os.ReadFile(trafficStateFile()); err == nil {
+		var st persistentTrafficState
+		if json.Unmarshal(data, &st) == nil && (st.LifetimeUp > 0 || st.LifetimeDown > 0) {
+			lifetimeUp = st.LifetimeUp
+			lifetimeDown = st.LifetimeDown
+			lastRawUp = st.LastRawUp
+			lastRawDown = st.LastRawDown
+			return
+		}
+	}
+
+	// 2. Fallback to latest sample in traffic.json history
+	hist := loadHistory()
+	for i := len(hist) - 1; i >= 0; i-- {
+		if hist[i].Up != nil && hist[i].Down != nil {
+			lifetimeUp = *hist[i].Up
+			lifetimeDown = *hist[i].Down
+			break
+		}
+	}
+}
+
+func saveTrafficStateLocked() {
+	_ = os.MkdirAll(configDir, 0700)
+	st := persistentTrafficState{
+		LifetimeUp:    lifetimeUp,
+		LifetimeDown:  lifetimeDown,
+		LifetimeTotal: lifetimeUp + lifetimeDown,
+		LastRawUp:     lastRawUp,
+		LastRawDown:   lastRawDown,
+		SavedAt:       time.Now().Unix(),
+	}
+	b := mustJSON(st)
+	tmp := trafficStateFile() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0600); err == nil {
+		_ = os.Rename(tmp, trafficStateFile())
+	}
+	lastStateSave = time.Now()
+}
 
 var (
 	peerIfsMu       sync.RWMutex
@@ -382,18 +441,10 @@ func greTrafficFrom(devData string) map[string]any {
 	now := time.Now()
 
 	if !trafficStateInit {
-		hist := loadHistory()
-		for i := len(hist) - 1; i >= 0; i-- {
-			if hist[i].Up != nil && hist[i].Down != nil {
-				lifetimeUp = *hist[i].Up
-				lifetimeDown = *hist[i].Down
-				break
-			}
-		}
+		loadTrafficStateLocked()
 		lastRawUp = rawUp
 		lastRawDown = rawDown
 		lastSampleTime = now
-		trafficStateInit = true
 	}
 
 	dU := uint64(0)
@@ -414,6 +465,10 @@ func greTrafficFrom(devData string) map[string]any {
 	lifetimeDown += dD
 	lastRawUp = rawUp
 	lastRawDown = rawDown
+
+	if (dU > 0 || dD > 0) && time.Since(lastStateSave) >= 5*time.Second {
+		saveTrafficStateLocked()
+	}
 
 	speedDeltaUp += dU
 	speedDeltaDown += dD
@@ -734,7 +789,12 @@ func saveHistoryLocked() {
 		return
 	}
 	compactHistoryLocked(time.Now().Unix())
-	_ = os.WriteFile(historyFile(), mustJSON(histCached), 0600)
+	_ = os.MkdirAll(configDir, 0700)
+	b := mustJSON(histCached)
+	tmp := historyFile() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0600); err == nil {
+		_ = os.Rename(tmp, historyFile())
+	}
 	histDirty = false
 	lastFlushTime = time.Now()
 }
@@ -745,6 +805,9 @@ func flushHistoryIfDirty() {
 	if histDirty {
 		saveHistoryLocked()
 	}
+	trafficStateMu.Lock()
+	saveTrafficStateLocked()
+	trafficStateMu.Unlock()
 }
 
 // startTrafficRecorder runs 24/7 in the background, sampling every 5s

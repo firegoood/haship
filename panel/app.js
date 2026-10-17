@@ -1719,6 +1719,31 @@ document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => {
   if (cv) { cv._forceAnim = true; cv._ymax = null; }
   refreshDash();
 });
+
+function hydrateCachedTraffic() {
+  try {
+    const raw = localStorage.getItem('hashem_traffic_cache');
+    if (!raw) return;
+    const cache = JSON.parse(raw);
+    if (!cache || !cache.traffic) return;
+    const t = cache.traffic;
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    if (t.total != null) set('kpiTraffic', fmtBytes(t.total));
+    if (t.down != null && t.up != null) {
+      const rtUp = t.speed_up != null ? fmtRate(t.speed_up) : '0.0 B/s';
+      const rtDown = t.speed_down != null ? fmtRate(t.speed_down) : '0.0 B/s';
+      set('kpiTrafficSub', 'Speed: ↓ ' + rtDown + ' · ↑ ' + rtUp + '  |  Tot: ↓ ' + fmtBytes(t.down) + ' · ↑ ' + fmtBytes(t.up));
+    }
+    if (cache.history && cache.history.length >= 2) {
+      setTimeout(() => {
+        drawChart(cache.history, false);
+        if (typeof drawActivityChart === 'function') drawActivityChart(cache.history, false);
+      }, 20);
+    }
+  } catch (e) {}
+}
+try { hydrateCachedTraffic(); } catch (e) {}
+
 // Throughput chart: cumulative counters to interval rate.
 function drawChart(hist, isDown) {
   const cv = $('trafficChart');
@@ -2252,6 +2277,15 @@ async function refreshDash() {
     set('kpiTrafficSub', 'Speed: ↓ ' + rtDown + ' · ↑ ' + rtUp + '  |  Tot: ↓ ' + fmtBytes(t.down) + ' · ↑ ' + fmtBytes(t.up));
     drawChart(d.history, !on);
     drawActivityChart(d.history, !on);
+    try {
+      if (d.traffic && (d.traffic.total > 0 || (d.history && d.history.length > 0))) {
+        localStorage.setItem('hashem_traffic_cache', JSON.stringify({
+          traffic: d.traffic,
+          history: d.history,
+          saved_at: Date.now()
+        }));
+      }
+    } catch (e) {}
     const cd = $('chartDown'), cc = $('chartCard');
     if (cd) cd.classList.toggle('hidden', on);
     if (cc) cc.classList.toggle('is-down', !on);
@@ -7200,7 +7234,7 @@ function renderLicense(d) {
 
   if (d.is_valid) {
     brandEls.forEach(el => {
-      el.innerHTML = 'Hashem <span class="badge brand-premium-badge" style="background:linear-gradient(135deg, rgba(245,158,11,0.18) 0%, rgba(217,70,239,0.22) 100%); color:#fbbf24; border:1px solid rgba(245,158,11,0.5); font-size:10px; font-weight:800; padding:2px 8px; border-radius:14px; letter-spacing:0.06em; vertical-align:middle; margin-left:6px; display:inline-flex; align-items:center; gap:4px; box-shadow:0 0 12px rgba(245,158,11,0.25), inset 0 1px 0 rgba(255,255,255,0.18); text-shadow:0 1px 2px rgba(0,0,0,0.5);"><svg width="9" height="9" viewBox="0 0 24 24" fill="#fbbf24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Premium</span>';
+      el.innerHTML = 'Hashem <span class="brand-premium-badge"><svg class="bp-gem" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="bp-label">PREMIUM</span></span>';
     });
     if (badge) {
       badge.textContent = 'PREMIUM (Active)';
@@ -8079,31 +8113,36 @@ function renderSentinelModal() {
   const isIran = !!d.is_iran;
 
   body.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:10px 14px;">
-      <span style="font-size:13px; font-weight:600; color:#34d399;">لایسنس سنتینال فعال است ✓</span>
-      <span class="badge" style="background:linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(217,70,239,0.25) 100%); color:#fbbf24; border:1px solid rgba(245,158,11,0.45); font-size:10px; font-weight:800; padding:2px 8px; border-radius:12px;">PREMIUM</span>
+    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:10px; padding:12px 16px;">
+      <span style="font-size:13px; font-weight:700; color:#34d399; display:flex; align-items:center; gap:6px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+        لایسنس سنتینال فعال است
+      </span>
+      <span class="brand-premium-badge" style="margin:0;"><svg class="bp-gem" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="bp-label">PREMIUM</span></span>
     </div>
 
     <!-- Critical Warning Box -->
-    <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.35); border-radius:8px; padding:12px 14px; display:flex; align-items:flex-start; gap:10px;">
-      <span style="font-size:20px; line-height:1;">⚠️</span>
-      <div style="font-size:13px; line-height:1.6; color:#fef3c7;">
-        <b style="color:#fbbf24;">هشدار مهم:</b><br>
-        برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه
+    <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.35); border-radius:10px; padding:14px; display:flex; align-items:flex-start; gap:12px;">
+      <span style="font-size:22px; line-height:1;">⚠️</span>
+      <div>
+        <b style="color:#fbbf24; font-size:13px;">هشدار مهم پیش‌نیاز سنتینال:</b>
+        <div style="font-size:13px; color:#fef3c7; margin-top:3px; line-height:1.6;">
+          برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه
+        </div>
       </div>
     </div>
 
     <!-- Locality Decision Buttons -->
-    <div style="background:rgba(255,255,255,0.03); border:1px solid var(--ln); border-radius:8px; padding:14px;">
+    <div style="background:rgba(255,255,255,0.03); border:1px solid var(--ln); border-radius:10px; padding:14px;">
       <label style="font-size:13px; font-weight:700; color:#f8fafc; margin-bottom:10px; display:block;">
-        آیا این سرور در ایران قرار دارد؟
+        موقعیت جغرافیایی سرور:
       </label>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <button type="button" class="hashem-btn ${isIran ? 'hashem-btn-primary' : 'hashem-btn-secondary'}" id="btnSentinelChooseIran" style="padding:10px; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;">
-          🇮🇷 بله، این سرور ایران است
+          🇮🇷 این سرور ایران است ${isIran ? '✓' : ''}
         </button>
         <button type="button" class="hashem-btn ${!isIran ? 'hashem-btn-danger' : 'hashem-btn-secondary'}" id="btnSentinelChooseForeign" style="padding:10px; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;">
-          🌍 خیر، سرور خارج است
+          🌍 سرور خارج است ${!isIran ? '✓' : ''}
         </button>
       </div>
     </div>
@@ -8118,57 +8157,50 @@ function renderSentinelModal() {
   const outcomeSec = $('sentinelModalOutcomeSec');
   if (!outcomeSec) return;
 
-  if (!isIran) {
+  if (!d.installed) {
     outcomeSec.innerHTML = `
-      <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:8px; padding:12px; color:#fca5a5; font-size:13px; line-height:1.6;">
-        ⛔ <b>امکان نصب و مانیتورینگ روی سرور خارج وجود ندارد.</b><br>
-        برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه. لطفاً سنتینال را روی سرور ایران راه‌اندازی نمایید.
+      <div style="background:rgba(14,165,233,0.08); border:1px solid rgba(14,165,233,0.3); border-radius:10px; padding:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+        <div>
+          <div style="font-size:14px; font-weight:700; color:#38bdf8;">نصب و راه‌اندازی سنتینال</div>
+          <div style="font-size:12px; color:#cbd5e1; margin-top:3px; line-height:1.5;">
+            ${isIran ? 'سرور ایران تایید شده؛ سرویس سنتینال با هسته Xray و پورت رندوم امن نصب می‌شود.' : 'توجه: برای تست کانفیگ‌ها باید روی سرور ایران باشد؛ با کلیک زیر نصب مستقیم شروع می‌شود.'}
+          </div>
+        </div>
+        <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" style="background:linear-gradient(135deg, #0284c7, #2563eb); border:none; padding:10px 22px; font-weight:700; font-size:13px;">
+          ⚡ نصب خودکار سنتینال
+        </button>
       </div>`;
+    const instBtn = $('btnModalInstallSentinel');
+    if (instBtn) instBtn.onclick = () => installSentinelModalClick(isIran);
     if (acts) acts.innerHTML = '';
   } else {
-    if (!d.installed) {
-      outcomeSec.innerHTML = `
-        <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-          <div>
-            <div style="font-size:13px; font-weight:700; color:#34d399;">سرور ایران تایید شد ✓</div>
-            <div style="font-size:12px; color:#94a3b8; margin-top:2px;">سنتینال آماده نصب روی این سرور است (پورت رندوم امن ۳۰۰۰۰ تا ۳۹۹۹۹).</div>
+    const isRunning = d.running;
+    outcomeSec.innerHTML = `
+      <div style="background:rgba(14,165,233,0.06); border:1px solid rgba(14,165,233,0.25); border-radius:10px; padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span class="badge" style="background:${isRunning ? '#10b981' : '#ef4444'}; color:#fff; font-size:11px; font-weight:800; padding:3px 10px; border-radius:20px;">
+              ${isRunning ? 'ACTIVE / RUNNING' : 'STOPPED'}
+            </span>
+            <span style="font-size:13px; font-weight:700; color:#e2e8f0;">پورت: <code>${d.port}</code></span>
           </div>
-          <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" style="background:linear-gradient(135deg, #10b981, #059669); border:none; padding:8px 18px; font-weight:700;">
-            ⚡ نصب خودکار سنتینال
+          <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" style="font-weight:700; padding:8px 18px; font-size:13px;">
+            🔗 ورود به داشبورد سنتینال ↗
           </button>
-        </div>`;
-      const instBtn = $('btnModalInstallSentinel');
-      if (instBtn) instBtn.onclick = installSentinelModalClick;
-      if (acts) acts.innerHTML = '';
-    } else {
-      const isRunning = d.running;
-      outcomeSec.innerHTML = `
-        <div style="background:rgba(14,165,233,0.06); border:1px solid rgba(14,165,233,0.25); border-radius:8px; padding:14px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span class="badge" style="background:${isRunning ? '#10b981' : '#ef4444'}; color:#fff; font-size:10px; font-weight:700;">
-                ${isRunning ? 'ACTIVE / RUNNING' : 'STOPPED'}
-              </span>
-              <span style="font-size:13px; font-weight:600; color:#e2e8f0;">پورت: <code>${d.port}</code></span>
-            </div>
-            <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" style="font-weight:700; padding:6px 16px;">
-              🔗 ورود به داشبورد سنتینال
-            </button>
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button type="button" class="hashem-btn hashem-btn-secondary" id="btnModalRestartSentinel" style="font-size:12px;">🔄 ریستارت</button>
-            <button type="button" class="hashem-btn hashem-btn-danger" id="btnModalUninstallSentinel" style="font-size:12px;">🗑️ حذف</button>
-          </div>
-        </div>`;
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button type="button" class="hashem-btn hashem-btn-secondary" id="btnModalRestartSentinel" style="font-size:12px;">🔄 ریستارت</button>
+          <button type="button" class="hashem-btn hashem-btn-danger" id="btnModalUninstallSentinel" style="font-size:12px;">🗑️ حذف سنتینال</button>
+        </div>
+      </div>`;
 
-      const openBtn = $('btnModalOpenDashboard');
-      if (openBtn) openBtn.onclick = () => window.open(d.url, '_blank');
-      const rstBtn = $('btnModalRestartSentinel');
-      if (rstBtn) rstBtn.onclick = async () => { await controlSentinelAction('restart'); renderSentinelModal(); };
-      const unBtn = $('btnModalUninstallSentinel');
-      if (unBtn) unBtn.onclick = async () => { await controlSentinelAction('uninstall'); renderSentinelModal(); };
-      if (acts) acts.innerHTML = '';
-    }
+    const openBtn = $('btnModalOpenDashboard');
+    if (openBtn) openBtn.onclick = () => window.open(d.url, '_blank');
+    const rstBtn = $('btnModalRestartSentinel');
+    if (rstBtn) rstBtn.onclick = async () => { await controlSentinelAction('restart'); renderSentinelModal(); };
+    const unBtn = $('btnModalUninstallSentinel');
+    if (unBtn) unBtn.onclick = async () => { await controlSentinelAction('uninstall'); renderSentinelModal(); };
+    if (acts) acts.innerHTML = '';
   }
 }
 
@@ -8205,11 +8237,14 @@ async function setSentinelLocalityClick(isIran) {
   }
 }
 
-async function installSentinelModalClick() {
+async function installSentinelModalClick(isIran) {
   const btn = $('btnModalInstallSentinel');
-  if (btn) { btn.disabled = true; btn.textContent = 'در حال نصب و تخصیص پورت…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'در حال نصب و راه‌اندازی سنتینال…'; }
   try {
-    const r = await api('/api/sentinel', { action: 'install' });
+    if (!isIran) {
+      await api('/api/sentinel', { action: 'set_locality', is_iran: true });
+    }
+    const r = await api('/api/sentinel', { action: 'install', is_iran: true });
     toastMsg('ok', r.message || 'سنتینال با موفقیت نصب شد!');
     await loadSentinelState();
     renderSentinelModal();
