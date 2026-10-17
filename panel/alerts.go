@@ -220,8 +220,6 @@ func deliverAlerts(cfg alertConfig, events []alertEvent) {
 				recordError("E-WD-01", "alerts", "telegram failed: "+err.Error())
 			}
 		}
-		// Also forward to Sentinel Telegram notification worker if installed
-		_ = ForwardAlertToSentinel(formatSentinelTunnelAlert(e))
 	}
 }
 

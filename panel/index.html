@@ -3181,6 +3181,27 @@
               🔗 ورود به داشبورد سنتینال ↗
             </button>
           </div>
+
+          <div class="fg" style="margin-bottom:12px;">
+            <label style="font-size:12px; font-weight:700; color:#94a3b8; display:block; margin-bottom:6px;">
+              🌐 آدرس کامل پنل سنتینال (Dashboard URL):
+            </label>
+            <div style="display:flex; gap:8px;">
+              <input class="hashem-input" id="sentinelModalUrl" readonly style="font-family:monospace; font-size:12px; width:100%; color:#38bdf8; background:rgba(0,0,0,0.4); direction:ltr;" placeholder="http://...">
+              <button type="button" class="hashem-btn" id="btnCopySentinelUrl" onclick="copySentinelUrlClick()" style="white-space:nowrap; padding:6px 14px;">📋 کپی آدرس</button>
+            </div>
+          </div>
+
+          <div class="fg" id="sentinelModalPassRow" style="margin-bottom:14px;">
+            <label style="font-size:12px; font-weight:700; color:#94a3b8; display:block; margin-bottom:6px;">
+              🔑 رمز عبور ورود (Admin Password):
+            </label>
+            <div style="display:flex; gap:8px;">
+              <input class="hashem-input" id="sentinelModalPass" readonly style="font-family:monospace; font-size:12px; width:100%; color:#fbbf24; background:rgba(0,0,0,0.4); direction:ltr;" placeholder="••••••••">
+              <button type="button" class="hashem-btn" id="btnCopySentinelPass" onclick="copySentinelPassClick()" style="white-space:nowrap; padding:6px 14px;">📋 کپی رمز</button>
+            </div>
+          </div>
+
           <div style="display:flex; gap:10px;">
             <button type="button" class="hashem-btn hashem-btn-secondary" id="btnModalRestartSentinel" onclick="controlSentinelAction('restart')" style="font-size:12px;">🔄 ریستارت</button>
             <button type="button" class="hashem-btn hashem-btn-danger" id="btnModalUninstallSentinel" onclick="controlSentinelAction('uninstall')" style="font-size:12px;">🗑️ حذف سنتینال</button>

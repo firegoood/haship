@@ -8075,6 +8075,23 @@ function renderSentinelModal() {
         bEl.textContent = d.running ? 'ACTIVE / RUNNING' : 'STOPPED';
         bEl.style.background = d.running ? '#10b981' : '#ef4444';
       }
+
+      // Compute display URL
+      let displayUrl = d.url;
+      if (!displayUrl || displayUrl.includes('127.0.0.1')) {
+        const host = window.location.hostname || '127.0.0.1';
+        displayUrl = `http://${host}:${d.port || 32836}${d.path || '/'}`;
+      }
+      const urlInp = $('sentinelModalUrl');
+      if (urlInp) urlInp.value = displayUrl;
+
+      const passInp = $('sentinelModalPass');
+      if (passInp && d.password) {
+        passInp.value = d.password;
+        if ($('sentinelModalPassRow')) $('sentinelModalPassRow').classList.remove('hidden');
+      } else if (passInp) {
+        if ($('sentinelModalPassRow')) $('sentinelModalPassRow').classList.add('hidden');
+      }
     } else {
       if (uninstalledCard) uninstalledCard.classList.remove('hidden');
       if (installedCard) installedCard.classList.add('hidden');
@@ -8087,14 +8104,20 @@ function copySentinelHashClick() {
   copyTextSafe(el ? el.value : '', 'کپی شد', 'هش سرور در کلیپ‌بورد کپی شد');
 }
 
+function copySentinelUrlClick() {
+  const el = $('sentinelModalUrl');
+  copyTextSafe(el ? el.value : '', 'کپی شد', 'آدرس وب‌پنل سنتینال در کلیپ‌بورد کپی شد');
+}
+
+function copySentinelPassClick() {
+  const el = $('sentinelModalPass');
+  copyTextSafe(el ? el.value : '', 'کپی شد', 'رمز عبور پنل سنتینال در کلیپ‌بورد کپی شد');
+}
+
 function openSentinelDashboardClick() {
-  if (_sentinelData && _sentinelData.url) {
-    window.open(_sentinelData.url, '_blank');
-  } else if (_sentinelData && _sentinelData.port) {
-    window.open('http://' + window.location.hostname + ':' + _sentinelData.port + (_sentinelData.path || '/'), '_blank');
-  } else {
-    window.open('http://' + window.location.hostname + ':32836/', '_blank');
-  }
+  const urlInp = $('sentinelModalUrl');
+  const targetUrl = (urlInp && urlInp.value) ? urlInp.value : (_sentinelData && _sentinelData.url ? _sentinelData.url : 'http://' + window.location.hostname + ':32836/');
+  window.open(targetUrl, '_blank');
 }
 
 async function activateSentinelLicenseModalClick() {
@@ -8134,6 +8157,8 @@ async function installSentinelModalClick() {
 }
 
 window.copySentinelHashClick = copySentinelHashClick;
+window.copySentinelUrlClick = copySentinelUrlClick;
+window.copySentinelPassClick = copySentinelPassClick;
 window.openSentinelDashboardClick = openSentinelDashboardClick;
 window.activateSentinelLicenseModalClick = activateSentinelLicenseModalClick;
 window.installSentinelModalClick = installSentinelModalClick;

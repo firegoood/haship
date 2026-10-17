@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
-	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -22,17 +21,16 @@ import (
 )
 
 type SentinelConfig struct {
-	Installed      bool   `json:"installed"`
-	Running        bool   `json:"running"`
-	Port           int    `json:"port"`
-	Path           string `json:"path"`
-	URL            string `json:"url"`
-	IsIran         bool   `json:"is_iran"`
-	IsIranDecided  bool   `json:"is_iran_decided"`
-	HasLicense     bool   `json:"has_license"`
-	ForwardAlerts  bool   `json:"forward_alerts"`
-	TelegramChatID string `json:"telegram_chat_id"`
-	Version        string `json:"version"`
+	Installed     bool   `json:"installed"`
+	Running       bool   `json:"running"`
+	Port          int    `json:"port"`
+	Path          string `json:"path"`
+	URL           string `json:"url"`
+	Password      string `json:"password"`
+	IsIran        bool   `json:"is_iran"`
+	IsIranDecided bool   `json:"is_iran_decided"`
+	HasLicense    bool   `json:"has_license"`
+	Version       string `json:"version"`
 }
 
 var sentinelMu sync.Mutex
@@ -192,27 +190,36 @@ func GetSentinelStatus() SentinelConfig {
 		for _, line := range lines {
 			parts := strings.SplitN(strings.TrimSpace(line), "=", 2)
 			if len(parts) == 2 {
-				switch parts[0] {
+				switch strings.ToLower(parts[0]) {
 				case "port":
 					fmt.Sscanf(parts[1], "%d", &cfg.Port)
 				case "path":
 					cfg.Path = parts[1]
+				case "password":
+					cfg.Password = parts[1]
 				}
 			}
 		}
+	} else if _, err := os.Stat("/opt/sentinel/app.py"); err == nil {
+		cfg.Installed = true
 	}
 
-	if cfg.Installed && cfg.Port > 0 {
+	if cfg.Port > 0 {
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", cfg.Port), 400*time.Millisecond)
 		if err == nil {
 			cfg.Running = true
 			conn.Close()
 		}
-		pubHost := st.LocalPub
+		pubHost := detectPublicIP()
+		if pubHost == "" {
+			pubHost = st.LocalPub
+		}
 		if pubHost == "" {
 			pubHost = "127.0.0.1"
 		}
-		cfg.URL = fmt.Sprintf("http://%s:%d%s", pubHost, cfg.Port, cfg.Path)
+		cleanPath := "/" + strings.Trim(cfg.Path, "/") + "/"
+		cfg.Path = cleanPath
+		cfg.URL = fmt.Sprintf("http://%s:%d%s", pubHost, cfg.Port, cleanPath)
 	}
 
 	return cfg
@@ -226,9 +233,8 @@ func handleSentinelGet(w http.ResponseWriter, r *http.Request) {
 // handleSentinelPost handles POST /api/sentinel actions.
 func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Action        string `json:"action"`
-		ForwardAlerts *bool  `json:"forward_alerts"`
-		IsIran        *bool  `json:"is_iran"`
+		Action string `json:"action"`
+		IsIran *bool  `json:"is_iran"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-REQ-01", "invalid json body")
@@ -295,6 +301,15 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-INSTALL-01", fmt.Sprintf("Sentinel install failed: %s", string(out)))
 			return
 		}
+
+		// Wait up to 5s for credentials.txt to be created by app.py
+		credsPath := sentinelCredentialsPath()
+		for i := 0; i < 10; i++ {
+			if _, err := os.Stat(credsPath); err == nil {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
 		sentinelMu.Unlock()
 
 		writeJSON(w, map[string]any{
@@ -327,65 +342,4 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeAPIError(w, r, "E-ACT-01", fmt.Sprintf("unsupported action %q", act))
 	}
-}
-
-// formatSentinelTunnelAlert formats a Hashem alertEvent into an HTML Telegram notification.
-func formatSentinelTunnelAlert(e alertEvent) string {
-	icon := map[string]string{stateDown: "🚨", stateHealthy: "✅", stateDegraded: "⚠️"}[e.To]
-	if icon == "" {
-		icon = "ℹ️"
-	}
-	s := fmt.Sprintf("%s <b>[Hashem Tunnel Alert]</b>\nHost: <code>%s</code>\nLink: <code>%s</code>\nState: %s ➔ <b>%s</b>",
-		icon, e.Host, e.Link, strings.ToUpper(e.From), strings.ToUpper(e.To))
-	if e.Why != "" {
-		s += fmt.Sprintf("\nReason: <i>%s</i>", e.Why)
-	}
-	s += "\n\n<i>📡 Forwarded via Sentinel</i>"
-	return s
-}
-
-// ForwardAlertToSentinel sends an alert to Sentinel's local Telegram notification worker.
-func ForwardAlertToSentinel(text string) error {
-	st := GetSentinelStatus()
-	if !st.Installed || !st.Running || st.Port <= 0 {
-		return fmt.Errorf("sentinel is not running")
-	}
-
-	payload, err := json.Marshal(map[string]string{"text": text, "source": "hashem"})
-	if err != nil {
-		return err
-	}
-
-	schemes := []string{"https", "http"}
-	var lastErr error
-	client := &http.Client{
-		Timeout: 3 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
-	for _, scheme := range schemes {
-		cleanPath := "/" + strings.Trim(st.Path, "/")
-		targetURL := fmt.Sprintf("%s://127.0.0.1:%d%s/api/external-alert", scheme, st.Port, cleanPath)
-		req, err := http.NewRequest("POST", targetURL, bytes.NewReader(payload))
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-R", "1")
-
-		resp, err := client.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
-			lastErr = fmt.Errorf("sentinel returned HTTP %d", resp.StatusCode)
-		} else {
-			lastErr = err
-		}
-	}
-	return lastErr
 }

@@ -81,21 +81,3 @@ func TestSentinel_RandomPortAllocation(t *testing.T) {
 		t.Errorf("port %d outside expected range [30000, 39999]", port)
 	}
 }
-
-func TestSentinel_AlertFormatting(t *testing.T) {
-	event := alertEvent{
-		From: "healthy",
-		To:   "down",
-		Host: "my-node",
-		Link: "gre-tunnel",
-		Why:  "loss > 50%",
-	}
-
-	msg := formatSentinelTunnelAlert(event)
-	if !strings.Contains(msg, "🚨 <b>[Hashem Tunnel Alert]</b>") {
-		t.Errorf("expected alert header, got: %s", msg)
-	}
-	if !strings.Contains(msg, "HEALTHY ➔ <b>DOWN</b>") {
-		t.Errorf("expected status transition, got: %s", msg)
-	}
-}
