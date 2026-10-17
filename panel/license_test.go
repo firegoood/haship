@@ -288,3 +288,103 @@ func TestDualKeyVerification(t *testing.T) {
 		t.Fatalf("expected 400 Bad Request for untrusted token, got %d", rrPostUntrusted.Code)
 	}
 }
+
+// withTestLicense installs a throwaway signing key, an empty configDir and a
+// valid license.key, and restores the globals afterwards.
+func withTestLicense(t *testing.T) string {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldMaster, oldTrusted := masterPublicKeyB64, trustedMasterPublicKeysB64
+	oldDir, oldCfg, oldLoaded := configDir, cfg, cfgLoaded.Load()
+	masterPublicKeyB64 = base64.StdEncoding.EncodeToString(pub)
+	trustedMasterPublicKeysB64 = nil
+	configDir = t.TempDir()
+	t.Cleanup(func() {
+		masterPublicKeyB64, trustedMasterPublicKeysB64 = oldMaster, oldTrusted
+		configDir, cfg = oldDir, oldCfg
+		cfgLoaded.Store(oldLoaded)
+		licenseKeyCleared.Store(false)
+		_ = os.Remove("/etc/hashem/license.key")
+		activeLicenseMu.Lock()
+		activeLicense = nil
+		licenseCheckedAt = time.Now()
+		activeLicenseMu.Unlock()
+	})
+	token := generateTestToken(t, "C1", getMachineHash(), []string{"cluster"}, time.Now().Add(time.Hour).Unix(), priv)
+	if err := os.WriteFile(filepath.Join(configDir, "license.key"), []byte(token), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func readPanelJSON(t *testing.T) panelConfig {
+	t.Helper()
+	data, err := os.ReadFile(cfgPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c panelConfig
+	if err := json.Unmarshal(data, &c); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// C1: loading the license before loadOrInit() must not save the zero-value
+// cfg over panel.json (it used to wipe 2FA on every restart).
+func TestLicenseLoadKeepsPanelSettings(t *testing.T) {
+	token := withTestLicense(t)
+	cfg = panelConfig{Username: "admin", PassHash: hashPassword("Secret-123"), Port: 7777, BasePath: "p",
+		TOTPEnabled: true, TOTPSecret: "JBSWY3DPEHPK3PXP", TerminalEnabled: true}
+	saveCfg()
+
+	cfg = panelConfig{} // state before loadOrInit
+	cfgLoaded.Store(false)
+	loadLicenseFromDisk()
+	if c := readPanelJSON(t); !c.TOTPEnabled || c.TOTPSecret == "" || !c.TerminalEnabled {
+		t.Fatalf("panel.json settings wiped before config load: %+v", c)
+	}
+
+	loadOrInit()
+	loadLicenseFromDisk()
+	c := readPanelJSON(t)
+	if !c.TOTPEnabled || !c.TerminalEnabled {
+		t.Fatalf("panel.json settings wiped after license load: %+v", c)
+	}
+	if c.LicenseKey != token {
+		t.Fatalf("license key not persisted to panel.json")
+	}
+	if !HasFeature("cluster") {
+		t.Fatal("license not active")
+	}
+}
+
+// H10: deactivation must clear panel.json too, or the key comes back.
+func TestLicenseDeactivatePersists(t *testing.T) {
+	withTestLicense(t)
+	cfg = panelConfig{Username: "admin", PassHash: hashPassword("Secret-123"), Port: 7777, BasePath: "p"}
+	saveCfg()
+	cfgLoaded.Store(true)
+	loadLicenseFromDisk()
+	if readPanelJSON(t).LicenseKey == "" {
+		t.Fatal("setup: license key not in panel.json")
+	}
+
+	rr := httptest.NewRecorder()
+	handleLicensePost(rr, httptest.NewRequest("POST", "/api/license", strings.NewReader(`{"key":""}`)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("deactivate: %d %s", rr.Code, rr.Body.String())
+	}
+	if k := readPanelJSON(t).LicenseKey; k != "" {
+		t.Fatal("license key still in panel.json after deactivation")
+	}
+	activeLicenseMu.Lock()
+	licenseCheckedAt = time.Time{}
+	activeLicenseMu.Unlock()
+	if HasFeature("cluster") {
+		t.Fatal("license re-activated from disk after deactivation")
+	}
+}

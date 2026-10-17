@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // SSHFwdConfig stores configuration for the Bagher Engine / SSH carrier.
@@ -157,6 +160,54 @@ func formatAuthorizedKeyLine(pubKey string, mode string, frpPort int, ports []in
 	}
 	permitStr := strings.Join(permitOpenOpts, ",")
 	return fmt.Sprintf("restrict,port-forwarding,%s %s", permitStr, strings.TrimSpace(pubKey))
+}
+
+// authorizedKeysPath is root's authorized_keys; tests point it elsewhere.
+var authorizedKeysPath = "/root/.ssh/authorized_keys"
+
+// installRestrictedKey adds pubKey to authorized_keys behind the restrict
+// options from formatAuthorizedKeyLine, replacing any earlier entry for the
+// same key. The key comes from a peer, so it must be exactly one valid public
+// key: a newline could smuggle in a second, unrestricted key, and a loose
+// substring match on removal could delete every other root key.
+func installRestrictedKey(pubKey, mode string, frpPort int, ports []int) error {
+	pubKey = strings.TrimSpace(pubKey)
+	if strings.ContainsAny(pubKey, "\r\n") {
+		return fmt.Errorf("public key must be a single line")
+	}
+	pk, _, opts, rest, err := ssh.ParseAuthorizedKey([]byte(pubKey))
+	if err != nil {
+		return fmt.Errorf("invalid public key: %v", err)
+	}
+	if len(opts) > 0 || len(bytes.TrimSpace(rest)) > 0 {
+		return fmt.Errorf("public key must not carry options or extra data")
+	}
+	canonical := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pk)))
+	authLine := formatAuthorizedKeyLine(canonical, mode, frpPort, ports)
+
+	_ = os.MkdirAll(filepath.Dir(authorizedKeysPath), 0700)
+	existing, _ := os.ReadFile(authorizedKeysPath)
+	var newLines []string
+	for _, line := range strings.Split(string(existing), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if old, _, _, _, err := ssh.ParseAuthorizedKey([]byte(trimmed)); err == nil && bytes.Equal(old.Marshal(), pk.Marshal()) {
+			continue
+		}
+		newLines = append(newLines, trimmed)
+	}
+	newLines = append(newLines, authLine)
+	tmp := authorizedKeysPath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strings.Join(newLines, "\n")+"\n"), 0600); err != nil {
+		return fmt.Errorf("failed writing authorized_keys: %w", err)
+	}
+	if err := os.Rename(tmp, authorizedKeysPath); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("failed writing authorized_keys: %w", err)
+	}
+	return nil
 }
 
 // buildSSHFwdService generates the systemd service file content for Bagher Engine.
@@ -433,34 +484,8 @@ func ParseBagherBundle(bundleStr string) (*BagherBundle, error) {
 
 // applyBagherBundle configures Foreign host automatically from a parsed BagherBundle.
 func applyBagherBundle(b *BagherBundle) error {
-	authLine := formatAuthorizedKeyLine(b.SSHPublicKey, "bagher", b.FRPPort, b.Ports)
-	authFile := "/root/.ssh/authorized_keys"
-	_ = os.MkdirAll("/root/.ssh", 0700)
-
-	existing, _ := os.ReadFile(authFile)
-	existingStr := string(existing)
-
-	cleanPub := strings.TrimSpace(b.SSHPublicKey)
-	keyParts := strings.Fields(cleanPub)
-	targetKey := cleanPub
-	if len(keyParts) >= 2 {
-		targetKey = keyParts[1]
-	}
-
-	var newLines []string
-	for _, line := range strings.Split(existingStr, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if !strings.Contains(trimmed, targetKey) {
-			newLines = append(newLines, trimmed)
-		}
-	}
-	newLines = append(newLines, authLine)
-	finalContent := strings.Join(newLines, "\n") + "\n"
-	if err := os.WriteFile(authFile, []byte(finalContent), 0600); err != nil {
-		return fmt.Errorf("failed writing authorized_keys: %w", err)
+	if err := installRestrictedKey(b.SSHPublicKey, "bagher", b.FRPPort, b.Ports); err != nil {
+		return err
 	}
 
 	_ = os.MkdirAll("/etc/gre-panel/bagher", 0755)
@@ -1137,35 +1162,12 @@ func handlePeerSSHFwdInstallKey(w http.ResponseWriter, r *http.Request) {
 		body.Mode = "bagher"
 	}
 
-	authLine := formatAuthorizedKeyLine(body.PubKey, body.Mode, body.FRPBindPort, body.Ports)
-	authFile := "/root/.ssh/authorized_keys"
-	_ = os.MkdirAll("/root/.ssh", 0700)
-
-	existing, _ := os.ReadFile(authFile)
-	existingStr := string(existing)
-
-	cleanPub := strings.TrimSpace(body.PubKey)
-	keyParts := strings.Fields(cleanPub)
-	targetKey := cleanPub
-	if len(keyParts) >= 2 {
-		targetKey = keyParts[1]
-	}
-
-	var newLines []string
-	for _, line := range strings.Split(existingStr, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
+	if err := installRestrictedKey(body.PubKey, body.Mode, body.FRPBindPort, body.Ports); err != nil {
+		code := "E-SSHFWD-06"
+		if !strings.HasPrefix(err.Error(), "failed writing") {
+			code = "E-SSHFWD-01"
 		}
-		if !strings.Contains(trimmed, targetKey) {
-			newLines = append(newLines, trimmed)
-		}
-	}
-	newLines = append(newLines, authLine)
-	finalContent := strings.Join(newLines, "\n") + "\n"
-
-	if err := os.WriteFile(authFile, []byte(finalContent), 0600); err != nil {
-		writeAPIError(w, r, "E-SSHFWD-06", fmt.Sprintf("failed writing authorized_keys: %v", err))
+		writeAPIError(w, r, code, err.Error())
 		return
 	}
 

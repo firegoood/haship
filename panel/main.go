@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -99,6 +100,12 @@ func cfgPath() string { return filepath.Join(configDir, "panel.json") }
 var (
 	cfgFileModTime time.Time
 	cfgFileMu      sync.RWMutex
+	// cfgLoaded is set once loadOrInit has populated cfg; saving before that
+	// would overwrite panel.json with zero values.
+	cfgLoaded atomic.Bool
+	// licenseKeyCleared lets an explicit deactivation save an empty
+	// LicenseKey instead of saveConfigAtomic restoring the previous one.
+	licenseKeyCleared atomic.Bool
 )
 
 func recordLoadedModTime() {
@@ -171,7 +178,7 @@ func saveConfigAtomic(c panelConfig) error {
 			if c.Port <= 0 && prev.Port > 0 {
 				c.Port = prev.Port
 			}
-			if strings.TrimSpace(c.LicenseKey) == "" && strings.TrimSpace(prev.LicenseKey) != "" {
+			if strings.TrimSpace(c.LicenseKey) == "" && strings.TrimSpace(prev.LicenseKey) != "" && !licenseKeyCleared.Load() {
 				c.LicenseKey = prev.LicenseKey
 			}
 		}
@@ -256,6 +263,7 @@ func ensureFreeHTTPPort() {
 }
 
 func loadOrInit() {
+	defer cfgLoaded.Store(true)
 	_ = os.MkdirAll(configDir, 0700)
 
 	// CWE-256 Migration: Delete legacy plaintext panel.pass if it exists on disk
@@ -520,7 +528,7 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy | cluster]")
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy | cluster | license [status|deactivate]]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
@@ -530,6 +538,8 @@ func main() {
 			os.Exit(cliSetPassword(os.Args[2:]))
 		case "info", "status", "url":
 			os.Exit(cliShowInfo())
+		case "license":
+			os.Exit(cliLicense(os.Args[2:]))
 		}
 	}
 	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {

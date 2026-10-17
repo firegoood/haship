@@ -106,26 +106,63 @@ func isClusterLicensed() bool {
 	return HasFeature("bagher") || HasFeature("cluster")
 }
 
+// cloneClusterConfig deep-copies the maps and slices so a caller's copy never
+// shares storage with clusterCache. Shared maps let handlers write while the
+// monitor or JSON encoder iterated them: a fatal, unrecoverable runtime error.
+func cloneClusterConfig(c ClusterConfig) ClusterConfig {
+	out := c
+	out.ServicePorts = append([]int(nil), c.ServicePorts...)
+	out.Nodes = make(map[string]ClusterNode, len(c.Nodes))
+	for k, v := range c.Nodes {
+		out.Nodes[k] = v
+	}
+	out.ForeignNodes = make(map[string]ForeignNode, len(c.ForeignNodes))
+	for k, v := range c.ForeignNodes {
+		if v.TargetPorts != nil {
+			tp := make(map[int]int, len(v.TargetPorts))
+			for p, q := range v.TargetPorts {
+				tp[p] = q
+			}
+			v.TargetPorts = tp
+		}
+		out.ForeignNodes[k] = v
+	}
+	return out
+}
+
+// loadClusterConfig returns a private copy of the cluster config.
 func loadClusterConfig() ClusterConfig {
 	clusterMu.Lock()
 	defer clusterMu.Unlock()
+	return cloneClusterConfig(*clusterCacheLocked())
+}
 
+// updateClusterRuntime mutates the cached config in place under clusterMu
+// without persisting it; used for health state that is refreshed every tick.
+func updateClusterRuntime(fn func(c *ClusterConfig)) {
+	clusterMu.Lock()
+	defer clusterMu.Unlock()
+	fn(clusterCacheLocked())
+}
+
+// clusterCacheLocked loads clusterCache from disk if needed. Caller holds clusterMu.
+func clusterCacheLocked() *ClusterConfig {
 	if clusterCache != nil {
-		return *clusterCache
+		return clusterCache
 	}
 
 	data, err := os.ReadFile(clusterConfigFile())
 	if err != nil || len(data) == 0 {
 		def := defaultClusterConfig()
 		clusterCache = &def
-		return def
+		return clusterCache
 	}
 
 	var c ClusterConfig
 	if err := json.Unmarshal(data, &c); err != nil {
 		def := defaultClusterConfig()
 		clusterCache = &def
-		return def
+		return clusterCache
 	}
 
 	if c.Nodes == nil {
@@ -147,7 +184,7 @@ func loadClusterConfig() ClusterConfig {
 		c.BalancingMode = "wrr"
 	}
 	clusterCache = &c
-	return c
+	return clusterCache
 }
 
 func saveClusterConfig(c ClusterConfig) error {
@@ -177,7 +214,8 @@ func saveClusterConfig(c ClusterConfig) error {
 		return err
 	}
 
-	clusterCache = &c
+	saved := cloneClusterConfig(c)
+	clusterCache = &saved
 	return nil
 }
 
@@ -571,19 +609,19 @@ func handleClusterHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	// Update record of peer
 	if payload.NodeID != "" && payload.NodeID != cfg.NodeID {
-		clusterMu.Lock()
-		if existing, ok := cfg.Nodes[payload.NodeID]; ok {
-			existing.TunnelStatus = payload.TunnelStatus
-			existing.TunnelLoss = payload.TunnelLoss
-			existing.IsFailing = payload.IsFailing
-			existing.IsHealthy = payload.TunnelStatus == "UP" && !payload.IsFailing
-			existing.LastSeen = time.Now()
-			if payload.PublicIP != "" {
-				existing.PublicIP = payload.PublicIP
+		updateClusterRuntime(func(c *ClusterConfig) {
+			if existing, ok := c.Nodes[payload.NodeID]; ok {
+				existing.TunnelStatus = payload.TunnelStatus
+				existing.TunnelLoss = payload.TunnelLoss
+				existing.IsFailing = payload.IsFailing
+				existing.IsHealthy = payload.TunnelStatus == "UP" && !payload.IsFailing
+				existing.LastSeen = time.Now()
+				if payload.PublicIP != "" {
+					existing.PublicIP = payload.PublicIP
+				}
+				c.Nodes[payload.NodeID] = existing
 			}
-			cfg.Nodes[payload.NodeID] = existing
-		}
-		clusterMu.Unlock()
+		})
 	}
 
 	localStatus, localLoss, _ := getLocalTunnelStatus()
@@ -897,6 +935,15 @@ func applyClusterLoadBalancing(cfg *ClusterConfig) error {
 
 var lastClusterBalancingHash string
 
+// persistClusterFailover saves only the failover fields onto the latest config,
+// so the monitor's (seconds-old) copy never overwrites nodes edited meanwhile.
+func persistClusterFailover(active, target string) {
+	fresh := loadClusterConfig()
+	fresh.ActiveFailover = active
+	fresh.FailoverTarget = target
+	_ = saveClusterConfig(fresh)
+}
+
 // startClusterMonitor runs the periodic gossip and failover check loop.
 func startClusterMonitor() {
 	ticker := time.NewTicker(3 * time.Second)
@@ -912,25 +959,43 @@ func startClusterMonitor() {
 			continue
 		}
 
+		// cfg is a private copy; probeMu guards it while probes run, and the
+		// results are then published to the shared cache.
+		var probeMu sync.Mutex
+
 		// Probe foreign nodes pool
 		if len(cfg.ForeignNodes) > 0 {
-			var fwg sync.WaitGroup
+			ids := make([]string, 0, len(cfg.ForeignNodes))
+			nodes := make([]ForeignNode, 0, len(cfg.ForeignNodes))
 			for fid, fnode := range cfg.ForeignNodes {
+				ids = append(ids, fid)
+				nodes = append(nodes, fnode)
+			}
+			var fwg sync.WaitGroup
+			for i := range ids {
 				fwg.Add(1)
 				go func(id string, fn ForeignNode) {
 					defer fwg.Done()
 					status, lat := probeForeignNodeHealth(fn)
-					clusterMu.Lock()
-					if existing, ok := cfg.ForeignNodes[id]; ok {
-						existing.IsHealthy = (status == "UP")
-						existing.LatencyMs = lat
-						existing.LastProbe = time.Now()
-						cfg.ForeignNodes[id] = existing
-					}
-					clusterMu.Unlock()
-				}(fid, fnode)
+					probeMu.Lock()
+					fn.IsHealthy = (status == "UP")
+					fn.LatencyMs = lat
+					fn.LastProbe = time.Now()
+					cfg.ForeignNodes[id] = fn
+					probeMu.Unlock()
+				}(ids[i], nodes[i])
 			}
 			fwg.Wait()
+			updateClusterRuntime(func(c *ClusterConfig) {
+				for id, probed := range cfg.ForeignNodes {
+					if existing, ok := c.ForeignNodes[id]; ok {
+						existing.IsHealthy = probed.IsHealthy
+						existing.LatencyMs = probed.LatencyMs
+						existing.LastProbe = probed.LastProbe
+						c.ForeignNodes[id] = existing
+					}
+				}
+			})
 
 			// In WRR Load Balancing mode, synchronize kernel rules with healthy foreign nodes
 			if cfg.Enabled && cfg.BalancingMode == "wrr" {
@@ -954,8 +1019,14 @@ func startClusterMonitor() {
 		isLocalFailing := localStatus != "UP" || localLoss > 50.0
 
 		// Probe peer nodes concurrently
-		var wg sync.WaitGroup
+		peerIDs := make([]string, 0, len(cfg.Nodes))
+		peers := make([]ClusterNode, 0, len(cfg.Nodes))
 		for id, node := range cfg.Nodes {
+			peerIDs = append(peerIDs, id)
+			peers = append(peers, node)
+		}
+		var wg sync.WaitGroup
+		for i := range peerIDs {
 			wg.Add(1)
 			go func(nid string, n ClusterNode) {
 				defer wg.Done()
@@ -967,8 +1038,8 @@ func startClusterMonitor() {
 					IsFailing:    isLocalFailing,
 				})
 
-				clusterMu.Lock()
-				defer clusterMu.Unlock()
+				probeMu.Lock()
+				defer probeMu.Unlock()
 				if updated, exists := cfg.Nodes[nid]; exists {
 					if err == nil {
 						updated.TunnelStatus = res.TunnelStatus
@@ -986,9 +1057,25 @@ func startClusterMonitor() {
 					}
 					cfg.Nodes[nid] = updated
 				}
-			}(id, node)
+			}(peerIDs[i], peers[i])
 		}
 		wg.Wait()
+		updateClusterRuntime(func(c *ClusterConfig) {
+			for id, probed := range cfg.Nodes {
+				if existing, ok := c.Nodes[id]; ok {
+					existing.TunnelStatus = probed.TunnelStatus
+					existing.TunnelLoss = probed.TunnelLoss
+					existing.IsFailing = probed.IsFailing
+					existing.IsHealthy = probed.IsHealthy
+					existing.LatencyMs = probed.LatencyMs
+					existing.LastSeen = probed.LastSeen
+					if existing.PublicIP == "" {
+						existing.PublicIP = probed.PublicIP
+					}
+					c.Nodes[id] = existing
+				}
+			}
+		})
 
 		// Evaluate auto-failover
 		if cfg.AutoFailover {
@@ -1009,7 +1096,7 @@ func startClusterMonitor() {
 					}
 					if bestNode != nil {
 						_ = applyClusterFailover(&cfg, *bestNode)
-						_ = saveClusterConfig(cfg)
+						persistClusterFailover(cfg.ActiveFailover, cfg.FailoverTarget)
 					}
 				}
 			} else {
@@ -1018,7 +1105,7 @@ func startClusterMonitor() {
 				// Revert if healthy for 3 cycles and currently failed over
 				if consecutiveSuccesses >= 3 && cfg.ActiveFailover != "" {
 					_ = clearClusterFailover(&cfg)
-					_ = saveClusterConfig(cfg)
+					persistClusterFailover("", "")
 				}
 			}
 		}

@@ -8972,11 +8972,23 @@ EOF
             mkdir -p /root/.ssh
             touch /root/.ssh/authorized_keys
             chmod 600 /root/.ssh/authorized_keys
-            # Remove old key if present, append restricted line
-            local CLEAN_PUB=$(echo "$PUBKEY" | awk '{print $2}')
-            sed -i "/$CLEAN_PUB/d" /root/.ssh/authorized_keys 2>/dev/null || true
-            local AUTH_LINE="restrict,port-forwarding,permitopen=\"127.0.0.1:${FRP_PORT}\",permitopen=\"127.0.0.1:443\",permitopen=\"127.0.0.1:8443\",permitopen=\"127.0.0.1:1020\",permitopen=\"127.0.0.1:1030\",permitopen=\"127.0.0.1:1040\" $PUBKEY"
-            echo "$AUTH_LINE" >> /root/.ssh/authorized_keys
+            # Accept exactly one "<type> <base64>" key: anything else could
+            # add an unrestricted key or match (and delete) unrelated lines.
+            local KEY_TYPE KEY_B64
+            read -r KEY_TYPE KEY_B64 _ <<< "$PUBKEY"
+            if [[ ! "$KEY_TYPE" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)$ \
+                  || ! "$KEY_B64" =~ ^[A-Za-z0-9+/]+=*$ ]]; then
+                echo -e "${RED}[!] Bundle ssh_pub_key is not a valid public key.${NC}"
+                return 1
+            fi
+            # Remove an earlier entry for the same key (exact field match), then
+            # append the restricted line (same options as the panel writes).
+            local AK_TMP
+            AK_TMP=$(mktemp /root/.ssh/authorized_keys.XXXXXX)
+            awk -v k="$KEY_B64" '{ for (i = 1; i <= NF; i++) if ($i == k) next; print }' /root/.ssh/authorized_keys > "$AK_TMP"
+            echo "restrict,port-forwarding,permitlisten=\"127.0.0.1:${FRP_PORT}\" ${KEY_TYPE} ${KEY_B64}" >> "$AK_TMP"
+            chmod 600 "$AK_TMP"
+            mv -f "$AK_TMP" /root/.ssh/authorized_keys
 
             echo -e "${CYAN}[*] Writing /etc/gre-panel/bagher/frpc.toml...${NC}"
             mkdir -p /etc/gre-panel/bagher
@@ -9081,8 +9093,12 @@ cli_license() {
             echo -e "Hardware Fingerprint: ${YELLOW}${M_HASH:-UNKNOWN}${NC}"
             if [[ -f "$LIC_FILE" && -s "$LIC_FILE" ]]; then
                 echo -e "License Key File:     ${GREEN}${LIC_FILE} (Present)${NC}"
-                local JSON_OUT
-                JSON_OUT=$(curl -sk -m 2 http://127.0.0.1:7777/api/license 2>/dev/null || true)
+                local JSON_OUT=""
+                # The HTTP API needs a session and the random base path, so ask
+                # the panel binary directly.
+                if [[ -x "${PANEL_BIN:-/usr/local/bin/gre-panel}" ]]; then
+                    JSON_OUT=$("${PANEL_BIN:-/usr/local/bin/gre-panel}" license status 2>/dev/null || true)
+                fi
                 if [[ -n "$JSON_OUT" ]] && command -v jq >/dev/null 2>&1; then
                     local VALID=$(echo "$JSON_OUT" | jq -r '.is_valid // false')
                     local CUST=$(echo "$JSON_OUT" | jq -r '.customer // "N/A"')
@@ -9129,8 +9145,16 @@ cli_license() {
             cli_license status
             ;;
         deactivate|remove)
-            if [[ -f "$LIC_FILE" ]]; then
-                rm -f "$LIC_FILE"
+            # The panel also reads the key from these paths and from
+            # panel.json; leaving any of them re-activates the license.
+            local p FOUND=0
+            for p in "$LIC_FILE" /etc/hashem/license.key /root/.hashem/license.key /root/.hashem-license/license.key; do
+                [[ -f "$p" ]] && { rm -f "$p"; FOUND=1; }
+            done
+            if [[ -x "${PANEL_BIN:-/usr/local/bin/gre-panel}" ]]; then
+                "${PANEL_BIN:-/usr/local/bin/gre-panel}" license deactivate >/dev/null 2>&1 && FOUND=1
+            fi
+            if (( FOUND )); then
                 echo -e "${GREEN}[✔️] License removed. Reverted to Free edition.${NC}"
                 if systemctl is-active --quiet gre-panel.service 2>/dev/null; then
                     systemctl restart gre-panel.service 2>/dev/null || true

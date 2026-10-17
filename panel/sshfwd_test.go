@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestSSHFwdFormatAuthorizedKeyLine(t *testing.T) {
@@ -365,5 +369,64 @@ func TestBagherBundleGeneration(t *testing.T) {
 	}
 	if len(bundle.Ports) != 2 || bundle.Ports[0] != 443 || bundle.Ports[1] != 8443 {
 		t.Fatalf("unexpected ports in bundle: %v", bundle.Ports)
+	}
+}
+
+func testPubKey(t *testing.T, comment string) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sp))) + " " + comment
+}
+
+// C4: a peer-supplied key must not inject extra lines or wipe other keys.
+func TestInstallRestrictedKeyValidation(t *testing.T) {
+	old := authorizedKeysPath
+	authorizedKeysPath = filepath.Join(t.TempDir(), "authorized_keys")
+	t.Cleanup(func() { authorizedKeysPath = old })
+
+	admin := testPubKey(t, "admin@laptop")
+	if err := os.WriteFile(authorizedKeysPath, []byte(admin+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	peer := testPubKey(t, "bagher")
+	attacker := testPubKey(t, "attacker")
+
+	for _, bad := range []string{
+		"ssh",
+		"ssh-ed25519",
+		peer + "\n" + attacker,
+		`command="/bin/sh" ` + peer,
+		"not-a-key AAAA",
+	} {
+		if err := installRestrictedKey(bad, "bagher", 55400, nil); err == nil {
+			t.Fatalf("accepted bad key %q", bad)
+		}
+	}
+	data, _ := os.ReadFile(authorizedKeysPath)
+	if string(data) != admin+"\n" {
+		t.Fatalf("rejected keys modified authorized_keys: %q", data)
+	}
+
+	if err := installRestrictedKey(peer, "bagher", 55400, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Re-installing the same key (different comment) replaces its line.
+	if err := installRestrictedKey(strings.TrimSuffix(peer, " bagher")+" renamed", "bagher", 55401, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(authorizedKeysPath)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 || lines[0] != admin {
+		t.Fatalf("unexpected authorized_keys:\n%s", data)
+	}
+	if !strings.HasPrefix(lines[1], `restrict,port-forwarding,permitlisten="127.0.0.1:55401" ssh-ed25519 `) {
+		t.Fatalf("peer key not restricted: %s", lines[1])
 	}
 }

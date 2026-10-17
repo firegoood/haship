@@ -30,6 +30,9 @@ const (
 )
 
 func hashPassword(pw string) string {
+	// verifyPassword trims its input, so hash the same form or a password
+	// with leading/trailing spaces could never log in.
+	pw = strings.TrimSpace(pw)
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		panic("crypto/rand unavailable: " + err.Error())
@@ -49,6 +52,14 @@ func isLegacyHash(stored string) bool {
 	return err == nil
 }
 
+// looksHashed reports whether stored is a password hash rather than a legacy
+// plaintext password. A hash must never be accepted as the password itself.
+func looksHashed(stored string) bool {
+	return isLegacyHash(stored) ||
+		strings.HasPrefix(stored, argonPrefix) ||
+		strings.HasPrefix(stored, "$")
+}
+
 // verifyPassword reports whether pw matches stored, and whether stored is in a
 // legacy format that should be re-hashed.
 func verifyPassword(stored, pw string) (ok, needsUpgrade bool) {
@@ -58,9 +69,11 @@ func verifyPassword(stored, pw string) (ok, needsUpgrade bool) {
 		return false, false
 	}
 
-	// Plaintext fallback (legacy configs where password was saved unhashed, min 8 chars)
-	if len(stored) >= 8 && subtle.ConstantTimeCompare([]byte(stored), []byte(pw)) == 1 {
-		return true, true
+	// Plaintext fallback (legacy configs where the password was saved
+	// unhashed, min 8 chars); upgraded to argon2id on this login. Skipped for
+	// anything hash-shaped, or the hash itself would work as the password.
+	if !looksHashed(stored) {
+		return len(stored) >= 8 && subtle.ConstantTimeCompare([]byte(stored), []byte(pw)) == 1, true
 	}
 
 	if isLegacyHash(stored) {

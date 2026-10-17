@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -481,4 +483,70 @@ func TestCliClusterCommands(t *testing.T) {
 	if len(cfg.ForeignNodes) != 0 {
 		t.Fatalf("expected 0 foreign nodes after deletion, got %d", len(cfg.ForeignNodes))
 	}
+}
+
+// C3: callers get private copies, so editing one never touches the cache
+// another goroutine may be iterating.
+func TestClusterConfigCopiesAreIndependent(t *testing.T) {
+	_, cleanup := setupClusterTest(t)
+	defer cleanup()
+
+	a := loadClusterConfig()
+	a.Nodes["x"] = ClusterNode{ID: "x"}
+	a.ServicePorts[0] = 1
+	if b := loadClusterConfig(); len(b.Nodes) != 0 || b.ServicePorts[0] == 1 {
+		t.Fatal("loadClusterConfig shares storage with the cache")
+	}
+	if err := saveClusterConfig(a); err != nil {
+		t.Fatal(err)
+	}
+	a.Nodes["y"] = ClusterNode{ID: "y"}
+	if b := loadClusterConfig(); len(b.Nodes) != 1 {
+		t.Fatal("saveClusterConfig kept a reference to the caller's map")
+	}
+}
+
+// C3: handlers saving while status/monitor read must not crash with
+// "concurrent map iteration and map write".
+func TestClusterConcurrentAccess(t *testing.T) {
+	_, cleanup := setupClusterTest(t)
+	defer cleanup()
+
+	done := make(chan struct{})
+	var readers sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				c := loadClusterConfig()
+				_, _ = json.Marshal(c)
+				updateClusterRuntime(func(c *ClusterConfig) {
+					for id, n := range c.Nodes {
+						n.IsHealthy = !n.IsHealthy
+						c.Nodes[id] = n
+					}
+				})
+			}
+		}()
+	}
+	for i := 0; i < 200; i++ {
+		c := loadClusterConfig()
+		id := "n" + strconv.Itoa(i%10)
+		if i%3 == 0 {
+			delete(c.Nodes, id)
+		} else {
+			c.Nodes[id] = ClusterNode{ID: id}
+		}
+		if err := saveClusterConfig(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(done)
+	readers.Wait()
 }

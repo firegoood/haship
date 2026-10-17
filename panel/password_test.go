@@ -156,3 +156,21 @@ func TestLoginWhitespaceAndCaseInsensitiveUser(t *testing.T) {
 		t.Fatalf("login failed for user with whitespace/case: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// C2: the stored hash itself must never be accepted as the password.
+func TestVerifyPasswordRejectsHashAsPassword(t *testing.T) {
+	argon := hashPassword("Correct-Horse-9!")
+	for _, stored := range []string{argon, "$" + argon, legacyHash("OldPass!2026x"), "$2a$10$abcdefghijklmnopqrstuv"} {
+		if ok, _ := verifyPassword(stored, stored); ok {
+			t.Fatalf("hash %q accepted as its own password", stored)
+		}
+	}
+}
+
+// L20: a password with surrounding spaces must verify against its own hash.
+func TestHashPasswordTrimMatchesVerify(t *testing.T) {
+	h := hashPassword("  Spaced-Pass-1 ")
+	if ok, _ := verifyPassword(h, "  Spaced-Pass-1 "); !ok {
+		t.Fatal("password with surrounding spaces rejected")
+	}
+}

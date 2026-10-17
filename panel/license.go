@@ -38,8 +38,34 @@ var (
 	licenseCheckedAt           time.Time
 )
 
-func init() {
-	loadLicenseFromDisk()
+// The license is loaded from main() after loadOrInit(); loading it from an
+// init() ran saveCfg() with an empty cfg and wiped panel.json settings.
+
+// licenseKeyPaths lists every location a license key is read from. Removing a
+// license must clear all of them, or loadLicenseFromDisk resurrects it.
+func licenseKeyPaths() []string {
+	return []string{
+		filepath.Join(configDir, "license.key"),
+		"/etc/hashem/license.key",
+		"/root/.hashem/license.key",
+		"/root/.hashem-license/license.key",
+	}
+}
+
+// deactivateLicense removes the key from disk and panel.json.
+func deactivateLicense() {
+	for _, p := range licenseKeyPaths() {
+		_ = os.Remove(p)
+	}
+	licenseKeyCleared.Store(true)
+	mu.Lock()
+	cfg.LicenseKey = ""
+	saveCfg()
+	mu.Unlock()
+	activeLicenseMu.Lock()
+	activeLicense = nil
+	licenseCheckedAt = time.Now()
+	activeLicenseMu.Unlock()
 }
 
 type LicensePayload struct {
@@ -174,15 +200,8 @@ func verifyLicenseKey(token string) (*LicensePayload, error) {
 }
 
 func loadLicenseFromDisk() {
-	candidatePaths := []string{
-		filepath.Join(configDir, "license.key"),
-		"/etc/hashem/license.key",
-		"/root/.hashem/license.key",
-		"/root/.hashem-license/license.key",
-	}
-
 	var keyData []byte
-	for _, p := range candidatePaths {
+	for _, p := range licenseKeyPaths() {
 		if d, err := os.ReadFile(p); err == nil && len(bytes.TrimSpace(d)) > 0 {
 			keyData = d
 			break
@@ -210,7 +229,9 @@ func loadLicenseFromDisk() {
 		_ = os.WriteFile(filepath.Join(configDir, "license.key"), []byte(keyStr), 0600)
 		_ = os.MkdirAll("/etc/hashem", 0755)
 		_ = os.WriteFile("/etc/hashem/license.key", []byte(keyStr), 0600)
-		if cfg.LicenseKey != keyStr {
+		// Never save before loadOrInit() has populated cfg: saving a
+		// zero-value cfg drops TOTP, terminal and TLS settings.
+		if cfgLoaded.Load() && cfg.LicenseKey != keyStr {
 			cfg.LicenseKey = keyStr
 			saveCfg()
 		}
@@ -287,6 +308,43 @@ func handleLicenseGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
+// cliLicense implements `gre-panel license [status|deactivate]` so hashem.sh
+// can query and clear the license without going through the authenticated API.
+func cliLicense(args []string) int {
+	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
+		configDir = v
+	}
+	loadOrInit()
+	sub := "status"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "deactivate", "remove":
+		deactivateLicense()
+		fmt.Println("license removed")
+		return 0
+	case "status":
+		loadLicenseFromDisk()
+		rr := &licenseStatusWriter{header: http.Header{}}
+		handleLicenseGet(rr, nil)
+		fmt.Println(strings.TrimSpace(rr.body.String()))
+		return 0
+	}
+	fmt.Fprintln(os.Stderr, "Usage: gre-panel license [status|deactivate]")
+	return 2
+}
+
+// licenseStatusWriter captures handleLicenseGet's JSON for the CLI.
+type licenseStatusWriter struct {
+	header http.Header
+	body   bytes.Buffer
+}
+
+func (w *licenseStatusWriter) Header() http.Header         { return w.header }
+func (w *licenseStatusWriter) Write(b []byte) (int, error) { return w.body.Write(b) }
+func (w *licenseStatusWriter) WriteHeader(int)             {}
+
 // handleLicensePost handles POST /api/license.
 func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -300,13 +358,7 @@ func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 
 	key := strings.TrimSpace(req.Key)
 	if key == "" {
-		_ = os.Remove(filepath.Join(configDir, "license.key"))
-		_ = os.Remove("/etc/hashem/license.key")
-		cfg.LicenseKey = ""
-		saveCfg()
-		activeLicenseMu.Lock()
-		activeLicense = nil
-		activeLicenseMu.Unlock()
+		deactivateLicense()
 		writeJSON(w, map[string]any{"status": "deactivated"})
 		return
 	}
@@ -328,8 +380,11 @@ func handleLicensePost(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = os.MkdirAll("/etc/hashem", 0755)
 	_ = os.WriteFile("/etc/hashem/license.key", []byte(key), 0600)
+	licenseKeyCleared.Store(false)
+	mu.Lock()
 	cfg.LicenseKey = key
 	saveCfg()
+	mu.Unlock()
 
 	activeLicenseMu.Lock()
 	activeLicense = payload
