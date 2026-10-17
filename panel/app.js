@@ -808,461 +808,47 @@ const I18N = {
     err_retry: "Retry failed",
     carrier_switch_confirm: "Switch both Iran & Foreign servers to carrier \"{id}\"?"
   },
-  fa: {
-    nav_dashboard: "Dashboard",
-    nav_tunnel: "Tunnel",
-    nav_sshfwd: "Bagher",
-    nav_bagher: "Bagher",
-    nav_cluster: "Cluster",
-    nav_setup: "Setup",
-    nav_logs: "Logs",
-    nav_perf: "Performance",
-    perf_mux_title: "TCP Multiplexing (transport.tcpMux)",
-    perf_mux_hint: "Packs every user stream into ONE TCP connection between frpc and frps. Measured over GRE it roughly halves tunnel throughput (e.g. 460 vs 1010 Mbit on Finland). Default is OFF (max speed). It must be identical on the Iran hub AND every foreign server, otherwise frpc cannot log in.",
-    nav_watchdog: "Watchdog",
-    nav_doctor: "Diagnostics",
-    nav_benchmark: "Benchmark",
-    nav_update: "Update",
-    upd_channel: "Update channel",
-    upd_channel_stable: "Stable",
-    upd_channel_dev: "Dev",
-    upd_dev_warn: "Dev channel: test builds, may break. Not for production tunnels.",
-    upd_dev_badge: "DEV",
-    nav_settings: "Settings",
-    nav_terminal: "Terminal",
-    sec_overview: "Overview",
-    sec_tunnel: "Tunnel",
-    sec_system: "System",
-    theme: "Theme",
-    logout: "Logout",
-    refresh: "Refresh",
-    kpi_traffic: "Traffic & Speed",
-    kpi_status: "Tunnel Status",
-    kpi_links: "Links (GRE / FRP)",
-    kpi_latency: "Latency",
-    kpi_cpu: "CPU",
-    kpi_ram: "RAM",
-    kpi_disk: "Disk",
-    kpi_conns: "Uptime / Conns",
-    details: "Details",
-    chart_traffic_title: "Tunnel Traffic Throughput",
-    chart_traffic_sub: "Real-time download and upload speeds over time",
-    chart_activity_title: "Tunnel Activity & Connections",
-    chart_activity_sub: "Active concurrent connections and session stream over time",
-    download: "Download",
-    upload: "Upload",
-
-    // General
-    status_active: "Active",
-    status_down: "Down",
-    status_healthy: "Healthy",
-    status_connected: "Connected",
-    status_disconnected: "Disconnected",
-    status_unreachable: "Unreachable",
-    status_running: "Running",
-    status_stopped: "Stopped",
-    status_error: "Error",
-    actions: "Actions",
-    confirm: "Confirm",
-    apply: "Apply",
-    copy: "Copy",
-    copied: "Copied!",
-    remove: "Remove",
-    restart: "Restart",
-    ping: "Ping",
-    bundle: "Bundle",
-    show_bundle: "Show Bundle",
-    copy_bundle: "Copy Bundle",
-    test: "Test",
-    switch: "Switch",
-    current: "Current",
-    loading: "Loading…",
-    save_settings: "Save Settings",
-
-    // Dashboard Details & Cards
-    card_server_title: "Server & Role",
-    card_gre_title: "GRE Kernel Tunnel",
-    card_frp_title: "FRP Relay & Traffic",
-    card_peers_title: "Peer Tunnels",
-    lbl_public_ip: "Public IP",
-    lbl_role: "Role",
-    lbl_forwarded_ports: "Forwarded Ports",
-    lbl_gre_local: "Local GRE IP",
-    lbl_gre_peer: "Peer GRE IP",
-    lbl_gre_interface: "Interface",
-    lbl_frp_status: "Status",
-    lbl_control_port: "Control Port",
-    lbl_bind_port: "Bind Port",
-    lbl_tunnel_ports: "Tunnel Ports",
-    lbl_uptime_since: "Active Since",
-    lbl_peer_name: "Name",
-    lbl_peer_id: "ID",
-    lbl_peer_foreign_ip: "Foreign IP",
-    lbl_peer_ports: "Ports",
-    lbl_peer_latency: "Ping Latency",
-
-    // Tunnel Tab
-    tun_title: "Tunnel Topology & Status",
-    tun_sub: "Live link metrics, peer inventory, and interface health",
-    tun_main_card: "Main Link (Hub / Spoke 1)",
-    tun_add_peer_btn: "+ Connect Another Server",
-    tun_view_bundle_btn: "View Setup Bundle",
-
-    // Setup Tab
-    setup_title: "Quick setup — GRE + FRP tunnel",
-    setup_sub: "Two servers, one tunnel. Answer on this machine; the Iran side gives you a token to paste on the Foreign side.",
-    setup_step1: "1. Which server am I on right now?",
-    setup_role_iran: "Iran — users connect here",
-    setup_role_foreign: "Foreign — service runs here",
-    setup_step2_engine: "2. Tunnel Engine",
-    setup_eng_frp: "GRE + FRP",
-    setup_eng_grebh: "GRE + Backhaul",
-    setup_eng_bh: "Backhaul (No-GRE)",
-    setup_step3_params: "3. Connection Parameters",
-    setup_local_pub: "Iran public IP (auto, editable)",
-    setup_remote_pub: "Remote public IP (the other server)",
-    setup_local_gre: "Local GRE IP",
-    setup_peer_gre: "Peer GRE IP",
-    setup_ctrl_port: "Control / Bind port",
-    setup_transport: "Transport Protocol",
-    setup_forward_ports: "Forwarded Ports (single, ranges, mappings)",
-    setup_step4_token: "4. Token & apply",
-    setup_apply_btn: "Apply setup",
-    setup_unlock_btn: "Unlock to replace",
-    setup_relock_btn: "Keep locked",
-    setup_bundle_title: "Setup Bundle (Copy to Foreign server)",
-    setup_foreign_step2: "2. Join tunnel (from Iran bundle)",
-    setup_bundle_paste_lbl: "Setup bundle or token (from Iran side)",
-    setup_bundle_paste_ph: "paste hsh1_..., bh1_..., or gh1_... bundle",
-    setup_join_btn: "Connect to Iran",
-    setup_foreign_step3: "3. Advanced (optional)",
-    setup_add_peer_title: "Connect another foreign server",
-    setup_peer_name_lbl: "Name (label for this tunnel)",
-    setup_add_tunnel_btn: "Add tunnel",
-
-    // Performance & Tuning Tab
-    perf_status_pool: "Work-conn pool (frpc / frps)",
-    perf_status_decision: "Auto Pool decision",
-    perf_mode_auto: "Auto Pool",
-    perf_mode_manual: "Manual",
-    perf_ap_title: "Auto Pool (FRP work connections)",
-    perf_ap_sub: "Sizes frpc poolCount and frps maxPoolCount from pool-full errors, active connections, CPU and free RAM. Scales up fast, scales down slowly, restarts only frpc and only when few users are connected.",
-    perf_ap_toggle: "Auto Pool (recommended)",
-    perf_ap_toggle_hint: "When off, the manual values below are written to frpc.toml / frps.toml as typed.",
-    perf_ap_last_decision: "Last decision",
-    perf_ap_errors: "Pool-full errors (last tick)",
-    perf_ap_last_restart: "Last frpc restart",
-    perf_ap_frps_note: "maxPoolCount was raised in frps.toml; restart frps during a quiet period to apply it.",
-    perf_ap_saved: "Auto Pool updated",
-    perf_ap_on_msg: "Pool is resized automatically every minute.",
-    perf_ap_off_msg: "Manual values apply after Save & Apply.",
-    perf_pool_count: "Client Pool Count (frpc)",
-    perf_pool_sub: "Pre-opened work connections on foreign spokes.",
-    perf_max_pool: "Max Pool Count (frps)",
-    perf_max_sub: "Server-side maximum work connection headroom (always at least 1.5 × poolCount).",
-    perf_save_tuning: "Save & Apply Capacity",
-    perf_carrier_title: "Carrier & UDP Encapsulation (FOU)",
-    perf_carrier_save: "Save Mode",
-
-    // Watchdog
-    wd_title: "Tunnel Watchdog",
-    wd_hint: "Monitors GRE ping and FRP service every 1 minute. Sends Telegram alerts and optional auto-restart after consecutive failures.",
-    wd_autorestart_label: "Auto-Restart on Failure",
-    wd_autorestart_sub: "(Disabled by default to prevent CPU spike storms; alerts only)",
-    wd_health: "Tunnel Health",
-    wd_fails: "Consecutive Fails",
-    wd_last_check: "Last Check",
-    wd_restart_title: "Tunnel Auto-Restart Schedule",
-    wd_restart_hint: "Periodically refreshes the tunnel interfaces and restarts FRP/Backhaul relay services gracefully without interrupting the web panel or losing configuration.",
-    wd_restart_interval: "Restart Interval",
-    wd_restart_save: "Save Schedule",
-    wd_restart_now: "Restart Tunnel Now",
-    wd_tg_title: "Telegram Alerts",
-    wd_tg_hint: "Receive instant Telegram notifications when the tunnel drops or recovers. Middle of bot token is never exposed.",
-    wd_tg_token: "Bot Token",
-    wd_tg_chat: "Chat ID",
-    wd_tg_route: "Telegram Route",
-    wd_tg_save: "Save Telegram Settings",
-    wd_tg_test: "Test Alert",
-    wd_backup_title: "Encrypted Backups",
-    wd_backup_hint: "Full backup of FRP tomls, panel settings, peers registry, and systemd units encrypted with OpenSSL AES-256-CBC keyed from your panel password.",
-    wd_backup_now: "Create Backup Now",
-    wd_backup_sched: "Backup Schedule",
-    wd_backup_save: "Save Schedule",
-    wd_events_title: "Watchdog Event Log",
-
-    // Benchmark Tab
-    bench_title: "Carrier Benchmark & Auto-Pilot",
-    bench_peer_link_title: "Inter-Panel Link (Peer)",
-    bench_peer_link_sub: "Master/Worker dual-path synchronization with remote panel.",
-    bench_peer_test_btn: "Test Connection",
-    bench_peer_cfg_btn: "Configure Link",
-    bench_failover_title: "Automatic Failover",
-    bench_failover_sub: "Strictly OFF by default. When OFF, the tunnel never switches automatically.",
-    bench_failover_toggle: "Enable Automatic Failover (Auto-Switching)",
-    bench_failover_threshold: "Packet Loss Trigger Threshold (%)",
-    bench_failover_save: "Save Failover Policy",
-    bench_leaderboard_title: "Carrier Performance Leaderboard",
-    bench_run_btn: "Run Carrier Benchmark",
-    bench_tbl_rank: "Carrier & Route",
-    bench_tbl_trans: "Transport",
-    bench_tbl_port: "Port",
-    bench_tbl_rtt: "Latency (RTT)",
-    bench_tbl_loss: "Packet Loss",
-    bench_tbl_jitter: "Jitter",
-    bench_tbl_score: "Quality Score",
-    bench_tbl_status: "Status",
-    bench_tbl_action: "Action",
-
-    // Diagnostics / Doctor Tab
-    doc_title: "Network Doctor & Diagnostic Suite",
-    doc_sub: "Automated end-to-end path tests, MTU probe, socket exhaustion check, and routing health",
-    doc_run_btn: "Run Full Diagnostics",
-    doc_fix_btn: "Quick Repair & Optimize",
-    doc_fix_box_btn: "Auto-Fix Detected Issues",
-    doc_issues_title: "Issues & Recommendations",
-
-    // Logs Tab
-    logs_title: "System & Tunnel Service Logs",
-    logs_sub: "Real-time journal logs for FRP services, GRE interfaces, and watchdog events",
-    logs_svc_label: "Service",
-    logs_lines_label: "Lines",
-    logs_refresh_btn: "Refresh Logs",
-    logs_copy_btn: "Copy Logs",
-
-    // Settings & Update Tab
-    settings_title: "Panel Security & Password",
-    settings_cur_pass: "Current panel password",
-    settings_new_pass: "New panel password",
-    settings_change_btn: "Change Password",
-    update_title: "Panel update",
-    update_current: "Installed version",
-    update_check_btn: "Check for updates",
-
-    // Terminal Tab
-    term_title: "Interactive Web Console (PTY)",
-    term_connect: "Connect Terminal",
-    term_clear: "Clear Screen",
-
-    // Right Sidebar & Modals
-    login_sub: "Sign in with your username and password",
-    login_user_ph: "Username",
-    login_pass_ph: "Password",
-    login_signin: "Sign in",
-    rs_header: "Live Activity Stream",
-    rsc_title: "Connectivity Rescue", rsc_remote: "Reachable server (the one that can connect to this server)", rsc_ports: "Ports to connect (TCP + UDP)",
-    rsc_code: "Rescue code from the blocked server", rsc_ban_t: "This server cannot connect to its peer",
-    rsc_ban_d: "Ping works but every TCP connection is dropped on the way. A one-click fix reverses the connection direction.", rsc_ban_go: "Fix it",
-    rsc_idle_ok: "No problem detected. If a peer can ping you but connections time out, this tool reverses the direction automatically.",
-    rsc_idle_warn: "A one-way block was detected: ping works but TCP is dropped. Enable Rescue to reverse the direction.",
-    rsc_b_off: "Off", rsc_b_susp: "Block detected", rsc_b_on: "Active", rsc_b_on_auto: "Active (Auto)", rsc_b_wait: "Waiting for peer", rsc_b_lift: "Block lifted",
-    rsc_auto_is_off: "فعال‌سازی خودکار: خاموش", rsc_auto_is_on: "فعال‌سازی خودکار: روشن",
-    rsc_auto_on_q: "پنل وقتی انسداد یک‌طرفه تشخیص داد، Rescue را خودش فعال کند؟ اگر تشخیص اشتباه باشد (مثلاً پورت پنل با فایروال بسته باشد)، سرور بدون پرسیدن تغییر می‌کند.",
-    rsc_check: "Check now", rsc_enable: "Enable Rescue", rsc_join: "Join with code", rsc_apply: "Apply code", rsc_disable: "Disable and remove",
-    rsc_cancel: "Cancel", rsc_getcode: "Show rescue code", rsc_copy: "Copy code", rsc_nocfg: "frp binaries are missing on this server. Run hashem update first.",
-    rsc_origin: "This server is the blocked side. {n} port(s) are forwarded through {ip}.", rsc_origin_auto: "One-way block detected: connectivity automatically established through {ip} ({n} ports forwarded).", rsc_entry: "This server is the entry. {n} port(s) are served here and tunnelled to {ip}.", rsc_entry_auto: "This server is acting as the entry for {ip} ({n} ports tunnelled).",
-    rsc_skipped: "Skipped (busy or reserved): {p}", rsc_conn: "Control link", rsc_conn_ok: "connected", rsc_conn_no: "not connected yet",
-    rsc_svc: "Services", rsc_direct: "Kernel forward (full speed)", rsc_relay: "FRP relay (filtered path)", rsc_auto: "The other panel picks this up by itself within a few minutes if the two panels are paired. Otherwise use the code.",
-    rsc_lift: "The direct route works again. You can disable Rescue and use the normal tunnel.",
-    rsc_confirm_t: "Enable Connectivity Rescue?", rsc_confirm_b: "This starts three small services here and opens one firewalled control port. The reachable server is the only host allowed to use it. You can remove everything with one click.",
-    rsc_dis_t: "Remove Rescue?", rsc_dis_b: "The forwarded ports on the entry server stop working until the normal tunnel is up.",
-    rsc_probe_ok: "Peer reachable", rsc_probe_block: "One-way block confirmed", rsc_probe_down: "Peer unreachable (outage, not a block)", rsc_probe_svc: "Peer reachable but its panel is not listening",
-    rsc_done: "Rescue enabled", rsc_removed: "Rescue removed", rsc_copied: "Copied",
-    pal_open: "Search and commands", pal_search: "Search", pal_title: "Command palette", pal_ph: "Search pages and actions…",
-    pal_nav: "navigate", pal_run: "run", pal_close: "close", pal_none: "Nothing matches", pal_go: "Go to", pal_act: "Actions", pal_look: "Appearance",
-    pal_refresh: "Refresh data", pal_theme: "Toggle dark / light theme", pal_lang: "Switch language", pal_stream: "Show / hide Live Activity Stream",
-    pal_sidebar: "Collapse / expand sidebar", pal_density: "Toggle table density", pal_diag: "Run diagnostics", pal_donate: "Support Hashem", pal_logout: "Log out",
-    pal_accent: "Accent colour",
-    sb_collapse: "Collapse sidebar", sb_expand: "Expand sidebar",
-    tbl_filter: "Filter errors…", tbl_shown: "{n} of {t} shown",
-    dens_title: "Table density", dens_comfy: "Comfortable", dens_compact: "Compact",
-    onb_title: "Welcome to Hashem", onb_sub: "No tunnel yet. Three steps and you are live.",
-    onb_s1: "Choose this server's role", onb_s1d: "Iran hub (server) or foreign server (client) from the Setup tab.",
-    onb_s2: "Link the other server", onb_s2d: "Create the tunnel and paste the connection bundle on the other side.",
-    onb_s3: "Verify and optimise", onb_s3d: "Run Diagnostics, then Optimize in the Tunnel tab.",
-    onb_go: "Open Setup", onb_later: "Not now", onb_dismiss: "Dismiss",
-    badge_tunnel: "{n} tunnel(s) need attention", badge_doctor: "{n} diagnostic issue(s)",
-    fleet_title: "Fleet health",
-    fleet_all_ok: "All servers healthy",
-    fleet_some: "{n} of {t} servers need attention",
-    fleet_all_down: "All servers are down",
-    fleet_meta: "Updated {time} · sampled every {s}s · last hour",
-    fleet_hub: "Iran hub",
-    fleet_healthy: "Healthy",
-    fleet_degraded: "Degraded",
-    fleet_down: "Down",
-    fleet_avg: "Avg",
-    fleet_loss: "Loss",
-    fleet_uptime: "Uptime",
-    fleet_nodata: "Collecting data…",
-    fleet_frp_only: "FRP only",
-    fleet_icmp_filtered: "ICMP filtered",
-    fleet_session_up: "session up",
-    fleet_updated: "updated",
-    fleet_ago: "ago",
-    dial_title: "Route to the Iran hub", dial_hint: "How this server reaches Iran: over the GRE inner IP, directly to the hub's public IP, or Auto (GRE when it works, public IP otherwise).", dial_auto: "Auto", dial_gre: "GRE inner IP", dial_public: "Public IP", dial_public_btn: "Iran public IP",
-    fleet_topo_aria: "Tunnel topology: {hub} connected to {n} servers",
-    fleet_ring_aria: "{h} of {t} servers healthy",
-    rs_hide_aria: "Hide live activity stream",
-    rs_hidden_toast: "Live Activity Stream hidden",
-    rs_hidden_sub: "Bring it back from Logs → Live Activity Stream",
-    rs_restore_hint: "Side panel with the latest events. Wide screens (1200px+) only.",
-    rs_btn_hide: "Hide",
-    rs_btn_show: "Show",
-    sup_title: "Enjoying a stable tunnel?",
-    sup_body: "Hashem is free and built by one developer. If it keeps your connection alive, a small donation helps keep it improving.",
-    sup_donate: "Donate",
-    sup_later: "Maybe later",
-    sup_snooze: "Don't remind me for 30 days",
-    sup_card_title: "Support Hashem",
-    sup_card_hint: "Hashem is free. If it helps you, you can support its development any time.",
-    appear_title: "Appearance",
-    appear_hint: "Pick an accent colour. Every preset is contrast-checked for both dark and light themes.",
-    appear_aria: "Accent colour",
-    acc_blue: "Blue", acc_indigo: "Indigo", acc_violet: "Violet", acc_rose: "Rose", acc_emerald: "Emerald", acc_teal: "Teal", acc_orange: "Orange",
-    rs_waiting: "Waiting for logs...",
-    edit_tunnel_title: "Edit Tunnel",
-    edit_tunnel_sub: "Modify tunnel parameters, carrier protocol, or forwarded ports. Changes apply immediately.",
-    carrier_title: "Carrier Selection / Policy",
-    save_carrier: "Save Mode",
-    connect_iran: "Connect to Iran",
-    reverse_ports: "Reverse ports (ranges & mappings allowed)",
-    disabled: "Disabled",
-    enabled: "Enabled",
-    save: "Save",
-    cancel: "Cancel",
-    close: "Close",
-    x002: "Iran",
-    x003: "Foreign",
-    x004: "[ ON ] Auto-Switching",
-    x005: "[ OFF ] Manual Mode",
-    x006: "Stable / Zero Drops",
-    x007: "Engine",
-    x008: "Carrier & Failover",
-    x009: "Active Carrier",
-    x010: "Failover Policy",
-    x011: "Diagnostics",
-    x012: "tunnel up",
-    x013: "Open full card in Tunnel tab",
-    x014: "All diagnostic tests passed with zero bottlenecks. Connection is operating at peak performance.",
-    x015: "Recommendation: Run automated repair to resolve bottlenecks and optimize parameters.",
-    x016: "Auto-Fix Detected Issues",
-    x017: "Diagnosing… (sweep MTU & ping)",
-    x018: "Diagnostics complete",
-    x019: "Health score",
-    x020: "Diagnostics failed",
-    x021: "Run Diagnostics",
-    x022: "Apply Automated Optimizations?",
-    x023: "This will enable TCP BBR, configure MSS clamping, ensure IPv4 forwarding, tune FRP concurrency limits, and restore tunnel interface connectivity.",
-    x024: "Repair & Optimize",
-    x025: "Applying fixes…",
-    x026: "Applying…",
-    x027: "Optimizations applied",
-    x028: "System stack optimized",
-    x029: "Fix failed",
-    x030: "Quick Repair & Optimize",
-    x031: "Active route",
-    x032: "Best round-trip",
-    x033: "Zero loss link",
-    x034: "Packet drop rate",
-    x035: "Last benchmark",
-    x036: "candidates probed",
-    x037: "None",
-    x038: "No benchmark metrics yet. Click \"Run Carrier Benchmark\".",
-    x039: "Healthy",
-    x040: "Good",
-    x041: "Warning",
-    x042: "Down",
-    x043: "Raw 47",
-    x044: "ACTIVE",
-    x045: "BEST",
-    x046: "Current",
-    x047: "Switch",
-    x048: "Probing carriers...",
-    x049: "Benchmarking carriers",
-    x050: "Probing GRE, WSS, TCP, KCP, QUIC, and WS...",
-    x051: "Benchmark Complete",
-    x052: "Best Carrier",
-    x053: "Benchmark failed",
-    x054: "Applying carrier",
-    x055: "Carrier Applied",
-    x056: "Apply failed",
-    err_generic: "Request failed",
-    state_retry: "Retry",
-    state_error_title: "Could not load data",
-    rs_empty_title: "No log lines yet",
-    rs_waiting_sys: "Waiting for system logs...",
-    empty_bench_title: "No benchmark metrics yet",
-    empty_bench_msg: "Run a carrier benchmark to compare protocols.",
-    empty_peers_title: "No peer tunnels yet",
-    empty_peers_msg: "Add one from Setup → Add another foreign server.",
-    empty_logs_title: "No log lines",
-    empty_logs_msg: "Nothing to show for this service yet.",
-    empty_errors_title: "No panel errors",
-    empty_errors_msg: "Clean run — every failure will appear here with its code.",
-    aria_close: "Close",
-    aria_menu: "Menu",
-    aria_main_nav: "Main navigation",
-    aria_toggle_visibility: "Toggle visibility",
-    aria_copy: "Copy",
-    aria_edit_ports: "Edit ports",
-    aria_close_search: "Close search",
-    aria_close_proxy: "Close proxy configuration",
-    aria_font_smaller: "Smaller font",
-    aria_font_larger: "Larger font",
-    aria_fullscreen: "Fullscreen",
-    err_status: "Refresh failed",
-    err_dashboard: "Dashboard refresh failed",
-    err_carrier: "Carrier status failed",
-    err_peers: "Peers load failed",
-    err_setup: "Setup defaults failed",
-    err_logs: "Logs load failed",
-    err_errors: "Error history failed",
-    err_rslogs: "Live log stream failed",
-    err_benchmark: "Benchmark load failed",
-    err_peerlink: "Peer link status failed",
-    err_bundle: "Bundle lookup failed",
-    err_retry: "Retry failed",
-    carrier_switch_confirm: "Switch both Iran & Foreign servers to carrier \"{id}\"?"
-  }
 };
 
 let currentLang = 'en';
 
-function setLanguage(lang) {
-  currentLang = (lang === 'fa') ? 'fa' : 'en';
-  try { localStorage.setItem('hashem_lang', currentLang); } catch(e) { /* storage blocked */ }
+// ---- Language: English source text; Persian through one phrase map (i18n-fa.js) ----
+// tr() translates keyed strings (and templates with {placeholders}, before values are
+// filled in); the DOM pass below translates everything else that reaches the page:
+// static markup, HTML built in JS, toasts and dialogs. Values are never translated.
+function setLanguage(lang, boot) {
+  const next = (lang === 'fa') ? 'fa' : 'en';
+  if (!boot && next !== currentLang) {
+    // Switching rebuilds every string the page has rendered; a reload does that cleanly.
+    try { localStorage.setItem('hashem_lang', next); } catch(e) { /* storage blocked: language cannot persist */ }
+    location.reload();
+    return;
+  }
+  currentLang = next;
   document.documentElement.setAttribute('dir', currentLang === 'fa' ? 'rtl' : 'ltr');
   document.documentElement.setAttribute('lang', currentLang);
-  if (currentLang === 'fa') {
-    document.body.classList.add('is-rtl');
-  } else {
-    document.body.classList.remove('is-rtl');
-  }
-  applyTranslations(currentLang);
+  document.body.classList.toggle('is-rtl', currentLang === 'fa');
+  if (currentLang === 'fa') faStart(); // before anything that can throw during boot
+  try { applyTranslations(currentLang); } catch (e) { /* boot: later sections not initialised yet; they render translated */ }
 }
 
+// English text of a key, translated for the current language; null when the key is unknown.
+function tv(k) { return (I18N.en && I18N.en[k] != null) ? tr(k) : null; }
+
 function applyTranslations(lang) {
-  const dict = I18N[lang] || I18N.en;
   document.querySelectorAll('[data-i18n]').forEach(el => {
-    const key = el.dataset.i18n;
-    if (dict[key]) {
-      if (el.tagName === 'INPUT' && (el.type === 'button' || el.type === 'submit')) {
-        el.value = dict[key];
-      } else {
-        el.textContent = dict[key];
-      }
-    }
+    const v = tv(el.dataset.i18n);
+    if (!v) return;
+    if (el.tagName === 'INPUT' && (el.type === 'button' || el.type === 'submit')) el.value = v;
+    else el.textContent = v;
   });
   document.querySelectorAll('[data-i18n-aria]').forEach(el => {
-    const v = dict[el.dataset.i18nAria];
+    const v = tv(el.dataset.i18nAria);
     if (v) el.setAttribute('aria-label', v);
   });
   document.querySelectorAll('[data-i18n-ph]').forEach(el => {
-    const key = el.dataset.i18nPh;
-    if (dict[key]) {
-      el.placeholder = dict[key];
-    }
+    const v = tv(el.dataset.i18nPh);
+    if (v) el.placeholder = v;
   });
   if (typeof rsSync === 'function') rsSync();
   if (typeof sbApply === 'function') sbApply();
@@ -1274,7 +860,84 @@ function applyTranslations(lang) {
 }
 
 function tr(k, fb) {
-  return (I18N[currentLang] && I18N[currentLang][k]) ? I18N[currentLang][k] : (fb || k);
+  const en = (I18N.en && I18N.en[k]) ? I18N.en[k] : (fb || k);
+  return currentLang === 'fa' ? faText(en) : en;
+}
+
+// Persian for an English string: exact phrase first, then known phrases inside it
+// (text built as "Score: " + n keeps its numbers). Unknown text stays English.
+let _faRe = null;
+function faText(s) {
+  const map = window.FA_TEXT;
+  if (!map || !s || typeof s !== 'string') return s;
+  const t = s.trim();
+  if (!t || !/[A-Za-z]/.test(t)) return s;
+  if (map[t]) return s.replace(t, map[t]);
+  const n = t.replace(/\s+/g, ' '); // markup line breaks and indentation collapse to single spaces
+  if (map[n]) return map[n];
+  if (!_faRe) {
+    const keys = Object.keys(map).filter(k => k.length >= 4 && /[A-Za-z]{2}/.test(k))
+      .sort((a, b) => b.length - a.length)
+      .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    _faRe = new RegExp('(^|[^A-Za-z])(' + keys.join('|') + ')(?![A-Za-z])', 'g');
+  }
+  let hit = false;
+  const out = n.replace(_faRe, (m, pre, k) => { hit = true; return pre + map[k]; });
+  // No phrase found: leave the text exactly as it was (it may already be Persian).
+  // A sentence still mostly English reads worse half-translated: keep it whole.
+  return !hit || (out.match(/\b[a-z]{3,}\b/g) || []).length >= 3 ? s : out;
+}
+
+// Values and machine text stay as they are: IPs, ports, keys, logs, code, the terminal.
+const FA_SKIP = 'script,style,code,pre,textarea,kbd,svg,.xterm,.mono,.u-mono,.rs-log-line,.log-line,[data-no-i18n]';
+const FA_ATTRS = ['placeholder', 'title', 'aria-label'];
+// Hints on value fields (placeholder, aria-label) are UI text even where the content is not.
+const FA_SKIP_ATTR = '.xterm,[data-no-i18n]';
+function faAttr(el, a) {
+  const v = el.getAttribute(a);
+  if (!v) return;
+  const t = faText(v);
+  if (t !== v) el.setAttribute(a, t);
+}
+function faTextNode(n) {
+  const p = n.parentElement;
+  if (!p || p.closest(FA_SKIP)) return;
+  const t = faText(n.nodeValue);
+  if (t !== n.nodeValue) n.nodeValue = t;
+}
+function faTree(root) {
+  if (!root || (root.nodeType === 1 && root.closest(FA_SKIP_ATTR))) return;
+  if (root.nodeType === 3) { faTextNode(root); return; }
+  if (root.nodeType !== 1) return;
+  [root, ...root.querySelectorAll('*')].forEach(el => {
+    if (el.closest(FA_SKIP_ATTR)) return;
+    FA_ATTRS.forEach(a => faAttr(el, a));
+    if (el.tagName === 'INPUT' && (el.type === 'button' || el.type === 'submit') && el.value) el.value = faText(el.value);
+  });
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) faTextNode(n);
+}
+function faStart() {
+  const go = () => {
+    document.documentElement.classList.remove('i18n-wait');
+    if (!window.FA_TEXT) return;
+    try { applyTranslations('fa'); } catch (e) { /* the DOM pass below still translates */ }
+    faTree(document.body);
+    document.title = faText(document.title);
+    new MutationObserver(muts => muts.forEach(m => {
+      if (m.type === 'childList') m.addedNodes.forEach(faTree);
+      else if (m.type === 'characterData') faTextNode(m.target);
+      else if (m.type === 'attributes') faAttr(m.target, m.attributeName);
+    })).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: FA_ATTRS });
+  };
+  if (window.FA_TEXT) { go(); return; }
+  const app = document.querySelector('script[src*="app.js"]');
+  const q = app && app.src.includes('?') ? app.src.slice(app.src.indexOf('?')) : '';
+  const s = document.createElement('script');
+  s.src = 'i18n-fa.js' + q;
+  s.onload = go; s.onerror = go;
+  document.head.appendChild(s);
+  setTimeout(() => document.documentElement.classList.remove('i18n-wait'), 3000); // never stay hidden
 }
 
 function toggleLang() {
@@ -1283,8 +946,15 @@ function toggleLang() {
 
 if ($('langToggleBtn')) $('langToggleBtn').onclick = toggleLang;
 if ($('langToggleBtnM')) $('langToggleBtnM').onclick = toggleLang;
-try { setLanguage(localStorage.getItem('hashem_lang') || 'en'); } catch(e) { /* storage blocked: stay on default language */ }
+try { setLanguage(localStorage.getItem('hashem_lang') || 'en', true); } catch(e) { /* storage blocked: stay on default language */ }
 
+// Each value in its own <bdi> so "0.0 B/s" keeps its order inside a Persian line.
+function trafficSub(el, rtDown, rtUp, down, up) {
+  if (!el) return;
+  const v = x => '<bdi>' + esc(x) + '</bdi>';
+  el.innerHTML = esc(tr('kpi_speed_l', 'Speed:')) + ' ↓ ' + v(rtDown) + ' · ↑ ' + v(rtUp) +
+    ' | ' + esc(tr('kpi_tot_l', 'Tot:')) + ' ↓ ' + v(down) + ' · ↑ ' + v(up);
+}
 function dot(ok) { return `<span class="dot ${ok ? 'up' : 'down'}"></span>`; }
 // Shared detail-card icons + builder (Dashboard AND peer cards use these;
 // keep global so renderPeers works even when refreshDash never ran).
@@ -1758,7 +1428,7 @@ function hydrateCachedTraffic() {
     if (t.down != null && t.up != null) {
       const rtUp = t.speed_up != null ? fmtRate(t.speed_up) : '0.0 B/s';
       const rtDown = t.speed_down != null ? fmtRate(t.speed_down) : '0.0 B/s';
-      set('kpiTrafficSub', 'Speed: ↓ ' + rtDown + ' · ↑ ' + rtUp + '  |  Tot: ↓ ' + fmtBytes(t.down) + ' · ↑ ' + fmtBytes(t.up));
+      trafficSub($('kpiTrafficSub'), rtDown, rtUp, fmtBytes(t.down), fmtBytes(t.up));
     }
     if (cache.history && cache.history.length >= 2) {
       setTimeout(() => {
@@ -2306,7 +1976,7 @@ async function refreshDash() {
       if (b.up != null && a.up != null && b.up >= a.up) rtUp = fmtRate((b.up - a.up) / dt);
       if (b.down != null && a.down != null && b.down >= a.down) rtDown = fmtRate((b.down - a.down) / dt);
     }
-    set('kpiTrafficSub', 'Speed: ↓ ' + rtDown + ' · ↑ ' + rtUp + '  |  Tot: ↓ ' + fmtBytes(t.down) + ' · ↑ ' + fmtBytes(t.up));
+    trafficSub($('kpiTrafficSub'), rtDown, rtUp, fmtBytes(t.down), fmtBytes(t.up));
     drawChart(d.history, !on);
     drawActivityChart(d.history, !on);
     try {
@@ -8173,24 +7843,24 @@ function renderSentinelModal() {
 
 function copySentinelHashClick() {
   const el = $('sentinelModalMachineHash');
-  copyTextSafe(el ? el.value : '', 'کپی شد', 'هش سرور در کلیپ‌بورد کپی شد');
+  copyTextSafe(el ? el.value : '', 'Copied', 'Server hash copied.');
 }
 
 function copySentinelUrlClick() {
   const el = $('sentinelModalUrl');
-  copyTextSafe(el ? el.value : '', 'کپی شد', 'آدرس وب‌پنل سنتینال در کلیپ‌بورد کپی شد');
+  copyTextSafe(el ? el.value : '', 'Copied', 'Sentinel dashboard URL copied.');
 }
 
 function copySentinelPassClick() {
   const el = $('sentinelModalPass');
-  copyTextSafe(el ? el.value : '', 'کپی شد', 'رمز عبور پنل سنتینال در کلیپ‌بورد کپی شد');
+  copyTextSafe(el ? el.value : '', 'Copied', 'Sentinel password copied.');
 }
 
 function openSentinelDashboardClick() {
   const urlInp = $('sentinelModalUrl');
   const targetUrl = (urlInp && urlInp.value) ? urlInp.value : sentinelDisplayUrl(_sentinelData);
   if (!targetUrl) {
-    toastMsg('err', 'آدرس سنتینال هنوز آماده نیست؛ چند ثانیه بعد دوباره امتحان کنید.');
+    toastMsg('err', 'The Sentinel address is not ready yet. Try again in a few seconds.');
     return;
   }
   window.open(targetUrl, '_blank');
@@ -8200,35 +7870,35 @@ async function activateSentinelLicenseModalClick() {
   const keyEl = $('sentinelModalKeyInput');
   const key = keyEl ? keyEl.value.trim() : '';
   if (!key) {
-    toastErr('Missing Key', 'لطفاً کلید لایسنس را وارد کنید.');
+    toastErr('Missing Key', 'Enter the license key.');
     return;
   }
   const btn = $('btnSentinelActivateModal');
-  if (btn) { btn.disabled = true; btn.textContent = 'در حال فعال‌سازی…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Activating…'; }
   try {
     const res = await api('/api/license', { key });
     try { localStorage.setItem('hashem_bagher_license', key); } catch (e) {}
-    toastOk('لایسنس فعال شد', 'لایسنس با موفقیت فعال شد: ' + (res.customer || 'Hashem Premium'));
+    toastOk('License Activated', 'License activated: ' + (res.customer || 'Hashem Premium'));
     await loadLicense();
     await loadSentinelState();
     renderSentinelModal();
   } catch (err) {
-    toastErr('خطا در فعال‌سازی', err.message || String(err));
-    if (btn) { btn.disabled = false; btn.textContent = 'فعال‌سازی لایسنس'; }
+    toastErr('Activation Failed', err.message || String(err));
+    if (btn) { btn.disabled = false; btn.textContent = 'Activate License'; }
   }
 }
 
 async function installSentinelModalClick() {
   const btn = $('btnModalInstallSentinel');
-  if (btn) { btn.disabled = true; btn.textContent = 'در حال نصب و راه‌اندازی سنتینال…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Installing Sentinel…'; }
   try {
     const r = await api('/api/sentinel', { action: 'install' });
-    toastMsg('ok', r.message || 'سنتینال با موفقیت نصب شد!');
+    toastMsg('ok', r.message || 'Sentinel installed successfully!');
     await loadSentinelState();
     renderSentinelModal();
   } catch (err) {
-    toastMsg('err', 'خطا در نصب سنتینال: ' + (err.message || err));
-    if (btn) { btn.disabled = false; btn.textContent = 'نصب خودکار سنتینال'; }
+    toastMsg('err', 'Sentinel install failed: ' + (err.message || err));
+    if (btn) { btn.disabled = false; btn.textContent = 'Install Sentinel Automatically'; }
   }
 }
 

@@ -198,3 +198,15 @@ func TestUIHandlersDefined(t *testing.T) {
 		}
 	}
 }
+
+// Stray control characters (a backspace where a regex \b was meant) break code silently.
+func TestUINoControlChars(t *testing.T) {
+	for _, f := range []string{"index.html", "app.js", "i18n-fa.js", "tokens.css", "base.css", "enterprise.css"} {
+		for i, r := range readUI(t, f) {
+			if r < 32 && r != '\t' && r != '\n' && r != '\r' {
+				t.Errorf("%s: control character %U at byte %d", f, r, i)
+				break
+			}
+		}
+	}
+}

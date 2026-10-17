@@ -34,6 +34,7 @@
     var l = localStorage.getItem('hashem_lang') || 'en';
     document.documentElement.lang = l;
     document.documentElement.dir = l === 'fa' ? 'rtl' : 'ltr';
+    if (l === 'fa') document.documentElement.classList.add('i18n-wait');
   } catch (e) { /* storage blocked: stay LTR/en */ }
 </script>
 <style>
@@ -755,18 +756,27 @@
     direction: rtl;
     text-align: right;
   }
+  /* Vazirmatn first: the Apple/Segoe system faces have no (or poor) Persian glyphs. */
   html[dir="rtl"] body {
-    font-family: -apple-system, BlinkMacSystemFont, "Vazirmatn", "Segoe UI", Tahoma, Roboto, Arial, sans-serif;
+    font-family: "Vazirmatn", -apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, Roboto, Arial, sans-serif;
   }
+  /* Persian reads small at the Latin size: one step up. */
+  html[lang="fa"] { --fs-body: 0.875rem; }
+  @media (max-width: 640px) { html[lang="fa"] { --fs-body: 1rem; } }
+  /* Every text run takes its own direction, so "0 B", IPs, ports and English names stay
+     LTR inside Persian, and untranslated English keeps its punctuation in place. */
+  html[dir="rtl"] body * { unicode-bidi: plaintext; }
+  html[dir="rtl"] :is(.kpi-val, .kpi-sub, .det-v, td, th) { text-align: right; }
+  /* Machine text and drawings stay left-to-right. */
+  html[dir="rtl"] :is(canvas, pre, code, kbd, .xterm, .mono, .u-mono) { direction: ltr; unicode-bidi: isolate; }
+  /* Hidden until the Persian text is in, so English never flashes (app.js clears it, 3s cap). */
+  .i18n-wait body { visibility: hidden; }
   html[dir="rtl"] .sidebar {
     border-right: none;
     border-left: 1px solid var(--ln);
   }
   html[dir="rtl"] .chart-legend {
     justify-content: flex-start;
-  }
-  html[dir="rtl"] .badge {
-    direction: ltr;
   }
 
   /* Benchmark Tab & Table Spacing Enhancements */
@@ -3281,9 +3291,9 @@
       <div class="u-tint-wr u-bd-wr u-r-10 u-p-16 u-flex u-ai-s u-gap-12">
         <span class="u-fs-24 u-lh-1"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
         <div>
-          <b class="u-c-wr u-fs-13">هشدار مهم پیش‌نیاز سنتینال:</b>
+          <b class="u-c-wr u-fs-13">Sentinel prerequisite:</b>
           <div class="u-fs-13 u-c-wr u-mt-4 u-lh-16">
-            برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه
+            Sentinel must be installed on the Iran server for configs to be tested.
           </div>
         </div>
       </div>
@@ -3293,28 +3303,28 @@
         <div class="u-tint-er u-bd-er u-r-10 u-p-16 u-flex u-ai-s u-gap-12 u-mb-12">
           <span class="u-fs-20 u-lh-1"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span>
           <div class="u-fs-13 u-lh-15 u-c-er">
-            <b>لایسنس پرمیوم سنتینال مورد نیاز است</b><br>
-            سنتینال نیازمند لایسنس فعال با ویژگی <code>sentinel</code> می‌باشد.
+            <b>Sentinel needs a premium license</b><br>
+            Sentinel needs an active license with the <code>sentinel</code> feature.
           </div>
         </div>
         <div class="fg">
           <label for="sentinelModalMachineHash" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-            کد اختصاصی سخت‌افزار سرور (Machine Hash):
+            Server hardware code (Machine Hash):
           </label>
           <div class="u-flex u-gap-8">
-            <input class="hashem-input u-mono u-fs-13 u-w-full u-c-info u-bg-inset" id="sentinelModalMachineHash" readonly placeholder="در حال محاسبه هش…">
-            <button type="button" class="hashem-btn" id="btnCopySentinelHash" onclick="copySentinelHashClick()">کپی کد</button>
+            <input class="hashem-input u-mono u-fs-13 u-w-full u-c-info u-bg-inset" id="sentinelModalMachineHash" readonly placeholder="Calculating hash…">
+            <button type="button" class="hashem-btn" id="btnCopySentinelHash" onclick="copySentinelHashClick()">Copy Code</button>
           </div>
-          <div class="u-hint-12 u-mt-4">این کد را برای صدور لایسنس در سایت وارد کنید.</div>
+          <div class="u-hint-12 u-mt-4">Enter this code on the website to issue a license.</div>
         </div>
         <div class="fg">
           <label for="sentinelModalKeyInput" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-            کلید لایسنس (License Key):
+            License Key:
           </label>
-          <textarea class="hashem-input u-mono u-fs-12 u-w-full u-resize-y u-p-8 u-lh-14" id="sentinelModalKeyInput" rows="2" placeholder="کلید لایسنس خود را اینجا Paste کنید..."></textarea>
+          <textarea class="hashem-input u-mono u-fs-12 u-w-full u-resize-y u-p-8 u-lh-14" id="sentinelModalKeyInput" rows="2" placeholder="Paste your license key here…"></textarea>
         </div>
         <button type="button" class="hashem-btn hashem-btn-primary u-w-full u-mt-8" id="btnSentinelActivateModal" onclick="activateSentinelLicenseModalClick()">
-          فعال‌سازی لایسنس
+          Activate License
         </button>
       </div>
 
@@ -3322,8 +3332,8 @@
       <div id="sentinelManageSection">
         <div class="u-flex u-jc-sb u-ai-c u-tint-ok u-bd-ok u-r-10 u-p-12x16 u-mb-12">
           <span class="u-fs-13 u-fw-700 u-c-ok u-flex u-ai-c u-gap-8">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
-            لایسنس سنتینال فعال است
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+            Sentinel license is active
           </span>
           <span class="brand-premium-badge u-m-0"><svg class="bp-gem" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="bp-label">PREMIUM</span></span>
         </div>
@@ -3331,11 +3341,11 @@
         <!-- Uninstalled State -->
         <div id="sentinelUninstalledCard" class="u-tint-info u-bd-info u-r-10 u-p-16 u-flex u-jc-sb u-ai-c u-wrap u-gap-16">
           <div>
-            <div class="u-fs-14 u-fw-700 u-c-info">نصب و راه‌اندازی سنتینال</div>
-            <div class="u-fs-12 u-c-tx2 u-mt-4 u-lh-15">سرویس سنتینال با هسته Xray و تخصیص خودکار پورت رندوم امن نصب می‌گردد.</div>
+            <div class="u-fs-14 u-fw-700 u-c-info">Install Sentinel</div>
+            <div class="u-fs-12 u-c-tx2 u-mt-4 u-lh-15">Sentinel installs with the Xray core and a random secure port.</div>
           </div>
           <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" onclick="installSentinelModalClick()">
-            نصب خودکار سنتینال
+            Install Sentinel Automatically
           </button>
         </div>
 
@@ -3346,42 +3356,42 @@
               <span class="badge ok" id="sentinelModalStatusBadge">
                 ACTIVE / RUNNING
               </span>
-              <span class="u-fs-13 u-fw-700 u-c-tx2">پورت: <code id="sentinelModalPort">32836</code></span>
+              <span class="u-fs-13 u-fw-700 u-c-tx2">Port: <code id="sentinelModalPort">32836</code></span>
             </div>
             <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" onclick="openSentinelDashboardClick()">
-              ورود به داشبورد سنتینال ↗
+              Open Sentinel Dashboard ↗
             </button>
           </div>
 
           <div class="fg u-mb-12">
             <label for="sentinelModalUrl" class="u-fs-12 u-fw-700 u-c-mu u-block u-mb-8">
-              آدرس کامل پنل سنتینال (Dashboard URL):
+              Sentinel dashboard URL:
             </label>
             <div class="u-flex u-gap-8">
               <input class="hashem-input u-mono u-fs-12 u-w-full u-c-info u-bg-inset u-ltr" id="sentinelModalUrl" readonly placeholder="http://...">
-              <button type="button" class="hashem-btn" id="btnCopySentinelUrl" onclick="copySentinelUrlClick()">کپی آدرس</button>
+              <button type="button" class="hashem-btn" id="btnCopySentinelUrl" onclick="copySentinelUrlClick()">Copy URL</button>
             </div>
           </div>
 
           <div class="fg u-mb-16" id="sentinelModalPassRow">
             <label for="sentinelModalPass" class="u-fs-12 u-fw-700 u-c-mu u-block u-mb-8">
-              رمز عبور ورود (Admin Password):
+              Admin password:
             </label>
             <div class="u-flex u-gap-8">
               <input class="hashem-input u-mono u-fs-12 u-w-full u-c-wr u-bg-inset u-ltr" id="sentinelModalPass" readonly placeholder="••••••••">
-              <button type="button" class="hashem-btn" id="btnCopySentinelPass" onclick="copySentinelPassClick()">کپی رمز</button>
+              <button type="button" class="hashem-btn" id="btnCopySentinelPass" onclick="copySentinelPassClick()">Copy Password</button>
             </div>
           </div>
 
           <div class="u-flex u-gap-12">
-            <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="btnModalRestartSentinel" onclick="controlSentinelAction('restart')">ریستارت</button>
-            <button type="button" class="hashem-btn hashem-btn-danger u-btn-30" id="btnModalUninstallSentinel" onclick="controlSentinelAction('uninstall')">حذف سنتینال</button>
+            <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="btnModalRestartSentinel" onclick="controlSentinelAction('restart')">Restart</button>
+            <button type="button" class="hashem-btn hashem-btn-danger u-btn-30" id="btnModalUninstallSentinel" onclick="controlSentinelAction('uninstall')">Uninstall Sentinel</button>
           </div>
         </div>
       </div>
     </div>
     <div class="ent-modal-f u-flex u-jc-e u-ai-c u-bt-ln u-p-12x20 u-gap-8" id="sentinelModalFoot">
-      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeSentinelModal()">بستن (Close)</button>
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeSentinelModal()">Close</button>
     </div>
   </div>
 </div>
