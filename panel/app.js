@@ -7200,7 +7200,7 @@ function renderLicense(d) {
 
   if (d.is_valid) {
     brandEls.forEach(el => {
-      el.innerHTML = 'Hashem <span class="badge" style="background:linear-gradient(135deg, #f59e0b, #ec4899); color:#fff; font-size:10px; font-weight:800; padding:2px 7px; border-radius:12px; letter-spacing:0.05em; vertical-align:middle; margin-left:6px; box-shadow:0 2px 8px rgba(245,158,11,0.4);">PRO</span>';
+      el.innerHTML = 'Hashem <span class="badge brand-premium-badge" style="background:linear-gradient(135deg, rgba(245,158,11,0.18) 0%, rgba(217,70,239,0.22) 100%); color:#fbbf24; border:1px solid rgba(245,158,11,0.5); font-size:10px; font-weight:800; padding:2px 8px; border-radius:14px; letter-spacing:0.06em; vertical-align:middle; margin-left:6px; display:inline-flex; align-items:center; gap:4px; box-shadow:0 0 12px rgba(245,158,11,0.25), inset 0 1px 0 rgba(255,255,255,0.18); text-shadow:0 1px 2px rgba(0,0,0,0.5);"><svg width="9" height="9" viewBox="0 0 24 24" fill="#fbbf24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Premium</span>';
     });
     if (badge) {
       badge.textContent = 'PREMIUM (Active)';
@@ -7985,9 +7985,19 @@ async function controlSentinelAction(action) {
 
 // Sentinel Modal & Locality Flow
 function openSentinelModal() {
+  if (typeof drawerClose === 'function') drawerClose();
   const m = $('sentinelModal');
-  if (m) m.hidden = false;
-  loadSentinelState().then(() => {
+  if (!m) return;
+  m.hidden = false;
+  renderSentinelModal();
+
+  Promise.all([
+    typeof loadLicense === 'function' ? loadLicense() : Promise.resolve(),
+    typeof loadSentinelState === 'function' ? loadSentinelState() : Promise.resolve()
+  ]).then(() => {
+    renderSentinelModal();
+  }).catch(err => {
+    console.warn('Error loading sentinel/license:', err);
     renderSentinelModal();
   });
 }
@@ -8003,10 +8013,20 @@ window.closeSentinelModal = closeSentinelModal;
 function renderSentinelModal() {
   const m = $('sentinelModal');
   if (!m || m.hidden) return;
-  const d = _sentinelData || {};
+  const d = _sentinelData;
   const body = $('sentinelModalBody');
   const acts = $('sentinelModalActions');
   if (!body) return;
+
+  if (!d) {
+    body.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:35px 20px; gap:12px; color:var(--mu);">
+        <div style="width:30px; height:30px; border:3px solid rgba(56,189,248,0.2); border-top-color:#38bdf8; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
+        <div style="font-size:13px; font-weight:600; color:var(--tx);">در حال بررسی وضعیت و لایسنس سنتینال…</div>
+      </div>`;
+    if (acts) acts.innerHTML = '';
+    return;
+  }
 
   const mHash = (_licenseData && _licenseData.machine_hash) || '';
 
@@ -8061,7 +8081,7 @@ function renderSentinelModal() {
   body.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:10px 14px;">
       <span style="font-size:13px; font-weight:600; color:#34d399;">لایسنس سنتینال فعال است ✓</span>
-      <span class="badge" style="background:#10b981; color:#fff; font-size:10px; font-weight:700;">PRO LICENSE</span>
+      <span class="badge" style="background:linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(217,70,239,0.25) 100%); color:#fbbf24; border:1px solid rgba(245,158,11,0.45); font-size:10px; font-weight:800; padding:2px 8px; border-radius:12px;">PREMIUM</span>
     </div>
 
     <!-- Critical Warning Box -->
@@ -8129,7 +8149,7 @@ function renderSentinelModal() {
               <span class="badge" style="background:${isRunning ? '#10b981' : '#ef4444'}; color:#fff; font-size:10px; font-weight:700;">
                 ${isRunning ? 'ACTIVE / RUNNING' : 'STOPPED'}
               </span>
-              <span style="font-size:13px; font-weight:600;">Port: <code>${d.port}</code></span>
+              <span style="font-size:13px; font-weight:600; color:#e2e8f0;">پورت: <code>${d.port}</code></span>
             </div>
             <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" style="font-weight:700; padding:6px 16px;">
               🔗 ورود به داشبورد سنتینال
@@ -8164,7 +8184,7 @@ async function activateSentinelLicenseModalClick() {
   try {
     const res = await api('/api/license', { key });
     try { localStorage.setItem('hashem_bagher_license', key); } catch (e) {}
-    toastOk('لایسنس فعال شد', 'لایسنس با موفقیت فعال شد: ' + (res.customer || 'Hashem Pro'));
+    toastOk('لایسنس فعال شد', 'لایسنس با موفقیت فعال شد: ' + (res.customer || 'Hashem Premium'));
     await loadLicense();
     await loadSentinelState();
     renderSentinelModal();
@@ -8199,12 +8219,18 @@ async function installSentinelModalClick() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  const navBtn = $('sentinelNav');
-  if (navBtn) {
-    navBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      openSentinelModal();
-    });
-  }
-});
+// Bind directly without waiting for DOMContentLoaded (since app.js is at bottom of body)
+const sNavBtn = $('sentinelNav');
+if (sNavBtn) {
+  sNavBtn.onclick = (e) => {
+    e.preventDefault();
+    openSentinelModal();
+  };
+}
+
+const sModalEl = $('sentinelModal');
+if (sModalEl) {
+  sModalEl.onclick = (e) => {
+    if (e.target === sModalEl) closeSentinelModal();
+  };
+}
