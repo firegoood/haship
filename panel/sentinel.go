@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ type SentinelConfig struct {
 	Path           string `json:"path"`
 	URL            string `json:"url"`
 	IsIran         bool   `json:"is_iran"`
+	IsIranDecided  bool   `json:"is_iran_decided"`
 	HasLicense     bool   `json:"has_license"`
 	ForwardAlerts  bool   `json:"forward_alerts"`
 	TelegramChatID string `json:"telegram_chat_id"`
@@ -36,6 +38,19 @@ var sentinelMu sync.Mutex
 func CheckSentinelEligibility(serverRole, countryCode string) (bool, string) {
 	if !(HasFeature("sentinel") || HasFeature("*") || HasFeature("all")) {
 		return false, "License missing required 'sentinel' feature"
+	}
+
+	// Manual override from sentinel.json takes precedence if decided
+	if pData, err := os.ReadFile(sentinelConfigPath()); err == nil {
+		var pState struct {
+			IsIran *bool `json:"is_iran"`
+		}
+		if err := json.Unmarshal(pData, &pState); err == nil && pState.IsIran != nil {
+			if *pState.IsIran {
+				return true, ""
+			}
+			return false, "برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه"
+		}
 	}
 
 	roleLow := strings.ToLower(serverRole)
@@ -88,6 +103,10 @@ func sentinelCredentialsPath() string {
 	return "/opt/sentinel/credentials.txt"
 }
 
+func sentinelConfigPath() string {
+	return filepath.Join(configDir, "sentinel.json")
+}
+
 // GetSentinelStatus gathers current Sentinel state and credentials.
 func GetSentinelStatus() SentinelConfig {
 	sentinelMu.Lock()
@@ -96,12 +115,26 @@ func GetSentinelStatus() SentinelConfig {
 	st := localStatus()
 	country := DetectServerCountry()
 
+	isIranDecided := false
+	isIran := strings.Contains(strings.ToLower(st.Role), "iran") || st.Role == "master" || country == "IR"
+
+	if pData, err := os.ReadFile(sentinelConfigPath()); err == nil {
+		var pState struct {
+			IsIran *bool `json:"is_iran"`
+		}
+		if err := json.Unmarshal(pData, &pState); err == nil && pState.IsIran != nil {
+			isIran = *pState.IsIran
+			isIranDecided = true
+		}
+	}
+
 	cfg := SentinelConfig{
-		Installed:  false,
-		Running:    false,
-		HasLicense: HasFeature("sentinel") || HasFeature("*") || HasFeature("all"),
-		IsIran:     strings.Contains(strings.ToLower(st.Role), "iran") || st.Role == "master" || country == "IR",
-		Version:    "1.2.0",
+		Installed:     false,
+		Running:       false,
+		HasLicense:    HasFeature("sentinel") || HasFeature("*") || HasFeature("all"),
+		IsIran:        isIran,
+		IsIranDecided: isIranDecided,
+		Version:       "1.2.0",
 	}
 
 	credsPath := sentinelCredentialsPath()
@@ -147,6 +180,7 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Action        string `json:"action"`
 		ForwardAlerts *bool  `json:"forward_alerts"`
+		IsIran        *bool  `json:"is_iran"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-REQ-01", "invalid json body")
@@ -167,12 +201,35 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 	case "status":
 		writeJSON(w, GetSentinelStatus())
 
+	case "set_locality":
+		if body.IsIran == nil {
+			writeAPIError(w, r, "E-REQ-02", "missing is_iran boolean field")
+			return
+		}
+		sentinelMu.Lock()
+		_ = os.MkdirAll(configDir, 0700)
+		pData, _ := json.Marshal(map[string]any{
+			"is_iran": *body.IsIran,
+		})
+		if err := os.WriteFile(sentinelConfigPath(), pData, 0600); err != nil {
+			sentinelMu.Unlock()
+			writeAPIError(w, r, "E-FILE-01", fmt.Sprintf("failed writing sentinel config: %v", err))
+			return
+		}
+		sentinelMu.Unlock()
+
+		writeJSON(w, map[string]any{
+			"status":  "ok",
+			"message": "Sentinel server locality updated",
+			"data":    GetSentinelStatus(),
+		})
+
 	case "install":
 		sentinelMu.Lock()
-		defer sentinelMu.Unlock()
 
 		port, err := PickRandomSentinelPort(30000, 39999)
 		if err != nil {
+			sentinelMu.Unlock()
 			writeAPIError(w, r, "E-PORT-01", fmt.Sprintf("failed allocating random port: %v", err))
 			return
 		}
@@ -185,9 +242,11 @@ func handleSentinelPost(w http.ResponseWriter, r *http.Request) {
 		cmd := exec.Command("bash", installScript, "--yes", "--port", fmt.Sprintf("%d", port))
 		out, err := cmd.CombinedOutput()
 		if err != nil {
+			sentinelMu.Unlock()
 			writeAPIError(w, r, "E-INSTALL-01", fmt.Sprintf("Sentinel install failed: %s", string(out)))
 			return
 		}
+		sentinelMu.Unlock()
 
 		writeJSON(w, map[string]any{
 			"status":  "ok",

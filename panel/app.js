@@ -287,6 +287,10 @@ function drawerSync() {
     if (b.id === 'termNav') b.id = '';
     if (b.querySelector('#updBadge')) b.querySelector('#updBadge').id = 'updBadgeM';
   });
+  const sNavM = nav.querySelector('#sentinelNav') || nav.querySelector('[title*="Sentinel"]');
+  if (sNavM) {
+    sNavM.onclick = (e) => { e.preventDefault(); drawerClose(); if (typeof openSentinelModal === 'function') openSentinelModal(); };
+  }
   // hide the terminal entry in the drawer while the flag is off
   const t = nav.querySelector('[data-tab="terminal"]');
   if (t && $('termNav') && $('termNav').classList.contains('hidden')) t.classList.add('hidden');
@@ -7979,21 +7983,228 @@ async function controlSentinelAction(action) {
   }
 }
 
+// Sentinel Modal & Locality Flow
+function openSentinelModal() {
+  const m = $('sentinelModal');
+  if (m) m.hidden = false;
+  loadSentinelState().then(() => {
+    renderSentinelModal();
+  });
+}
+
+function closeSentinelModal() {
+  const m = $('sentinelModal');
+  if (m) m.hidden = true;
+}
+
+window.openSentinelModal = openSentinelModal;
+window.closeSentinelModal = closeSentinelModal;
+
+function renderSentinelModal() {
+  const m = $('sentinelModal');
+  if (!m || m.hidden) return;
+  const d = _sentinelData || {};
+  const body = $('sentinelModalBody');
+  const acts = $('sentinelModalActions');
+  if (!body) return;
+
+  const mHash = (_licenseData && _licenseData.machine_hash) || '';
+
+  if (!d.has_license) {
+    body.innerHTML = `
+      <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25); border-radius:8px; padding:12px 14px; display:flex; align-items:flex-start; gap:10px;">
+        <span style="font-size:20px; line-height:1;">🔒</span>
+        <div style="font-size:13px; line-height:1.5; color:#fca5a5;">
+          <b>فعال‌سازی لایسنس سنتینال (Sentinel License)</b><br>
+          سنتینال یک قابلیت پیشرفته برای مانیتورینگ سلامت نودها، تست خودکار کانفیگ‌ها و اعلان وضعیت است که نیازمند لایسنس فعال با ویژگی <code>sentinel</code> می‌باشد.
+        </div>
+      </div>
+      <div class="fg">
+        <label style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          کد اختصاصی سخت‌افزار سرور (Machine Hash):
+        </label>
+        <div style="display:flex; gap:8px;">
+          <input class="hashem-input" id="sentinelModalMachineHash" readonly value="${mHash}" style="font-family:monospace; font-size:13px; width:100%; color:#38bdf8; background:rgba(0,0,0,0.4);" placeholder="در حال محاسبه هش…">
+          <button type="button" class="hashem-btn" id="btnCopySentinelHash" style="white-space:nowrap; padding:6px 14px;">📋 کپی کد</button>
+        </div>
+        <div class="u-hint-12 u-mt-4">این کد را برای صدور لایسنس در سایت یا ربات وارد کنید.</div>
+      </div>
+      <div class="fg">
+        <label style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+          کلید لایسنس (License Key):
+        </label>
+        <textarea class="hashem-input" id="sentinelModalKeyInput" rows="3" placeholder="کلید لایسنس خود را اینجا Paste کنید..." style="font-family:monospace; font-size:12px; width:100%; resize:vertical; padding:8px; line-height:1.4;"></textarea>
+      </div>`;
+
+    if (acts) {
+      acts.innerHTML = `
+        <button type="button" class="hashem-btn hashem-btn-primary" id="btnSentinelActivateModal" style="background:linear-gradient(135deg, #0284c7, #2563eb); border:none; padding:8px 22px; font-weight:600;">
+          ⚡ فعال‌سازی لایسنس
+        </button>`;
+      const actBtn = $('btnSentinelActivateModal');
+      if (actBtn) actBtn.onclick = activateSentinelLicenseModalClick;
+    }
+
+    const cpBtn = $('btnCopySentinelHash');
+    if (cpBtn) {
+      cpBtn.onclick = () => {
+        const inp = $('sentinelModalMachineHash');
+        copyTextSafe(inp ? inp.value : '', 'کپی شد', 'هش سرور در کلیپ‌بورد کپی شد');
+      };
+    }
+    return;
+  }
+
+  // Licensed: Locality Decision & Warning
+  const isIran = !!d.is_iran;
+
+  body.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:10px 14px;">
+      <span style="font-size:13px; font-weight:600; color:#34d399;">لایسنس سنتینال فعال است ✓</span>
+      <span class="badge" style="background:#10b981; color:#fff; font-size:10px; font-weight:700;">PRO LICENSE</span>
+    </div>
+
+    <!-- Critical Warning Box -->
+    <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.35); border-radius:8px; padding:12px 14px; display:flex; align-items:flex-start; gap:10px;">
+      <span style="font-size:20px; line-height:1;">⚠️</span>
+      <div style="font-size:13px; line-height:1.6; color:#fef3c7;">
+        <b style="color:#fbbf24;">هشدار مهم:</b><br>
+        برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه
+      </div>
+    </div>
+
+    <!-- Locality Decision Buttons -->
+    <div style="background:rgba(255,255,255,0.03); border:1px solid var(--ln); border-radius:8px; padding:14px;">
+      <label style="font-size:13px; font-weight:700; color:#f8fafc; margin-bottom:10px; display:block;">
+        آیا این سرور در ایران قرار دارد؟
+      </label>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <button type="button" class="hashem-btn ${isIran ? 'hashem-btn-primary' : 'hashem-btn-secondary'}" id="btnSentinelChooseIran" style="padding:10px; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;">
+          🇮🇷 بله، این سرور ایران است
+        </button>
+        <button type="button" class="hashem-btn ${!isIran ? 'hashem-btn-danger' : 'hashem-btn-secondary'}" id="btnSentinelChooseForeign" style="padding:10px; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;">
+          🌍 خیر، سرور خارج است
+        </button>
+      </div>
+    </div>
+
+    <div id="sentinelModalOutcomeSec"></div>`;
+
+  const btnIran = $('btnSentinelChooseIran');
+  if (btnIran) btnIran.onclick = () => setSentinelLocalityClick(true);
+  const btnForeign = $('btnSentinelChooseForeign');
+  if (btnForeign) btnForeign.onclick = () => setSentinelLocalityClick(false);
+
+  const outcomeSec = $('sentinelModalOutcomeSec');
+  if (!outcomeSec) return;
+
+  if (!isIran) {
+    outcomeSec.innerHTML = `
+      <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:8px; padding:12px; color:#fca5a5; font-size:13px; line-height:1.6;">
+        ⛔ <b>امکان نصب و مانیتورینگ روی سرور خارج وجود ندارد.</b><br>
+        برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه. لطفاً سنتینال را روی سرور ایران راه‌اندازی نمایید.
+      </div>`;
+    if (acts) acts.innerHTML = '';
+  } else {
+    if (!d.installed) {
+      outcomeSec.innerHTML = `
+        <div style="background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:8px; padding:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#34d399;">سرور ایران تایید شد ✓</div>
+            <div style="font-size:12px; color:#94a3b8; margin-top:2px;">سنتینال آماده نصب روی این سرور است (پورت رندوم امن ۳۰۰۰۰ تا ۳۹۹۹۹).</div>
+          </div>
+          <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" style="background:linear-gradient(135deg, #10b981, #059669); border:none; padding:8px 18px; font-weight:700;">
+            ⚡ نصب خودکار سنتینال
+          </button>
+        </div>`;
+      const instBtn = $('btnModalInstallSentinel');
+      if (instBtn) instBtn.onclick = installSentinelModalClick;
+      if (acts) acts.innerHTML = '';
+    } else {
+      const isRunning = d.running;
+      outcomeSec.innerHTML = `
+        <div style="background:rgba(14,165,233,0.06); border:1px solid rgba(14,165,233,0.25); border-radius:8px; padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="badge" style="background:${isRunning ? '#10b981' : '#ef4444'}; color:#fff; font-size:10px; font-weight:700;">
+                ${isRunning ? 'ACTIVE / RUNNING' : 'STOPPED'}
+              </span>
+              <span style="font-size:13px; font-weight:600;">Port: <code>${d.port}</code></span>
+            </div>
+            <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" style="font-weight:700; padding:6px 16px;">
+              🔗 ورود به داشبورد سنتینال
+            </button>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="hashem-btn hashem-btn-secondary" id="btnModalRestartSentinel" style="font-size:12px;">🔄 ریستارت</button>
+            <button type="button" class="hashem-btn hashem-btn-danger" id="btnModalUninstallSentinel" style="font-size:12px;">🗑️ حذف</button>
+          </div>
+        </div>`;
+
+      const openBtn = $('btnModalOpenDashboard');
+      if (openBtn) openBtn.onclick = () => window.open(d.url, '_blank');
+      const rstBtn = $('btnModalRestartSentinel');
+      if (rstBtn) rstBtn.onclick = async () => { await controlSentinelAction('restart'); renderSentinelModal(); };
+      const unBtn = $('btnModalUninstallSentinel');
+      if (unBtn) unBtn.onclick = async () => { await controlSentinelAction('uninstall'); renderSentinelModal(); };
+      if (acts) acts.innerHTML = '';
+    }
+  }
+}
+
+async function activateSentinelLicenseModalClick() {
+  const keyEl = $('sentinelModalKeyInput');
+  const key = keyEl ? keyEl.value.trim() : '';
+  if (!key) {
+    toastErr('Missing Key', 'لطفاً کلید لایسنس را وارد کنید.');
+    return;
+  }
+  const btn = $('btnSentinelActivateModal');
+  if (btn) { btn.disabled = true; btn.textContent = 'در حال فعال‌سازی…'; }
+  try {
+    const res = await api('/api/license', { key });
+    try { localStorage.setItem('hashem_bagher_license', key); } catch (e) {}
+    toastOk('لایسنس فعال شد', 'لایسنس با موفقیت فعال شد: ' + (res.customer || 'Hashem Pro'));
+    await loadLicense();
+    await loadSentinelState();
+    renderSentinelModal();
+  } catch (err) {
+    toastErr('خطا در فعال‌سازی', err.message || String(err));
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ فعال‌سازی لایسنس'; }
+  }
+}
+
+async function setSentinelLocalityClick(isIran) {
+  try {
+    const r = await api('/api/sentinel', { action: 'set_locality', is_iran: isIran });
+    toastMsg('ok', isIran ? 'سرور به عنوان سرور ایران تنظیم شد' : 'سرور به عنوان سرور خارج تنظیم شد');
+    await loadSentinelState();
+    renderSentinelModal();
+  } catch (err) {
+    toastMsg('err', 'خطا در تغییر موقعیت: ' + (err.message || err));
+  }
+}
+
+async function installSentinelModalClick() {
+  const btn = $('btnModalInstallSentinel');
+  if (btn) { btn.disabled = true; btn.textContent = 'در حال نصب و تخصیص پورت…'; }
+  try {
+    const r = await api('/api/sentinel', { action: 'install' });
+    toastMsg('ok', r.message || 'سنتینال با موفقیت نصب شد!');
+    await loadSentinelState();
+    renderSentinelModal();
+  } catch (err) {
+    toastMsg('err', 'خطا در نصب سنتینال: ' + (err.message || err));
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ نصب خودکار سنتینال'; }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const navBtn = $('sentinelNav');
   if (navBtn) {
     navBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      if (_sentinelData && _sentinelData.running && _sentinelData.url) {
-        window.open(_sentinelData.url, '_blank');
-      } else {
-        if (typeof window.switchTab === 'function') {
-          window.switchTab('settings');
-        }
-        const card = $('sentinelAddonCard');
-        if (card) card.scrollIntoView({ behavior: 'smooth' });
-        toastMsg('info', 'Install Sentinel from Settings to open dashboard');
-      }
+      openSentinelModal();
     });
   }
 });

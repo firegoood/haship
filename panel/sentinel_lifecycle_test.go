@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,4 +59,58 @@ func TestSentinel_LifecycleAPI(t *testing.T) {
 	if rrInvalid.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request on invalid action, got %d", rrInvalid.Code)
 	}
+
+	// 4. Test POST /api/sentinel set_locality missing is_iran
+	bodyLocMissing := bytes.NewBufferString(`{"action":"set_locality"}`)
+	reqLocMissing := httptest.NewRequest("POST", "/api/sentinel", bodyLocMissing)
+	rrLocMissing := httptest.NewRecorder()
+	handleSentinelPost(rrLocMissing, reqLocMissing)
+	if rrLocMissing.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 on set_locality without is_iran, got %d", rrLocMissing.Code)
+	}
+
+	// 5. Test POST /api/sentinel set_locality = false (Foreign server)
+	bodyLocForeign := bytes.NewBufferString(`{"action":"set_locality","is_iran":false}`)
+	reqLocForeign := httptest.NewRequest("POST", "/api/sentinel", bodyLocForeign)
+	rrLocForeign := httptest.NewRecorder()
+	handleSentinelPost(rrLocForeign, reqLocForeign)
+	if rrLocForeign.Code != http.StatusOK {
+		t.Errorf("expected 200 on set_locality=false, got %d", rrLocForeign.Code)
+	}
+
+	stForeign := GetSentinelStatus()
+	if stForeign.IsIran != false || !stForeign.IsIranDecided {
+		t.Errorf("expected IsIran=false and IsIranDecided=true, got is_iran=%v, decided=%v", stForeign.IsIran, stForeign.IsIranDecided)
+	}
+
+	// Eligibility must reject when user explicitly chose foreign with the Persian warning
+	okElig, reasonElig := CheckSentinelEligibility("iran (server)", "IR")
+	if okElig {
+		t.Errorf("expected rejection when user explicitly set foreign server")
+	}
+	if !strings.Contains(reasonElig, "برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه") {
+		t.Errorf("expected warning 'برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه', got %q", reasonElig)
+	}
+
+	// 6. Test POST /api/sentinel set_locality = true (Iran server)
+	bodyLocIran := bytes.NewBufferString(`{"action":"set_locality","is_iran":true}`)
+	reqLocIran := httptest.NewRequest("POST", "/api/sentinel", bodyLocIran)
+	rrLocIran := httptest.NewRecorder()
+	handleSentinelPost(rrLocIran, reqLocIran)
+	if rrLocIran.Code != http.StatusOK {
+		t.Errorf("expected 200 on set_locality=true, got %d", rrLocIran.Code)
+	}
+
+	stIran := GetSentinelStatus()
+	if stIran.IsIran != true || !stIran.IsIranDecided {
+		t.Errorf("expected IsIran=true and IsIranDecided=true, got is_iran=%v, decided=%v", stIran.IsIran, stIran.IsIranDecided)
+	}
+
+	okEligIran, _ := CheckSentinelEligibility("unknown", "XX")
+	if !okEligIran {
+		t.Errorf("expected eligibility to succeed when user confirmed Iran server")
+	}
+
+	// Clean up config file so other tests start clean
+	_ = os.Remove(sentinelConfigPath())
 }

@@ -1,12 +1,16 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestSentinelEligibility_LicenseGating(t *testing.T) {
+	_ = os.Remove(sentinelConfigPath())
+	t.Cleanup(func() { _ = os.Remove(sentinelConfigPath()) })
+
 	// 1. Without sentinel feature
 	activeLicenseMu.Lock()
 	activeLicense = &LicensePayload{
