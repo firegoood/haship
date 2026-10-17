@@ -1,11 +1,20 @@
 /* Hashem Tunnel — Design Tokens
  * Minimal, Premium, Technical, Friendly
+ *
+ * Color roles (one color, one meaning):
+ *   surface  --bg, --s1, --s2, --s3, --sunk      layers, back to front
+ *   content  --tx, --tx2, --mu, --dim, --faint   text, strongest to quietest (all >= 4.5:1)
+ *   accent   --ac (text, rings), --ac-fill        primary action and current selection only
+ *   signal   --ok, --wr, --er, --info             status only; --*-fill carries white text
+ *   second   --sc                                 secondary series in charts and badges
+ * No hex values outside this file: tint with color-mix(in srgb, var(--token) N%, transparent).
  */
 
 /* Baseline resets */
 button,input,select,textarea{font:inherit;color:inherit}
 svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 [hidden]{display:none!important}
+input[type="checkbox"],input[type="radio"]{width:18px;height:18px;flex:none;accent-color:var(--ac-fill)}
 
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%;-moz-text-size-adjust:100%;text-size-adjust:100%}
@@ -63,6 +72,10 @@ html{-webkit-text-size-adjust:100%;-moz-text-size-adjust:100%;text-size-adjust:1
   --ctl-fw: 600;
   --field: var(--s2);
 
+  /* Motion: brief, and only where it explains a change */
+  --dur-fast: .15s;
+  --dur: .25s;
+
   /* Radius scale */
   --r-sm: 8px;
   --r-md: 12px;
@@ -78,8 +91,14 @@ html{-webkit-text-size-adjust:100%;-moz-text-size-adjust:100%;text-size-adjust:1
   /* Status colors */
   --ok: #22c55e;
   --wr: #eab308;
-  --er: #ef4444;
+  --er: #f87171; /* red-400: 4.5:1+ as text on its own tint over dark cards */
   --info: #38bdf8;
+  /* Solid status fills carrying white text, same in both themes (white on each >= 4.9:1). */
+  --info-fill: #0369a1;
+  --ok-fill: #047857;
+  --er-fill: #b91c1c;
+  --wr-fill: #a16207;
+  --sc-fill: #7c3aed;
   --spring: cubic-bezier(.32, .72, 0, 1);
   /* Accent — single identity color, derived tints. Dark & light share the hue. */
   --accent-h: 217;
@@ -106,6 +125,12 @@ html{-webkit-text-size-adjust:100%;-moz-text-size-adjust:100%;text-size-adjust:1
   --ac-btn-dark: color-mix(in srgb, var(--ac) 90%, black);
   --er-btn-b40: color-mix(in srgb, var(--er) 40%, transparent);
 }
+
+/* Numbers line up in columns: metrics, IPs, ports, rates. */
+.kpi-val, .det-v, .mono, td, .badge, code, kbd { font-variant-numeric: tabular-nums; }
+
+/* Phones read at arm's length: larger body text. */
+@media (max-width: 640px) { :root { --fs-body: 0.9375rem; } }
 
 /* Glass material — subtle, professional */
 body{
@@ -231,12 +256,12 @@ body[data-t="dark"], body {
   border-radius: var(--ctl-r);
   font-size: var(--ctl-fs);
   font-weight: var(--ctl-fw);
-  transition: all 0.15s ease;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
   cursor: pointer;
   border: 1px solid transparent;
   text-decoration: none;
 }
-.hashem-btn:focus {
+.hashem-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--ac);
 }
@@ -245,14 +270,12 @@ body[data-t="dark"], body {
   background:var(--ac-fill);
   color:var(--ac-on);
   border-color:transparent;
-  box-shadow:0 2px 12px color-mix(in srgb, var(--ac) 35%, transparent), inset 0 1px 0 rgba(255,255,255,.18);
+  box-shadow:var(--lift-sm), inset 0 1px 0 rgba(255,255,255,.12);
 }
 .hashem-btn-primary:hover {
   background:var(--ac-hover);
-  transform:translateY(-1px);
-  box-shadow:0 4px 18px color-mix(in srgb, var(--ac) 45%, transparent), inset 0 1px 0 rgba(255,255,255,.18);
+  box-shadow:var(--lift-sm), inset 0 1px 0 rgba(255,255,255,.12);
 }
-.hashem-btn-primary:active { transform:translateY(0); }
 
 .hashem-btn-secondary {
   background:var(--s2);
@@ -264,9 +287,7 @@ body[data-t="dark"], body {
   background:var(--s3);
   color:var(--tx);
   border-color:var(--ac-b35-ln2);
-  transform:translateY(-1px);
 }
-.hashem-btn-secondary:active { transform:translateY(0); }
 
 .hashem-btn-danger {
   background: color-mix(in srgb, var(--er) 10%, transparent);
@@ -297,7 +318,7 @@ body[data-t="dark"], body {
   font-size:var(--ctl-fs);
   color:var(--tx2);
   outline:none;
-  transition:border-color .15s ease, box-shadow .15s ease, background .15s ease;
+  transition:border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 .hashem-input::placeholder {
   color:var(--dim);
@@ -336,12 +357,7 @@ body[data-t="dark"], body {
 
 .quick-create-btn:hover {
   background: color-mix(in srgb, var(--tx) 88%, var(--ac));
-  transform: translateY(-1px);
   box-shadow: var(--lift);
-}
-
-.quick-create-btn:active {
-  transform: translateY(0);
 }
 
 .quick-create-btn svg {

@@ -70,3 +70,23 @@ func TestUIThemeFollowsSystem(t *testing.T) {
 		t.Error("theme bootstrap must consult prefers-color-scheme")
 	}
 }
+
+// Colors come from tokens.css: hard-coded colors break the light theme and the
+// accent presets. White text on a status fill is the only literal allowed.
+func TestUINoHardcodedColors(t *testing.T) {
+	decl := regexp.MustCompile(`(?:^|[^\w-])(color|background(?:-color)?|border(?:-[a-z]+)?|fill|stroke)\s*:\s*[^;"'{}<>` + "`" + `]*?(#[0-9a-fA-F]{3,6}\b|rgba?\([^)]*\))`)
+	canvas := regexp.MustCompile(`fillStyle|strokeStyle|addColorStop|C_[A-Z]+ *=|xterm|selectionBackground`)
+	for _, f := range []string{"index.html", "app.js", "enterprise.css", "base.css"} {
+		for i, line := range strings.Split(readUI(t, f), "\n") {
+			if canvas.MatchString(line) {
+				continue
+			}
+			for _, m := range decl.FindAllStringSubmatch(line, -1) {
+				if v := strings.ToLower(m[2]); m[1] == "color" && (v == "#fff" || v == "#ffffff") {
+					continue
+				}
+				t.Errorf("%s:%d: hard-coded color %q", f, i+1, strings.TrimSpace(m[0]))
+			}
+		}
+	}
+}

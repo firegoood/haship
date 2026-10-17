@@ -147,7 +147,7 @@ table.ent-tbl { width: 100%; border-collapse: collapse; font-size: var(--ent-tbl
 
 /* ---------- light-theme tuning ---------- */
 body[data-t="light"] .ent-tbl thead th { background: var(--s3); }
-body[data-t="light"] .ent-empty { background: rgba(0,0,0,.025); }
+body[data-t="light"] .ent-empty { background: color-mix(in srgb, var(--bg) 2%, transparent); }
 body[data-t="light"] .ent-topo-node { background: var(--s1); }
 
 /* ---------- code / log text ---------- */
@@ -159,11 +159,11 @@ body[data-t="light"] .ent-topo-node { background: var(--s1); }
 .term-toolbar .hashem-btn { height: 32px; padding: 0 12px; font-size: 12.5px; }
 .term-search { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .term-search .hashem-input { flex: 1; min-width: 160px; }
-.term-wrap { position: relative; border: 1px solid var(--ln2); border-radius: var(--r-md); background: #0a0e17; min-height: 420px; height: 52dvh; overflow: hidden; }
+.term-wrap { position: relative; border: 1px solid var(--ln2); border-radius: var(--r-md); background: var(--bg); min-height: 420px; height: 52dvh; overflow: hidden; }
 .term-wrap.full { position: fixed; inset: 12px; z-index: 140; height: auto; }
 .term-wrap #termBox, .term-wrap .xterm { height: 100%; }
 .term-wrap #termBox { padding: 8px; }
-.term-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(6,9,15,.72); backdrop-filter: blur(3px); }
+.term-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 72%, transparent); backdrop-filter: blur(3px); }
 .term-overlay-card { display: grid; gap: 10px; justify-items: center; text-align: center; background: var(--s1); border: 1px solid var(--ln2); border-radius: var(--r-lg); padding: 22px 26px; max-width: min(92%, 380px); }
 .term-overlay-card b { color: var(--tx); font-size: var(--fs-h4); }
 .term-keys { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -219,7 +219,7 @@ pre.logs .ent-empty { white-space: normal; font-family: var(--font-sans); }
   color:var(--tx2); font-size:var(--fs-small); font-weight:600; cursor:pointer;
   transition:border-color .2s ease, background .2s ease, transform .15s var(--spring);
 }
-.acc-sw:hover { background:var(--s3); transform:translateY(-1px); }
+.acc-sw:hover { background:var(--s3); }
 .acc-sw[aria-checked="true"] { border-color:var(--sw); background:color-mix(in srgb, var(--sw) 12%, var(--s2)); color:var(--tx); box-shadow:0 0 0 1px var(--sw); }
 .acc-dot { width:18px; height:18px; border-radius:50%; background:var(--sw); flex:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,.25); }
 
@@ -331,7 +331,7 @@ body[data-t="light"] .sup-card { box-shadow:0 18px 50px rgba(15,23,42,.22), 0 0 
 @keyframes tpPulse { 50% { transform:scale(1.35); opacity:.7; } }
 .tp-hub-ring { fill:var(--ac-soft); stroke:var(--ac-b30); stroke-width:1.5; }
 .tp-hub-core { fill:var(--ac); }
-.tp-hub-ic { fill:var(--ac-on); font-size:12px; font-weight:800; letter-spacing:.04em; }
+.tp-hub-ic { fill:var(--ac-on); font-size:12px; font-weight:700; letter-spacing:.04em; }
 .tp-name { fill:var(--tx); font-size:13px; font-weight:700; }
 .tp-sub { fill:var(--mu); font-size:12px; }
 .fleet-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:14px; }
@@ -449,8 +449,8 @@ body[data-t="light"] .sup-card { box-shadow:0 18px 50px rgba(15,23,42,.22), 0 0 
   font-size:12px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; flex:none;
 }
 .nav-badge.hidden { display:none; }
-.nav-badge.warn { background:var(--wr); color:#1a1300; }
-.nav-badge.err { background:var(--er); color:#fff; }
+.nav-badge.warn { background:var(--wr-fill); color:#fff; }
+.nav-badge.err { background:var(--er-fill); color:#fff; }
 .sf-ic { display:none; width:18px; height:18px; flex:none; stroke-width:2; }
 @media (min-width:761px) {
   html[data-sb="1"] .sidebar { width:68px; }
@@ -558,61 +558,19 @@ html[data-dens="compact"] .hashem-table th, html[data-dens="compact"] .hashem-ta
   .rsc-code .hashem-btn { flex:1 1 100%; min-height:44px; }
 }
 
-/* ========================================================
-   Luxury Enterprise Brand Premium Badge (Ultra-Polished)
-   ======================================================== */
+/* Brand premium badge: a quiet tinted pill (no glow, no looping shimmer). */
 .brand-premium-badge {
-  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 9px 3px 8px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(24, 18, 6, 0.95) 0%, rgba(42, 31, 10, 0.88) 50%, rgba(18, 14, 5, 0.96) 100%);
-  border: 1px solid rgba(245, 158, 11, 0.65);
-  box-shadow: 0 0 16px rgba(245, 158, 11, 0.28), 0 2px 8px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.35), inset 0 0 10px rgba(245, 158, 11, 0.15);
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wr) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wr) 35%, transparent);
+  color: var(--wr);
   vertical-align: middle;
-  margin-left: 7px;
+  margin-inline-start: 7px;
   user-select: none;
-  overflow: hidden;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
-
-.brand-premium-badge::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -120%;
-  width: 60%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%);
-  transform: skewX(-25deg);
-  animation: premiumShimmer 3.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  pointer-events: none;
-}
-
-@keyframes premiumShimmer {
-  0% { left: -120%; }
-  22% { left: 220%; }
-  100% { left: 220%; }
-}
-
-.brand-premium-badge .bp-gem {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
-  fill: #fbbf24;
-  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.85));
-}
-
-.brand-premium-badge .bp-label {
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  background: linear-gradient(135deg, #ffffff 0%, #fef08a 30%, #f59e0b 70%, #d97706 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  line-height: 1;
-}
+.brand-premium-badge .bp-gem { width: 11px; height: 11px; flex-shrink: 0; fill: currentColor; stroke: none; }
+.brand-premium-badge .bp-label { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1; }

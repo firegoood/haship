@@ -142,9 +142,9 @@ button, a, input, select, textarea, [role="button"], [role="menuitem"] {
 .u-flex-center-wrap12 { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .u-flex-col-gap14 { display: flex; flex-direction: column; gap: 14px; }
 .u-cursor-pointer { cursor: pointer; }
-.u-accent-ac { accent-color: var(--ac); }
+.u-accent-ac { accent-color: var(--ac-fill); }
 .u-hint-accent { border-inline-start: 3px solid var(--ac); padding-inline-start: 10px; }
-.u-checkbox-ac { margin-top: 3px; accent-color: var(--ac); width: 16px; height: 16px; flex: none; }
+.u-checkbox-ac { margin-top: 3px; }
 .u-color-tx { color: var(--tx); }
 .u-color-tx2 { color: var(--tx2); }
 .u-fs-12 { font-size: 12px; }
@@ -184,11 +184,11 @@ button, a, input, select, textarea, [role="button"], [role="menuitem"] {
 .u-card-tint { border: 1px solid var(--ln); background: color-mix(in srgb, var(--bg) 80%, var(--s1)); }
 .u-peer-card-wide { grid-column: 1 / -1; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .u-peer-acts-bar { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--ln); padding-top: 12px; }
-.badge.u-pill-sky, .bench-proto-pill.u-pill-sky { background: rgba(56,189,248,.15); color: var(--info); border: 1px solid rgba(56,189,248,.3); }
-.badge.u-pill-violet, .bench-proto-pill.u-pill-violet { background: rgba(168,85,247,.15); color: #c084fc; border: 1px solid rgba(168,85,247,.3); }
+.badge.u-pill-sky, .bench-proto-pill.u-pill-sky { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); border: 1px solid color-mix(in srgb, var(--info) 30%, transparent); }
+.badge.u-pill-violet, .bench-proto-pill.u-pill-violet { background: color-mix(in srgb, var(--sc) 15%, transparent); color: var(--sc); border: 1px solid color-mix(in srgb, var(--sc) 30%, transparent); }
 /* right-sidebar live log line parts */
 .badge.log-tag { font-size: 12px; padding: 1px 4px; margin-inline-end: 4px; }
-.rs-log-line.rs-log-mono { font-family: var(--font-mono); font-size: 12px; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.04); word-break: break-all; }
+.rs-log-line.rs-log-mono { font-family: var(--font-mono); font-size: 12px; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--tx) 4%, transparent); word-break: break-all; }
 .rs-log-time { color: var(--mu); margin-inline-end: 4px; font-size: 12px; }
 
 /* ---- Touch targets: >=44x44 CSS px for every interactive control on coarse pointers ---- */
