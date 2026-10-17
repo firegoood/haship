@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -168,6 +170,20 @@ func currentIranBundle() (string, string) {
 		iranPub = "127.0.0.1"
 	}
 
+	// GRE inner addresses actually in use: the setup record, else the live
+	// tunnel, else the defaults. A bundle with the defaults breaks the
+	// tunnel when the admin chose other addresses.
+	iranGre, foreignGre := setupMeta.IranGre, setupMeta.ForeignGre
+	if iranGre == "" {
+		iranGre = strings.SplitN(st.Gre.Inner, "/", 2)[0]
+	}
+	if foreignGre == "" && st.Gre.Inner != "" {
+		foreignGre = grePeerInner(st.Gre.Inner) // st.GrePeer is the outer (public) address
+	}
+	if iranGre == "" || foreignGre == "" {
+		iranGre, foreignGre = defaultIranGRE, defaultForeignGRE
+	}
+
 	// Backhaul server
 	if st.FrpSvc == "backhaul-server" || st.Engine == "backhaul" || st.Engine == "gre-backhaul" || setupMeta.Engine == "backhaul" || setupMeta.Engine == "gre-backhaul" {
 		data, err := os.ReadFile(filepath.Join(backhaulDir, "config.toml"))
@@ -210,7 +226,7 @@ func currentIranBundle() (string, string) {
 			}
 			if token != "" {
 				if st.Engine == "gre-backhaul" || setupMeta.Engine == "gre-backhaul" || st.Gre.Exists {
-					return MakeGreBackhaulBundle(iranPub, bindPort, defaultIranGRE, defaultForeignGRE, transport, token, rawPorts), token
+					return MakeGreBackhaulBundle(iranPub, bindPort, iranGre, foreignGre, transport, token, rawPorts), token
 				}
 				return MakeBackhaulBundle(iranPub, bindPort, transport, token, rawPorts), token
 			}
@@ -231,7 +247,7 @@ func currentIranBundle() (string, string) {
 			}
 		}
 		if token != "" && st.FrpPort > 0 {
-			return MakeBundle(iranPub, st.FrpPort, defaultIranGRE, defaultForeignGRE, token, st.ProxyPorts), token
+			return MakeBundle(iranPub, st.FrpPort, iranGre, foreignGre, token, st.ProxyPorts), token
 		}
 	}
 
@@ -308,7 +324,26 @@ func tunnelExists() bool {
 	return false
 }
 
+// detectPublicIP returns this server's public IPv4. The route source address
+// is only used when it is public: behind NAT (many clouds) it is a private
+// address, which broke bundles, DNS checks and URLs. Then the address the
+// admin entered at setup, then an external lookup (cached), and only as a last
+// resort the private source address.
 func detectPublicIP() string {
+	src := routeSourceIP()
+	if src != "" && !isPrivateIP(src) {
+		return src
+	}
+	if v := savedPublicIP(); v != "" {
+		return v
+	}
+	if v := externalPublicIPCached(); v != "" {
+		return v
+	}
+	return src
+}
+
+func routeSourceIP() string {
 	out, err := runCmdTimeout(5*time.Second, "ip", "route", "get", "1.1.1.1")
 	if err == nil {
 		f := strings.Fields(string(out))
@@ -318,6 +353,64 @@ func detectPublicIP() string {
 					return f[i+1]
 				}
 			}
+		}
+	}
+	return ""
+}
+
+// savedPublicIP is the public address recorded in setup.json, if valid.
+func savedPublicIP() string {
+	var meta struct {
+		LocalPub string `json:"local_public"`
+	}
+	if data, err := os.ReadFile(filepath.Join(configDir, "setup.json")); err == nil {
+		_ = json.Unmarshal(data, &meta)
+	}
+	if ip := strings.TrimSpace(meta.LocalPub); net.ParseIP(ip) != nil && !isPrivateIP(ip) {
+		return ip
+	}
+	return ""
+}
+
+var (
+	extIPMu   sync.Mutex
+	extIPVal  string
+	extIPTime time.Time
+	// externalIPLookup asks public "what is my IP" services; swappable for tests.
+	externalIPLookup = lookupExternalPublicIP
+)
+
+// externalPublicIPCached caches the external lookup (30 min, failures 2 min),
+// since detectPublicIP runs from request handlers and lookups can be slow or
+// filtered from Iran.
+func externalPublicIPCached() string {
+	extIPMu.Lock()
+	defer extIPMu.Unlock()
+	if extIPVal != "" && time.Since(extIPTime) < 30*time.Minute {
+		return extIPVal
+	}
+	if extIPVal == "" && !extIPTime.IsZero() && time.Since(extIPTime) < 2*time.Minute {
+		return ""
+	}
+	extIPTime = time.Now()
+	if v := externalIPLookup(); v != "" {
+		extIPVal = v
+	}
+	return extIPVal
+}
+
+func lookupExternalPublicIP() string {
+	client := &http.Client{Timeout: 1200 * time.Millisecond}
+	for _, u := range []string{"https://api.ipify.org", "https://icanhazip.com", "https://ifconfig.me/ip"} {
+		resp, err := client.Get(u)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
+		_ = resp.Body.Close()
+		candidate := strings.TrimSpace(string(body))
+		if resp.StatusCode == 200 && net.ParseIP(candidate) != nil && !isPrivateIP(candidate) {
+			return candidate
 		}
 	}
 	return ""
@@ -521,24 +614,17 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 			pcfg.InternalIP = body.PeerGre
 		}
 		if body.RemotePub != "" {
-			port := 8080
-			if cfg.Port > 0 {
-				port = cfg.Port
-			}
-			pcfg.PeerURL = fmt.Sprintf("http://%s:%d", body.RemotePub, port)
+			// The master's panel port is unknown here (each panel picks its
+			// own); without a port sendToPeer tries the usual ones, and the
+			// handshake reply then records the real port.
+			pcfg.PeerURL = "http://" + body.RemotePub
 		}
 		_ = savePeerConfig(pcfg)
 
 		go func() {
 			for attempt := 1; attempt <= 6; attempt++ {
 				time.Sleep(time.Duration(attempt*2) * time.Second)
-				_, err := sendToPeer("/api/peer/handshake", "POST", PeerHandshakeRequest{
-					Role:       "worker",
-					PublicIP:   detectPublicIP(),
-					PanelPort:  cfg.Port,
-					InternalIP: body.LocalGre,
-				})
-				if err == nil {
+				if err := peerHandshake("worker", body.LocalGre); err == nil {
 					log.Printf("[PeerSync] Auto-connected handshake with master on attempt %d", attempt)
 					break
 				}

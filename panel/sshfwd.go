@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -390,27 +389,16 @@ func isPrivateIP(ipStr string) bool {
 	if ip4[0] == 192 && ip4[1] == 168 {
 		return true
 	}
+	if ip4[0] == 100 && ip4[1]&0xC0 == 64 { // 100.64.0.0/10 carrier-grade NAT
+		return true
+	}
 	return false
 }
 
+// resolvePublicIP is detectPublicIP, which now skips private addresses and
+// caches its external lookup itself.
 func resolvePublicIP() string {
-	ip := detectPublicIP()
-	if ip != "" && !isPrivateIP(ip) {
-		return ip
-	}
-	client := &http.Client{Timeout: 1200 * time.Millisecond}
-	for _, url := range []string{"https://api.ipify.org", "https://icanhazip.com", "https://ifconfig.me/ip"} {
-		resp, err := client.Get(url)
-		if err == nil && resp.StatusCode == 200 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
-			_ = resp.Body.Close()
-			candidate := strings.TrimSpace(string(body))
-			if net.ParseIP(candidate) != nil && !isPrivateIP(candidate) {
-				return candidate
-			}
-		}
-	}
-	return ip
+	return detectPublicIP()
 }
 
 // MakeBagherBundle builds a portable encrypted/base64 string for zero-terminal Foreign setup.

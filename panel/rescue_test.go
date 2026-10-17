@@ -354,8 +354,21 @@ func TestRescueAutoEnableAndAutoJoin(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	blocked := rescueProbeResult{Host: "194.107.116.102", Verdict: "one_way_block"}
 
-	// 1. Trigger consecutive strikes on origin
+	// 0. H6: by default a detected block only raises the banner.
 	var st rescueState
+	for i := 0; i < rescueStrikes+1; i++ {
+		st = rescueObserve(blocked, now)
+	}
+	if st.Role != "" || st.SuspectedSince == 0 {
+		t.Fatalf("without auto mode expected banner only, got role=%q suspected=%d", st.Role, st.SuspectedSince)
+	}
+
+	// 1. With auto mode on, consecutive strikes activate the origin.
+	rescueMu.Lock()
+	stAuto := loadRescueLocked()
+	stAuto.AutoMode, stAuto.Strikes = true, 0
+	_ = saveRescueLocked(stAuto)
+	rescueMu.Unlock()
 	for i := 0; i < rescueStrikes; i++ {
 		st = rescueObserve(blocked, now)
 	}

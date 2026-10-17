@@ -683,11 +683,7 @@ func main() {
 	})
 
 	// Peer-to-peer synchronization & commands
-	mux.HandleFunc("POST "+base+"/api/peer/handshake", requirePeerAuth(handlePeerHandshake))
-	mux.HandleFunc("POST "+base+"/api/peer/apply-carrier", requirePeerAuth(handlePeerApplyCarrier))
-	mux.HandleFunc("POST "+base+"/api/peer/apply-engine", requirePeerAuth(handlePeerApplyEngine))
-	mux.HandleFunc("POST "+base+"/api/peer/ping", requirePeerAuth(handlePeerPing))
-	mux.HandleFunc("POST "+base+"/api/peer/revpath-probe", requirePeerAuth(handlePeerRevPathProbe))
+	mountPeerRoutes(mux, base)
 	mux.HandleFunc("GET "+base+"/api/peer/rescue-offer", requireRescuePeerAuth(handlePeerRescueOffer))
 	mux.HandleFunc("POST "+base+"/api/peer/rescue-ack", requireRescuePeerAuth(handlePeerRescueAck))
 	mux.HandleFunc("GET "+base+"/api/rescue", requireAuth(handleRescueGet))
@@ -710,10 +706,8 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/cluster/failover/revert", requireAuth(requireCSRF(handleClusterFailoverRevert)))
 	mux.HandleFunc("GET "+base+"/api/bagher", requireAuth(handleSSHFwdGet))
 	mux.HandleFunc("POST "+base+"/api/bagher", requireAuth(requireCSRF(handleSSHFwdPost)))
-	mux.HandleFunc("POST "+base+"/api/peer/sshfwd-install-key", requirePeerAuth(handlePeerSSHFwdInstallKey))
 	mux.HandleFunc("GET "+base+"/api/license", requireAuth(handleLicenseGet))
 	mux.HandleFunc("POST "+base+"/api/license", requireAuth(requireCSRF(handleLicensePost)))
-	mux.HandleFunc("GET "+base+"/api/peer/status", requirePeerAuth(handlePeerStatus))
 	mux.HandleFunc("GET "+base+"/api/peer/config", requireAuth(handlePeerConfigGet))
 	mux.HandleFunc("POST "+base+"/api/peer/config", requireAuth(requireCSRF(handlePeerConfigPost)))
 

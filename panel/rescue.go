@@ -93,6 +93,10 @@ type rescueState struct {
 	LastProbe        int64  `json:"last_probe,omitempty"`
 	AutoTriggered    bool   `json:"auto_triggered,omitempty"`
 	DisabledManually bool   `json:"disabled_manually,omitempty"`
+	// AutoMode lets the monitor enable the rescue by itself after
+	// rescueStrikes blocked probes. Off by default: a probe can misread a
+	// firewalled panel port as a one-way block, so the default is the banner.
+	AutoMode bool `json:"auto_mode,omitempty"`
 }
 
 func rescueStatePath() string { return filepath.Join(configDir, "rescue.json") }
@@ -673,33 +677,44 @@ func rescueTargets() []rescueTarget {
 		t.Ports = append(t.Ports, port)
 	}
 
+	// The remote panel port is the peer's own (learned by the Peer Link
+	// handshake); our cfg.Port is only a guess. Probing just a wrong or
+	// firewalled port looks exactly like a one-way block.
+	pc := loadPeerConfig()
+	addPanel := func(host string) {
+		if pc.InternalPort > 0 {
+			add(host, pc.InternalPort)
+		}
+		add(host, cfg.Port)
+	}
+
 	// 1. PeerURL
-	if pc := loadPeerConfig(); pc.PeerURL != "" {
+	if pc.PeerURL != "" {
 		u := strings.TrimSpace(pc.PeerURL)
 		if !strings.Contains(u, "://") {
 			u = "http://" + u
 		}
 		if pu, err := url.Parse(u); err == nil {
-			port := cfg.Port
 			if pp, e := strconv.Atoi(pu.Port()); e == nil {
-				port = pp
+				add(pu.Hostname(), pp)
+			} else {
+				addPanel(pu.Hostname())
 			}
-			add(pu.Hostname(), port)
 		}
 	}
 
 	// 2. peers.json
 	for _, p := range loadPeers() {
-		add(p.RemotePub, cfg.Port)
+		addPanel(p.RemotePub)
 	}
 
 	// 3. GRE status from localStatus
 	ls := currentLocal()
 	if ls.RemotePub != "" {
-		add(ls.RemotePub, cfg.Port)
+		addPanel(ls.RemotePub)
 	}
 	if ls.GrePeer != "" {
-		add(ls.GrePeer, cfg.Port)
+		addPanel(ls.GrePeer)
 	}
 
 	// 4. WSS Carrier remote address
@@ -831,11 +846,9 @@ func rescueProbeReal(t rescueTarget) rescueProbeResult {
 	return res
 }
 
-// rescueObserve folds one probe into the persisted state. It only ever sets
-// the banner after rescueStrikes consecutive blocked results.
-// rescueObserve folds one probe into the persisted state. When rescueStrikes
-// consecutive one-way block verdicts occur, it automatically activates connectivity
-// rescue without requiring manual confirmation.
+// rescueObserve folds one probe into the persisted state. After rescueStrikes
+// consecutive one-way block verdicts it raises the banner; only when the admin
+// turned on AutoMode does it also activate the rescue by itself.
 func rescueObserve(res rescueProbeResult, now time.Time) rescueState {
 	rescueMu.Lock()
 	st := loadRescueLocked()
@@ -852,7 +865,7 @@ func rescueObserve(res rescueProbeResult, now time.Time) rescueState {
 				if st.SuspectedSince == 0 {
 					st.SuspectedSince = now.Unix()
 				}
-				if !st.DisabledManually && res.Host != "" {
+				if st.AutoMode && !st.DisabledManually && res.Host != "" {
 					pts := suggestRescuePorts()
 					if len(pts) > 0 {
 						autoTarget = res.Host
@@ -941,15 +954,18 @@ func rescuePullOffer() {
 		}
 		hosts[t.Host] = ps
 	}
-	client := &http.Client{Timeout: 4 * time.Second}
-	bases := []string{""}
-	if cfg.BasePath != "" {
-		bases[0] = "/" + strings.Trim(cfg.BasePath, "/")
+	client := &http.Client{
+		Timeout:       4 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	if u, err := url.Parse(strings.TrimSpace(pc.PeerURL)); err == nil && strings.Trim(u.Path, "/") != "" {
-		if pb := "/" + strings.Trim(u.Path, "/"); pb != bases[0] {
-			bases = append([]string{pb}, bases...)
-		}
+	// Fixed peer prefix first (no need to know the peer's base path), then
+	// the peer's own base path, then ours for peers that predate both.
+	bases := []string{peerRoutePrefix}
+	if pb := strings.Trim(pc.PeerBasePath, "/"); pb != "" {
+		bases = append(bases, "/"+pb)
+	}
+	if pb := strings.Trim(cfg.BasePath, "/"); pb != "" && pb != strings.Trim(pc.PeerBasePath, "/") {
+		bases = append(bases, "/"+pb)
 	}
 	for h, ports := range hosts {
 		for _, port := range ports {
@@ -1034,6 +1050,7 @@ func rescueStatusMap(full bool) map[string]any {
 		"strikes":           st.Strikes,
 		"auto_triggered":    st.AutoTriggered,
 		"disabled_manually": st.DisabledManually,
+		"auto_mode":         st.AutoMode,
 	}
 	if st.Role == "origin" {
 		m["ctrl_port"] = st.CtrlPort
@@ -1073,6 +1090,7 @@ func handleRescuePost(w http.ResponseWriter, r *http.Request) {
 		RemoteIP string `json:"remote_ip"`
 		Ports    string `json:"ports"`
 		Code     string `json:"code"`
+		Enabled  *bool  `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-RESCUE-01", "")
@@ -1118,6 +1136,22 @@ func handleRescuePost(w http.ResponseWriter, r *http.Request) {
 		_ = saveRescueLocked(stD)
 		rescueMu.Unlock()
 		writeJSON(w, map[string]any{"status": "ok", "state": rescueStatusMap(false)})
+	case "auto":
+		if body.Enabled == nil {
+			writeAPIError(w, r, "E-RESCUE-01", "enabled (true/false) is required")
+			return
+		}
+		rescueMu.Lock()
+		stA := loadRescueLocked()
+		stA.AutoMode = *body.Enabled
+		err := saveRescueLocked(stA)
+		rescueMu.Unlock()
+		if err != nil {
+			writeAPIError(w, r, "E-RESCUE-04", err.Error())
+			return
+		}
+		LogSecurityAudit("rescue_auto_mode", "admin", ClientIP(r), fmt.Sprintf("enabled=%v", *body.Enabled))
+		writeJSON(w, map[string]any{"status": "ok", "state": rescueStatusMap(false)})
 	case "code":
 		rescueMu.Lock()
 		st := loadRescueLocked()
@@ -1143,39 +1177,47 @@ func rescueStatusMapFrom(st rescueState) map[string]any {
 
 func requireRescuePeerAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if authed(r) {
+		if authed(r) || rescuePeerAllowed(r) {
 			next(w, r)
 			return
 		}
-		rescueMu.Lock()
-		st := loadRescueLocked()
-		rescueMu.Unlock()
-
-		// Allowed if client is the designated remote IP
-		if st.RemoteIP != "" && ClientIP(r) == st.RemoteIP {
-			next(w, r)
-			return
-		}
-
-		// Or valid peer secret
-		c := loadPeerConfig()
-		if c.PeerSecret != "" {
-			clientSecret := strings.TrimSpace(r.Header.Get("X-Peer-Secret"))
-			if clientSecret == "" {
-				authHdr := r.Header.Get("Authorization")
-				if strings.HasPrefix(strings.ToLower(authHdr), "bearer ") {
-					clientSecret = strings.TrimSpace(authHdr[7:])
-				}
-			}
-			if clientSecret != "" && ConstantTimeCompare(c.PeerSecret, clientSecret) {
-				next(w, r)
-				return
-			}
-		}
-
 		LogSecurityAudit("rescue_peer_auth_rejected", "peer", ClientIP(r), "path="+r.URL.Path)
 		writeAPIError(w, r, "E-AUTH-01", "unauthorized peer request")
 	}
+}
+
+// requireRescuePeerHidden is requireRescuePeerAuth for the fixed
+// peerRoutePrefix: failures are a bare 404 (see requirePeerSecretHidden).
+func requireRescuePeerHidden(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !rescuePeerAllowed(r) {
+			http.NotFound(w, r)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// rescuePeerAllowed accepts the designated rescue remote IP or the peer secret.
+func rescuePeerAllowed(r *http.Request) bool {
+	rescueMu.Lock()
+	st := loadRescueLocked()
+	rescueMu.Unlock()
+	if st.RemoteIP != "" && ClientIP(r) == st.RemoteIP {
+		return true
+	}
+	c := loadPeerConfig()
+	if c.PeerSecret == "" {
+		return false
+	}
+	clientSecret := strings.TrimSpace(r.Header.Get("X-Peer-Secret"))
+	if clientSecret == "" {
+		authHdr := r.Header.Get("Authorization")
+		if strings.HasPrefix(strings.ToLower(authHdr), "bearer ") {
+			clientSecret = strings.TrimSpace(authHdr[7:])
+		}
+	}
+	return clientSecret != "" && ConstantTimeCompare(c.PeerSecret, clientSecret)
 }
 
 // Peer endpoints (X-Peer-Secret). The offer is only released to the exact

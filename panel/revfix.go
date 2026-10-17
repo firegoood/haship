@@ -20,7 +20,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,19 +201,30 @@ func requestSpokeProbe(p peerRecord) *SpokeProbeReport {
 	body, _ := json.Marshal(req)
 	// Target the spoke directly: its panel answers on the GRE inner address
 	// (peer tunnel IP) or its public address, same secret as other peer calls.
-	urls := []string{}
-	if p.PeerGre != "" {
-		urls = append(urls, fmt.Sprintf("http://%s:%d%s/api/peer/revpath-probe", p.PeerGre, cfg.Port, "/"+cfg.BasePath))
-	}
+	// The spoke's panel port and base path are its own, not ours: address it
+	// like sendToPeer does (fixed peer prefix first, known port first).
+	target := PeerConfig{InternalIP: p.PeerGre, InternalPort: c.InternalPort, PeerBasePath: c.PeerBasePath}
 	if p.RemotePub != "" {
-		urls = append(urls, fmt.Sprintf("http://%s:%d%s/api/peer/revpath-probe", p.RemotePub, cfg.Port, "/"+cfg.BasePath))
+		target.PeerURL = "http://" + p.RemotePub
 	}
+	urls := peerTargetURLs(target, "/api/peer/revpath-probe")
 	if len(urls) == 0 {
 		return nil
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{
+		Timeout:       15 * time.Second,
+		Transport:     &http.Transport{DialContext: (&net.Dialer{Timeout: 4 * time.Second}).DialContext},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	deadHosts := map[string]bool{}
 	for _, u := range urls {
-		u = strings.Replace(u, "//api/", "/api/", 1)
+		hostKey := u
+		if pu, err := url.Parse(u); err == nil {
+			hostKey = pu.Host
+		}
+		if deadHosts[hostKey] {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		hr, err := http.NewRequestWithContext(ctx, "POST", u, bytes.NewReader(body))
 		if err != nil {
@@ -221,13 +234,15 @@ func requestSpokeProbe(p peerRecord) *SpokeProbeReport {
 		hr.Header.Set("Content-Type", "application/json")
 		hr.Header.Set("X-Peer-Secret", c.PeerSecret)
 		resp, err := client.Do(hr)
-		cancel()
 		if err != nil {
+			cancel()
+			deadHosts[hostKey] = true
 			continue
 		}
 		var rep SpokeProbeReport
 		derr := json.NewDecoder(resp.Body).Decode(&rep)
 		_ = resp.Body.Close()
+		cancel()
 		if derr != nil || !rep.OK {
 			continue
 		}

@@ -33,6 +33,10 @@ type PeerConfig struct {
 	AutoPilotExplicit  bool    `json:"autopilot_explicit,omitempty"`
 	AutoPilotThreshold float64 `json:"autopilot_threshold"`       // Packet loss percentage threshold (e.g. 20.0)
 	TLSFingerprint     string  `json:"tls_fingerprint,omitempty"` // Pinned SHA-256 (hex) of the peer's leaf TLS cert (TOFU)
+	// PeerBasePath is the peer panel's own random base path (each panel has a
+	// different one), learned from the handshake or from a pasted panel URL.
+	// Only needed to reach peers that predate the fixed peerRoutePrefix.
+	PeerBasePath string `json:"peer_base_path,omitempty"`
 }
 
 type PeerHandshakeRequest struct {
@@ -40,7 +44,14 @@ type PeerHandshakeRequest struct {
 	PublicIP   string `json:"public_ip"`
 	PanelPort  int    `json:"panel_port"`
 	InternalIP string `json:"internal_ip"`
+	BasePath   string `json:"base_path,omitempty"`
 }
+
+// peerRoutePrefix serves the peer API at a fixed path, independent of each
+// panel's random base path, which the other side cannot know. Requests there
+// must carry the peer secret; anything else gets a plain 404 so the prefix
+// does not reveal the panel.
+const peerRoutePrefix = "/_hp"
 
 type PeerApplyCarrierRequest struct {
 	Carrier string `json:"carrier"` // "direct", "fou:443", "wss:8443", etc.
@@ -104,15 +115,24 @@ func defaultPeerConfig() PeerConfig {
 
 func loadPeerConfig() PeerConfig {
 	peerMu.RLock()
+	c, needsSave := readPeerConfig()
+	peerMu.RUnlock()
+
+	if needsSave {
+		_ = savePeerConfig(c)
+	}
+	return c
+}
+
+// readPeerConfig reads peer_link.json and fills defaults. Caller holds peerMu.
+func readPeerConfig() (PeerConfig, bool) {
 	data, err := os.ReadFile(peerConfigFile())
 	if err != nil {
-		peerMu.RUnlock()
-		return defaultPeerConfig()
+		return defaultPeerConfig(), false
 	}
 	var c PeerConfig
 	if err := json.Unmarshal(data, &c); err != nil {
-		peerMu.RUnlock()
-		return defaultPeerConfig()
+		return defaultPeerConfig(), false
 	}
 
 	def := defaultPeerConfig()
@@ -137,18 +157,29 @@ func loadPeerConfig() PeerConfig {
 		c.AutoPilotExplicit = true
 		needsSave = true
 	}
-	peerMu.RUnlock()
-
-	if needsSave {
-		_ = savePeerConfig(c)
-	}
-	return c
+	return c, needsSave
 }
 
 func savePeerConfig(c PeerConfig) error {
 	peerMu.Lock()
 	defer peerMu.Unlock()
+	return writePeerConfig(c)
+}
 
+// updatePeerConfig applies fn to the current peer_link.json under one lock.
+// Background status updates use it so they only touch their own fields: a
+// copy loaded before a multi-second peer call would otherwise overwrite a
+// secret or URL the admin saved in the meantime.
+func updatePeerConfig(fn func(c *PeerConfig)) error {
+	peerMu.Lock()
+	defer peerMu.Unlock()
+	c, _ := readPeerConfig()
+	fn(&c)
+	return writePeerConfig(c)
+}
+
+// writePeerConfig persists c atomically. Caller holds peerMu.
+func writePeerConfig(c PeerConfig) error {
 	_ = os.MkdirAll(configDir, 0700)
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -196,6 +227,55 @@ func requirePeerAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// requirePeerSecretHidden guards the fixed peerRoutePrefix routes: only the
+// peer secret is accepted, and every failure is a bare 404 so scanners
+// cannot tell the prefix belongs to a panel.
+func requirePeerSecretHidden(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c := loadPeerConfig()
+		got := strings.TrimSpace(r.Header.Get("X-Peer-Secret"))
+		if got == "" {
+			if h := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(h), "bearer ") {
+				got = strings.TrimSpace(h[7:])
+			}
+		}
+		if c.PeerSecret == "" || got == "" || !ConstantTimeCompare(c.PeerSecret, got) {
+			if got != "" {
+				LogSecurityAudit("peer_auth_rejected", "peer", ClientIP(r), "path="+r.URL.Path)
+			}
+			http.NotFound(w, r)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// mountPeerRoutes registers the peer API under base (the panel's base path)
+// and under the fixed peerRoutePrefix.
+func mountPeerRoutes(mux *http.ServeMux, base string) {
+	routes := []struct {
+		method, path string
+		h            http.HandlerFunc
+	}{
+		{"POST", "/api/peer/handshake", handlePeerHandshake},
+		{"POST", "/api/peer/apply-carrier", handlePeerApplyCarrier},
+		{"POST", "/api/peer/apply-engine", handlePeerApplyEngine},
+		{"POST", "/api/peer/ping", handlePeerPing},
+		{"POST", "/api/peer/revpath-probe", handlePeerRevPathProbe},
+		{"POST", "/api/peer/sshfwd-install-key", handlePeerSSHFwdInstallKey},
+		{"GET", "/api/peer/status", handlePeerStatus},
+	}
+	for _, rt := range routes {
+		mux.HandleFunc(rt.method+" "+base+rt.path, requirePeerAuth(rt.h))
+		mux.HandleFunc(rt.method+" "+peerRoutePrefix+rt.path, requirePeerSecretHidden(rt.h))
+	}
+	mux.HandleFunc("GET "+peerRoutePrefix+"/api/peer/rescue-offer", requireRescuePeerHidden(handlePeerRescueOffer))
+	mux.HandleFunc("POST "+peerRoutePrefix+"/api/peer/rescue-ack", requireRescuePeerHidden(handlePeerRescueAck))
+	// Anything else under the prefix (other paths, wrong methods) is a plain
+	// 404 rather than the catch-all redirect or a 405 that would reveal routes.
+	mux.HandleFunc(peerRoutePrefix+"/", http.NotFound)
+}
+
 // POST /api/peer/handshake
 func handlePeerHandshake(w http.ResponseWriter, r *http.Request) {
 	var req PeerHandshakeRequest
@@ -204,31 +284,70 @@ func handlePeerHandshake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := loadPeerConfig()
-	c.IsConnected = true
-	c.LastSync = time.Now().Format("2006-01-02 15:04:05")
-
-	if req.PublicIP != "" && req.PanelPort > 0 {
-		scheme := "http"
-		if req.PanelPort == 443 {
-			scheme = "https"
+	var role string
+	_ = updatePeerConfig(func(c *PeerConfig) {
+		c.IsConnected = true
+		c.LastSync = time.Now().Format("2006-01-02 15:04:05")
+		if req.PublicIP != "" && req.PanelPort > 0 {
+			scheme := "http"
+			if req.PanelPort == 443 {
+				scheme = "https"
+			}
+			c.PeerURL = fmt.Sprintf("%s://%s:%d", scheme, req.PublicIP, req.PanelPort)
 		}
-		c.PeerURL = fmt.Sprintf("%s://%s:%d", scheme, req.PublicIP, req.PanelPort)
-	}
-	if req.InternalIP != "" {
-		c.InternalIP = req.InternalIP
-	}
-
-	_ = savePeerConfig(c)
+		if req.PanelPort > 0 && req.PanelPort <= 65535 {
+			c.InternalPort = req.PanelPort
+		}
+		if req.InternalIP != "" {
+			c.InternalIP = req.InternalIP
+		}
+		if bp := strings.Trim(req.BasePath, "/"); bp != "" {
+			c.PeerBasePath = bp
+		}
+		role = c.Role
+	})
 
 	carrierCfg := loadCarrierConfig()
 	writeJSON(w, map[string]any{
 		"status":         "ok",
-		"role":           c.Role,
+		"role":           role,
 		"active_carrier": carrierCfg.ActiveCarrier,
 		"version":        panelVersion,
 		"timestamp":      time.Now().Unix(),
+		// Lets the caller reach this panel directly next time.
+		"base_path":  strings.Trim(cfg.BasePath, "/"),
+		"panel_port": cfg.Port,
 	})
+}
+
+// peerHandshake introduces this panel to the peer and stores the base path and
+// panel port the peer reports back.
+func peerHandshake(role, internalIP string) error {
+	resp, err := sendToPeer("/api/peer/handshake", "POST", PeerHandshakeRequest{
+		Role:       role,
+		PublicIP:   detectPublicIP(),
+		PanelPort:  cfg.Port,
+		InternalIP: internalIP,
+		BasePath:   strings.Trim(cfg.BasePath, "/"),
+	})
+	if err != nil {
+		return err
+	}
+	var hs struct {
+		BasePath  string `json:"base_path"`
+		PanelPort int    `json:"panel_port"`
+	}
+	if json.Unmarshal(resp, &hs) == nil {
+		_ = updatePeerConfig(func(c *PeerConfig) {
+			if bp := strings.Trim(hs.BasePath, "/"); bp != "" {
+				c.PeerBasePath = bp
+			}
+			if hs.PanelPort > 0 && hs.PanelPort <= 65535 {
+				c.InternalPort = hs.PanelPort
+			}
+		})
+	}
+	return nil
 }
 
 // POST /api/peer/apply-carrier
@@ -253,10 +372,7 @@ func handlePeerApplyCarrier(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := loadPeerConfig()
-	c.IsConnected = true
-	c.LastSync = time.Now().Format("2006-01-02 15:04:05")
-	_ = savePeerConfig(c)
+	markPeerSeen()
 
 	carrierCfg := loadCarrierConfig()
 	writeJSON(w, map[string]any{
@@ -288,15 +404,20 @@ func handlePeerApplyEngine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := loadPeerConfig()
-	c.IsConnected = true
-	c.LastSync = time.Now().Format("2006-01-02 15:04:05")
-	_ = savePeerConfig(c)
+	markPeerSeen()
 
 	writeJSON(w, map[string]any{
 		"status": "ok",
 		"engine": engine,
 		"detail": out,
+	})
+}
+
+// markPeerSeen records that the peer just reached us.
+func markPeerSeen() {
+	_ = updatePeerConfig(func(c *PeerConfig) {
+		c.IsConnected = true
+		c.LastSync = time.Now().Format("2006-01-02 15:04:05")
 	})
 }
 
@@ -368,6 +489,14 @@ func handlePeerConfigPost(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 			u = "http://" + u
 		}
+		// A pasted panel URL ("http://ip:port/<base>/") carries the peer's
+		// base path: keep it separately and store only scheme://host:port.
+		if pu, err := url.Parse(u); err == nil && pu.Host != "" {
+			if bp := strings.Trim(pu.Path, "/"); bp != "" {
+				c.PeerBasePath = bp
+			}
+			u = pu.Scheme + "://" + pu.Host
+		}
 		if u != c.PeerURL {
 			c.TLSFingerprint = "" // new peer address: re-pin on first use
 		}
@@ -426,7 +555,7 @@ func peerTLSConfig(c *PeerConfig) *tls.Config {
 			pinned := strings.ToLower(strings.TrimSpace(c.TLSFingerprint))
 			if pinned == "" {
 				c.TLSFingerprint = got
-				if err := savePeerConfig(*c); err != nil {
+				if err := updatePeerConfig(func(p *PeerConfig) { p.TLSFingerprint = got }); err != nil {
 					log.Printf("peer TLS pin: cannot persist fingerprint: %v", err)
 				}
 				return nil
@@ -453,63 +582,7 @@ func sendToPeer(path string, method string, payload any) ([]byte, error) {
 		}
 	}
 
-	cleanPath := path
-	if !strings.HasPrefix(cleanPath, "/") {
-		cleanPath = "/" + cleanPath
-	}
-	basePath := ""
-	if cfg.BasePath != "" {
-		basePath = "/" + strings.Trim(cfg.BasePath, "/")
-	}
-	fullPath := basePath + cleanPath
-
-	var targetURLs []string
-
-	// 1. Try Internal tunnel IP first if configured
-	if c.InternalIP != "" {
-		portList := []int{}
-		if c.InternalPort > 0 {
-			portList = append(portList, c.InternalPort)
-		}
-		if cfg.Port > 0 && cfg.Port != c.InternalPort {
-			portList = append(portList, cfg.Port)
-		}
-		if len(portList) == 0 {
-			portList = []int{8080, 80}
-		}
-		for _, p := range portList {
-			targetURLs = append(targetURLs, fmt.Sprintf("http://%s:%d%s", c.InternalIP, p, fullPath))
-		}
-	}
-
-	// 2. Try Public URL as fallback
-	if c.PeerURL != "" {
-		u := strings.TrimRight(c.PeerURL, "/")
-		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-			u = "http://" + u
-		}
-		targetURLs = append(targetURLs, u+fullPath)
-
-		parsed, err := url.Parse(u)
-		if err == nil {
-			scheme := parsed.Scheme
-			if scheme == "" {
-				scheme = "http"
-			}
-			host := parsed.Hostname()
-			if parsed.Port() == "" {
-				if cfg.Port > 0 {
-					targetURLs = append(targetURLs, fmt.Sprintf("%s://%s:%d%s", scheme, host, cfg.Port, fullPath))
-				}
-				for _, p := range []int{effectiveTLSPort(), 7443, 7777, 8080} {
-					if p != cfg.Port && p > 0 {
-						targetURLs = append(targetURLs, fmt.Sprintf("%s://%s:%d%s", scheme, host, p, fullPath))
-					}
-				}
-			}
-		}
-	}
-
+	targetURLs := peerTargetURLs(c, path)
 	if len(targetURLs) == 0 {
 		return nil, fmt.Errorf("no peer address configured (both InternalIP and PeerURL are empty)")
 	}
@@ -521,10 +594,22 @@ func sendToPeer(path string, method string, payload any) ([]byte, error) {
 	client := &http.Client{
 		Timeout:   4 * time.Second,
 		Transport: tr,
+		// A wrong path hits the catch-all redirect to the login page; following
+		// it turned that into a 200 "success", so never follow redirects.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
 	var lastErr error
+	deadHosts := map[string]bool{} // scheme://host:port that failed to connect
 	for _, target := range targetURLs {
+		pu, _ := url.Parse(target)
+		hostKey := ""
+		if pu != nil {
+			hostKey = pu.Scheme + "://" + pu.Host
+		}
+		if deadHosts[hostKey] {
+			continue // no point retrying an unreachable address with another path
+		}
 		req, err := http.NewRequest(method, target, bytes.NewReader(bodyBytes))
 		if err != nil {
 			lastErr = err
@@ -539,6 +624,7 @@ func sendToPeer(path string, method string, payload any) ([]byte, error) {
 		resp, err := client.Do(req)
 		if err != nil {
 			lastErr = err
+			deadHosts[hostKey] = true
 			continue
 		}
 
@@ -549,20 +635,82 @@ func sendToPeer(path string, method string, payload any) ([]byte, error) {
 			continue
 		}
 
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			// Successful connection!
-			c.IsConnected = true
-			c.LastSync = time.Now().Format("2006-01-02 15:04:05")
-			_ = savePeerConfig(c)
+		// Every peer endpoint answers JSON; an HTML page means we reached
+		// something other than the peer API.
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 && json.Valid(respBytes) {
+			markPeerSeen()
 			return respBytes, nil
 		}
 
-		lastErr = fmt.Errorf("peer returned HTTP %d: %s", resp.StatusCode, string(respBytes))
+		lastErr = fmt.Errorf("peer returned HTTP %d: %s", resp.StatusCode, truncateForError(respBytes))
 	}
 
-	c.IsConnected = false
-	_ = savePeerConfig(c)
+	_ = updatePeerConfig(func(p *PeerConfig) { p.IsConnected = false })
 	return nil, lastErr
+}
+
+func truncateForError(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) > 200 {
+		s = s[:200] + "..."
+	}
+	return s
+}
+
+// peerTargetURLs lists the URLs to try for a peer API path, best first:
+// the fixed peer prefix (works without knowing the peer's base path), then
+// the peer's own base path when known, on the tunnel IP and then the public URL.
+func peerTargetURLs(c PeerConfig, path string) []string {
+	cleanPath := "/" + strings.TrimLeft(path, "/")
+	prefixes := []string{peerRoutePrefix}
+	if bp := strings.Trim(c.PeerBasePath, "/"); bp != "" {
+		prefixes = append(prefixes, "/"+bp)
+	} else if bp := strings.Trim(cfg.BasePath, "/"); bp != "" {
+		// Legacy fallback for old peers installed with the same base path.
+		prefixes = append(prefixes, "/"+bp)
+	}
+
+	var bases []string
+	if c.InternalIP != "" {
+		ports := []int{}
+		if c.InternalPort > 0 {
+			ports = append(ports, c.InternalPort)
+		}
+		if cfg.Port > 0 && cfg.Port != c.InternalPort {
+			ports = append(ports, cfg.Port)
+		}
+		for _, p := range ports {
+			bases = append(bases, fmt.Sprintf("http://%s:%d", c.InternalIP, p))
+		}
+	}
+	if c.PeerURL != "" {
+		u := strings.TrimRight(c.PeerURL, "/")
+		if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+			u = "http://" + u
+		}
+		if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
+			host := parsed.Hostname()
+			if parsed.Port() != "" {
+				bases = append(bases, parsed.Scheme+"://"+parsed.Host)
+			} else {
+				seen := map[int]bool{}
+				for _, p := range []int{c.InternalPort, cfg.Port, effectiveTLSPort(), 7443, 7777, 8080} {
+					if p > 0 && !seen[p] {
+						seen[p] = true
+						bases = append(bases, fmt.Sprintf("%s://%s:%d", parsed.Scheme, host, p))
+					}
+				}
+			}
+		}
+	}
+
+	var out []string
+	for _, b := range bases {
+		for _, pre := range prefixes {
+			out = append(out, b+pre+cleanPath)
+		}
+	}
+	return out
 }
 
 // testPeerLink measures HTTP ping round-trip time to peer and updates status.
@@ -571,18 +719,19 @@ func testPeerLink() (bool, float64, error) {
 	_, err := sendToPeer("/api/peer/ping", "POST", map[string]string{"action": "ping"})
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
 
-	c := loadPeerConfig()
 	if err != nil {
-		c.IsConnected = false
-		c.LatencyMs = 0
-		_ = savePeerConfig(c)
+		_ = updatePeerConfig(func(c *PeerConfig) {
+			c.IsConnected = false
+			c.LatencyMs = 0
+		})
 		return false, 0, err
 	}
 
-	c.IsConnected = true
-	c.LatencyMs = latency
-	c.LastSync = time.Now().Format("2006-01-02 15:04:05")
-	_ = savePeerConfig(c)
+	_ = updatePeerConfig(func(c *PeerConfig) {
+		c.IsConnected = true
+		c.LatencyMs = latency
+		c.LastSync = time.Now().Format("2006-01-02 15:04:05")
+	})
 	return true, latency, nil
 }
 
@@ -644,13 +793,7 @@ func peerSyncTick() {
 				localInner = defaultForeignGRE
 			}
 			innerIP := strings.Split(localInner, "/")[0]
-			_, err := sendToPeer("/api/peer/handshake", "POST", PeerHandshakeRequest{
-				Role:       "worker",
-				PublicIP:   detectPublicIP(),
-				PanelPort:  cfg.Port,
-				InternalIP: innerIP,
-			})
-			if err == nil {
+			if err := peerHandshake("worker", innerIP); err == nil {
 				log.Printf("[PeerSync] Background handshake succeeded with master")
 			}
 		} else {

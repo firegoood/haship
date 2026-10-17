@@ -39,6 +39,8 @@ func TestMain(m *testing.M) {
 	spokeFetcher = func(p peerRecord) *SpokeProbeReport { return nil }
 	// The post-switch health run sleeps then probes; tests opt in explicitly.
 	tunnelHealthAutoRun = false
+	// detectPublicIP's "what is my IP" fallback must not reach the internet.
+	externalIPLookup = func() string { return "" }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)

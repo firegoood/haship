@@ -617,6 +617,8 @@ const I18N = {
     rsc_idle_ok: "No problem detected. If a peer can ping you but connections time out, this tool reverses the direction automatically.",
     rsc_idle_warn: "A one-way block was detected: ping works but TCP is dropped. Enable Rescue to reverse the direction.",
     rsc_b_off: "Off", rsc_b_susp: "Block detected", rsc_b_on: "Active", rsc_b_on_auto: "Active (Auto)", rsc_b_wait: "Waiting for peer", rsc_b_lift: "Block lifted",
+    rsc_auto_is_off: "Auto-enable: off", rsc_auto_is_on: "Auto-enable: on",
+    rsc_auto_on_q: "Let this panel enable Rescue by itself when a one-way block is detected? A false detection (for example a firewalled panel port) would then change the server without asking.",
     rsc_check: "Check now", rsc_enable: "Enable Rescue", rsc_join: "Join with code", rsc_apply: "Apply code", rsc_disable: "Disable and remove",
     rsc_cancel: "Cancel", rsc_getcode: "Show rescue code", rsc_copy: "Copy code", rsc_nocfg: "frp binaries are missing on this server. Run hashem update first.",
     rsc_origin: "This server is the blocked side. {n} port(s) are forwarded through {ip}.", rsc_origin_auto: "One-way block detected: connectivity automatically established through {ip} ({n} ports forwarded).", rsc_entry: "This server is the entry. {n} port(s) are served here and tunnelled to {ip}.", rsc_entry_auto: "This server is acting as the entry for {ip} ({n} ports tunnelled).",
@@ -1032,6 +1034,8 @@ const I18N = {
     rsc_idle_ok: "No problem detected. If a peer can ping you but connections time out, this tool reverses the direction automatically.",
     rsc_idle_warn: "A one-way block was detected: ping works but TCP is dropped. Enable Rescue to reverse the direction.",
     rsc_b_off: "Off", rsc_b_susp: "Block detected", rsc_b_on: "Active", rsc_b_on_auto: "Active (Auto)", rsc_b_wait: "Waiting for peer", rsc_b_lift: "Block lifted",
+    rsc_auto_is_off: "فعال‌سازی خودکار: خاموش", rsc_auto_is_on: "فعال‌سازی خودکار: روشن",
+    rsc_auto_on_q: "پنل وقتی انسداد یک‌طرفه تشخیص داد، Rescue را خودش فعال کند؟ اگر تشخیص اشتباه باشد (مثلاً پورت پنل با فایروال بسته باشد)، سرور بدون پرسیدن تغییر می‌کند.",
     rsc_check: "Check now", rsc_enable: "Enable Rescue", rsc_join: "Join with code", rsc_apply: "Apply code", rsc_disable: "Disable and remove",
     rsc_cancel: "Cancel", rsc_getcode: "Show rescue code", rsc_copy: "Copy code", rsc_nocfg: "frp binaries are missing on this server. Run hashem update first.",
     rsc_origin: "This server is the blocked side. {n} port(s) are forwarded through {ip}.", rsc_origin_auto: "One-way block detected: connectivity automatically established through {ip} ({n} ports forwarded).", rsc_entry: "This server is the entry. {n} port(s) are served here and tunnelled to {ip}.", rsc_entry_auto: "This server is acting as the entry for {ip} ({n} ports tunnelled).",
@@ -5641,6 +5645,7 @@ function rscRender() {
     acts.appendChild(rscBtn('rscOpenEnable', 'rsc_enable', 'hashem-btn-primary', rscOpenEnable));
     acts.appendChild(rscBtn('rscOpenJoin', 'rsc_join', 'hashem-btn-secondary', () => { _rscMode = 'join'; rscRender(); $('rscCode').focus(); }));
     acts.appendChild(rscBtn('rscProbe', 'rsc_check', 'hashem-btn-ghost', rscProbe));
+    acts.appendChild(rscBtn('rscAuto', s.auto_mode ? 'rsc_auto_is_on' : 'rsc_auto_is_off', 'hashem-btn-ghost', rscToggleAuto));
   }
   rscSet('rscMsg', msg);
 }
@@ -5650,6 +5655,12 @@ async function rscOpenEnable() {
   if (!$('rscRemote').value && s.suggest_remote) $('rscRemote').value = s.suggest_remote;
   if (!$('rscPorts').value && (s.suggest_ports || []).length) $('rscPorts').value = s.suggest_ports.join(', ');
   rscRender(); $('rscRemote').focus();
+}
+async function rscToggleAuto() {
+  const on = !(_rsc && _rsc.auto_mode);
+  if (on && !await entConfirm(tr('rsc_title', ''), tr('rsc_auto_on_q', ''), tr('rsc_enable', ''))) return;
+  try { await api('/api/rescue', { action: 'auto', enabled: on }); await loadRescue(); }
+  catch (e) { toastErr(e.message || String(e)); }
 }
 async function rscProbe() {
   const b = $('rscProbe'); if (b) b.disabled = true;
