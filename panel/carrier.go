@@ -372,7 +372,7 @@ func updateFrpcTransport(proto string) error {
 		}
 		lines = newLines
 	}
-	if err := os.WriteFile(frpcPath, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+	if err := writeTokenFile(frpcPath, []byte(strings.Join(lines, "\n"))); err != nil {
 		return err
 	}
 	if _, err := exec.LookPath("systemctl"); err == nil {

@@ -172,3 +172,55 @@ func TestUpdateServiceRemoteIP(t *testing.T) {
 
 	updateServiceRemoteIP(filepath.Join(dir, "missing.service"), "a", "b") // must not panic
 }
+
+// L15: only the exact old address is rewritten, not addresses containing it.
+func TestUpdateServiceRemoteIPExactMatch(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "gre.service")
+	unit := "ExecStart=/sbin/ip tunnel add g mode gre remote 1.2.3.4 local 1.2.3.45\nExecStartPost=/bin/ping -c1 1.2.3.4\n"
+	_ = os.WriteFile(f, []byte(unit), 0644)
+	updateServiceRemoteIP(f, "1.2.3.4", "9.9.9.9")
+	b, _ := os.ReadFile(f)
+	want := "ExecStart=/sbin/ip tunnel add g mode gre remote 9.9.9.9 local 1.2.3.45\nExecStartPost=/bin/ping -c1 9.9.9.9\n"
+	if string(b) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", b, want)
+	}
+}
+
+// H3: editing an FRP peer's ports on Iran must not write [[proxies]] into
+// its frps config (frps rejects them) nor restart frps.
+func TestEditPeerDirectLeavesFrpsConfigAlone(t *testing.T) {
+	withPeersFile(t, `{"peers":[{"id":2,"name":"p2","ports":[8080],"gre_if":"gre-t2","frps_svc":"frps-2"}]}`)
+	oldFrp := frpDir
+	frpDir = t.TempDir()
+	t.Cleanup(func() { frpDir = oldFrp })
+	frps := "bindPort = 7001\nauth.token = \"tok\"\n"
+	path := filepath.Join(frpDir, "frps-2.toml")
+	_ = os.WriteFile(path, []byte(frps), 0600)
+
+	peer := findPeer(2)
+	ports := []int{9090}
+	warning, err := editPeerDirect(peer, peerPatchRequest{ID: 2, Ports: &ports})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != frps {
+		t.Fatalf("frps config modified:\n%s", b)
+	}
+	if !strings.Contains(warning, "foreign server") {
+		t.Errorf("expected a hint to apply ports on the foreign server, got %q", warning)
+	}
+	if p := findPeer(2); p == nil || len(p.Ports) != 1 || p.Ports[0] != 9090 {
+		t.Fatalf("ports not saved to peers.json: %+v", p)
+	}
+}
+
+func TestMaxPeersDefaultAndOverride(t *testing.T) {
+	t.Setenv("GRE_MAX_PEERS", "")
+	if maxPeers() != 10 {
+		t.Fatalf("default max peers = %d, want 10", maxPeers())
+	}
+	t.Setenv("GRE_MAX_PEERS", "3")
+	if maxPeers() != 3 {
+		t.Fatalf("GRE_MAX_PEERS override ignored")
+	}
+}

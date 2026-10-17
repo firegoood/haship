@@ -30,7 +30,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	if m := snap.Main; m != nil {
 		lv.HealthState, lv.ICMPFiltered, lv.LatencyMs, lv.LatencyKind, lv.Reasons = m.HealthState, m.ICMPFiltered, m.LatencyMs, m.LatencyKind, m.Reasons
 	}
-	resp := map[string]any{"local": lv, "peers": peers, "peer_count": len(peers), "snapshot_age_ms": snap.AgeMs()}
+	resp := map[string]any{"local": lv, "peers": peers, "peer_count": len(peers), "peer_max": maxPeers(), "snapshot_age_ms": snap.AgeMs()}
 	if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
 		resp["csrf_token"] = GenerateCSRFToken(c.Value)
 	}
@@ -1193,10 +1193,20 @@ func writeEngineFile(dir, name, content string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+	if err := writeTokenFile(filepath.Join(dir, name), []byte(content)); err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Join(dir, name), err)
 	}
 	return nil
+}
+
+// writeTokenFile writes a file that holds a token (FRP/Backhaul configs) as
+// 0600. os.WriteFile keeps the mode of an existing file, so older installs'
+// 0644 configs are tightened with an explicit chmod.
+func writeTokenFile(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0600)
 }
 
 // ensureFRPServiceUnits enforces high-concurrency systemd limits (LimitNOFILE, TasksMax, Restart=always)

@@ -2047,11 +2047,17 @@ backhaul_write_client_conf_v2() {
 }
 
 backhaul_write_server_conf() {
-    if backhaul_is_v2; then backhaul_write_server_conf_v2 "$@"; else backhaul_write_server_conf_v1 "$@"; fi
+    local rc=0
+    if backhaul_is_v2; then backhaul_write_server_conf_v2 "$@" || rc=$?; else backhaul_write_server_conf_v1 "$@" || rc=$?; fi
+    chmod 600 "$1" 2>/dev/null || true  # holds the auth token
+    return "$rc"
 }
 
 backhaul_write_client_conf() {
-    if backhaul_is_v2; then backhaul_write_client_conf_v2 "$@"; else backhaul_write_client_conf_v1 "$@"; fi
+    local rc=0
+    if backhaul_is_v2; then backhaul_write_client_conf_v2 "$@" || rc=$?; else backhaul_write_client_conf_v1 "$@" || rc=$?; fi
+    chmod 600 "$1" 2>/dev/null || true  # holds the auth token
+    return "$rc"
 }
 
 setup_backhaul_server_systemd() {
@@ -2721,6 +2727,7 @@ transport.tcpKeepalive = 15
 transport.heartbeatTimeout = 45
 transport.maxPoolCount = ${MAX_POOL}
 EOF
+    chmod 600 "${CONFIG_DIR}/frps.toml" 2>/dev/null || true  # holds the auth token
     cat <<EOF > /etc/systemd/system/frps.service
 [Unit]
 Description=FRP Server Service
@@ -2924,6 +2931,7 @@ transport.dialServerKeepalive = 15
 transport.poolCount = ${EFF_POOL}
 
 EOF
+    chmod 600 "${CONFIG_DIR}/frpc.toml" 2>/dev/null || true  # holds the auth token
     local PROXY_TARGET_IP="${RELAY_IP:-127.0.0.1}"
     local PP_LINE=""
     if [[ "$PROXY_PROTOCOL" == "v2" || "$PROXY_PROTOCOL" == "v1" ]]; then
@@ -3474,11 +3482,13 @@ setup_gre_backhaul_foreign_server_noninteractive() {
 
 # ---- Multi-peer tunnels: up to MAX_PEERS foreign servers on one Iran ----
 # Peer 1 reuses the legacy names (gre-tunnel, frps.toml, frps.service) so
-# existing installs keep working. Peers 2..5 get gre-tN + frps-N.toml +
+# existing installs keep working. Peers 2..MAX_PEERS get gre-tN + frps-N.toml +
 # frps-N.service, each with its own token and control port (one frps
 # understands only one token). Registry: /etc/gre-panel/peers.json.
 PEERS_FILE="${PANEL_CONFIG_DIR}/peers.json"
-MAX_PEERS=5
+# Must match maxPeers() in the panel (peers_edit.go).
+MAX_PEERS="${GRE_MAX_PEERS:-10}"
+[[ "$MAX_PEERS" =~ ^[1-9][0-9]*$ ]] || MAX_PEERS=10
 
 peer_init() {
     mkdir -p "$(dirname "$PEERS_FILE")" "$CONFIG_DIR"
@@ -3548,6 +3558,7 @@ transport.tcpKeepalive = 15
 transport.heartbeatTimeout = 45
 transport.maxPoolCount = ${MAX_POOL}
 EOF
+    chmod 600 "${CONFIG_DIR}/frps${SUF}.toml" 2>/dev/null || true  # holds the auth token
     local SVC="frps${SUF}"
     cat <<EOF > /etc/systemd/system/${SVC}.service
 [Unit]
@@ -3992,34 +4003,10 @@ PYEOF
 
     # 3. Apply Ports update if changed
     if [[ -n "$CLEANED" ]]; then
-        echo -e "${CYAN}[*] Updating forwarded ports for ${CUR_SVC}...${NC}"
-        local TOML_FILE="/etc/frp/frps-${ID}.toml"
-        [[ ! -f "$TOML_FILE" && "$ID" -eq 1 ]] && TOML_FILE="/etc/frp/frps.toml"
-        if [[ -f "$TOML_FILE" ]]; then
-            PEERS_F="$PEERS_FILE" TOML_F="$TOML_FILE" PORTS_CLEAN="$CLEANED" python3 <<'PYEOF'
-import os
-tf = os.environ["TOML_F"]
-ports = [int(x) for x in os.environ["PORTS_CLEAN"].split()]
-lines = open(tf).readlines()
-header = []
-in_proxy = False
-for line in lines:
-    t = line.strip()
-    if t.startswith("[[proxies]]"):
-        in_proxy = True
-        continue
-    if t.startswith("[") and not t.startswith("[[proxies]]"):
-        in_proxy = False
-    if not in_proxy:
-        header.append(line)
-out = "".join(header).rstrip() + "\n"
-for p in ports:
-    out += f"\n[[proxies]]\nname = \"tcp_{p}\"\ntype = \"tcp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = {p}\nremotePort = {p}\n"
-    out += f"\n[[proxies]]\nname = \"udp_{p}\"\ntype = \"udp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = {p}\nremotePort = {p}\n"
-open(tf, "w").write(out)
-PYEOF
-            systemctl reload-or-restart "$CUR_SVC" >/dev/null 2>&1 || true
-        fi
+        # FRP proxies live in frpc.toml on the foreign server; frps only
+        # accepts them, and [[proxies]] in frps-N.toml breaks it. So the Iran
+        # side just records the ports (peers.json, step 4) and opens the firewall.
+        echo -e "${YELLOW}[i] Ports saved for ${CUR_SVC}. Apply them on the foreign server too (re-run its setup with the updated bundle).${NC}"
         if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
             for p in $CLEANED; do
                 ufw allow "$p"/tcp >/dev/null 2>&1 || true
@@ -8779,6 +8766,7 @@ proxyBindAddr = "0.0.0.0"
 auth.token = "hashem-bagher-sec"
 transport.tcpMux = false
 EOF
+                chmod 600 /etc/gre-panel/bagher/frps.toml 2>/dev/null || true  # holds the auth token
                 cat <<EOF > /etc/systemd/system/hashem-bagher-frps.service
 [Unit]
 Description=Hashem Bagher Engine FRP Server (Iran)
@@ -9040,6 +9028,7 @@ localIP = "127.0.0.1"
 localPort = 1040
 remotePort = 1040
 EOF
+            chmod 600 /etc/gre-panel/bagher/frpc.toml 2>/dev/null || true  # holds the auth token
 
             echo -e "${CYAN}[*] Enabling and starting hashem-bagher-frpc.service...${NC}"
             cat <<'EOF' > /etc/systemd/system/hashem-bagher-frpc.service

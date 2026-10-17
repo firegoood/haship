@@ -370,13 +370,7 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		if body.Autogen || body.Token == "" {
 			body.Token = randomToken(32)
 		}
-		maxPeers := 10
-		if v := os.Getenv("GRE_MAX_PEERS"); v != "" {
-			if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-				maxPeers = parsed
-			}
-		}
-		if len(loadPeers()) >= maxPeers {
+		if len(loadPeers()) >= maxPeers() {
 			writeAPIError(w, r, "E-PEER-01", "")
 			return
 		}

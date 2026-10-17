@@ -18,29 +18,92 @@ func allowUFWPorts(ports []int) {
 	}
 }
 
-// rewriteTomlPorts rebuilds the [[proxies]] sections of an frps/frpc TOML file
-// with the new port list. Non-proxy lines (header, [server], bindPort, etc.)
-// are kept verbatim; only the [[proxies]] blocks are replaced.
+// rewriteTomlPorts rebuilds the [[proxies]] sections of an frpc TOML file
+// with the new port list. Non-proxy lines (header, serverAddr, etc.) are kept
+// verbatim. Per-proxy options (localIP, transport.proxyProtocolVersion,
+// transport.useEncryption, ...) are carried over: from the old block for the
+// same type and port when there is one, otherwise from the first old block of
+// that type, so a backend that needs PROXY protocol keeps working.
 func rewriteTomlPorts(src string, ports []int) string {
+	type proxyOpts struct {
+		localIP string
+		extras  []string
+	}
+	byPort := map[string]proxyOpts{} // "tcp:443"
+	byType := map[string]proxyOpts{} // first block per type
+
 	var header strings.Builder
 	inProxy := false
+	var typ string
+	var port int
+	var cur proxyOpts
+	flush := func() {
+		if !inProxy || typ == "" {
+			return
+		}
+		if port > 0 {
+			byPort[fmt.Sprintf("%s:%d", typ, port)] = cur
+		}
+		if _, ok := byType[typ]; !ok {
+			byType[typ] = cur
+		}
+	}
 	for _, line := range strings.Split(src, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[[proxies]]") {
-			inProxy = true
+			flush()
+			inProxy, typ, port, cur = true, "", 0, proxyOpts{}
 			continue
 		}
-		if strings.HasPrefix(trimmed, "[") && !strings.HasPrefix(trimmed, "[[proxies]]") {
+		if strings.HasPrefix(trimmed, "[") {
+			flush()
 			inProxy = false
 		}
 		if !inProxy {
 			header.WriteString(line)
 			header.WriteByte('\n')
+			continue
+		}
+		key, val, ok := strings.Cut(trimmed, "=")
+		if !ok || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		key, val = strings.TrimSpace(key), strings.TrimSpace(val)
+		switch key {
+		case "name":
+		case "type":
+			typ = strings.Trim(val, `"'`)
+		case "localPort":
+			if port == 0 {
+				port, _ = strconv.Atoi(val)
+			}
+		case "remotePort":
+			port, _ = strconv.Atoi(val)
+		case "localIP":
+			cur.localIP = strings.Trim(val, `"'`)
+		default:
+			cur.extras = append(cur.extras, trimmed)
 		}
 	}
+	flush()
+
+	block := func(typ string, p int) string {
+		o, ok := byPort[fmt.Sprintf("%s:%d", typ, p)]
+		if !ok {
+			o = byType[typ]
+		}
+		if o.localIP == "" {
+			o.localIP = "127.0.0.1"
+		}
+		s := fmt.Sprintf("\n[[proxies]]\nname = \"%s_%d\"\ntype = \"%s\"\nlocalIP = %q\nlocalPort = %d\nremotePort = %d\n", typ, p, typ, o.localIP, p, p)
+		for _, e := range o.extras {
+			s += e + "\n"
+		}
+		return s
+	}
 	result := strings.TrimRight(header.String(), "\n") + "\n"
-	for _, port := range ports {
-		result += fmt.Sprintf("\n[[proxies]]\nname = \"tcp_%d\"\ntype = \"tcp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = %d\nremotePort = %d\n\n[[proxies]]\nname = \"udp_%d\"\ntype = \"udp\"\nlocalIP = \"127.0.0.1\"\nlocalPort = %d\nremotePort = %d\n", port, port, port, port, port, port)
+	for _, p := range ports {
+		result += block("tcp", p) + block("udp", p)
 	}
 	return result
 }

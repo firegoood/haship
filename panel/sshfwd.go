@@ -490,7 +490,7 @@ func applyBagherBundle(b *BagherBundle) error {
 
 	_ = os.MkdirAll("/etc/gre-panel/bagher", 0755)
 	frpcToml := buildFRPCConfig(b.FRPPort, b.PoolCount, b.Ports)
-	if err := os.WriteFile("/etc/gre-panel/bagher/frpc.toml", []byte(frpcToml), 0644); err != nil {
+	if err := writeTokenFile("/etc/gre-panel/bagher/frpc.toml", []byte(frpcToml)); err != nil {
 		return fmt.Errorf("failed writing frpc.toml: %w", err)
 	}
 
@@ -731,7 +731,7 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 	if isBagher {
 		_ = os.MkdirAll("/etc/gre-panel/bagher", 0755)
 		frpsToml := buildFRPSConfig(cfg)
-		if err := os.WriteFile("/etc/gre-panel/bagher/frps.toml", []byte(frpsToml), 0644); err != nil {
+		if err := writeTokenFile("/etc/gre-panel/bagher/frps.toml", []byte(frpsToml)); err != nil {
 			return fmt.Errorf("failed writing frps.toml: %w", err)
 		}
 		if err := os.WriteFile("/etc/systemd/system/hashem-bagher-frps.service", []byte(buildFRPSService()), 0644); err != nil {

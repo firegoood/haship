@@ -1615,7 +1615,7 @@ async function updatePeerHints(s) {
     if (!$('pLocalPub').value) $('pLocalPub').value = d.local_public || '';
     const n = (s && s.peer_count) || 0;
     const hint = $('peerCountHint');
-    if (hint) hint.textContent = n + ' / 5 tunnels';
+    if (hint) hint.textContent = n + ' / ' + ((s && s.peer_max) || 10) + ' tunnels';
     if (!$('pFrpPort').value) $('pFrpPort').value = 7000 + n;
     if (!$('pLocalGre').value) $('pLocalGre').value = '10.1' + (n + 1) + '.0.2';
     if (!$('pPeerGre').value) $('pPeerGre').value = '10.1' + (n + 1) + '.0.1';

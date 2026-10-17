@@ -738,7 +738,6 @@ func main() {
 	go startFleetSampler()
 	go startRescueMonitor()
 	go startClusterMonitor()
-	go startNativeAutoPoolWorker()
 	go func() {
 		cc := loadCarrierConfig()
 		if strings.HasPrefix(cc.ActiveCarrier, "wss") {

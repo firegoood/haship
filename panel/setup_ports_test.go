@@ -233,3 +233,45 @@ func TestHandlePeersPatchFullUpdate(t *testing.T) {
 		t.Errorf("expected 409 E-PEER-02 for port clash, got status %d body %s", w3.Code, w3.Body.String())
 	}
 }
+
+// M14: rewriting the port list keeps per-proxy options such as PROXY
+// protocol and encryption instead of dropping them.
+func TestRewriteTomlPortsKeepsProxyOptions(t *testing.T) {
+	src := `serverAddr = "10.10.10.1"
+serverPort = 7000
+
+[[proxies]]
+name = "tcp_443"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 443
+remotePort = 443
+transport.proxyProtocolVersion = "v2"
+transport.useEncryption = true
+
+[[proxies]]
+name = "udp_443"
+type = "udp"
+localIP = "127.0.0.1"
+localPort = 443
+remotePort = 443
+`
+	out := rewriteTomlPorts(src, []int{443, 8443})
+	if strings.Count(out, `transport.proxyProtocolVersion = "v2"`) != 2 {
+		t.Fatalf("proxy protocol not kept on both tcp proxies:\n%s", out)
+	}
+	if strings.Count(out, "transport.useEncryption = true") != 2 {
+		t.Fatalf("encryption not kept:\n%s", out)
+	}
+	if strings.Count(out, "[[proxies]]") != 4 || !strings.Contains(out, `name = "udp_8443"`) {
+		t.Fatalf("unexpected proxy set:\n%s", out)
+	}
+	udp := out[strings.Index(out, `name = "udp_443"`):]
+	udp = udp[:strings.Index(udp, "[[proxies]]")]
+	if strings.Contains(udp, "proxyProtocolVersion") {
+		t.Fatalf("tcp-only option copied onto a udp proxy:\n%s", udp)
+	}
+	if !strings.HasPrefix(out, "serverAddr = \"10.10.10.1\"\nserverPort = 7000\n") {
+		t.Fatalf("header not kept:\n%s", out)
+	}
+}

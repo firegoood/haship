@@ -57,7 +57,18 @@ func handlePeersGet(w http.ResponseWriter, r *http.Request) {
 	snap := currentSnapshot()
 	setSnapshotAgeHeader(w, snap)
 	peers := snap.PeersAged()
-	writeJSON(w, map[string]any{"peers": peers, "peer_count": len(peers), "max": 5, "snapshot_age_ms": snap.AgeMs()})
+	writeJSON(w, map[string]any{"peers": peers, "peer_count": len(peers), "max": maxPeers(), "snapshot_age_ms": snap.AgeMs()})
+}
+
+// maxPeers is the foreign-server cap; hashem.sh enforces the same value
+// (MAX_PEERS, also overridable with GRE_MAX_PEERS).
+func maxPeers() int {
+	if v := os.Getenv("GRE_MAX_PEERS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 10
 }
 
 // POST /api/peers just proxies validation errors from /api/setup role=add-peer.
@@ -553,7 +564,7 @@ func editPeerDirect(peer *peerRecord, req peerPatchRequest) (string, error) {
 			}
 			if rawToml, err := os.ReadFile(tomlPath); err == nil {
 				updated := rewriteBackhaulTomlPorts(string(rawToml), rawList)
-				_ = os.WriteFile(tomlPath, []byte(updated), 0644)
+				_ = writeTokenFile(tomlPath, []byte(updated))
 			}
 			svc := peer.FrpsSvc
 			if svc == "" {
@@ -566,24 +577,15 @@ func editPeerDirect(peer *peerRecord, req peerPatchRequest) (string, error) {
 			_ = runSystemctl("reload-or-restart", svc)
 			allowUFWPorts(numList)
 		} else {
-			tomlPath := filepath.Join(frpDir, fmt.Sprintf("frps-%d.toml", peer.ID))
-			if _, err := os.Stat(tomlPath); err != nil && peer.ID == 1 {
-				tomlPath = filepath.Join(frpDir, "frps.toml")
-			}
-			if rawToml, err := os.ReadFile(tomlPath); err == nil {
-				updated := rewriteTomlPorts(string(rawToml), numList)
-				_ = os.WriteFile(tomlPath, []byte(updated), 0644)
-			}
-			svc := peer.FrpsSvc
-			if svc == "" {
-				if peer.ID > 1 {
-					svc = fmt.Sprintf("frps-%d", peer.ID)
-				} else {
-					svc = "frps"
-				}
-			}
-			_ = runSystemctl("reload-or-restart", svc)
+			// FRP proxies are defined by frpc on the foreign server; frps only
+			// accepts them. Writing [[proxies]] into frps-N.toml is invalid
+			// (strict config rejects it) and took the peer's tunnel down, so
+			// the Iran side only records the ports and opens the firewall.
 			allowUFWPorts(numList)
+			if warning != "" {
+				warning += "; "
+			}
+			warning += "Ports saved. Apply them on the foreign server too (re-run its setup with the updated bundle)."
 		}
 	}
 
@@ -659,7 +661,7 @@ func editMainTunnelDirect(req peerPatchRequest, legacyPeer *peerRecord) (string,
 	if req.RawPorts != nil {
 		if rawToml, err := os.ReadFile(filepath.Join(backhaulDir, "config.toml")); err == nil {
 			updated := rewriteBackhaulTomlPorts(string(rawToml), *req.RawPorts)
-			_ = os.WriteFile(filepath.Join(backhaulDir, "config.toml"), []byte(updated), 0644)
+			_ = writeTokenFile(filepath.Join(backhaulDir, "config.toml"), []byte(updated))
 			_ = runSystemctl("reload-or-restart", "backhaul-server")
 			allowUFWPorts(extractNumericPorts(*req.RawPorts))
 		}
@@ -867,8 +869,15 @@ func updateServiceRemoteIP(serviceFile string, oldIP string, newIP string) {
 		return
 	}
 	content := string(data)
-	if oldIP != "" && strings.Contains(content, oldIP) {
-		content = strings.ReplaceAll(content, oldIP, newIP)
+	// Match oldIP only as a whole address: a plain substring replace also
+	// rewrote 1.2.3.45 when oldIP was 1.2.3.4.
+	exact := regexp.MustCompile(`(^|[^0-9.])` + regexp.QuoteMeta(oldIP) + `($|[^0-9.])`)
+	if oldIP != "" && exact.MatchString(content) {
+		// Repeat: back-to-back occurrences share a separator character, so
+		// one pass can miss every second one.
+		for i := 0; i < 4 && oldIP != newIP && exact.MatchString(content); i++ {
+			content = exact.ReplaceAllString(content, "${1}"+newIP+"${2}")
+		}
 	} else {
 		re := regexp.MustCompile(`remote\s+\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}`)
 		content = re.ReplaceAllString(content, "remote "+newIP)
@@ -905,21 +914,12 @@ func editMainTunnelPortsDirect(newPorts []int) error {
 		}
 	}
 
-	// 2. Foreign client toml (/etc/frp/frpc.toml)
+	// 2. Foreign client toml (/etc/frp/frpc.toml): the only place FRP
+	// proxies live. frps.toml is left alone (see editPeerDirect).
 	if rawToml, err := os.ReadFile(filepath.Join(frpDir, "frpc.toml")); err == nil {
 		updated := rewriteTomlPorts(string(rawToml), newPorts)
-		_ = os.WriteFile(filepath.Join(frpDir, "frpc.toml"), []byte(updated), 0644)
+		_ = writeTokenFile(filepath.Join(frpDir, "frpc.toml"), []byte(updated))
 		_ = runSystemctl("reload-or-restart", "frpc")
-		editedAny = true
-	}
-
-	// 3. Server toml (/etc/frp/frps.toml)
-	if rawToml, err := os.ReadFile(filepath.Join(frpDir, "frps.toml")); err == nil {
-		if strings.Contains(string(rawToml), "[[proxies]]") {
-			updated := rewriteTomlPorts(string(rawToml), newPorts)
-			_ = os.WriteFile(filepath.Join(frpDir, "frps.toml"), []byte(updated), 0644)
-		}
-		_ = runSystemctl("reload-or-restart", "frps")
 		editedAny = true
 	}
 
