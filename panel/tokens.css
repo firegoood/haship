@@ -79,7 +79,7 @@ html{-webkit-text-size-adjust:100%;-moz-text-size-adjust:100%;text-size-adjust:1
   --ok: #22c55e;
   --wr: #eab308;
   --er: #ef4444;
-  --info: #3b82f6;
+  --info: #38bdf8;
   --spring: cubic-bezier(.32, .72, 0, 1);
   /* Accent — single identity color, derived tints. Dark & light share the hue. */
   --accent-h: 217;
@@ -87,6 +87,8 @@ html{-webkit-text-size-adjust:100%;-moz-text-size-adjust:100%;text-size-adjust:1
   --accent-l: 60%;
   --ac: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
   --ac-on: #ffffff;
+  /* Fill behind --ac-on text; the default blue needs a darker fill for 4.5:1 (see enterprise.css). */
+  --ac-fill: var(--ac);
   --ac-soft: color-mix(in srgb, var(--ac) 12%, transparent);
   --ac-b30: color-mix(in srgb, var(--ac) 30%, transparent);
   --ac-b22: color-mix(in srgb, var(--ac) 22%, transparent);
@@ -167,7 +169,7 @@ body[data-t="dark"], body {
   --lift: 0 4px 20px rgba(0, 0, 0, 0.5);
   --lift-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
 
-  --ac-hover: color-mix(in srgb, var(--ac) 82%, #ffffff);
+  --ac-hover: color-mix(in srgb, var(--ac-fill) 90%, #ffffff);
   --ac-subtle: rgba(255, 255, 255, 0.06);
   --neon-blue: #60a5fa;
   --sc: #a855f7;
@@ -199,11 +201,17 @@ body[data-t="dark"], body {
   --lift: 0 4px 20px rgba(0, 0, 0, 0.08);
   --lift-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
 
-  --ac-hover: color-mix(in srgb, var(--ac) 85%, #000000);
+  --ac-hover: color-mix(in srgb, var(--ac-fill) 88%, #000000);
   --ac-subtle: rgba(0, 0, 0, 0.05);
   --neon-blue: #2563eb;
   --sc: #9333ea;
   --field: var(--s1);
+
+  /* Status colors are also text: >= 4.7:1 on their own 12% tint over #f2f2f2. */
+  --ok: #166534;
+  --wr: #854d0e;
+  --er: #b91c1c;
+  --info: #075985;
 }
 
 /* Custom Scrollbar */
@@ -234,7 +242,7 @@ body[data-t="dark"], body {
 }
 
 .hashem-btn-primary {
-  background:linear-gradient(135deg, color-mix(in srgb, var(--ac) 88%, #ffffff 12%), var(--ac));
+  background:var(--ac-fill);
   color:var(--ac-on);
   border-color:transparent;
   box-shadow:0 2px 12px color-mix(in srgb, var(--ac) 35%, transparent), inset 0 1px 0 rgba(255,255,255,.18);

@@ -64,8 +64,8 @@
 }
 
 .btn.primary {
-  background: var(--ac);
-  border-color: var(--ac);
+  background: var(--ac-fill);
+  border-color: var(--ac-fill);
   color: var(--ac-on, #fff);
 }
 
@@ -180,11 +180,11 @@ button, a, input, select, textarea, [role="button"], [role="menuitem"] {
 .hashem-btn.u-btn-30 { height: 30px; padding: 0 12px; font-size: 12px; }
 .hashem-btn.u-btn-28 { height: 28px; padding: 0 10px; font-size: 12px; }
 .wd-stat-label.u-stat-label { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--mu); letter-spacing: .05em; }
-.wd-stat-val.u-stat-val-ok { font-size: 17px; font-weight: 700; color: #10b981; margin: 8px 0 4px 0; }
+.wd-stat-val.u-stat-val-ok { font-size: 17px; font-weight: 700; color: var(--ok); margin: 8px 0 4px 0; }
 .u-card-tint { border: 1px solid var(--ln); background: color-mix(in srgb, var(--bg) 80%, var(--s1)); }
 .u-peer-card-wide { grid-column: 1 / -1; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .u-peer-acts-bar { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--ln); padding-top: 12px; }
-.badge.u-pill-sky, .bench-proto-pill.u-pill-sky { background: rgba(56,189,248,.15); color: #38bdf8; border: 1px solid rgba(56,189,248,.3); }
+.badge.u-pill-sky, .bench-proto-pill.u-pill-sky { background: rgba(56,189,248,.15); color: var(--info); border: 1px solid rgba(56,189,248,.3); }
 .badge.u-pill-violet, .bench-proto-pill.u-pill-violet { background: rgba(168,85,247,.15); color: #c084fc; border: 1px solid rgba(168,85,247,.3); }
 /* right-sidebar live log line parts */
 .badge.log-tag { font-size: 12px; padding: 1px 4px; margin-inline-end: 4px; }

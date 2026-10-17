@@ -207,6 +207,10 @@ pre.logs .ent-empty { white-space: normal; font-family: var(--font-sans); }
 :root[data-acc="emerald"][data-t="light"] { --accent-l:26%; --ac-on:#fff; }
 :root[data-acc="teal"][data-t="light"]    { --accent-l:26%; --ac-on:#fff; }
 :root[data-acc="orange"][data-t="light"]  { --accent-l:40%; --ac-on:#fff; }
+/* Default blue: white on hsl(217 91% 60%) is 3.6:1. Dark: darker fill only (5.5:1), the
+   accent stays bright as text (5.5:1 on --bg). Light: darker accent (5.6:1 both ways). */
+:root:not([data-acc]):not([data-t="light"]) { --ac-fill: color-mix(in srgb, var(--ac) 78%, black); }
+:root:not([data-acc])[data-t="light"] { --accent-l:47%; }
 
 .acc-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:10px; margin-top:10px; }
 .acc-sw {
@@ -329,7 +333,7 @@ body[data-t="light"] .sup-card { box-shadow:0 18px 50px rgba(15,23,42,.22), 0 0 
 .tp-hub-core { fill:var(--ac); }
 .tp-hub-ic { fill:var(--ac-on); font-size:12px; font-weight:800; letter-spacing:.04em; }
 .tp-name { fill:var(--tx); font-size:13px; font-weight:700; }
-.tp-sub { fill:var(--mu); font-size:11.5px; }
+.tp-sub { fill:var(--mu); font-size:12px; }
 .fleet-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:14px; }
 .fl-card {
   display:grid; gap:10px; padding:16px; border-radius:var(--r-lg);
@@ -386,7 +390,7 @@ body[data-t="light"] .sup-card { box-shadow:0 18px 50px rgba(15,23,42,.22), 0 0 
 .pal-btn { gap:8px; }
 .pal-btn svg { width:16px; height:16px; flex:none; stroke-width:2; }
 .pal-btn kbd, .pal-foot kbd {
-  font:600 11px/1 var(--font-mono, ui-monospace, monospace); padding:3px 6px; border-radius:6px;
+  font:600 12px/1 var(--font-mono, ui-monospace, monospace); padding:3px 6px; border-radius:6px;
   background:var(--sunk); border:1px solid var(--ln2); color:var(--mu);
 }
 .pal-ov {
@@ -404,7 +408,7 @@ body[data-t="light"] .sup-card { box-shadow:0 18px 50px rgba(15,23,42,.22), 0 0 
 .pal-in > svg { width:18px; height:18px; flex:none; color:var(--mu); stroke-width:2; }
 .pal-in input { flex:1; min-width:0; height:54px; background:transparent; border:0; outline:0; color:var(--tx); font-size:16px; }
 .pal-in input::placeholder { color:var(--dim); }
-.pal-esc { height:28px; padding:0 8px; border-radius:8px; border:1px solid var(--ln2); background:var(--sunk); color:var(--mu); font:600 11px var(--font-mono, monospace); cursor:pointer; }
+.pal-esc { height:28px; padding:0 8px; border-radius:8px; border:1px solid var(--ln2); background:var(--sunk); color:var(--mu); font:600 12px var(--font-mono, monospace); cursor:pointer; }
 .pal-list { overflow:auto; padding:8px; overscroll-behavior:contain; }
 .pal-g { padding:10px 10px 4px; color:var(--dim); font-size:var(--fs-caption); font-weight:700; letter-spacing:.07em; text-transform:uppercase; }
 .pal-it { display:flex; align-items:center; gap:12px; min-height:44px; padding:8px 10px; border-radius:var(--r-md); cursor:pointer; color:var(--tx2); }
@@ -442,7 +446,7 @@ body[data-t="light"] .sup-card { box-shadow:0 18px 50px rgba(15,23,42,.22), 0 0 
 .sidebar { position:sticky; transition:width .25s var(--spring); }
 .nav-badge {
   min-width:20px; height:20px; padding:0 6px; border-radius:10px; display:inline-grid; place-items:center;
-  font-size:11px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; flex:none;
+  font-size:12px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; flex:none;
 }
 .nav-badge.hidden { display:none; }
 .nav-badge.warn { background:var(--wr); color:#1a1300; }
@@ -456,7 +460,7 @@ body[data-t="light"] .sup-card { box-shadow:0 18px 50px rgba(15,23,42,.22), 0 0 
   html[data-sb="1"] .sidebar .brand-name,
   html[data-sb="1"] .sidebar #updBadge,
   html[data-sb="1"] .sidebar .term-live { display:none; }
-  html[data-sb="1"] .sidebar .nav-badge { position:absolute; top:2px; inset-inline-end:2px; min-width:16px; height:16px; padding:0 4px; font-size:10px; margin:0; box-shadow:0 0 0 2px var(--sidebar-bg); }
+  html[data-sb="1"] .sidebar .nav-badge { position:absolute; top:2px; inset-inline-end:2px; min-width:16px; height:16px; padding:0 4px; font-size:12px; margin:0; box-shadow:0 0 0 2px var(--sidebar-bg); }
   html[data-sb="1"] .sidebar .sidebar-foot { flex-direction:column; padding:10px 8px; }
   html[data-sb="1"] .sidebar .sidebar-foot .hashem-btn { padding:0; min-height:40px; width:100%; justify-content:center; }
   html[data-sb="1"] .sidebar .sidebar-foot .sf-ic { display:block; }
@@ -473,7 +477,7 @@ body[data-t="light"] .sup-card { box-shadow:0 18px 50px rgba(15,23,42,.22), 0 0 
 .ent-tools { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:10px 0 8px; }
 .ent-tools .hashem-input { flex:1 1 220px; max-width:360px; min-height:40px; }
 .ent-tbl th[data-sort] { cursor:pointer; user-select:none; position:sticky; }
-.ent-tbl th[data-sort]::after { content:"\2195"; margin-inline-start:6px; opacity:.35; font-size:11px; }
+.ent-tbl th[data-sort]::after { content:"\2195"; margin-inline-start:6px; opacity:.35; font-size:12px; }
 .ent-tbl th[aria-sort="ascending"]::after { content:"\2191"; opacity:1; color:var(--ac); }
 .ent-tbl th[aria-sort="descending"]::after { content:"\2193"; opacity:1; color:var(--ac); }
 .ent-tbl th[data-sort]:focus-visible { outline:2px solid var(--ent-focus); outline-offset:-2px; }
@@ -509,7 +513,7 @@ html[data-dens="compact"] .hashem-table th, html[data-dens="compact"] .hashem-ta
 .onb-ic svg { width:22px; height:22px; stroke-width:2; }
 .onb-steps { list-style:none; margin:0; padding:0; display:grid; gap:12px; counter-reset:none; }
 .onb-steps li { display:flex; gap:14px; align-items:flex-start; }
-.onb-n { width:28px; height:28px; flex:none; display:grid; place-items:center; border-radius:50%; background:var(--ac); color:var(--ac-on); font-weight:700; font-size:var(--fs-small); }
+.onb-n { width:28px; height:28px; flex:none; display:grid; place-items:center; border-radius:50%; background:var(--ac-fill); color:var(--ac-on); font-weight:700; font-size:var(--fs-small); }
 .onb-steps b { display:block; color:var(--tx); font-size:var(--fs-body); }
 .onb-steps span:not(.onb-n) { color:var(--mu); font-size:var(--fs-small); line-height:1.6; }
 .onb-acts { display:flex; gap:10px; flex-wrap:wrap; }
@@ -603,7 +607,7 @@ html[data-dens="compact"] .hashem-table th, html[data-dens="compact"] .hashem-ta
 }
 
 .brand-premium-badge .bp-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.1em;
   text-transform: uppercase;

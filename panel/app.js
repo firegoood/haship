@@ -351,9 +351,9 @@ $('themeBtnM').onclick = () => setTheme(document.body.dataset.t === 'dark' ? 'li
 $('logoutBtnM').onclick = async () => { try { await api('/api/logout', {}); } catch(e){ /* logout best-effort: always fall through to login screen */ } showLogin(); };
 drawerSync();
 // theme (hashem-style: localStorage + data-t on html and body)
-function setTheme(t) {
+function setTheme(t, persist = true) {
   document.documentElement.dataset.t = t; document.body.dataset.t = t;
-  try { localStorage.setItem('gre_theme', t); } catch(e) { /* storage blocked (private mode): theme just won't persist */ }
+  if (persist) { try { localStorage.setItem('gre_theme', t); } catch(e) { /* storage blocked (private mode): theme just won't persist */ } }
   const b = $('themeBtn');
   if (b) { const lab = t === 'dark' ? '☀️ Light' : '🌙 Dark', sp = b.querySelector('.sf-t');
     if (sp) { sp.textContent = lab; sp.removeAttribute('data-i18n'); } else b.textContent = lab;
@@ -362,7 +362,11 @@ function setTheme(t) {
   try { if (typeof refreshDash === 'function') refreshDash(); } catch(e) { /* dashboard not ready yet; polling repaints it */ }
 }
 $('themeBtn').onclick = () => setTheme(document.body.dataset.t === 'dark' ? 'light' : 'dark');
-try { setTheme(localStorage.getItem('gre_theme') || document.body.dataset.t || 'dark'); } catch(e) { /* storage blocked: keep default theme */ }
+// No saved choice: follow the system appearance, live, until the user picks one.
+function savedTheme() { try { return localStorage.getItem('gre_theme'); } catch(e) { return null; } }
+const sysLight = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
+setTheme(savedTheme() || (sysLight && sysLight.matches ? 'light' : 'dark'), false);
+if (sysLight && sysLight.addEventListener) sysLight.addEventListener('change', e => { if (!savedTheme()) setTheme(e.matches ? 'light' : 'dark', false); });
 
 // i18n & Persian (Farsi) Language System
 const I18N = {
@@ -1368,7 +1372,7 @@ function renderPeers(peers) {
           <span class="status-indicator ${bagherUp ? 'active' : 'offline'}"><span class="dot"></span></span>
           <b class="u-fs-16-tx">Bagher Tunnel</b>
           <span class="qs-hint mono">#stealth</span>
-          <span class="badge" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700">🟢 Bagher Engine</span>
+          <span class="badge" style="background:rgba(16,185,129,0.18);color:var(--ok);border:1px solid rgba(16,185,129,0.35);font-weight:700">🟢 Bagher Engine</span>
           <span class="badge" style="background:rgba(255,255,255,0.06);color:var(--mu);font-size:12px">${esc(roleLabel)}</span>
           <span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'active' : 'inactive'}</span>
         </div>
@@ -1383,7 +1387,7 @@ function renderPeers(peers) {
         <div class="det-card">
           <div class="det-card-head">⚡ <span>Link Status</span></div>
           <div class="det-row"><span class="det-k">Status</span><span class="det-v"><span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'Running' : 'Stopped'}</span></span></div>
-          <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono" style="color:#38bdf8">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : (bagherUp ? 'Optimal' : '—')}</span></div>
+          <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono" style="color:var(--info)">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : (bagherUp ? 'Optimal' : '—')}</span></div>
           <div class="det-row"><span class="det-k">Services</span><span class="det-v mono">${esc(b.active_services || (bagherUp ? 'frps, frpc, ssh-fwd' : 'none'))}</span></div>
         </div>
       </div>
@@ -1479,7 +1483,7 @@ function peerRemoveClick(peerId, name) {
   else armRemovePeer(peerId, name);
 }
 function renderTunnel(st) {
-  $('roleLine').textContent = esc(st.role || 'unknown role');
+  $('roleLine').textContent = st.role || 'Not configured';
   const up = !!(st.gre.exists || st.frp_up);
   const d = $('tunnelDot');
   if (d) { d.className = 'status-indicator ' + (up ? 'active' : 'offline'); $('tunnelDotTxt').textContent = up ? 'up' : 'down'; }
@@ -1765,8 +1769,8 @@ function drawChart(hist, isDown) {
 
   // Palette: cyan download, violet upload, down red.
   const C_GRID = light ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.06)';
-  const C_AXIS = light ? 'rgba(24,24,27,0.6)' : 'rgba(255,255,255,0.45)';
-  const C_IDLE = light ? 'rgba(24,24,27,0.55)' : 'rgba(255,255,255,0.45)';
+  const C_AXIS = light ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.6)'; // >= 4.5:1 on the card
+  const C_IDLE = light ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.6)';
 
   const dpr = window.devicePixelRatio || 1;
   const W = cv.clientWidth || (cv.parentElement ? cv.parentElement.clientWidth : 600) || 600;
@@ -2219,9 +2223,12 @@ async function refreshDash() {
       statusText = 'Healthy';
       statusColor = 'var(--ok)';
     }
+    // Fresh install: nothing to be "down" yet, so no red state (onboarding card explains next steps).
+    const unset = window._hashemEmpty === true && !on && !bagherUp;
+    if (unset) { statusText = 'Not set up'; statusColor = 'var(--mu)'; }
     set('kpiStatus', statusText);
     const kpiStatus = $('kpiStatus'); if (kpiStatus) kpiStatus.style.color = statusColor;
-    set('kpiStatusSub', (multi ? nPeers + ' tunnel' + (nPeers > 1 ? 's' : '') + ' · ' : (bagherUp && !nPeers ? 'Bagher tunnel · ' : '')) + (d.role || 'unknown role') + ' · ' + (d.checked ? 'checked ' + String(d.checked).slice(11, 19) + ' UTC' : ''));
+    set('kpiStatusSub', (multi ? nPeers + ' tunnel' + (nPeers > 1 ? 's' : '') + ' · ' : (bagherUp && !nPeers ? 'Bagher tunnel · ' : '')) + (unset ? 'Not configured' : (d.role || 'Not configured')) + ' · ' + (d.checked ? 'checked ' + String(d.checked).slice(11, 19) + ' UTC' : ''));
     const g = d.gre || {}, f = d.frp || {};
     const peers = d.peers || [];
     const kpiLinks = $('kpiLinks');
@@ -2230,14 +2237,14 @@ async function refreshDash() {
       const greUp = peers.filter(p => p.gre_up).length, frpUp = peers.filter(p => p.frp_up).length;
       let multiLinks = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE ' + greUp + '/' + nPeers + '</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP ' + frpUp + '/' + nPeers + '</span>';
       if (bagherUp) {
-        multiLinks += ' <span class="badge ok" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700"><span class="dot"></span>Bagher</span>';
+        multiLinks += ' <span class="badge ok" style="background:rgba(16,185,129,0.18);color:var(--ok);border:1px solid rgba(16,185,129,0.35);font-weight:700"><span class="dot"></span>Bagher</span>';
       }
       if (kpiLinks) kpiLinks.innerHTML = multiLinks;
     } else {
       const greUp = !!g.exists, frpUp = !!f.up;
       let linksHtml = '';
       if (bagherUp) {
-        linksHtml += '<span class="badge ok" style="background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.35);font-weight:700"><span class="dot"></span>Bagher</span>';
+        linksHtml += '<span class="badge ok" style="background:rgba(16,185,129,0.18);color:var(--ok);border:1px solid rgba(16,185,129,0.35);font-weight:700"><span class="dot"></span>Bagher</span>';
       }
       if (greUp || frpUp || !bagherUp) {
         if (linksHtml) linksHtml += ' ';
@@ -2296,8 +2303,8 @@ async function refreshDash() {
       }
     } catch (e) {}
     const cd = $('chartDown'), cc = $('chartCard');
-    if (cd) cd.classList.toggle('hidden', on);
-    if (cc) cc.classList.toggle('is-down', !on);
+    if (cd) cd.classList.toggle('hidden', on || unset);
+    if (cc) cc.classList.toggle('is-down', !on && !unset);
     const badge = $('chartLiveBadge');
     if (badge) {
       const paused = !on || document.hidden;
@@ -2456,7 +2463,7 @@ async function refreshDash() {
         const hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
         const when = (dashRange === '1h' || dashRange === '24h') ? hhmm : M + ' ' + d.getDate() + ' ' + hhmm;
         tip.innerHTML = '<span class="tip-time">' + esc(when) + '</span><span class="tip-sep">·</span>' +
-          '<span style="color:#10b981;font-weight:600">● ' + esc(String(p.conns ?? 0)) + ' active connections</span>';
+          '<span style="color:var(--ok);font-weight:600">● ' + esc(String(p.conns ?? 0)) + ' active connections</span>';
         tip.style.display = 'inline-flex';
         const tw = tip.offsetWidth || 160;
         const th = tip.offsetHeight || 30;
@@ -2473,7 +2480,7 @@ async function refreshDash() {
     if (cv && d.history) cv._hist = d.history;
     const w = $('tunnelWarn');
     if (w) {
-      if (!on) { w.innerHTML = '⚠️ <b>Tunnel is not running.</b> Go to Setup to configure GRE + FRP, or check the Tunnel tab.'; w.classList.remove('hidden'); }
+      if (!on && !unset) { w.innerHTML = '⚠️ <b>Tunnel is not running.</b> Go to Setup to configure GRE + FRP, or check the Tunnel tab.'; w.classList.remove('hidden'); }
       else w.classList.add('hidden');
     }
     const s = d.system || {};
@@ -2559,8 +2566,8 @@ function drawActivityChart(hist, isDown) {
   const light = (document.body && document.body.dataset.t === 'light') ||
     (document.documentElement && document.documentElement.dataset.t === 'light');
   const C_GRID = light ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.06)';
-  const C_AXIS = light ? 'rgba(24,24,27,0.6)' : 'rgba(255,255,255,0.45)';
-  const C_IDLE = light ? 'rgba(24,24,27,0.55)' : 'rgba(255,255,255,0.45)';
+  const C_AXIS = light ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.6)'; // >= 4.5:1 on the card
+  const C_IDLE = light ? 'rgba(24,24,27,0.65)' : 'rgba(255,255,255,0.6)';
   
   const pts = (hist || []).filter(p => p && p.t != null && p.conns != null);
   cv._pts = pts;
@@ -2590,7 +2597,7 @@ function drawActivityChart(hist, isDown) {
     const y = Math.round(padT + ih * g / 2) + 0.5;
     const val = Math.round(max * (1 - g / 2));
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-    ctx.fillStyle = C_AXIS; ctx.font = '12px tabular-nums'; ctx.textAlign = 'right';
+    ctx.fillStyle = C_AXIS; ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'right';
     ctx.fillText(String(val), padL - 8, y + 3);
   }
   
@@ -5754,6 +5761,7 @@ function uiObserve(s) {
   const bagherConfigured = !!(bObj.is_active || bObj.enabled || bObj.connected || bObj.has_config || (bObj.remote_host && bObj.remote_host.length) || (Array.isArray(bObj.ports) && bObj.ports.length));
   const empty = !peers.length && !(L.gre && L.gre.exists) && !L.frp_up && !bagherConfigured;
   let dismissed = false; try { dismissed = localStorage.getItem('hashem_onb_done') === '1'; } catch (e) { /* storage blocked */ }
+  window._hashemEmpty = empty; // refreshDash shows a neutral "not set up" state instead of errors
   const c = $('onbCard'); if (c) c.hidden = !empty || dismissed;
 }
 { const _rd = renderDoctor; renderDoctor = function (rep) { _rd(rep); try { navBadge('doctor', ((rep && rep.issues) || []).length, rep && rep.rating === 'critical' ? 'err' : 'warn', 'badge_doctor'); } catch (e) { /* cosmetic */ } }; }
@@ -6376,15 +6384,15 @@ function renderBenchmark(bench, peer) {
     if (tLower === 'gre' || tLower === 'direct') {
       protoPill = `<span class="bench-proto-pill u-pill-sky">GRE DIRECT</span>`;
     } else if (tLower === 'frp_tcp') {
-      protoPill = `<span class="bench-proto-pill" style="background:rgba(59,130,246,0.15);color:#60a5fa;border:1px solid rgba(59,130,246,0.3)">FRP TCP</span>`;
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(59,130,246,0.15);color:var(--info);border:1px solid rgba(59,130,246,0.3)">FRP TCP</span>`;
     } else if (tLower === 'frp_kcp') {
-      protoPill = `<span class="bench-proto-pill" style="background:rgba(245,158,11,0.15);color:#fbbf24;border:1px solid rgba(245,158,11,0.3)">FRP KCP</span>`;
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(245,158,11,0.15);color:var(--wr);border:1px solid rgba(245,158,11,0.3)">FRP KCP</span>`;
     } else if (tLower === 'frp_quic') {
       protoPill = `<span class="bench-proto-pill u-pill-violet">FRP QUIC</span>`;
     } else if (tLower === 'frp_ws' || tLower === 'websocket') {
       protoPill = `<span class="bench-proto-pill" style="background:rgba(20,184,166,0.15);color:#2dd4bf;border:1px solid rgba(20,184,166,0.3)">WEBSOCKET</span>`;
     } else if (tLower === 'frp_wss' || tLower === 'wss') {
-      protoPill = `<span class="bench-proto-pill" style="background:rgba(16,185,129,0.15);color:#34d399;border:1px solid rgba(16,185,129,0.3)">WSS TLS</span>`;
+      protoPill = `<span class="bench-proto-pill" style="background:rgba(16,185,129,0.15);color:var(--ok);border:1px solid rgba(16,185,129,0.3)">WSS TLS</span>`;
     } else if (tLower.includes('backhaul')) {
       protoPill = `<span class="bench-proto-pill info">BACKHAUL</span>`;
     } else if (tLower.includes('ssh') || tLower.includes('bagher')) {
@@ -7508,9 +7516,9 @@ function renderClusterUI(data) {
   const actRouteEl = $('clusterActiveRouting');
   if (actRouteEl) {
     if (data.active_failover && data.failover_target) {
-      actRouteEl.innerHTML = `<span style="color:#f87171;">Rerouted \u2192 ${esc(data.failover_target)}</span>`;
+      actRouteEl.innerHTML = `<span style="color:var(--er);">Rerouted \u2192 ${esc(data.failover_target)}</span>`;
     } else {
-      actRouteEl.innerHTML = `<span style="color:#34d399;">Local Tunnel (Direct)</span>`;
+      actRouteEl.innerHTML = `<span style="color:var(--ok);">Local Tunnel (Direct)</span>`;
     }
   }
 
@@ -7541,7 +7549,7 @@ function renderClusterUI(data) {
           <div style="font-size:12px; color:#94a3b8; max-width:440px; margin:0 auto 10px auto;">
             Add your foreign servers here to monitor latency, auto-failover, or manually switch exit paths.
           </div>
-          <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddForeignModal()" style="font-size:11px; padding:5px 14px; background:#0284c7; border-color:#0284c7;">
+          <button class="hashem-btn hashem-btn-primary" onclick="openClusterAddForeignModal()" style="font-size:12px; padding:5px 14px; background:#0284c7; border-color:#0284c7;">
             + Add Foreign Exit Server
           </button>
         </div>`;
@@ -7560,22 +7568,22 @@ function renderClusterUI(data) {
                   <div style="font-weight:700; color:#f8fafc; font-size:14px; display:flex; align-items:center; gap:6px;">
                     <span>🌐</span> ${esc(fn.name || fn.id)}
                   </div>
-                  <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${esc(fn.id)}</div>
+                  <div style="font-size:12px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${esc(fn.id)}</div>
                 </div>
                 <div style="display:flex; gap:6px; align-items:center;">
-                  ${isActive ? `<span class="badge info" style="font-size:9px; font-weight:800; background:#0284c7; color:#fff;">ACTIVE</span>` : ''}
-                  <span class="badge ${isHealthy ? 'ok' : 'err'}" style="font-size:10px; font-weight:700;">${isHealthy ? 'UP' : 'DOWN'}</span>
+                  ${isActive ? `<span class="badge info" style="font-size:12px; font-weight:800; background:#0284c7; color:#fff;">ACTIVE</span>` : ''}
+                  <span class="badge ${isHealthy ? 'ok' : 'err'}" style="font-size:12px; font-weight:700;">${isHealthy ? 'UP' : 'DOWN'}</span>
                 </div>
               </div>
 
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
                 <div>
                   <span style="color:#94a3b8;">Public IP:</span>
                   <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${esc(fn.public_ip || '--')}</div>
                 </div>
                 <div>
                   <span style="color:#94a3b8;">Port / Proto:</span>
-                  <div style="font-family:monospace; color:#38bdf8; font-weight:600;">${fn.tunnel_port || 55354} / ${(fn.protocol || 'wss').toUpperCase()}</div>
+                  <div style="font-family:monospace; color:var(--info); font-weight:600;">${fn.tunnel_port || 55354} / ${(fn.protocol || 'wss').toUpperCase()}</div>
                 </div>
                 <div>
                   <span style="color:#94a3b8;">Weight (WRR):</span>
@@ -7583,17 +7591,17 @@ function renderClusterUI(data) {
                 </div>
                 <div>
                   <span style="color:#94a3b8;">TCP Latency:</span>
-                  <div style="font-family:monospace; color:#34d399; font-weight:600;">${latency}</div>
+                  <div style="font-family:monospace; color:var(--ok); font-weight:600;">${latency}</div>
                 </div>
               </div>
             </div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
               ${isActive
-                ? `<span style="font-size:11px; color:#38bdf8; font-weight:700;">✓ In Use</span>`
-                : `<button class="hashem-btn" onclick="switchClusterForeign(${jsArg(fn.id)})" style="font-size:11px; padding:4px 10px; background:rgba(2,132,199,0.2); border-color:#0284c7; color:#38bdf8;">Switch to This</button>`
+                ? `<span style="font-size:12px; color:var(--info); font-weight:700;">✓ In Use</span>`
+                : `<button class="hashem-btn" onclick="switchClusterForeign(${jsArg(fn.id)})" style="font-size:12px; padding:4px 10px; background:rgba(2,132,199,0.2); border-color:#0284c7; color:var(--info);">Switch to This</button>`
               }
-              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign(${jsArg(fn.id)})" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove foreign node">&#128465;</button>
+              <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterForeign(${jsArg(fn.id)})" style="font-size:12px; padding:4px 8px; color:var(--er);" title="Remove foreign node">&#128465;</button>
             </div>
           </div>
         `;
@@ -7656,19 +7664,19 @@ function renderClusterUI(data) {
               <div style="font-weight:700; color:#f8fafc; font-size:14px; display:flex; align-items:center; gap:6px;">
                 <span>🇮🇷</span> ${esc(node.name || node.id)}
               </div>
-              <div style="font-size:11px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${esc(node.id)}</div>
+              <div style="font-size:12px; font-family:monospace; color:#94a3b8; margin-top:2px;">ID: ${esc(node.id)}</div>
             </div>
-            <span class="badge ${statusBadgeClass}" style="font-size:10px; font-weight:700;">${statusText}</span>
+            <span class="badge ${statusBadgeClass}" style="font-size:12px; font-weight:700;">${statusText}</span>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; margin-bottom:14px; background:rgba(0,0,0,0.3); padding:8px 10px; border-radius:6px;">
             <div>
               <span style="color:#94a3b8;">Public IP:</span>
               <div style="font-family:monospace; color:#e2e8f0; font-weight:600;">${esc(node.public_ip || '--')}</div>
             </div>
             <div>
               <span style="color:#94a3b8;">Peer Ping:</span>
-              <div style="font-family:monospace; color:#38bdf8; font-weight:600;">${latency}</div>
+              <div style="font-family:monospace; color:var(--info); font-weight:600;">${latency}</div>
             </div>
             <div>
               <span style="color:#94a3b8;">Kharej Tunnel:</span>
@@ -7683,10 +7691,10 @@ function renderClusterUI(data) {
 
         <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); margin-top:8px;">
           ${isCurrentFailoverTarget
-            ? `<button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="font-size:11px; padding:4px 10px;">Revert Reroute</button>`
-            : `<button class="hashem-btn" onclick="triggerClusterFailover(${jsArg(node.id)})" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:11px; padding:4px 10px; background:rgba(124,58,237,0.2); border-color:#7c3aed; color:#c084fc;">\u2192 Failover Here</button>`
+            ? `<button class="hashem-btn hashem-btn-danger" onclick="revertClusterFailover()" style="font-size:12px; padding:4px 10px;">Revert Reroute</button>`
+            : `<button class="hashem-btn" onclick="triggerClusterFailover(${jsArg(node.id)})" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''} style="font-size:12px; padding:4px 10px; background:rgba(124,58,237,0.2); border-color:#7c3aed; color:#c084fc;">\u2192 Failover Here</button>`
           }
-          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode(${jsArg(node.id)})" style="font-size:11px; padding:4px 8px; color:#ef4444;" title="Remove peer">&#128465;</button>
+          <button class="hashem-btn hashem-btn-ghost" onclick="deleteClusterNode(${jsArg(node.id)})" style="font-size:12px; padding:4px 8px; color:var(--er);" title="Remove peer">&#128465;</button>
         </div>
       </div>
     `;
@@ -7973,7 +7981,7 @@ function renderSentinel(d) {
 
   if (!d.has_license) {
     sec.innerHTML = `
-      <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); padding:12px; border-radius:6px; color:#ef4444; font-size:13px;">
+      <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); padding:12px; border-radius:6px; color:var(--er); font-size:13px;">
         ⚠️ <b>License Gate:</b> Sentinel requires a license with the <code>sentinel</code> feature unlocked. Please activate a valid key above.
       </div>`;
     return;
@@ -7997,7 +8005,7 @@ function renderSentinel(d) {
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background:rgba(14,165,233,0.06); padding:12px; border-radius:6px; border:1px solid rgba(14,165,233,0.2);">
           <div>
             <div style="display:flex; align-items:center; gap:8px;">
-              <span class="badge" style="background:${isRunning ? '#10b981' : '#ef4444'}; color:#fff; font-size:10px; font-weight:700;">${isRunning ? 'ACTIVE / RUNNING' : 'STOPPED'}</span>
+              <span class="badge" style="background:${isRunning ? '#10b981' : '#ef4444'}; color:#fff; font-size:12px; font-weight:700;">${isRunning ? 'ACTIVE / RUNNING' : 'STOPPED'}</span>
               <span style="font-size:13px; font-weight:600;">Port: <code>${d.port}</code></span>
             </div>
             <div style="font-size:12px; color:var(--mu); margin-top:4px;">Endpoint: <code>${d.path || '/'}</code></div>
