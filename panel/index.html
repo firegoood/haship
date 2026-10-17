@@ -3106,11 +3106,90 @@
       <button class="ent-x" id="sentinelModalClose" onclick="closeSentinelModal()" aria-label="Close">&#xD7;</button>
     </div>
     <div class="ent-modal-b" id="sentinelModalBody" style="gap:14px; padding:20px;">
-      <!-- Populated dynamically by renderSentinelModal() -->
+      <!-- Warning Header Box (Always visible) -->
+      <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.35); border-radius:10px; padding:14px; display:flex; align-items:flex-start; gap:12px;">
+        <span style="font-size:22px; line-height:1;">⚠️</span>
+        <div>
+          <b style="color:#fbbf24; font-size:13px;">هشدار مهم پیش‌نیاز سنتینال:</b>
+          <div style="font-size:13px; color:#fef3c7; margin-top:3px; line-height:1.6;">
+            برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه
+          </div>
+        </div>
+      </div>
+
+      <!-- License Required Section -->
+      <div id="sentinelLicSection" class="hidden">
+        <div style="background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); border-radius:10px; padding:14px; display:flex; align-items:flex-start; gap:12px; margin-bottom:12px;">
+          <span style="font-size:20px; line-height:1;">🔒</span>
+          <div style="font-size:13px; line-height:1.5; color:#fca5a5;">
+            <b>لایسنس پرمیوم سنتینال مورد نیاز است</b><br>
+            سنتینال نیازمند لایسنس فعال با ویژگی <code>sentinel</code> می‌باشد.
+          </div>
+        </div>
+        <div class="fg">
+          <label style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+            کد اختصاصی سخت‌افزار سرور (Machine Hash):
+          </label>
+          <div style="display:flex; gap:8px;">
+            <input class="hashem-input" id="sentinelModalMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:#38bdf8; background:rgba(0,0,0,0.4);" placeholder="در حال محاسبه هش…">
+            <button type="button" class="hashem-btn" id="btnCopySentinelHash" onclick="copySentinelHashClick()" style="white-space:nowrap; padding:6px 14px;">📋 کپی کد</button>
+          </div>
+          <div class="u-hint-12 u-mt-4">این کد را برای صدور لایسنس در سایت وارد کنید.</div>
+        </div>
+        <div class="fg">
+          <label style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:#94a3b8;">
+            کلید لایسنس (License Key):
+          </label>
+          <textarea class="hashem-input" id="sentinelModalKeyInput" rows="2" placeholder="کلید لایسنس خود را اینجا Paste کنید..." style="font-family:monospace; font-size:12px; width:100%; resize:vertical; padding:8px; line-height:1.4;"></textarea>
+        </div>
+        <button type="button" class="hashem-btn hashem-btn-primary" id="btnSentinelActivateModal" onclick="activateSentinelLicenseModalClick()" style="width:100%; background:linear-gradient(135deg, #0284c7, #2563eb); border:none; padding:10px 22px; font-weight:700; margin-top:8px;">
+          ⚡ فعال‌سازی لایسنس
+        </button>
+      </div>
+
+      <!-- Management / Installation Section -->
+      <div id="sentinelManageSection">
+        <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:10px; padding:12px 16px; margin-bottom:12px;">
+          <span style="font-size:13px; font-weight:700; color:#34d399; display:flex; align-items:center; gap:6px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+            لایسنس سنتینال فعال است
+          </span>
+          <span class="brand-premium-badge" style="margin:0;"><svg class="bp-gem" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="bp-label">PREMIUM</span></span>
+        </div>
+
+        <!-- Uninstalled State -->
+        <div id="sentinelUninstalledCard" style="background:rgba(14,165,233,0.08); border:1px solid rgba(14,165,233,0.3); border-radius:10px; padding:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+          <div>
+            <div style="font-size:14px; font-weight:700; color:#38bdf8;">نصب و راه‌اندازی سنتینال</div>
+            <div style="font-size:12px; color:#cbd5e1; margin-top:3px; line-height:1.5;">سرویس سنتینال با هسته Xray و تخصیص خودکار پورت رندوم امن نصب می‌گردد.</div>
+          </div>
+          <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" onclick="installSentinelModalClick()" style="background:linear-gradient(135deg, #0284c7, #2563eb); border:none; padding:10px 24px; font-weight:700; font-size:13px;">
+            ⚡ نصب خودکار سنتینال
+          </button>
+        </div>
+
+        <!-- Installed State -->
+        <div id="sentinelInstalledCard" class="hidden" style="background:rgba(14,165,233,0.06); border:1px solid rgba(14,165,233,0.25); border-radius:10px; padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span class="badge" id="sentinelModalStatusBadge" style="background:#10b981; color:#fff; font-size:11px; font-weight:800; padding:3px 10px; border-radius:20px;">
+                ACTIVE / RUNNING
+              </span>
+              <span style="font-size:13px; font-weight:700; color:#e2e8f0;">پورت: <code id="sentinelModalPort">32836</code></span>
+            </div>
+            <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" onclick="openSentinelDashboardClick()" style="font-weight:700; padding:8px 18px; font-size:13px;">
+              🔗 ورود به داشبورد سنتینال ↗
+            </button>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button type="button" class="hashem-btn hashem-btn-secondary" id="btnModalRestartSentinel" onclick="controlSentinelAction('restart')" style="font-size:12px;">🔄 ریستارت</button>
+            <button type="button" class="hashem-btn hashem-btn-danger" id="btnModalUninstallSentinel" onclick="controlSentinelAction('uninstall')" style="font-size:12px;">🗑️ حذف سنتینال</button>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="ent-modal-f" id="sentinelModalFoot" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:12px 18px; gap:8px; flex-wrap:wrap;">
+    <div class="ent-modal-f" id="sentinelModalFoot" style="display:flex; justify-content:flex-end; align-items:center; border-top:1px solid rgba(255,255,255,0.06); padding:12px 18px; gap:8px;">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeSentinelModal()">بستن (Close)</button>
-      <div id="sentinelModalActions" style="display:flex; gap:8px;"></div>
     </div>
   </div>
 </div>

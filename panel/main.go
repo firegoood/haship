@@ -88,8 +88,8 @@ func effectiveTLSPort() int {
 var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
-	// go build -ldflags "-X main.panelVersion=v2.3.4"
-	panelVersion = "v2.3.4"
+	// go build -ldflags "-X main.panelVersion=v2.3.5"
+	panelVersion = "v2.3.5"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
