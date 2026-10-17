@@ -501,7 +501,7 @@
   .hidden { display:none !important; }
   /* Watchdog & Backup styles */
   .wd-hero-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:8px; }
-  .wd-stat-box { background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r); padding:12px; display:flex; flex-direction:column; gap:4px; }
+  .wd-stat-box { background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); padding:12px; display:flex; flex-direction:column; gap:4px; }
   .wd-stat-label { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); font-weight:600; }
   .wd-stat-val { font-size:18px; font-weight:700; color:var(--tx); }
   .wd-stat-sub { font-size:var(--fs-small); color:var(--mu); }
@@ -509,13 +509,13 @@
   .wd-radio-opt { display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:var(--fs-body); color:var(--tx2); }
   .wd-radio-opt input { cursor:pointer; }
   .wd-backup-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
-  .wd-backup-item { display:flex; justify-content:space-between; align-items:center; background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r); padding:10px 14px; gap:10px; flex-wrap:wrap; }
+  .wd-backup-item { display:flex; justify-content:space-between; align-items:center; background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); padding:10px 14px; gap:10px; flex-wrap:wrap; }
   .wd-backup-meta { display:flex; flex-direction:column; gap:2px; min-width:0; }
   .wd-backup-name { font-weight:600; color:var(--tx); font-family:var(--font-mono); font-size:13px; word-break:break-all; }
   .wd-backup-info { font-size:var(--fs-small); color:var(--mu); }
   .wd-backup-acts { display:flex; gap:6px; flex-wrap:wrap; }
   .wd-event-log { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
-  .wd-event-item { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-radius:var(--r); background:var(--sunk); border:1px solid var(--ln); font-size:var(--fs-small); }
+  .wd-event-item { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-radius:var(--r-md); background:var(--sunk); border:1px solid var(--ln); font-size:var(--fs-small); }
   .wd-event-time { color:var(--mu); font-family:var(--font-mono); font-size:12px; flex:none; white-space:nowrap; }
   .wd-event-detail { color:var(--tx2); flex:1; word-break:break-word; }
   @media (max-width:480px) {
@@ -544,7 +544,7 @@
   .doc-card-title { font-size:var(--fs-body); font-weight:600; color:var(--tx); display:flex; align-items:center; gap:8px; }
   .doc-stat-val { font-size:22px; font-weight:700; color:var(--tx); font-family:var(--font-mono); }
   .doc-stat-sub { font-size:var(--fs-small); color:var(--mu); }
-  .doc-issues-box { background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r); padding:12px 14px; margin-top:8px; display:flex; flex-direction:column; gap:8px; }
+  .doc-issues-box { background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); padding:12px 14px; margin-top:8px; display:flex; flex-direction:column; gap:8px; }
   .doc-issue-item { display:flex; align-items:flex-start; gap:8px; font-size:var(--fs-small); color:var(--tx2); line-height:1.4; }
   .doc-pulse { animation:docPulseAnim 1.4s infinite ease-in-out; }
   @keyframes docPulseAnim { 0%, 100% { opacity:1; } 50% { opacity:0.5; } }
@@ -891,11 +891,174 @@
     border: 1px solid var(--ln2);
     color: var(--tx2);
   }
+  /* Utilities: one declaration each, values on the design scale (spacing 4/8, type ramp,
+     radius scale, tokens). Declared last so they win ties; !important except on properties
+     app.js sets at runtime (display, color, background, opacity, width, ...). */
+  .u-abs { position:absolute; }
+  .u-ai-c { align-items:center !important; }
+  .u-ai-e { align-items:flex-end !important; }
+  .u-ai-s { align-items:flex-start !important; }
+  .u-bb-info { border-bottom:1px solid color-mix(in srgb, var(--info) 30%, transparent) !important; }
+  .u-bb-ln { border-bottom:1px solid var(--ln) !important; }
+  .u-bb-sc { border-bottom:1px solid color-mix(in srgb, var(--sc) 30%, transparent) !important; }
+  .u-bb-wr { border-bottom:1px solid color-mix(in srgb, var(--wr) 30%, transparent) !important; }
+  .u-bd-0 { border:0 !important; }
+  .u-bd-ac { border:1px solid var(--ac) !important; }
+  .u-bd-er { border:1px solid color-mix(in srgb, var(--er) 30%, transparent) !important; }
+  .u-bd-info { border:1px solid color-mix(in srgb, var(--info) 30%, transparent) !important; }
+  .u-bd-ln { border:1px solid var(--ln) !important; }
+  .u-bd-ok { border:1px solid color-mix(in srgb, var(--ok) 30%, transparent) !important; }
+  .u-bd-sc { border:1px solid color-mix(in srgb, var(--sc) 30%, transparent) !important; }
+  .u-bd-wr { border:1px solid color-mix(in srgb, var(--wr) 30%, transparent) !important; }
+  .u-bdd-info { border:1px dashed color-mix(in srgb, var(--info) 30%, transparent) !important; }
+  .u-bdd-ln { border:1px dashed var(--ln) !important; }
+  .u-bdd-sc { border:1px dashed color-mix(in srgb, var(--sc) 30%, transparent) !important; }
+  .u-bg-er { background:var(--er); }
+  .u-bg-info-fill { background:var(--info-fill); }
+  .u-bg-inset { background:color-mix(in srgb, var(--bg) 40%, transparent); }
+  .u-bg-none { background:none; }
+  .u-bg-ok { background:var(--ok); }
+  .u-bg-s1 { background:var(--s1); }
+  .u-bg-s2 { background:var(--s2); }
+  .u-bg-sc-fill { background:var(--sc-fill); }
+  .u-bg-sunk { background:var(--sunk); }
+  .u-block { display:block; }
+  .u-break { overflow-wrap:anywhere !important; }
+  .u-bt-ln { border-top:1px solid var(--ln) !important; }
+  .u-c-ac { color:var(--ac); }
+  .u-c-dim { color:var(--dim); }
+  .u-c-er { color:var(--er); }
+  .u-c-info { color:var(--info); }
+  .u-c-mu { color:var(--mu); }
+  .u-c-ok { color:var(--ok); }
+  .u-c-sc { color:var(--sc); }
+  .u-c-tx { color:var(--tx); }
+  .u-c-tx2 { color:var(--tx2); }
+  .u-c-white { color:#fff; }
+  .u-c-wr { color:var(--wr); }
+  .u-col { flex-direction:column !important; }
+  .u-flex { display:flex; }
+  .u-fs-16 { font-size:16px !important; }
+  .u-fs-20 { font-size:20px !important; }
+  .u-fs-24 { font-size:24px !important; }
+  .u-fs-42 { font-size:42px !important; }
+  .u-fw-700 { font-weight:700 !important; }
+  .u-gap-12 { gap:12px !important; }
+  .u-gap-16 { gap:16px !important; }
+  .u-gap-4 { gap:4px !important; }
+  .u-gap-8 { gap:8px !important; }
+  .u-grid { display:grid; }
+  .u-gtc-1fr-1fr { grid-template-columns:1fr 1fr !important; }
+  .u-gtc-fit-140 { grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)) !important; }
+  .u-gtc-fit-180 { grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)) !important; }
+  .u-gtc-fit-200 { grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)) !important; }
+  .u-gtc-fit-260 { grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)) !important; }
+  .u-gtc-fit-280 { grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)) !important; }
+  .u-h-130 { height:130px !important; }
+  .u-h-14 { height:14px !important; }
+  .u-h-18 { height:18px !important; }
+  .u-h-36 { height:36px !important; }
+  .u-h-42 { height:42px !important; }
+  .u-h-64 { height:64px !important; }
+  .u-h-80 { height:80px !important; }
+  .u-iflex { display:inline-flex; }
+  .u-jc-c { justify-content:center !important; }
+  .u-jc-e { justify-content:flex-end !important; }
+  .u-jc-sb { justify-content:space-between !important; }
+  .u-lh-1 { line-height:1 !important; }
+  .u-lh-14 { line-height:1.4 !important; }
+  .u-lh-145 { line-height:1.45 !important; }
+  .u-lh-15 { line-height:1.5 !important; }
+  .u-lh-16 { line-height:1.6 !important; }
+  .u-lift { box-shadow:var(--lift); }
+  .u-ls-06 { letter-spacing:0.06em !important; }
+  .u-ls-n02 { letter-spacing:-0.02em !important; }
+  .u-ltr { direction:ltr !important; }
+  .u-m-0xautox12xauto { margin:0 auto 12px auto !important; }
+  .u-m-0xautox20xauto { margin:0 auto 20px auto !important; }
+  .u-m-12x0x16x0 { margin:12px 0 16px 0 !important; }
+  .u-m-8x0x4x0 { margin:8px 0 4px 0 !important; }
+  .u-maxh-100 { max-height:100px !important; }
+  .u-maxh-160 { max-height:160px !important; }
+  .u-maxw-140 { max-width:140px !important; }
+  .u-maxw-440 { max-width:440px !important; }
+  .u-maxw-500 { max-width:500px !important; }
+  .u-maxw-520 { max-width:520px !important; }
+  .u-maxw-540 { max-width:540px !important; }
+  .u-maxw-550 { max-width:550px !important; }
+  .u-mb-12 { margin-bottom:12px !important; }
+  .u-mb-16 { margin-bottom:16px !important; }
+  .u-mb-20 { margin-bottom:20px !important; }
+  .u-mb-24 { margin-bottom:24px !important; }
+  .u-mb-4 { margin-bottom:4px !important; }
+  .u-minh-36 { min-height:36px !important; }
+  .u-minh-90 { min-height:90px !important; }
+  .u-minh-95 { min-height:95px !important; }
+  .u-minw-0 { min-width:0 !important; }
+  .u-minw-10 { min-width:10px !important; }
+  .u-minw-26 { min-width:26px !important; }
+  .u-ml-8 { margin-left:8px !important; }
+  .u-mono { font-family:var(--font-mono) !important; }
+  .u-mr-4 { margin-right:4px !important; }
+  .u-none { display:none; }
+  .u-nowrap { white-space:nowrap !important; }
+  .u-o-65 { opacity:0.65; }
+  .u-o-70 { opacity:.7; }
+  .u-p-0x0x0x4 { padding:0 0 0 4px !important; }
+  .u-p-12 { padding:12px !important; }
+  .u-p-12x12 { padding:12px 12px !important; }
+  .u-p-12x16 { padding:12px 16px !important; }
+  .u-p-12x20 { padding:12px 20px !important; }
+  .u-p-16 { padding:16px !important; }
+  .u-p-16x20 { padding:16px 20px !important; }
+  .u-p-20 { padding:20px !important; }
+  .u-p-20x20 { padding:20px 20px !important; }
+  .u-p-20x24 { padding:20px 24px !important; }
+  .u-p-24x16 { padding:24px 16px !important; }
+  .u-p-2x4 { padding:2px 4px !important; }
+  .u-p-32x16 { padding:32px 16px !important; }
+  .u-p-48x20 { padding:48px 20px !important; }
+  .u-p-4x12 { padding:4px 12px !important; }
+  .u-p-4x8 { padding:4px 8px !important; }
+  .u-p-8 { padding:8px !important; }
+  .u-p-8x12 { padding:8px 12px !important; }
+  .u-p-8x16 { padding:8px 16px !important; }
+  .u-p-8x4 { padding:8px 4px !important; }
+  .u-pb-16 { padding-bottom:16px !important; }
+  .u-pre-wrap { white-space:pre-wrap !important; }
+  .u-pt-12 { padding-top:12px !important; }
+  .u-pt-8 { padding-top:8px !important; }
+  .u-r-10 { border-radius:10px !important; }
+  .u-r-12 { border-radius:12px !important; }
+  .u-r-4 { border-radius:4px !important; }
+  .u-r-8 { border-radius:8px !important; }
+  .u-rel { position:relative; }
+  .u-resize-none { resize:none !important; }
+  .u-resize-y { resize:vertical !important; }
+  .u-scroll-y { overflow-y:auto !important; }
+  .u-select-all { user-select:all !important; }
+  .u-select-none { user-select:none !important; }
+  .u-shrink-0 { flex-shrink:0 !important; }
+  .u-text-end { text-align:end !important; }
+  .u-text-start { text-align:start !important; }
+  .u-tint-er { background:color-mix(in srgb, var(--er) 10%, transparent); }
+  .u-tint-info { background:color-mix(in srgb, var(--info) 10%, transparent); }
+  .u-tint-ok { background:color-mix(in srgb, var(--ok) 10%, transparent); }
+  .u-tint-sc { background:color-mix(in srgb, var(--sc) 10%, transparent); }
+  .u-tint-wr { background:color-mix(in srgb, var(--wr) 10%, transparent); }
+  .u-tnum { font-variant-numeric:tabular-nums !important; }
+  .u-upper { text-transform:uppercase !important; }
+  .u-w-18 { width:18px; }
+  .u-w-36 { width:36px; }
+  .u-w-42 { width:42px; }
+  .u-w-44 { width:44px; }
+  .u-wrap { flex-wrap:wrap !important; }
+  .u-bg-field { background:var(--field); }
 </style>
 
 </head>
 <body data-t="dark">
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<svg width="0" height="0" class="u-abs" aria-hidden="true">
   <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
@@ -972,8 +1135,8 @@
       <button role="tab" aria-selected="true" aria-controls="tab-dashboard" tabindex="0" class="nav-item on" data-tab="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span data-i18n="nav_dashboard">Dashboard</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_tunnel">Tunnel</div>
       <button role="tab" aria-selected="false" aria-controls="tab-tunnel" tabindex="-1" class="nav-item" data-tab="tunnel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg><span data-i18n="nav_tunnel">Tunnel</span><span class="nav-badge hidden u-ml-auto" aria-hidden="false"></span></button>
-      <button role="tab" aria-selected="false" aria-controls="tab-sshfwd" tabindex="-1" class="nav-item" data-tab="sshfwd" id="sshfwdNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span data-i18n="nav_bagher">Bagher</span><span class="nav-badge bagher-lock-badge hidden" id="bagherNavLock" style="margin-left:auto; font-size:12px; padding:1px 5px; border-radius:4px; background:color-mix(in srgb, var(--wr) 20%, transparent); color:var(--wr); border:1px solid color-mix(in srgb, var(--wr) 40%, transparent);">PRO</span></button>
-      <button role="tab" aria-selected="false" class="nav-item" id="sentinelNav" onclick="openSentinelModal()" title="Sentinel VLESS &amp; Node Health Monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Sentinel</span><span class="nav-badge hidden" id="sentinelNavBadge" style="margin-left:auto; font-size:12px; padding:1px 5px; border-radius:4px; background:color-mix(in srgb, var(--info) 20%, transparent); color:var(--info); border:1px solid color-mix(in srgb, var(--info) 40%, transparent);">LIVE ↗</span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-sshfwd" tabindex="-1" class="nav-item" data-tab="sshfwd" id="sshfwdNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span data-i18n="nav_bagher">Bagher</span><span class="nav-badge bagher-lock-badge hidden u-ml-auto u-fs-12 u-p-2x4 u-r-4 u-tint-wr u-c-wr u-bd-wr" id="bagherNavLock">PRO</span></button>
+      <button role="tab" aria-selected="false" class="nav-item" id="sentinelNav" onclick="openSentinelModal()" title="Sentinel VLESS &amp; Node Health Monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Sentinel</span><span class="nav-badge hidden u-ml-auto u-fs-12 u-p-2x4 u-r-4 u-tint-info u-c-info u-bd-info" id="sentinelNavBadge">LIVE ↗</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-cluster" tabindex="-1" class="nav-item" data-tab="cluster" id="clusterNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span data-i18n="nav_cluster">Cluster</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-setup" tabindex="-1" class="nav-item" data-tab="setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span data-i18n="nav_setup">Setup</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" class="nav-item" data-tab="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span data-i18n="nav_logs">Logs</span></button>
@@ -1026,22 +1189,22 @@
         </div>
 
         <!-- Bagher PRO Dedicated Tunnel Banner / Hero Card in Dashboard -->
-        <div class="tunnel-card dash-bagher-card hidden" id="dashBagherCard" style="background: linear-gradient(135deg, color-mix(in srgb, var(--s1) 90%, transparent) 0%, color-mix(in srgb, var(--bg) 50%, transparent) 50%, color-mix(in srgb, var(--info) 18%, transparent) 100%); border: 1px solid color-mix(in srgb, var(--info) 45%, transparent); box-shadow: 0 10px 30px -5px color-mix(in srgb, var(--info) 28%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.12); border-radius: 14px; padding: 18px 22px; margin-bottom: 20px; backdrop-filter: blur(14px);">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
-            <div style="display:flex; align-items:center; gap:12px;">
-              <span style="display:inline-flex; align-items:center; justify-content:center; width:42px; height:42px; border-radius:10px; background:var(--info-fill); color:#fff;">
+        <div class="tunnel-card dash-bagher-card hidden u-bg-s1 u-bd-info u-noglow u-r-12 u-p-20x24 u-mb-20" id="dashBagherCard" style="backdrop-filter:blur(14px);">
+          <div class="u-flex u-jc-sb u-ai-c u-wrap u-gap-12 u-mb-16">
+            <div class="u-flex u-ai-c u-gap-12">
+              <span class="u-iflex u-ai-c u-jc-c u-w-42 u-h-42 u-r-10 u-bg-info-fill u-c-white">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
               </span>
               <div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <h3 style="margin:0; font-size:17px; font-weight:700; color:var(--tx); letter-spacing:-0.02em;">Bagher Tunnel</h3>
+                <div class="u-flex u-ai-c u-gap-8">
+                  <h3 class="u-m-0 u-fs-18 u-fw-700 u-c-tx u-ls-n02">Bagher Tunnel</h3>
                   <span class="badge ok">ACTIVE TUNNEL</span>
                   <span class="badge ok" id="dashBagherStatusBadge"><span class="dot"></span><span id="dashBagherStatusText">Active</span></span>
                 </div>
-                <div style="font-size:12px; color:var(--mu); margin-top:2px;" id="dashBagherRoleSub">Stealth Hybrid Tunnel · Role: Iran Server</div>
+                <div class="u-fs-12 u-c-mu u-mt-2" id="dashBagherRoleSub">Stealth Hybrid Tunnel · Role: Iran Server</div>
               </div>
             </div>
-            <div style="display:flex; align-items:center; gap:10px;">
+            <div class="u-flex u-ai-c u-gap-12">
               <button type="button" class="hashem-btn u-btn-30" onclick="openBagherQuickEdit()">
                 Edit Tunnel
               </button>
@@ -1054,22 +1217,22 @@
             </div>
           </div>
 
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; background:color-mix(in srgb, var(--bg) 40%, transparent); border:1px solid color-mix(in srgb, var(--tx) 6%, transparent); border-radius:10px; padding:12px 16px;">
+          <div class="u-grid u-gtc-fit-140 u-gap-12 u-bg-inset u-bd-ln u-r-10 u-p-12x16">
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Latency / Ping</div>
-              <div style="font-size:18px; font-weight:700; color:var(--info); font-family:monospace; margin-top:2px;" id="dashBagherPing">-- ms</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Latency / Ping</div>
+              <div class="u-fs-18 u-fw-700 u-c-info u-mono u-mt-2" id="dashBagherPing">-- ms</div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Traffic Rate</div>
-              <div style="font-size:14px; font-weight:700; color:var(--tx); margin-top:4px;" id="dashBagherRate">↓ 0 B/s · ↑ 0 B/s</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Traffic Rate</div>
+              <div class="u-fs-14 u-fw-700 u-c-tx u-mt-4" id="dashBagherRate">↓ 0 B/s · ↑ 0 B/s</div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Foreign Server</div>
-              <div style="font-size:13px; font-weight:700; color:var(--ok); font-family:monospace; margin-top:4px;" id="dashBagherForeign">--</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Foreign Server</div>
+              <div class="u-fs-13 u-fw-700 u-c-ok u-mono u-mt-4" id="dashBagherForeign">--</div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Forwarded Ports</div>
-              <div style="font-size:13px; font-weight:700; color:var(--tx2); font-family:monospace; margin-top:4px;" id="dashBagherPorts">--</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Forwarded Ports</div>
+              <div class="u-fs-13 u-fw-700 u-c-tx2 u-mono u-mt-4" id="dashBagherPorts">--</div>
             </div>
           </div>
         </div>
@@ -1116,11 +1279,11 @@
             <div class="chart-head">
               <div><p class="chart-title">Tunnel Activity &amp; Connections</p><div class="chart-sub">Active concurrent connections and session stream over time</div></div>
               <div class="chart-actions">
-                <div class="chart-live-badge" id="actLiveBadge"><span class="live-dot" style="background:var(--ok);box-shadow:0 0 8px color-mix(in srgb, var(--ok) 60%, transparent)"></span><span class="live-txt">STREAM</span></div>
+                <div class="chart-live-badge" id="actLiveBadge"><span class="live-dot u-bg-ok u-noglow"></span><span class="live-txt">STREAM</span></div>
               </div>
             </div>
-            <canvas id="activityChart" height="130" style="width:100%;height:130px;display:block;"></canvas>
-            <div class="chart-legend"><span style="color:var(--ok)"><i class="sw" style="background:var(--ok);box-shadow:0 0 6px color-mix(in srgb, var(--ok) 45%, transparent)"></i>Active Connections</span></div>
+            <canvas id="activityChart" height="130" class="u-w-full u-h-130 u-block"></canvas>
+            <div class="chart-legend"><span class="u-c-ok"><i class="sw u-bg-ok u-noglow"></i>Active Connections</span></div>
           </div>
           <div class="tunnel-card kpi">
             <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_cpu">CPU</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></span></div>
@@ -1198,17 +1361,17 @@
           <div class="fleet-grid" id="fleetGrid"></div>
         </div>
         <!-- Bagher PRO Tunnel Card in Tunnels Tab -->
-        <div class="tunnel-card hidden" id="tunnelBagherCard" style="background: linear-gradient(135deg, color-mix(in srgb, var(--s1) 90%, transparent) 0%, color-mix(in srgb, var(--bg) 45%, transparent) 100%); border: 1px solid color-mix(in srgb, var(--info) 40%, transparent); box-shadow: 0 8px 24px -4px color-mix(in srgb, var(--info) 22%, transparent); border-radius: 12px; padding: 18px; margin-bottom: 16px;">
-          <div class="tc-header" style="margin-bottom:12px;">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="color:var(--info); font-size:20px;"><svg class="i" aria-hidden="true"><use href="#i-bolt"/></svg></span>
+        <div class="tunnel-card hidden u-bg-s1 u-bd-info u-noglow u-r-12 u-p-20 u-mb-16" id="tunnelBagherCard">
+          <div class="tc-header u-mb-12">
+            <div class="u-flex u-ai-c u-gap-12">
+              <span class="u-c-info u-fs-20"><svg class="i" aria-hidden="true"><use href="#i-bolt"/></svg></span>
               <div>
-                <p class="tc-title" style="margin:0; font-size:15px; font-weight:700; color:var(--tx);">Bagher Hybrid Tunnel</p>
-                <div class="qs-hint" style="font-size:12px;">High-speed stealth carrier · Forwarding &amp; Multiplexing</div>
+                <p class="tc-title u-m-0 u-fs-16 u-fw-700 u-c-tx">Bagher Hybrid Tunnel</p>
+                <div class="qs-hint u-fs-12">High-speed stealth carrier · Forwarding &amp; Multiplexing</div>
               </div>
               <span class="badge ok">HYBRID</span>
             </div>
-            <div style="display:flex; align-items:center; gap:8px;">
+            <div class="u-flex u-ai-c u-gap-8">
               <span class="badge ok" id="tunBagherStatusBadge"><span class="dot"></span><span id="tunBagherStatusText">Active</span></span>
               <button type="button" class="hashem-btn u-btn-30" onclick="openBagherQuickEdit()">
                 Quick Edit
@@ -1219,22 +1382,22 @@
             </div>
           </div>
 
-          <div class="det-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
-            <div class="det-card" style="padding:10px 14px; background:color-mix(in srgb, var(--bg) 35%, transparent);">
-              <div class="det-head" style="font-size:12px; color:var(--mu);">Latency / Ping</div>
-              <div style="font-size:16px; font-weight:700; color:var(--info); font-family:monospace; margin-top:4px;" id="tunBagherPing">-- ms</div>
+          <div class="det-grid u-gtc-fit-180 u-gap-12">
+            <div class="det-card u-p-12x16 u-bg-inset">
+              <div class="det-head u-fs-12 u-c-mu">Latency / Ping</div>
+              <div class="u-fs-16 u-fw-700 u-c-info u-mono u-mt-4" id="tunBagherPing">-- ms</div>
             </div>
-            <div class="det-card" style="padding:10px 14px; background:color-mix(in srgb, var(--bg) 35%, transparent);">
-              <div class="det-head" style="font-size:12px; color:var(--mu);">Foreign Peer IP</div>
-              <div style="font-size:13px; font-weight:700; color:var(--ok); font-family:monospace; margin-top:4px;" id="tunBagherForeign">--</div>
+            <div class="det-card u-p-12x16 u-bg-inset">
+              <div class="det-head u-fs-12 u-c-mu">Foreign Peer IP</div>
+              <div class="u-fs-13 u-fw-700 u-c-ok u-mono u-mt-4" id="tunBagherForeign">--</div>
             </div>
-            <div class="det-card" style="padding:10px 14px; background:color-mix(in srgb, var(--bg) 35%, transparent);">
-              <div class="det-head" style="font-size:12px; color:var(--mu);">Forwarded Ports</div>
-              <div style="font-size:13px; font-weight:700; color:var(--tx); font-family:monospace; margin-top:4px;" id="tunBagherPorts">--</div>
+            <div class="det-card u-p-12x16 u-bg-inset">
+              <div class="det-head u-fs-12 u-c-mu">Forwarded Ports</div>
+              <div class="u-fs-13 u-fw-700 u-c-tx u-mono u-mt-4" id="tunBagherPorts">--</div>
             </div>
-            <div class="det-card" style="padding:10px 14px; background:color-mix(in srgb, var(--bg) 35%, transparent);">
-              <div class="det-head" style="font-size:12px; color:var(--mu);">Total Throughput</div>
-              <div style="font-size:13px; font-weight:700; color:var(--tx2); margin-top:4px;" id="tunBagherTotal">0 B</div>
+            <div class="det-card u-p-12x16 u-bg-inset">
+              <div class="det-head u-fs-12 u-c-mu">Total Throughput</div>
+              <div class="u-fs-13 u-fw-700 u-c-tx2 u-mt-4" id="tunBagherTotal">0 B</div>
             </div>
           </div>
         </div>
@@ -1279,17 +1442,17 @@
         </div>
 
         <!-- Live Tunnel Engine Switcher -->
-        <div class="tunnel-card u-mt-4" id="liveEngineCard" style="border:1px solid color-mix(in srgb, var(--info) 25%, transparent); background:linear-gradient(180deg, color-mix(in srgb, var(--bg) 60%, transparent) 0%, color-mix(in srgb, var(--s1) 80%, transparent) 100%);">
+        <div class="tunnel-card u-mt-4 u-bd-info u-bg-s1" id="liveEngineCard">
           <div class="tc-header">
             <p class="tc-title">Live Tunnel Engine Switcher</p>
             <span class="badge info" id="activeEngineBadge">FRP</span>
           </div>
-          <div style="font-size:12px;color:var(--mu);margin-bottom:12px">
+          <div class="u-fs-12 u-c-mu u-mb-12">
             Switch tunneling engine live on the fly without losing server tokens or port mappings. Both servers will re-link seamlessly.
           </div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px">
+          <div class="u-grid u-gtc-fit-200 u-gap-12 u-mb-12">
             <div>
-              <label for="liveEngineSelect" style="font-size:12px;text-transform:uppercase;color:var(--mu);display:block;margin-bottom:4px">Target Engine</label>
+              <label for="liveEngineSelect" class="u-fs-12 u-upper u-c-mu u-block u-mb-4">Target Engine</label>
               <select class="hashem-input u-w-full" id="liveEngineSelect">
                 <option value="frp">GRE + FRP Reverse Tunnel</option>
                 <option value="backhaul">Standalone Backhaul (Multiplexed)</option>
@@ -1297,7 +1460,7 @@
               </select>
             </div>
             <div id="liveTransportWrap">
-              <label for="liveTransportSelect" style="font-size:12px;text-transform:uppercase;color:var(--mu);display:block;margin-bottom:4px">Transport Protocol</label>
+              <label for="liveTransportSelect" class="u-fs-12 u-upper u-c-mu u-block u-mb-4">Transport Protocol</label>
               <select class="hashem-input u-w-full" id="liveTransportSelect">
                 <option value="tcpmux" selected>TCPMUX (Multi-stream TCP - Recommended)</option>
                 <option value="wssmux">WSSMUX (WebSocket + TLS Obfuscation)</option>
@@ -1308,7 +1471,7 @@
               </select>
             </div>
           </div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="u-flex u-ai-c u-gap-12 u-wrap">
             <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn">Switch Tunnel Engine Now</button>
             <span class="u-hint-12" id="liveEngineStatusTxt"></span>
           </div>
@@ -1317,10 +1480,10 @@
       <section id="tab-sshfwd" role="tabpanel" hidden>
         <input type="hidden" id="sshfwdMode" value="bagher" />
         <!-- Locked Banner (shown when un-licensed and modal is closed) -->
-        <div id="bagherLockedBanner" class="hidden" style="text-align:center; padding:60px 20px; background:linear-gradient(180deg, color-mix(in srgb, var(--s1) 85%, transparent) 0%, color-mix(in srgb, var(--s1) 95%, transparent) 100%); border:1px solid color-mix(in srgb, var(--info) 22%, transparent); border-radius:12px; margin-bottom:20px;">
-          <div style="font-size:42px; margin-bottom:14px;"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></div>
-          <h3 style="font-size:18px; font-weight:700; color:var(--info); margin-bottom:8px;">Bagher Engine Requires a Premium License</h3>
-          <p style="font-size:13px; color:var(--mu); max-width:500px; margin:0 auto 20px auto; line-height:1.6;">
+        <div id="bagherLockedBanner" class="hidden u-text-center u-p-48x20 u-bg-s1 u-bd-info u-r-12 u-mb-20">
+          <div class="u-fs-42 u-mb-16"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></div>
+          <h3 class="u-fs-18 u-fw-700 u-c-info u-mb-8">Bagher Engine Requires a Premium License</h3>
+          <p class="u-fs-13 u-c-mu u-maxw-500 u-m-0xautox20xauto u-lh-16">
             Stealth obfuscation and multiplexed SSH key pool tunneling is exclusively provided in the Premium edition. Enter your license key to unlock.
           </p>
           <button class="hashem-btn hashem-btn-primary" id="bagherOpenLicModalBtn" onclick="openBagherLicModal()">
@@ -1328,20 +1491,20 @@
           </button>
         </div>
 
-        <div id="bagherCardContainer" class="tunnel-card" style="border:1px solid color-mix(in srgb, var(--info) 38%, transparent); background:radial-gradient(circle at top right, color-mix(in srgb, var(--info) 18%, transparent), transparent 45%), linear-gradient(180deg, color-mix(in srgb, var(--s1) 95%, transparent) 0%, color-mix(in srgb, var(--s1) 98%, transparent) 100%); box-shadow:0 16px 40px -8px color-mix(in srgb, var(--info) 25%, transparent), inset 0 1px 0 rgba(255,255,255,0.1); border-radius:14px;">
-          <div class="tc-header" style="border-bottom:1px solid color-mix(in srgb, var(--info) 20%, transparent); padding-bottom:16px; margin-bottom:18px;">
+        <div id="bagherCardContainer" class="tunnel-card u-bd-info u-bg-s1 u-noglow u-r-12">
+          <div class="tc-header u-bb-info u-pb-16 u-mb-20">
             <div>
-              <div class="u-flex-center-gap10" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
-                <span class="tc-title" style="font-size:19px; font-weight:700; display:flex; align-items:center; gap:10px; color:var(--tx); letter-spacing:-0.02em; white-space:nowrap;">
-                  <span style="display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px; background:var(--info-fill); color:#fff;">
+              <div class="u-flex-center-gap10 u-flex u-ai-c u-wrap u-gap-12">
+                <span class="tc-title u-fs-20 u-fw-700 u-flex u-ai-c u-gap-12 u-c-tx u-ls-n02 u-nowrap">
+                  <span class="u-iflex u-ai-c u-jc-c u-w-36 u-h-36 u-r-8 u-bg-info-fill u-c-white">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
                   </span>
                   Bagher Stealth Tunnel
                 </span>
-                <span class="badge ok" style="white-space:nowrap;">TUNNEL ENGINE</span>
-                <span class="badge dim" id="sshfwdStatusBadge" style="white-space:nowrap;">Checking...</span>
+                <span class="badge ok u-nowrap">TUNNEL ENGINE</span>
+                <span class="badge dim u-nowrap" id="sshfwdStatusBadge">Checking...</span>
               </div>
-              <div class="qs-hint u-mt-4" id="sshfwdSubTxt" style="color:var(--mu); font-size:12px;">High-speed stealth carrier · Forwarding &amp; Multiplexing directly to Foreign server inbound ports</div>
+              <div class="qs-hint u-mt-4 u-c-mu u-fs-12" id="sshfwdSubTxt">High-speed stealth carrier · Forwarding &amp; Multiplexing directly to Foreign server inbound ports</div>
             </div>
             <div class="qs-actions">
               <span class="badge info" id="bagherActiveRoleBadge">Role: Iran Server</span>
@@ -1349,60 +1512,60 @@
           </div>
 
           <!-- Live Cyberpunk Telemetry Gauges -->
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; background:color-mix(in srgb, var(--bg) 45%, transparent); border:1px solid color-mix(in srgb, var(--info) 20%, transparent); border-radius:10px; padding:12px 18px; margin-bottom:18px;">
+          <div class="u-grid u-gtc-fit-140 u-gap-12 u-bg-inset u-bd-info u-r-10 u-p-12x20 u-mb-20">
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">RTT Latency</div>
-              <div style="font-size:18px; font-weight:700; color:var(--info); font-family:monospace; margin-top:2px;" id="bagherLivePing">-- ms</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">RTT Latency</div>
+              <div class="u-fs-18 u-fw-700 u-c-info u-mono u-mt-2" id="bagherLivePing">-- ms</div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Live Speed</div>
-              <div style="font-size:13px; font-weight:700; color:var(--tx); margin-top:4px;" id="bagherLiveSpeed">↓ 0 B/s · ↑ 0 B/s</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Live Speed</div>
+              <div class="u-fs-13 u-fw-700 u-c-tx u-mt-4" id="bagherLiveSpeed">↓ 0 B/s · ↑ 0 B/s</div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Total Transfer</div>
-              <div style="font-size:13px; font-weight:700; color:var(--ok); font-family:monospace; margin-top:4px;" id="bagherLiveTotal">0 B</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Total Transfer</div>
+              <div class="u-fs-13 u-fw-700 u-c-ok u-mono u-mt-4" id="bagherLiveTotal">0 B</div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Tunnel Sockets</div>
-              <div style="font-size:13px; font-weight:700; color:var(--tx2); font-family:monospace; margin-top:4px;" id="bagherLiveSockets">25 Active</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Tunnel Sockets</div>
+              <div class="u-fs-13 u-fw-700 u-c-tx2 u-mono u-mt-4" id="bagherLiveSockets">25 Active</div>
             </div>
           </div>
 
           <!-- Role Selector (Identical to gre-frp Quick Setup) -->
-          <div class="tc-box" style="background:var(--sunk); border:1px solid color-mix(in srgb, var(--info) 20%, transparent); padding:16px; border-radius:10px; margin-bottom:16px;">
-            <label class="qs-label" style="font-size:14px; font-weight:700; color:var(--tx2); margin-bottom:10px; display:block;">
+          <div class="tc-box u-bg-sunk u-bd-info u-p-16 u-r-10 u-mb-16">
+            <label class="qs-label u-fs-14 u-fw-700 u-c-tx2 u-mb-12 u-block">
               Step 1: Select Server Role
             </label>
             <div class="qs-seg" role="group" aria-label="Bagher Server Role">
-              <button type="button" id="bagherRoleIran" onclick="setBagherRole('iran')" aria-pressed="true" style="font-weight:700; padding:10px 20px; font-size:13px;">
+              <button type="button" id="bagherRoleIran" onclick="setBagherRole('iran')" aria-pressed="true" class="u-fw-700 u-p-12x20 u-fs-13">
                 Iran Server (Receives User Traffic)
               </button>
-              <button type="button" id="bagherRoleForeign" onclick="setBagherRole('foreign')" aria-pressed="false" style="font-weight:700; padding:10px 20px; font-size:13px;">
+              <button type="button" id="bagherRoleForeign" onclick="setBagherRole('foreign')" aria-pressed="false" class="u-fw-700 u-p-12x20 u-fs-13">
                 Foreign Server (Exit & Service Host)
               </button>
             </div>
             <input type="hidden" id="bagherRoleInput" value="iran">
-            <div class="qs-hint" id="bagherRoleHint" style="margin-top:8px; line-height:1.5;">
+            <div class="qs-hint u-mt-8 u-lh-15" id="bagherRoleHint">
               Iran server receives user traffic, listens on forwarded ports, and routes via stealth tunnel to foreign server.
             </div>
           </div>
 
           <!-- ==================== IRAN ROLE WRAPPER ==================== -->
           <div id="bagherIranWrap">
-            <div class="tc-box" style="background:var(--sunk); border:1px solid color-mix(in srgb, var(--info) 18%, transparent); padding:16px; border-radius:10px; margin-bottom:16px;">
-              <h4 style="font-size:14px; font-weight:700; color:var(--info); margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+            <div class="tc-box u-bg-sunk u-bd-info u-p-16 u-r-10 u-mb-16">
+              <h4 class="u-fs-14 u-fw-700 u-c-info u-mb-12 u-flex u-ai-c u-gap-8">
                 Step 2: Foreign Server Details & Forwarded Ports (Iran Setup)
               </h4>
-              <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:14px; margin-bottom:14px;">
+              <div class="u-grid u-gtc-fit-260 u-gap-16 u-mb-16">
                 <div>
-                  <label for="sshfwdRemoteHost" class="u-lbl-dim">Foreign Server Public IP <span style="color:var(--er);">*</span></label>
-                  <input type="text" id="sshfwdRemoteHost" class="hashem-input" placeholder="e.g. 91.107.174.173" style="width:100%;">
+                  <label for="sshfwdRemoteHost" class="u-lbl-dim">Foreign Server Public IP <span class="u-c-er">*</span></label>
+                  <input type="text" id="sshfwdRemoteHost" class="hashem-input u-w-full" placeholder="e.g. 91.107.174.173">
                   <div class="u-hint-11">Foreign server public IP where your proxy core and panel reside.</div>
                 </div>
                 <div>
-                  <label for="sshfwdPorts" class="u-lbl-dim">Forwarded Ports <span style="color:var(--er);">*</span></label>
-                  <input type="text" id="sshfwdPorts" class="hashem-input" placeholder="e.g. 443, 8443, 2083" style="width:100%;">
-                  <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
+                  <label for="sshfwdPorts" class="u-lbl-dim">Forwarded Ports <span class="u-c-er">*</span></label>
+                  <input type="text" id="sshfwdPorts" class="hashem-input u-w-full" placeholder="e.g. 443, 8443, 2083">
+                  <div class="u-flex u-wrap u-gap-8 u-mt-8">
                     <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443, 8443';">Web (443, 8443)</button>
                     <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443, 8443, 2053, 2083, 2087';">CDN/V2Ray (443, 8443, 2053, 2083, 2087)</button>
                     <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443';">Single (443)</button>
@@ -1412,31 +1575,31 @@
               </div>
 
               <!-- Advanced Iran Settings -->
-              <details style="margin-bottom:14px; background:color-mix(in srgb, var(--bg) 25%, transparent); border:1px solid color-mix(in srgb, var(--tx) 6%, transparent); border-radius:6px; padding:8px 12px;">
-                <summary style="cursor:pointer; font-size:12px; font-weight:600; color:var(--mu); user-select:none;">
+              <details class="u-mb-16 u-bg-inset u-bd-ln u-r-8 u-p-8x12">
+                <summary class="u-cursor-pointer u-fs-12 u-fw-600 u-c-mu u-select-none">
                   Advanced Settings (SSH Port, Pool Sockets, FRP)
                 </summary>
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:10px;">
+                <div class="u-grid u-gtc-fit-180 u-gap-12 u-mt-12">
                   <div>
                     <label for="sshfwdRemotePort" class="u-lbl-dim">Foreign SSH Port</label>
-                    <input type="number" id="sshfwdRemotePort" class="hashem-input" value="22" placeholder="22" style="width:100%;">
+                    <input type="number" id="sshfwdRemotePort" class="hashem-input u-w-full" value="22" placeholder="22">
                   </div>
                   <div>
                     <label for="sshfwdRemoteUser" class="u-lbl-dim">Foreign SSH Username</label>
-                    <input type="text" id="sshfwdRemoteUser" class="hashem-input" value="root" style="width:100%;">
+                    <input type="text" id="sshfwdRemoteUser" class="hashem-input u-w-full" value="root">
                   </div>
                   <div>
                     <label for="sshfwdFRPPort" class="u-lbl-dim">FRP Internal Port</label>
-                    <input type="number" id="sshfwdFRPPort" class="hashem-input" value="55400" style="width:100%;">
+                    <input type="number" id="sshfwdFRPPort" class="hashem-input u-w-full" value="55400">
                   </div>
                   <div>
                     <label for="sshfwdPoolCount" class="u-lbl-dim">Connection Pool Size</label>
-                    <input type="number" id="sshfwdPoolCount" class="hashem-input" value="25" style="width:100%;">
+                    <input type="number" id="sshfwdPoolCount" class="hashem-input u-w-full" value="25">
                   </div>
                 </div>
               </details>
 
-              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+              <div class="u-flex u-gap-12 u-ai-c u-wrap">
                 <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn">
                   Initialize Iran Server &amp; Issue Bundle
                 </button>
@@ -1453,41 +1616,41 @@
             </div>
 
             <!-- Iran Bundle Output Card -->
-            <div class="tc-box" id="bagherIranBundleCard" style="background:color-mix(in srgb, var(--info) 6%, transparent); border:1px solid color-mix(in srgb, var(--info) 22%, transparent); padding:16px; border-radius:10px; margin-bottom:16px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-                <span style="font-weight:700; font-size:15px; color:var(--info); display:flex; align-items:center; gap:8px;">
+            <div class="tc-box u-tint-info u-bd-info u-p-16 u-r-10 u-mb-16" id="bagherIranBundleCard">
+              <div class="u-flex u-jc-sb u-ai-c u-mb-12 u-wrap u-gap-8">
+                <span class="u-fw-700 u-fs-16 u-c-info u-flex u-ai-c u-gap-8">
                   Step 3: Generated Connection Bundle (Copy &amp; Paste into Foreign Server)
                 </span>
                 <button type="button" class="hashem-btn" id="bagherCopyBundleBtn">
                   Copy Bundle
                 </button>
               </div>
-              <div class="u-hint-12" style="margin-bottom:8px; line-height:1.5;">
+              <div class="u-hint-12 u-mb-8 u-lh-15">
                 <b>Connection Guide:</b> This bundle contains security keys and tunnel parameters. Copy and paste it on the Foreign Server web panel under Foreign Server role.
               </div>
-              <textarea id="bagherBundleText" aria-label="Connection bundle" class="hashem-input" rows="4" readonly placeholder="Fill in the fields above and click 'Initialize Iran Server &amp; Issue Bundle' to generate the connection bundle here..." style="width:100%; min-height:95px; font-family:monospace; font-size:12px; line-height:1.45; background:color-mix(in srgb, var(--bg) 55%, transparent); resize:vertical; color:var(--info); word-break:break-all; padding:10px; border-radius:6px;"></textarea>
+              <textarea id="bagherBundleText" aria-label="Connection bundle" class="hashem-input u-w-full u-minh-95 u-mono u-fs-12 u-lh-145 u-bg-inset u-resize-y u-c-info u-break u-p-12 u-r-8" rows="4" readonly placeholder="Fill in the fields above and click 'Initialize Iran Server &amp; Issue Bundle' to generate the connection bundle here..."></textarea>
             </div>
           </div>
 
           <!-- ==================== FOREIGN ROLE WRAPPER ==================== -->
           <div id="bagherForeignWrap" hidden>
-            <div class="tc-box" style="background:linear-gradient(180deg, color-mix(in srgb, var(--ok) 8%, transparent) 0%, color-mix(in srgb, var(--bg) 40%, transparent) 100%); border:1px solid color-mix(in srgb, var(--ok) 25%, transparent); padding:18px; border-radius:10px; margin-bottom:16px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
-                <span style="font-weight:700; font-size:15px; color:var(--ok); display:flex; align-items:center; gap:8px;">
+            <div class="tc-box u-bg-s1 u-bd-ok u-p-20 u-r-10 u-mb-16">
+              <div class="u-flex u-jc-sb u-ai-c u-mb-12 u-wrap u-gap-8">
+                <span class="u-fw-700 u-fs-16 u-c-ok u-flex u-ai-c u-gap-8">
                   Step 2: Paste Iran Connection Bundle & Start Tunnel
                 </span>
                 <span class="badge ok">1-Click Auto Connection</span>
               </div>
-              <div class="u-hint-12" style="margin-bottom:10px; line-height:1.5;">
-                Paste the connection code from Iran server (starts with <code style="color:var(--info);">BAGHER:</code>) below and click Connect:
+              <div class="u-hint-12 u-mb-12 u-lh-15">
+                Paste the connection code from Iran server (starts with <code class="u-c-info">BAGHER:</code>) below and click Connect:
               </div>
-              <div style="display:flex; flex-direction:column; gap:12px;">
-                <textarea id="bagherPasteBundleInput" aria-label="Connection bundle from the Iran server" class="hashem-input" rows="4" placeholder="BAGHER:eyJ2Ij...NDNd..." style="width:100%; min-height:90px; font-family:monospace; font-size:12px; background:color-mix(in srgb, var(--bg) 50%, transparent); resize:vertical; padding:10px; border-radius:6px; color:var(--ok); word-break:break-all;"></textarea>
-                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div class="u-flex u-col u-gap-12">
+                <textarea id="bagherPasteBundleInput" aria-label="Connection bundle from the Iran server" class="hashem-input u-w-full u-minh-90 u-mono u-fs-12 u-bg-inset u-resize-y u-p-12 u-r-8 u-c-ok u-break" rows="4" placeholder="BAGHER:eyJ2Ij...NDNd..."></textarea>
+                <div class="u-flex u-jc-sb u-ai-c u-wrap u-gap-12">
                   <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn">
                     Connect to Iran &amp; Start Foreign Tunnel
                   </button>
-                  <div style="display:flex; align-items:center; gap:8px;">
+                  <div class="u-flex u-ai-c u-gap-8">
                     <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn">
                       Stop Foreign Tunnel
                     </button>
@@ -1500,48 +1663,48 @@
             </div>
 
             <!-- Manual Terminal Fallback Details -->
-            <details style="margin-bottom:16px; background:color-mix(in srgb, var(--bg) 25%, transparent); border:1px solid color-mix(in srgb, var(--tx) 6%, transparent); border-radius:8px; padding:10px 14px;">
-              <summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--mu); user-select:none;">
+            <details class="u-mb-16 u-bg-inset u-bd-ln u-r-8 u-p-12x16">
+              <summary class="u-cursor-pointer u-fs-13 u-fw-600 u-c-mu u-select-none">
                 Manual Terminal Command (For Headless Remote Servers)
               </summary>
-              <div style="margin-top:12px;">
-                <div class="u-hint-12" style="margin-bottom:6px;">One-line Bash command to execute on headless Foreign server:</div>
-                <div style="position:relative; margin-bottom:12px;">
-                  <textarea id="sshfwdForeignCmd" aria-label="Install command for the foreign server" class="hashem-input" rows="3" readonly style="width:100%; font-family:monospace; font-size:12px; background:color-mix(in srgb, var(--bg) 60%, transparent);"></textarea>
-                  <button type="button" class="hashem-btn u-btn-30" id="sshfwdCopyForeignBtn" style="position:absolute; top:8px; left:8px;">Copy</button>
+              <div class="u-mt-12">
+                <div class="u-hint-12 u-mb-8">One-line Bash command to execute on headless Foreign server:</div>
+                <div class="u-rel u-mb-12">
+                  <textarea id="sshfwdForeignCmd" aria-label="Install command for the foreign server" class="hashem-input u-w-full u-mono u-fs-12 u-bg-inset" rows="3" readonly></textarea>
+                  <button type="button" class="hashem-btn u-btn-30 u-abs" id="sshfwdCopyForeignBtn" style="top:8px; left:8px;">Copy</button>
                 </div>
-                <div class="u-hint-12" style="margin-bottom:6px;">Foreign server authorized_keys configuration line:</div>
-                <div style="position:relative;">
-                  <textarea id="sshfwdAuthLine" aria-label="authorized_keys line for the foreign server" class="hashem-input" rows="2" readonly style="width:100%; font-family:monospace; font-size:12px; background:color-mix(in srgb, var(--bg) 60%, transparent);"></textarea>
-                  <button type="button" class="hashem-btn u-btn-30" id="sshfwdCopyAuthBtn" style="position:absolute; top:8px; left:8px;">Copy</button>
+                <div class="u-hint-12 u-mb-8">Foreign server authorized_keys configuration line:</div>
+                <div class="u-rel">
+                  <textarea id="sshfwdAuthLine" aria-label="authorized_keys line for the foreign server" class="hashem-input u-w-full u-mono u-fs-12 u-bg-inset" rows="2" readonly></textarea>
+                  <button type="button" class="hashem-btn u-btn-30 u-abs" id="sshfwdCopyAuthBtn" style="top:8px; left:8px;">Copy</button>
                 </div>
               </div>
             </details>
           </div>
 
           <!-- Live Health & Traffic Monitoring (Common for both roles) -->
-          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:6px;">
-            <div class="tc-box" style="background:var(--sunk); border:1px solid color-mix(in srgb, var(--info) 15%, transparent); padding:12px 14px; border-radius:8px;">
-              <div style="font-size:12px; text-transform:uppercase; color:var(--text-dim, var(--mu)); margin-bottom:6px; font-weight:600;">Tunnel Status</div>
-              <div style="display:flex; align-items:center; gap:8px;">
+          <div class="u-grid u-gtc-fit-180 u-gap-12 u-mt-8">
+            <div class="tc-box u-bg-sunk u-bd-info u-p-12x16 u-r-8">
+              <div class="u-fs-12 u-upper u-c-mu u-mb-8 u-fw-600">Tunnel Status</div>
+              <div class="u-flex u-ai-c u-gap-8">
                 <span class="badge" id="bagherConnBadge">Checking...</span>
               </div>
-              <div id="bagherRoleTxt" style="font-size:12px; color:var(--mu); margin-top:4px;">Role: Iran Server</div>
+              <div id="bagherRoleTxt" class="u-fs-12 u-c-mu u-mt-4">Role: Iran Server</div>
             </div>
-            <div class="tc-box" style="background:var(--sunk); border:1px solid color-mix(in srgb, var(--info) 15%, transparent); padding:12px 14px; border-radius:8px;">
-              <div style="font-size:12px; text-transform:uppercase; color:var(--text-dim, var(--mu)); margin-bottom:4px; font-weight:600;">Round-Trip Latency (RTT)</div>
-              <div style="font-size:18px; font-weight:700; color:var(--info);" id="bagherLatencyVal">—</div>
-              <div style="font-size:12px; color:var(--mu); margin-top:2px;">Real-time stealth session ping</div>
+            <div class="tc-box u-bg-sunk u-bd-info u-p-12x16 u-r-8">
+              <div class="u-fs-12 u-upper u-c-mu u-mb-4 u-fw-600">Round-Trip Latency (RTT)</div>
+              <div class="u-fs-18 u-fw-700 u-c-info" id="bagherLatencyVal">—</div>
+              <div class="u-fs-12 u-c-mu u-mt-2">Real-time stealth session ping</div>
             </div>
-            <div class="tc-box" style="background:var(--sunk); border:1px solid color-mix(in srgb, var(--info) 15%, transparent); padding:12px 14px; border-radius:8px;">
-              <div style="font-size:12px; text-transform:uppercase; color:var(--text-dim, var(--mu)); margin-bottom:4px; font-weight:600;">Data Usage</div>
-              <div style="font-size:18px; font-weight:700; color:var(--ok);" id="bagherTrafficTotal">0 B</div>
-              <div style="font-size:12px; color:var(--mu); margin-top:2px;" id="bagherTrafficUpDown">↓ 0 B  ↑ 0 B</div>
+            <div class="tc-box u-bg-sunk u-bd-info u-p-12x16 u-r-8">
+              <div class="u-fs-12 u-upper u-c-mu u-mb-4 u-fw-600">Data Usage</div>
+              <div class="u-fs-18 u-fw-700 u-c-ok" id="bagherTrafficTotal">0 B</div>
+              <div class="u-fs-12 u-c-mu u-mt-2" id="bagherTrafficUpDown">↓ 0 B  ↑ 0 B</div>
             </div>
-            <div class="tc-box" style="background:var(--sunk); border:1px solid color-mix(in srgb, var(--info) 15%, transparent); padding:12px 14px; border-radius:8px;">
-              <div style="font-size:12px; text-transform:uppercase; color:var(--text-dim, var(--mu)); margin-bottom:4px; font-weight:600;">Active Sockets (Pool)</div>
-              <div style="font-size:18px; font-weight:700; color:var(--wr);" id="bagherConnsVal">0</div>
-              <div style="font-size:12px; color:var(--mu); margin-top:2px;">Synchronized multiplexed tunnels</div>
+            <div class="tc-box u-bg-sunk u-bd-info u-p-12x16 u-r-8">
+              <div class="u-fs-12 u-upper u-c-mu u-mb-4 u-fw-600">Active Sockets (Pool)</div>
+              <div class="u-fs-18 u-fw-700 u-c-wr" id="bagherConnsVal">0</div>
+              <div class="u-fs-12 u-c-mu u-mt-2">Synchronized multiplexed tunnels</div>
             </div>
           </div>
         </div>
@@ -1549,10 +1712,10 @@
       <!-- ==================== CLUSTER TAB ==================== -->
       <section id="tab-cluster" role="tabpanel" hidden>
         <!-- Locked Banner (shown when un-licensed) -->
-        <div id="clusterLockedBanner" class="hidden" style="text-align:center; padding:60px 20px; background:linear-gradient(180deg, color-mix(in srgb, var(--s1) 85%, transparent) 0%, color-mix(in srgb, var(--s1) 95%, transparent) 100%); border:1px solid color-mix(in srgb, var(--sc) 30%, transparent); border-radius:12px; margin-bottom:20px;">
-          <div style="font-size:42px; margin-bottom:14px;"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></div>
-          <h3 style="font-size:18px; font-weight:700; color:var(--sc); margin-bottom:8px;">Iran Mesh Cluster Requires an Active License</h3>
-          <p style="font-size:13px; color:var(--mu); max-width:520px; margin:0 auto 20px auto; line-height:1.6;">
+        <div id="clusterLockedBanner" class="hidden u-text-center u-p-48x20 u-bg-s1 u-bd-sc u-r-12 u-mb-20">
+          <div class="u-fs-42 u-mb-16"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></div>
+          <h3 class="u-fs-18 u-fw-700 u-c-sc u-mb-8">Iran Mesh Cluster Requires an Active License</h3>
+          <p class="u-fs-13 u-c-mu u-maxw-520 u-m-0xautox20xauto u-lh-16">
             Autonomous Iran-to-Iran health gossip, latency probing, and automated zero-downtime failover rerouting is exclusively unlocked with a Bagher or Cluster license.
           </p>
           <button class="hashem-btn hashem-btn-primary" onclick="openBagherLicModal()">
@@ -1560,79 +1723,79 @@
           </button>
         </div>
 
-        <div id="clusterCardContainer" class="tunnel-card" style="border:1px solid color-mix(in srgb, var(--sc) 38%, transparent); background:radial-gradient(circle at top right, color-mix(in srgb, var(--sc) 15%, transparent), transparent 45%), linear-gradient(180deg, color-mix(in srgb, var(--s1) 95%, transparent) 0%, color-mix(in srgb, var(--s1) 98%, transparent) 100%); box-shadow:0 16px 40px -8px color-mix(in srgb, var(--sc) 22%, transparent), inset 0 1px 0 rgba(255,255,255,0.1); border-radius:14px;">
-          <div class="tc-header" style="border-bottom:1px solid color-mix(in srgb, var(--sc) 20%, transparent); padding-bottom:16px; margin-bottom:18px;">
+        <div id="clusterCardContainer" class="tunnel-card u-bd-sc u-bg-s1 u-noglow u-r-12">
+          <div class="tc-header u-bb-sc u-pb-16 u-mb-20">
             <div>
-              <div class="u-flex-center-gap10" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
-                <span class="tc-title" style="font-size:19px; font-weight:700; display:flex; align-items:center; gap:10px; color:var(--tx); letter-spacing:-0.02em; white-space:nowrap;">
-                  <span style="display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px; background:var(--sc-fill); color:#fff;">
+              <div class="u-flex-center-gap10 u-flex u-ai-c u-wrap u-gap-12">
+                <span class="tc-title u-fs-20 u-fw-700 u-flex u-ai-c u-gap-12 u-c-tx u-ls-n02 u-nowrap">
+                  <span class="u-iflex u-ai-c u-jc-c u-w-36 u-h-36 u-r-8 u-bg-sc-fill u-c-white">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                   </span>
                   Iran Hub Mesh Cluster
                 </span>
-                <span class="badge u-pill-violet" style="white-space:nowrap;">MULTI-HUB HA</span>
-                <span class="badge dim" id="clusterStatusBadge" style="white-space:nowrap;">Checking...</span>
+                <span class="badge u-pill-violet u-nowrap">MULTI-HUB HA</span>
+                <span class="badge dim u-nowrap" id="clusterStatusBadge">Checking...</span>
               </div>
-              <div class="qs-hint u-mt-4" style="color:var(--mu); font-size:12px;">Real-time gossip heartbeats across Iran nodes · Automatic zero-downtime client failover upon foreign tunnel drop</div>
+              <div class="qs-hint u-mt-4 u-c-mu u-fs-12">Real-time gossip heartbeats across Iran nodes · Automatic zero-downtime client failover upon foreign tunnel drop</div>
             </div>
-            <div class="qs-actions" style="display:flex; gap:8px; align-items:center;">
+            <div class="qs-actions u-flex u-gap-8 u-ai-c">
               <button class="hashem-btn u-btn-30" onclick="openClusterConfigModal()">Settings</button>
               <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddNodeModal()">+ Add Peer Node</button>
             </div>
           </div>
 
           <!-- Cluster Live Gauges -->
-          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; background:color-mix(in srgb, var(--bg) 45%, transparent); border:1px solid color-mix(in srgb, var(--sc) 20%, transparent); border-radius:10px; padding:12px 18px; margin-bottom:18px;">
+          <div class="u-grid u-gtc-fit-140 u-gap-12 u-bg-inset u-bd-sc u-r-10 u-p-12x20 u-mb-20">
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">This Node ID</div>
-              <div style="font-size:15px; font-weight:700; color:var(--sc); font-family:monospace; margin-top:2px;" id="clusterLocalNodeID">--</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">This Node ID</div>
+              <div class="u-fs-16 u-fw-700 u-c-sc u-mono u-mt-2" id="clusterLocalNodeID">--</div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Public IP</div>
-              <div style="font-size:14px; font-weight:700; color:var(--tx); font-family:monospace; margin-top:4px;" id="clusterLocalIP">--</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Public IP</div>
+              <div class="u-fs-14 u-fw-700 u-c-tx u-mono u-mt-4" id="clusterLocalIP">--</div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Local Tunnel to Kharej</div>
-              <div style="font-size:13px; font-weight:700; margin-top:4px;" id="clusterLocalTunnelStatus"><span class="badge ok">UP</span></div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Local Tunnel to Kharej</div>
+              <div class="u-fs-13 u-fw-700 u-mt-4" id="clusterLocalTunnelStatus"><span class="badge ok">UP</span></div>
             </div>
             <div>
-              <div style="font-size:12px; text-transform:uppercase; color:var(--mu); font-weight:600; letter-spacing:0.05em;">Active Routing Path</div>
-              <div style="font-size:13px; font-weight:700; color:var(--ok); font-family:monospace; margin-top:4px;" id="clusterActiveRouting">Local Tunnel (Direct)</div>
+              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Active Routing Path</div>
+              <div class="u-fs-13 u-fw-700 u-c-ok u-mono u-mt-4" id="clusterActiveRouting">Local Tunnel (Direct)</div>
             </div>
           </div>
 
           <!-- Active Failover Alert Bar (Visible only when rerouted) -->
-          <div id="clusterFailoverBar" class="hidden" style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:linear-gradient(90deg, color-mix(in srgb, var(--er) 20%, transparent), color-mix(in srgb, var(--wr) 20%, transparent)); border:1px solid color-mix(in srgb, var(--er) 50%, transparent); border-radius:8px; padding:12px 16px; margin-bottom:18px;">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="font-size:20px;"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
+          <div id="clusterFailoverBar" class="hidden u-flex u-ai-c u-jc-sb u-gap-12 u-bd-er u-r-8 u-p-12x16 u-mb-20" style="background:linear-gradient(90deg, color-mix(in srgb, var(--er) 20%, transparent), color-mix(in srgb, var(--wr) 20%, transparent));">
+            <div class="u-flex u-ai-c u-gap-12">
+              <span class="u-fs-20"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
               <div>
-                <b style="color:var(--er); font-size:13px;">FAILOVER ACTIVE:</b>
-                <span style="color:var(--tx); font-size:13px; margin-left:6px;" id="clusterFailoverBarText">Local tunnel dropped. All client traffic is currently rerouted through Iran peer.</span>
+                <b class="u-c-er u-fs-13">FAILOVER ACTIVE:</b>
+                <span class="u-c-tx u-fs-13 u-ml-8" id="clusterFailoverBarText">Local tunnel dropped. All client traffic is currently rerouted through Iran peer.</span>
               </div>
             </div>
             <button class="hashem-btn hashem-btn-danger u-btn-30" onclick="revertClusterFailover()">Revert to Local</button>
           </div>
 
           <!-- Foreign Exit Nodes Pool (Multi-Kharej HA) -->
-          <div style="margin-bottom:22px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <h4 style="font-size:14px; font-weight:700; color:var(--tx2); margin:0; display:flex; align-items:center; gap:8px;">
+          <div class="u-mb-24">
+            <div class="u-flex u-jc-sb u-ai-c u-mb-12">
+              <h4 class="u-fs-14 u-fw-700 u-c-tx2 u-m-0 u-flex u-ai-c u-gap-8">
                 <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> Foreign Exit Nodes Pool (<span id="clusterForeignCount">0</span>)
               </h4>
               <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddForeignModal()">+ Add Foreign Server</button>
             </div>
-            <div id="clusterForeignList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+            <div id="clusterForeignList" class="u-grid u-gtc-fit-280 u-gap-16">
               <!-- Dynamic Foreign Node Cards -->
             </div>
           </div>
 
           <!-- Nodes Topology Section -->
-          <div style="margin-bottom:18px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-              <h4 style="font-size:14px; font-weight:700; color:var(--tx2); margin:0;">Connected Iran Hubs (<span id="clusterNodeCount">0</span>)</h4>
+          <div class="u-mb-20">
+            <div class="u-flex u-jc-sb u-ai-c u-mb-12">
+              <h4 class="u-fs-14 u-fw-700 u-c-tx2 u-m-0">Connected Iran Hubs (<span id="clusterNodeCount">0</span>)</h4>
               <button class="hashem-btn u-btn-30" onclick="loadClusterStatus()">↻ Ping Now</button>
             </div>
-            <div id="clusterNodesList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+            <div id="clusterNodesList" class="u-grid u-gtc-fit-280 u-gap-16">
               <!-- Dynamic Peer Node Cards -->
             </div>
           </div>
@@ -1718,7 +1881,7 @@
               <div class="u-grid-gap-10">
                 <div class="fg"><label for="jToken" data-i18n="setup_bundle_paste_lbl">Setup bundle or token (from Iran side)</label><input class="hashem-input" id="jToken" autocomplete="off" data-i18n-ph="setup_bundle_paste_ph" placeholder="paste hsh1_..., bh1_..., or gh1_... bundle"></div>
                 <div class="fg"><label for="jPorts">Reverse ports (ranges &amp; mappings allowed)</label><input class="hashem-input" id="jPorts" placeholder="auto-filled from bundle, or 443, 10000-10050"></div>
-                <div class="fg" style="margin-top:2px;">
+                <div class="fg u-mt-2">
                   <label class="u-label-up" for="jFRPTransport" data-i18n="setup_transport">FRP Transport Protocol</label>
                   <select class="hashem-input u-mt-4" id="jFRPTransport">
                     <option value="tcp" selected>TCP (Standard multiplexed stream)</option>
@@ -1728,7 +1891,7 @@
                     <option value="wss">WSS (TLS-encrypted WebSocket obfuscation)</option>
                   </select>
                 </div>
-                <div class="fg" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:12px;">
+                <div class="fg u-mt-4 u-flex u-wrap u-gap-12">
                   <label class="u-check-row">
                     <input type="checkbox" id="jEncryption">
                     <span><b>Encryption</b> (AES/TLS)</span>
@@ -1853,7 +2016,7 @@
           </div>
           <div class="qs-hint">Every failed panel action is recorded here with its code — newest last.</div>
           <div class="ent-tools"><input class="hashem-input" id="errFilter" type="search" placeholder="Filter errors…" data-i18n-ph="tbl_filter" aria-label="Filter errors" data-i18n-aria="tbl_filter"><span class="qs-hint" id="errFilterCount" aria-live="polite"></span></div>
-          <div id="errList" class="u-grid-gap-6 u-mt-8"><div class="ent-skel" style="height:14px"></div></div>
+          <div id="errList" class="u-grid-gap-6 u-mt-8"><div class="ent-skel u-h-14"></div></div>
         </div>
       </section>
       <section id="tab-perf" role="tabpanel" hidden>
@@ -1978,7 +2141,7 @@
               <div class="tc-sub" data-i18n="perf_max_sub">Server-side maximum work connection headroom (always at least 1.5 × poolCount).</div>
             </div>
           </div>
-          <div class="qs-actions u-mt-12" style="display:flex;gap:12px;align-items:center;">
+          <div class="qs-actions u-mt-12 u-flex u-gap-12 u-ai-c">
             <button class="hashem-btn hashem-btn-primary" id="perfSaveTuningBtn" type="button" data-i18n="perf_save_tuning">
               Save &amp; Apply Capacity
             </button>
@@ -2061,8 +2224,8 @@
             </div>
           </div>
           <div class="qs-hint">Monitors GRE ping and FRP service every 1 minute. Sends Telegram alerts and optional auto-restart after consecutive failures.</div>
-          <div style="margin: 10px 0 14px 0;">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+          <div class="u-m-12x0x16x0">
+            <label class="u-flex u-ai-c u-gap-8 u-cursor-pointer u-fs-13">
               <input type="checkbox" id="wdAutoRestart">
               <span><b>Auto-Restart on Failure</b> (Disabled by default to prevent CPU spike storms; alerts only)</span>
             </label>
@@ -2388,11 +2551,11 @@
       <!-- Tab: Carrier Benchmark & Auto-Pilot -->
       <section id="tab-benchmark" role="tabpanel" hidden>
         <!-- Pre-connection Target & Role Configuration Card -->
-        <div class="tunnel-card" style="border:1px solid color-mix(in srgb, var(--info) 28%, transparent); background:linear-gradient(180deg, color-mix(in srgb, var(--s1) 92%, transparent) 0%, color-mix(in srgb, var(--s1) 98%, transparent) 100%); box-shadow:0 12px 36px -8px rgba(0,0,0,0.6); backdrop-filter:blur(16px); margin-bottom:18px;">
-          <div class="tc-header" style="border-bottom:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding-bottom:14px; margin-bottom:16px;">
+        <div class="tunnel-card u-bd-info u-bg-s1 u-lift u-mb-20" style="backdrop-filter:blur(16px);">
+          <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
             <div>
               <div class="u-flex-center-gap10">
-                <span class="tc-title" style="font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px;" data-i18n="bench_leaderboard_title">
+                <span class="tc-title u-fs-18 u-fw-700 u-flex u-ai-c u-gap-8" data-i18n="bench_leaderboard_title">
                   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#38bdf8" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                   Smart Multi-Protocol Carrier Benchmark
                 </span>
@@ -2401,7 +2564,7 @@
               <div class="qs-hint u-mt-4" id="benchMetaSub">Independent end-to-end benchmark across all 7 Hashem protocols before establishing tunnel</div>
             </div>
             <div class="qs-actions">
-              <button class="hashem-btn hashem-btn-primary" id="benchRunBtn" style="display:flex; align-items:center; gap:8px;">
+              <button class="hashem-btn hashem-btn-primary u-flex u-ai-c u-gap-8" id="benchRunBtn">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 <span id="benchRunBtnTxt" data-i18n="bench_run_btn">Run Smart Benchmark</span>
               </button>
@@ -2409,74 +2572,74 @@
           </div>
 
           <!-- Pre-connection Target Configuration Form -->
-          <div class="u-grid-2 u-gap-16 u-mb-16" style="background:var(--sunk); padding:16px; border-radius:10px; border:1px solid color-mix(in srgb, var(--tx) 5%, transparent);">
+          <div class="u-grid-2 u-gap-16 u-mb-16 u-bg-sunk u-p-16 u-r-10 u-bd-ln">
             <div>
-              <label class="qs-label" style="margin-bottom:8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
+              <label class="qs-label u-mb-8 u-fs-13 u-fw-600 u-flex u-ai-c u-gap-8">
                 <span>Current Server Role</span>
                 <span class="badge info">Role</span>
               </label>
-              <div class="qs-seg" role="group" aria-label="Server Role Selection" style="margin-bottom:8px;">
-                <button type="button" id="benchRoleIranBtn" class="active" aria-pressed="true" style="font-weight:600;">Iran Server</button>
-                <button type="button" id="benchRoleForeignBtn" aria-pressed="false" style="font-weight:600;">Foreign Server</button>
+              <div class="qs-seg u-mb-8" role="group" aria-label="Server Role Selection">
+                <button type="button" id="benchRoleIranBtn" class="active u-fw-600" aria-pressed="true">Iran Server</button>
+                <button type="button" id="benchRoleForeignBtn" aria-pressed="false" class="u-fw-600">Foreign Server</button>
               </div>
               <input type="hidden" id="benchTargetRole" value="iran">
               <div class="qs-hint" id="benchRoleHint">On Iran server, enter foreign server address to probe all 7 protocols outwards.</div>
             </div>
 
             <div>
-              <label class="qs-label" for="benchTargetHost" style="margin-bottom:8px;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+              <label class="qs-label u-mb-8 u-fs-13 u-fw-600 u-flex u-ai-c u-jc-sb" for="benchTargetHost">
                 <span>Foreign Server Public IP or Domain (Destination)</span>
-                <span class="badge dim" id="benchAutoDetectBadge" style="display:none;">Auto Detect</span>
+                <span class="badge dim u-none" id="benchAutoDetectBadge">Auto Detect</span>
               </label>
-              <input class="hashem-input" id="benchTargetHost" placeholder="e.g. 195.201.55.10 or foreign.mydomain.com" inputmode="decimal" style="direction:ltr;text-align:left;font-family:var(--font-mono);font-size:13.5px;padding:9px 12px;">
+              <input class="hashem-input u-ltr u-text-start u-mono u-fs-14 u-p-8x12" id="benchTargetHost" placeholder="e.g. 195.201.55.10 or foreign.mydomain.com" inputmode="decimal">
               <div class="qs-hint u-mt-4" id="benchTargetHint">Enter destination host to benchmark and discover the best protocol for lowest packet loss.</div>
             </div>
           </div>
 
           <!-- Advanced Custom Ports Accordion (Optional) -->
-          <div style="margin-bottom:16px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 4px;" id="benchAdvToggle">
-              <span style="font-size:12.5px;color:var(--ac);font-weight:600;display:flex;align-items:center;gap:6px;">
+          <div class="u-mb-16">
+            <div class="u-flex u-ai-c u-jc-sb u-cursor-pointer u-p-8x4" id="benchAdvToggle">
+              <span class="u-fs-13 u-c-ac u-fw-600 u-flex u-ai-c u-gap-8">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 <span>Custom Benchmark Ports (Optional)</span>
               </span>
-              <span style="font-size:12px;color:var(--mu);" id="benchAdvChevron">▼ Expand</span>
+              <span class="u-fs-12 u-c-mu" id="benchAdvChevron">▼ Expand</span>
             </div>
-            <div id="benchAdvWrap" class="hidden u-grid-4 u-gap-12 u-mt-8" style="background:color-mix(in srgb, var(--bg) 25%, transparent);padding:12px;border-radius:8px;border:1px solid color-mix(in srgb, var(--tx) 4%, transparent);">
+            <div id="benchAdvWrap" class="hidden u-grid-4 u-gap-12 u-mt-8 u-bg-inset u-p-12 u-r-8 u-bd-ln">
               <div>
-                <label for="benchFrpPort" style="font-size:12px;color:var(--mu);display:block;margin-bottom:4px;">FRP Port (TCP/KCP/QUIC)</label>
-                <input class="hashem-input" id="benchFrpPort" type="number" value="7000" style="padding:6px 10px;font-size:12px;font-family:var(--font-mono);">
+                <label for="benchFrpPort" class="u-fs-12 u-c-mu u-block u-mb-4">FRP Port (TCP/KCP/QUIC)</label>
+                <input class="hashem-input u-p-8x12 u-fs-12 u-mono" id="benchFrpPort" type="number" value="7000">
               </div>
               <div>
-                <label for="benchWssPort" style="font-size:12px;color:var(--mu);display:block;margin-bottom:4px;">WSS TLS Port</label>
-                <input class="hashem-input" id="benchWssPort" type="number" value="8443" style="padding:6px 10px;font-size:12px;font-family:var(--font-mono);">
+                <label for="benchWssPort" class="u-fs-12 u-c-mu u-block u-mb-4">WSS TLS Port</label>
+                <input class="hashem-input u-p-8x12 u-fs-12 u-mono" id="benchWssPort" type="number" value="8443">
               </div>
               <div>
-                <label for="benchBackhaulPort" style="font-size:12px;color:var(--mu);display:block;margin-bottom:4px;">Backhaul Port</label>
-                <input class="hashem-input" id="benchBackhaulPort" type="number" value="3080" style="padding:6px 10px;font-size:12px;font-family:var(--font-mono);">
+                <label for="benchBackhaulPort" class="u-fs-12 u-c-mu u-block u-mb-4">Backhaul Port</label>
+                <input class="hashem-input u-p-8x12 u-fs-12 u-mono" id="benchBackhaulPort" type="number" value="3080">
               </div>
               <div>
-                <label for="benchBagherPort" style="font-size:12px;color:var(--mu);display:block;margin-bottom:4px;">Bagher SSH Port</label>
-                <input class="hashem-input" id="benchBagherPort" type="number" value="22" style="padding:6px 10px;font-size:12px;font-family:var(--font-mono);">
+                <label for="benchBagherPort" class="u-fs-12 u-c-mu u-block u-mb-4">Bagher SSH Port</label>
+                <input class="hashem-input u-p-8x12 u-fs-12 u-mono" id="benchBagherPort" type="number" value="22">
               </div>
             </div>
           </div>
 
           <!-- Top Winner Recommendation Showcase Banner -->
-          <div id="benchWinnerBanner" class="hidden" style="border:1px solid color-mix(in srgb, var(--ok) 35%, transparent); background:linear-gradient(135deg, color-mix(in srgb, var(--ok) 12%, transparent) 0%, color-mix(in srgb, var(--s1) 85%, transparent) 100%); border-radius:12px; padding:18px 20px; margin-bottom:20px; box-shadow:0 8px 24px color-mix(in srgb, var(--ok) 15%, transparent);">
-            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;">
+          <div id="benchWinnerBanner" class="hidden u-bd-ok u-bg-s1 u-r-12 u-p-20x20 u-mb-20 u-noglow">
+            <div class="u-flex u-ai-c u-jc-sb u-wrap u-gap-16">
               <div>
-                <div style="display:flex;align-items:center;gap:8px;">
+                <div class="u-flex u-ai-c u-gap-8">
                   <span class="badge ok">Recommended Protocol</span>
                   <span class="badge info" id="benchWinnerBadge">Highest Stability</span>
                 </div>
-                <h3 id="benchWinnerTitle" style="margin:8px 0 4px 0;font-size:19px;font-weight:700;color:var(--tx);display:flex;align-items:center;gap:8px;">—</h3>
-                <div id="benchWinnerDesc" style="font-size:13px;color:var(--mu);">Based on live probe metrics, this carrier offers maximum throughput with lowest drop rate.</div>
+                <h3 id="benchWinnerTitle" class="u-m-8x0x4x0 u-fs-20 u-fw-700 u-c-tx u-flex u-ai-c u-gap-8">—</h3>
+                <div id="benchWinnerDesc" class="u-fs-13 u-c-mu">Based on live probe metrics, this carrier offers maximum throughput with lowest drop rate.</div>
               </div>
-              <div style="display:flex;align-items:center;gap:12px;">
-                <div style="text-align:right;background:color-mix(in srgb, var(--bg) 35%, transparent);padding:8px 14px;border-radius:8px;border:1px solid color-mix(in srgb, var(--tx) 6%, transparent);">
-                  <div style="font-size:12px;color:var(--mu);">Quality Score</div>
-                  <div id="benchWinnerScore" style="font-size:18px;font-weight:700;color:var(--ok);font-family:var(--font-mono);">— / 100</div>
+              <div class="u-flex u-ai-c u-gap-12">
+                <div class="u-text-end u-bg-inset u-p-8x16 u-r-8 u-bd-ln">
+                  <div class="u-fs-12 u-c-mu">Quality Score</div>
+                  <div id="benchWinnerScore" class="u-fs-18 u-fw-700 u-c-ok u-mono">— / 100</div>
                 </div>
                 <button class="hashem-btn hashem-btn-primary" id="benchApplyWinnerBtn">
                   Apply This Protocol
@@ -2498,14 +2661,14 @@
               <span class="wd-stat-label u-stat-label">
                 Active Tunnel Carrier
               </span>
-              <div class="wd-stat-val" id="benchStatActive" style="font-size: 17px; font-weight: 700; color: var(--info); margin: 8px 0 4px 0;">—</div>
+              <div class="wd-stat-val u-fs-18 u-fw-700 u-c-info u-m-8x0x4x0" id="benchStatActive">—</div>
               <span class="wd-stat-sub u-hint-12" id="benchStatActiveSub">Running Carrier</span>
             </div>
             <div class="bench-stat-card">
               <span class="wd-stat-label u-stat-label">
                 Lowest RTT Latency
               </span>
-              <div class="wd-stat-val" id="benchStatMinRtt" style="font-size: 17px; font-weight: 700; color: var(--tx); margin: 8px 0 4px 0;">—</div>
+              <div class="wd-stat-val u-fs-18 u-fw-700 u-c-tx u-m-8x0x4x0" id="benchStatMinRtt">—</div>
               <span class="wd-stat-sub u-hint-12" id="benchStatMinRttSub">Round-Trip Time</span>
             </div>
             <div class="bench-stat-card">
@@ -2522,7 +2685,7 @@
             <table class="hashem-table" id="benchTable">
               <thead>
                 <tr>
-                  <th style="width: 44px; text-align: center;">#</th>
+                  <th class="u-w-44 u-text-center">#</th>
                   <th data-i18n="bench_tbl_rank">Protocol & Carrier</th>
                   <th data-i18n="bench_tbl_trans">Transport Core</th>
                   <th data-i18n="bench_tbl_port">Destination Port</th>
@@ -2535,7 +2698,7 @@
                 </tr>
               </thead>
               <tbody id="benchTableBody">
-                <tr><td colspan="10"><div class="ent-skel" style="height:14px"></div></td></tr>
+                <tr><td colspan="10"><div class="ent-skel u-h-14"></div></td></tr>
               </tbody>
             </table>
           </div>
@@ -2592,12 +2755,12 @@
             <div class="fg u-mt-12">
               <label class="u-flex-center-wrap10">
                 <input type="checkbox" id="autoPilotToggle">
-                <span style="font-weight:600" data-i18n="bench_failover_toggle">Enable Carrier Auto-Failover</span>
+                <span class="u-fw-600" data-i18n="bench_failover_toggle">Enable Carrier Auto-Failover</span>
               </label>
             </div>
             <div class="fg u-mt-8">
               <label for="autoPilotThresholdInput" data-i18n="bench_failover_threshold">Packet Loss Trigger Threshold (%)</label>
-              <input class="hashem-input" id="autoPilotThresholdInput" type="number" min="5" max="90" value="20" style="max-width:140px;">
+              <input class="hashem-input u-maxw-140" id="autoPilotThresholdInput" type="number" min="5" max="90" value="20">
               <span class="ent-help">If the current carrier packet loss exceeds this threshold, the tunnel seamlessly switches to the best candidate.</span>
             </div>
             <div class="trow u-mt-4">
@@ -2615,7 +2778,7 @@
         </div>
 
         <!-- Modal / Inline Panel for Peer Configuration -->
-        <div class="tunnel-card hidden" id="peerConfigCard" style="border:1px solid var(--ac);">
+        <div class="tunnel-card hidden u-bd-ac" id="peerConfigCard">
           <div class="tc-header">
             <p class="tc-title">Configure Inter-Panel Peer Sync</p>
             <button class="hashem-btn hashem-btn-ghost u-btn-xs" id="peerConfigCloseBtn">Close</button>
@@ -2668,50 +2831,50 @@
       </section>
       <section id="tab-settings" role="tabpanel" hidden>
         <div class="tunnel-card" id="licenseCard">
-          <div class="tc-header" style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="tc-header u-flex u-jc-sb u-ai-c">
             <p class="tc-title">License &amp; Premium Features</p>
             <span id="licBadge" class="badge dim">FREE EDITION</span>
           </div>
           <div class="fg">
             <label for="licMachineHash">Server Hardware Fingerprint (Machine Hash)</label>
-            <div style="display:flex; gap:8px;">
-              <input class="hashem-input" id="licMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%;" placeholder="Calculating…">
+            <div class="u-flex u-gap-8">
+              <input class="hashem-input u-mono u-fs-13 u-w-full" id="licMachineHash" readonly placeholder="Calculating…">
               <button class="hashem-btn" id="licCopyMachineBtn" onclick="copyMachineHashClick()">Copy</button>
             </div>
             <div class="ent-help">Provide this fingerprint to your provider to issue or renew a hardware-locked license.</div>
           </div>
-          <div id="licActiveDetails" class="hidden" style="background:color-mix(in srgb, var(--ok) 8%, transparent); border:1px solid color-mix(in srgb, var(--ok) 20%, transparent); padding:10px; border-radius:6px; margin-bottom:12px;">
-            <div style="font-size:13px; font-weight:600; color:var(--ok); margin-bottom:4px;">Active Premium License</div>
-            <div style="font-size:12px;" id="licCustomerRow">Customer: -</div>
-            <div style="font-size:12px;" id="licExpiresRow">Expires: -</div>
-            <div style="font-size:12px;" id="licFeaturesRow">Unlocked Features: -</div>
+          <div id="licActiveDetails" class="hidden u-tint-ok u-bd-ok u-p-12 u-r-8 u-mb-12">
+            <div class="u-fs-13 u-fw-600 u-c-ok u-mb-4">Active Premium License</div>
+            <div class="u-fs-12" id="licCustomerRow">Customer: -</div>
+            <div class="u-fs-12" id="licExpiresRow">Expires: -</div>
+            <div class="u-fs-12" id="licFeaturesRow">Unlocked Features: -</div>
           </div>
           <div class="fg">
             <label for="licKeyInput">License Key</label>
-            <textarea class="hashem-input" id="licKeyInput" rows="3" placeholder="Paste your license token here (payload.signature)…" style="font-family:monospace; font-size:12px; resize:none;"></textarea>
+            <textarea class="hashem-input u-mono u-fs-12 u-resize-none" id="licKeyInput" rows="3" placeholder="Paste your license token here (payload.signature)…"></textarea>
           </div>
-          <div style="display:flex; gap:8px;">
+          <div class="u-flex u-gap-8">
             <button class="hashem-btn hashem-btn-primary" id="licActivateBtn" onclick="activateLicenseClick()">Activate License</button>
             <button class="hashem-btn hashem-btn-secondary hidden" id="licDeactivateBtn" onclick="deactivateLicenseClick()">Deactivate</button>
           </div>
         </div>
-        <div class="tunnel-card" id="sentinelAddonCard" style="margin-top:16px;">
-          <div class="tc-header" style="display:flex; justify-content:space-between; align-items:center;">
-            <div style="display:flex; align-items:center; gap:8px;">
+        <div class="tunnel-card u-mt-16" id="sentinelAddonCard">
+          <div class="tc-header u-flex u-jc-sb u-ai-c">
+            <div class="u-flex u-ai-c u-gap-8">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 <path d="m9 12 2 2 4-4"/>
               </svg>
-              <p class="tc-title" style="margin:0;">Sentinel — Infrastructure &amp; Node Health Monitor</p>
+              <p class="tc-title u-m-0">Sentinel — Infrastructure &amp; Node Health Monitor</p>
             </div>
-            <div style="display:flex; gap:6px;" id="sentinelHeaderBadges">
+            <div class="u-flex u-gap-8" id="sentinelHeaderBadges">
               <span id="sentinelLicBadge" class="badge dim">CHECKING</span>
               <span id="sentinelRegionBadge" class="badge dim">REGION</span>
             </div>
           </div>
-          <div class="ent-help" style="margin-bottom:12px;">Multi-protocol health monitor, dynamic subscription feeds, and 24h SLA tracker. Restricted to verified Iran servers with a licensed key.</div>
+          <div class="ent-help u-mb-12">Multi-protocol health monitor, dynamic subscription feeds, and 24h SLA tracker. Restricted to verified Iran servers with a licensed key.</div>
           <div id="sentinelBodySection">
-            <div style="color:var(--mu); font-size:12px;">Loading Sentinel state…</div>
+            <div class="u-c-mu u-fs-12">Loading Sentinel state…</div>
           </div>
         </div>
         <div class="tunnel-card">
@@ -2719,7 +2882,7 @@
           <div class="fg"><label for="curPass">Current panel password</label><input class="hashem-input" id="curPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>
           <div class="fg"><label for="newPass">New panel password</label><input class="hashem-input" id="newPass" type="password" autocomplete="new-password" minlength="12" placeholder="••••••••••••"></div>
           <div class="ent-help">Minimum 12 characters, uppercase, lowercase, numbers, and symbols (NIST 800-63B). Changing it invalidates all other sessions.</div>
-          <div id="passStrengthMeter" style="font-size:12px; margin-top:6px; margin-bottom:8px; color:var(--mu);"></div>
+          <div id="passStrengthMeter" class="u-fs-12 u-mt-8 u-mb-8 u-c-mu"></div>
           <div><button class="hashem-btn hashem-btn-primary" id="savePass">Change Password</button></div>
         </div>
         <div class="tunnel-card" id="advisorCard">
@@ -2734,13 +2897,13 @@
           <div class="tc-header"><p class="tc-title">Link history (last hours)</p></div>
           <div class="fg"><label for="histLink">Link</label><select class="hashem-input" id="histLink"></select></div>
           <div class="fg"><label for="histHours">Window</label><select class="hashem-input" id="histHours"><option value="1">1 hour</option><option value="6">6 hours</option><option value="24">24 hours</option></select></div>
-          <svg id="histSvg" viewBox="0 0 300 60" preserveAspectRatio="none" style="width:100%;height:80px;background:var(--bg2,transparent);border-radius:6px" role="img" aria-label="Latency history"></svg>
+          <svg id="histSvg" viewBox="0 0 300 60" preserveAspectRatio="none" class="u-w-full u-h-80 u-bg-none u-r-8" role="img" aria-label="Latency history"></svg>
           <div class="ent-help" id="histSum">Sampled every 30 s, kept in memory for 24 h (cleared on panel restart).</div>
         </div>
         <div class="tunnel-card" id="metricsCard">
           <div class="tc-header"><p class="tc-title">Prometheus metrics</p></div>
           <div class="ent-help" id="metricsState">Disabled. Rotate a token to enable <code>GET …/metrics</code> for your scraper (header <code>Authorization: Bearer &lt;token&gt;</code>). The token is shown once.</div>
-          <pre class="ent-help hidden" id="metricsTok" style="user-select:all"></pre>
+          <pre class="ent-help hidden u-select-all" id="metricsTok"></pre>
           <div>
             <button class="hashem-btn hashem-btn-primary" id="metricsRotate">Generate / Rotate Token</button>
             <button class="hashem-btn hashem-btn-secondary" id="metricsOff">Disable</button>
@@ -2788,7 +2951,7 @@
             <div class="fg"><label for="twofaPass">Password</label><input class="hashem-input" id="twofaPass" type="password" autocomplete="current-password"></div>
             <div class="fg"><label for="twofaDisCode">Code or recovery code</label><input class="hashem-input" id="twofaDisCode" maxlength="16"></div>
           </div>
-          <pre class="ent-help hidden" id="twofaCodes" style="user-select:all"></pre>
+          <pre class="ent-help hidden u-select-all" id="twofaCodes"></pre>
           <div>
             <button class="hashem-btn hashem-btn-primary" id="twofaBtn">Enable 2FA</button>
             <button class="hashem-btn hashem-btn-secondary hidden" id="twofaCancel">Cancel</button>
@@ -2827,24 +2990,24 @@
           <div class="fg"><label for="tlsDomain">Panel domain</label><input class="hashem-input" id="tlsDomain" placeholder="panel.example.com" autocomplete="off" spellcheck="false"></div>
           <div class="fg"><label for="tlsEmail">Email for expiry notices (optional)</label><input class="hashem-input" id="tlsEmail" placeholder="you@example.com" autocomplete="off" spellcheck="false"></div>
           <div id="tlsInfo" class="qs-hint">Not checked yet.</div>
-          <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+          <div class="qs-actions u-flex u-wrap u-gap-8">
             <button class="hashem-btn hashem-btn-primary" id="tlsIssueBtn">Get Certificate</button>
             <button class="hashem-btn hashem-btn-secondary" id="tlsRenewBtn">Renew Now</button>
-            <button class="hashem-btn hashem-btn-danger" id="tlsRemoveBtn" style="display:none;">Remove Domain</button>
+            <button class="hashem-btn hashem-btn-danger u-none" id="tlsRemoveBtn">Remove Domain</button>
             <button class="hashem-btn hashem-btn-secondary" id="tlsProxyConfBtn">Reverse Proxy Config</button>
           </div>
           <div class="qs-hint" id="tlsMsg">HTTPS serves on dedicated port 7443 alongside HTTP on port 7777.</div>
-          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
+          <div class="u-mt-12 u-pt-12 u-bt-ln">
             <b data-i18n="tls_ip_title">HTTPS on this server's IP (self-signed)</b>
             <div class="qs-hint" data-i18n="tls_ip_hint">No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.</div>
             <div class="fg"><label for="tlsIP">Server IP</label><input class="hashem-input" id="tlsIP" placeholder="1.2.3.4" autocomplete="off" spellcheck="false"></div>
-            <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+            <div class="qs-actions u-flex u-wrap u-gap-8">
               <button class="hashem-btn hashem-btn-primary" id="tlsIPBtn">Issue IP Certificate</button>
               <button class="hashem-btn hashem-btn-secondary" id="tlsIPRegenBtn">Regenerate</button>
               <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (Install Once)</button>
             </div>
           </div>
-          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border-color);">
+          <div class="u-mt-12 u-pt-12 u-bt-ln">
             <b data-i18n="tls_custom_title">Use your own certificate</b>
             <div class="qs-hint" data-i18n="tls_custom_hint">Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.</div>
             <div class="fg"><label for="tlsCustomCert">Certificate (PEM)</label><textarea class="hashem-input" id="tlsCustomCert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" autocomplete="off" spellcheck="false"></textarea></div>
@@ -2852,23 +3015,23 @@
             <div class="fg"><label for="tlsCustomCertFile">…or upload files</label><input type="file" id="tlsCustomCertFile" accept=".crt,.pem,.cert" aria-label="Certificate file"> <input type="file" id="tlsCustomKeyFile" accept=".key,.pem" aria-label="Private key file"></div>
             <div class="fg"><label for="tlsCustomCertPath">…or server paths</label><input class="hashem-input" id="tlsCustomCertPath" placeholder="/etc/ssl/my.crt" autocomplete="off" spellcheck="false"></div>
             <div class="fg"><label for="tlsCustomKeyPath">Key path</label><input class="hashem-input" id="tlsCustomKeyPath" placeholder="/etc/ssl/my.key" autocomplete="off" spellcheck="false"></div>
-            <div class="qs-actions" style="display:flex; flex-wrap:wrap; gap:8px;">
+            <div class="qs-actions u-flex u-wrap u-gap-8">
               <button class="hashem-btn hashem-btn-primary" id="tlsCustomBtn">Install Custom Certificate</button>
             </div>
           </div>
-          <div id="tlsProxyBox" style="display:none; margin-top:12px; padding:12px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-input);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div id="tlsProxyBox" class="u-none u-mt-12 u-p-12 u-bd-ln u-r-8 u-bg-field">
+            <div class="u-flex u-jc-sb u-ai-c u-mb-8">
               <b>Reverse Proxy Configuration (Nginx & Caddy)</b>
               <button class="hashem-btn hashem-btn-ghost u-btn-30" id="tlsProxyCloseBtn" aria-label="Close proxy configuration" data-i18n-aria="aria_close_proxy">×</button>
             </div>
             <div class="qs-hint u-mb-8">Copy and paste into your Nginx or Caddy server on this machine. Real client IPs and WebSocket upgrades are automatically supported.</div>
             <div class="u-mb-8">
               <b>Nginx:</b>
-              <pre id="tlsNginxCode" style="font-size:12px; max-height:160px; overflow-y:auto; background:var(--bg-card); padding:8px; border-radius:4px; user-select:all;"></pre>
+              <pre id="tlsNginxCode" class="u-fs-12 u-maxh-160 u-scroll-y u-bg-s1 u-p-8 u-r-4 u-select-all"></pre>
             </div>
             <div>
               <b>Caddy:</b>
-              <pre id="tlsCaddyCode" style="font-size:12px; max-height:100px; overflow-y:auto; background:var(--bg-card); padding:8px; border-radius:4px; user-select:all;"></pre>
+              <pre id="tlsCaddyCode" class="u-fs-12 u-maxh-100 u-scroll-y u-bg-s1 u-p-8 u-r-4 u-select-all"></pre>
             </div>
           </div>
         </div>
@@ -2918,7 +3081,7 @@
   <aside class="right-sidebar">
     <div class="rs-header"><span class="rs-title" data-i18n="rs_header">Live Activity Stream</span><button type="button" class="rs-x" id="rsClose" aria-label="Hide live activity stream" data-i18n-aria="rs_hide_aria" title="Hide">&#215;</button></div>
     <div class="rs-content" id="rsLogs">
-      <div class="ent-skel" style="height:14px"></div>
+      <div class="ent-skel u-h-14"></div>
     </div>
   </aside>
 </div>
@@ -2969,13 +3132,13 @@
 </div>
 <!-- Edit Peer Modal -->
 <div class="ent-modal-ov" id="editPortsModal" hidden>
-  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="editPortsTitle" style="max-width:520px;width:100%">
+  <div class="ent-modal u-maxw-520 u-w-full" role="dialog" aria-modal="true" aria-labelledby="editPortsTitle">
     <div class="ent-modal-h">
       <b id="editPortsTitle">Edit Peer Tunnel</b>
       <button class="ent-x" id="editPortsClose" aria-label="Close" data-i18n-aria="aria_close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b" style="gap:14px">
-      <p class="u-m-0" style="color:var(--mu);font-size:13px" id="editPortsSub">Modify tunnel parameters, carrier protocol, or forwarded ports. Changes reload services immediately.</p>
+    <div class="ent-modal-b u-gap-16">
+      <p class="u-m-0 u-c-mu u-fs-13" id="editPortsSub">Modify tunnel parameters, carrier protocol, or forwarded ports. Changes reload services immediately.</p>
       
       <div class="u-grid-2col">
         <div class="fg">
@@ -2984,7 +3147,7 @@
         </div>
         <div class="fg">
           <label class="u-label-up" for="editPeerRemote">Remote Public IP</label>
-          <input class="hashem-input" id="editPeerRemote" type="text" placeholder="e.g. 198.51.100.5" style="margin-top:6px;font-family:monospace">
+          <input class="hashem-input u-mt-8 u-mono" id="editPeerRemote" type="text" placeholder="e.g. 198.51.100.5">
         </div>
       </div>
 
@@ -3029,7 +3192,7 @@
         </select>
       </div>
 
-      <div class="fg" style="margin-top:2px;display:flex;flex-wrap:wrap;gap:12px;">
+      <div class="fg u-mt-2 u-flex u-wrap u-gap-12">
         <label class="u-check-row">
           <input type="checkbox" id="editPeerEncryption">
           <span><b>Encryption</b> (AES/TLS)</span>
@@ -3045,19 +3208,19 @@
       </div>
 
       <div>
-        <label style="font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mu);display:block;margin-bottom:8px">Forwarded Ports</label>
-        <div id="editPortsChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:36px;padding:8px;background:var(--sunk);border:1px solid var(--ln);border-radius:10px"></div>
+        <label class="u-fs-12 u-fw-700 u-ls-06 u-upper u-c-mu u-block u-mb-8">Forwarded Ports</label>
+        <div id="editPortsChips" class="u-flex u-wrap u-gap-8 u-minh-36 u-p-8 u-bg-sunk u-bd-ln u-r-10"></div>
       </div>
 
-      <div style="display:flex;gap:8px;align-items:flex-end">
-        <div class="fg" style="flex:1">
+      <div class="u-flex u-gap-8 u-ai-e">
+        <div class="fg u-flex-1">
           <label class="u-label-up" for="editPortsNew">Add Port / Range / Mapping</label>
           <input class="hashem-input u-mt-6" id="editPortsNew" type="text" placeholder="e.g. 8080, 10000-10050, 2083=8443">
         </div>
-        <button class="hashem-btn hashem-btn-secondary" id="editPortsAddBtn" type="button" style="flex-shrink:0;">&#xFF0B; Add</button>
+        <button class="hashem-btn hashem-btn-secondary u-shrink-0" id="editPortsAddBtn" type="button">&#xFF0B; Add</button>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--s2);border:1px solid var(--ln);border-radius:10px">
+      <div class="u-flex u-ai-c u-jc-sb u-p-12x12 u-bg-s2 u-bd-ln u-r-10">
         <div class="u-hint-12">Foreign Setup Bundle for client sync:</div>
         <button class="hashem-btn hashem-btn-ghost u-btn-28" id="editPeerCopyBundleBtn" type="button">&#x1F4CB; Copy Bundle</button>
       </div>
@@ -3073,40 +3236,40 @@
 
 <!-- Modal: Bagher Engine Premium License Activation -->
 <div class="ent-modal-ov" id="bagherLicModal" hidden>
-  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="bagherLicModalTitle" style="max-width:540px; width:100%; border:1px solid color-mix(in srgb, var(--wr) 30%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--wr) 15%, transparent);">
-    <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--wr) 20%, transparent); background:color-mix(in srgb, var(--wr) 6%, transparent);">
-      <b id="bagherLicModalTitle" style="display:flex; align-items:center; gap:8px; color:var(--wr); font-size:15px; font-weight:700;">
+  <div class="ent-modal u-maxw-540 u-w-full u-bd-wr u-lift" role="dialog" aria-modal="true" aria-labelledby="bagherLicModalTitle">
+    <div class="ent-modal-h u-bb-wr u-tint-wr">
+      <b id="bagherLicModalTitle" class="u-flex u-ai-c u-gap-8 u-c-wr u-fs-16 u-fw-700">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fbbf24" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         Bagher Tunnel — Premium Feature
       </b>
       <button class="ent-x" id="bagherLicModalClose" onclick="closeBagherLicModal()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b" style="gap:14px; padding:20px;">
-      <div style="background:color-mix(in srgb, var(--wr) 10%, transparent); border:1px solid color-mix(in srgb, var(--wr) 25%, transparent); border-radius:8px; padding:12px 14px; display:flex; align-items:flex-start; gap:10px;">
-        <span style="font-size:20px; line-height:1;"><svg class="i" aria-hidden="true"><use href="#i-star"/></svg></span>
-        <div style="font-size:13px; line-height:1.5; color:var(--wr);">
+    <div class="ent-modal-b u-gap-16 u-p-20">
+      <div class="u-tint-wr u-bd-wr u-r-8 u-p-12x16 u-flex u-ai-s u-gap-12">
+        <span class="u-fs-20 u-lh-1"><svg class="i" aria-hidden="true"><use href="#i-star"/></svg></span>
+        <div class="u-fs-13 u-lh-15 u-c-wr">
           <b>Bagher Stealth Tunnel</b> is an exclusive <b>Hashem Pro</b> feature. To configure and operate stealth tunnels, an active license is required.
         </div>
       </div>
       <div class="fg">
-        <label for="bagherLicMachineHash" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="bagherLicMachineHash" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Server Machine Hash:
         </label>
-        <div style="display:flex; gap:8px;">
-          <input class="hashem-input" id="bagherLicMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:var(--info); background:color-mix(in srgb, var(--bg) 40%, transparent);" placeholder="Checking...">
+        <div class="u-flex u-gap-8">
+          <input class="hashem-input u-mono u-fs-13 u-w-full u-c-info u-bg-inset" id="bagherLicMachineHash" readonly placeholder="Checking...">
           <button type="button" class="hashem-btn" id="bagherLicCopyMachineBtn" onclick="bagherLicCopyMachineClick()">Copy Hash</button>
         </div>
         <div class="u-hint-12 u-mt-4">Provide this machine hash to obtain your license key.</div>
       </div>
       <div class="fg">
-        <label for="bagherLicKeyInput" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="bagherLicKeyInput" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Activate License Key:
         </label>
-        <textarea class="hashem-input" id="bagherLicKeyInput" rows="3" placeholder="Paste your Hashem Pro license key here..." style="font-family:monospace; font-size:12px; width:100%; resize:vertical; padding:8px; line-height:1.4;"></textarea>
+        <textarea class="hashem-input u-mono u-fs-12 u-w-full u-resize-y u-p-8 u-lh-14" id="bagherLicKeyInput" rows="3" placeholder="Paste your Hashem Pro license key here..."></textarea>
       </div>
     </div>
-    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:12px 18px; gap:8px; flex-wrap:wrap;">
-      <div style="display:flex; gap:8px;">
+    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-12x20 u-gap-8 u-wrap">
+      <div class="u-flex u-gap-8">
         <button type="button" class="hashem-btn hashem-btn-ghost" id="bagherLicCancelBtn" onclick="cancelBagherLicModal()">Close</button>
         <button type="button" class="hashem-btn hashem-btn-secondary" onclick="openBagherLicenseSettings()">Settings</button>
       </div>
@@ -3119,21 +3282,21 @@
 
 <!-- Modal: Sentinel Pro License & Iran Locality Setup -->
 <div class="ent-modal-ov" id="sentinelModal" hidden>
-  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="sentinelModalTitle" style="max-width:550px; width:100%; border:1px solid color-mix(in srgb, var(--info) 35%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--info) 18%, transparent);">
-    <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--info) 25%, transparent); background:color-mix(in srgb, var(--info) 8%, transparent); display:flex; justify-content:space-between; align-items:center;">
-      <b id="sentinelModalTitle" style="display:flex; align-items:center; gap:8px; color:var(--info); font-size:15px; font-weight:700;">
+  <div class="ent-modal u-maxw-550 u-w-full u-bd-info u-lift" role="dialog" aria-modal="true" aria-labelledby="sentinelModalTitle">
+    <div class="ent-modal-h u-bb-info u-tint-info u-flex u-jc-sb u-ai-c">
+      <b id="sentinelModalTitle" class="u-flex u-ai-c u-gap-8 u-c-info u-fs-16 u-fw-700">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
         Sentinel — Node &amp; Config Monitor
       </b>
       <button class="ent-x" id="sentinelModalClose" onclick="closeSentinelModal()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b" id="sentinelModalBody" style="gap:14px; padding:20px;">
+    <div class="ent-modal-b u-gap-16 u-p-20" id="sentinelModalBody">
       <!-- Warning Header Box (Always visible) -->
-      <div style="background:color-mix(in srgb, var(--wr) 12%, transparent); border:1px solid color-mix(in srgb, var(--wr) 35%, transparent); border-radius:10px; padding:14px; display:flex; align-items:flex-start; gap:12px;">
-        <span style="font-size:22px; line-height:1;"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
+      <div class="u-tint-wr u-bd-wr u-r-10 u-p-16 u-flex u-ai-s u-gap-12">
+        <span class="u-fs-24 u-lh-1"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
         <div>
-          <b style="color:var(--wr); font-size:13px;">هشدار مهم پیش‌نیاز سنتینال:</b>
-          <div style="font-size:13px; color:var(--wr); margin-top:3px; line-height:1.6;">
+          <b class="u-c-wr u-fs-13">هشدار مهم پیش‌نیاز سنتینال:</b>
+          <div class="u-fs-13 u-c-wr u-mt-4 u-lh-16">
             برای اینکه کانفیگ ها تست بشن باید سنتینال روی سرور ایران نصب بشه
           </div>
         </div>
@@ -3141,49 +3304,49 @@
 
       <!-- License Required Section -->
       <div id="sentinelLicSection" class="hidden">
-        <div style="background:color-mix(in srgb, var(--er) 8%, transparent); border:1px solid color-mix(in srgb, var(--er) 25%, transparent); border-radius:10px; padding:14px; display:flex; align-items:flex-start; gap:12px; margin-bottom:12px;">
-          <span style="font-size:20px; line-height:1;"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span>
-          <div style="font-size:13px; line-height:1.5; color:var(--er);">
+        <div class="u-tint-er u-bd-er u-r-10 u-p-16 u-flex u-ai-s u-gap-12 u-mb-12">
+          <span class="u-fs-20 u-lh-1"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span>
+          <div class="u-fs-13 u-lh-15 u-c-er">
             <b>لایسنس پرمیوم سنتینال مورد نیاز است</b><br>
             سنتینال نیازمند لایسنس فعال با ویژگی <code>sentinel</code> می‌باشد.
           </div>
         </div>
         <div class="fg">
-          <label for="sentinelModalMachineHash" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+          <label for="sentinelModalMachineHash" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
             کد اختصاصی سخت‌افزار سرور (Machine Hash):
           </label>
-          <div style="display:flex; gap:8px;">
-            <input class="hashem-input" id="sentinelModalMachineHash" readonly style="font-family:monospace; font-size:13px; width:100%; color:var(--info); background:color-mix(in srgb, var(--bg) 40%, transparent);" placeholder="در حال محاسبه هش…">
+          <div class="u-flex u-gap-8">
+            <input class="hashem-input u-mono u-fs-13 u-w-full u-c-info u-bg-inset" id="sentinelModalMachineHash" readonly placeholder="در حال محاسبه هش…">
             <button type="button" class="hashem-btn" id="btnCopySentinelHash" onclick="copySentinelHashClick()">کپی کد</button>
           </div>
           <div class="u-hint-12 u-mt-4">این کد را برای صدور لایسنس در سایت وارد کنید.</div>
         </div>
         <div class="fg">
-          <label for="sentinelModalKeyInput" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+          <label for="sentinelModalKeyInput" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
             کلید لایسنس (License Key):
           </label>
-          <textarea class="hashem-input" id="sentinelModalKeyInput" rows="2" placeholder="کلید لایسنس خود را اینجا Paste کنید..." style="font-family:monospace; font-size:12px; width:100%; resize:vertical; padding:8px; line-height:1.4;"></textarea>
+          <textarea class="hashem-input u-mono u-fs-12 u-w-full u-resize-y u-p-8 u-lh-14" id="sentinelModalKeyInput" rows="2" placeholder="کلید لایسنس خود را اینجا Paste کنید..."></textarea>
         </div>
-        <button type="button" class="hashem-btn hashem-btn-primary" id="btnSentinelActivateModal" onclick="activateSentinelLicenseModalClick()" style="width:100%; margin-top:8px;">
+        <button type="button" class="hashem-btn hashem-btn-primary u-w-full u-mt-8" id="btnSentinelActivateModal" onclick="activateSentinelLicenseModalClick()">
           فعال‌سازی لایسنس
         </button>
       </div>
 
       <!-- Management / Installation Section -->
       <div id="sentinelManageSection">
-        <div style="display:flex; justify-content:space-between; align-items:center; background:color-mix(in srgb, var(--ok) 8%, transparent); border:1px solid color-mix(in srgb, var(--ok) 25%, transparent); border-radius:10px; padding:12px 16px; margin-bottom:12px;">
-          <span style="font-size:13px; font-weight:700; color:var(--ok); display:flex; align-items:center; gap:6px;">
+        <div class="u-flex u-jc-sb u-ai-c u-tint-ok u-bd-ok u-r-10 u-p-12x16 u-mb-12">
+          <span class="u-fs-13 u-fw-700 u-c-ok u-flex u-ai-c u-gap-8">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
             لایسنس سنتینال فعال است
           </span>
-          <span class="brand-premium-badge" style="margin:0;"><svg class="bp-gem" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="bp-label">PREMIUM</span></span>
+          <span class="brand-premium-badge u-m-0"><svg class="bp-gem" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="bp-label">PREMIUM</span></span>
         </div>
 
         <!-- Uninstalled State -->
-        <div id="sentinelUninstalledCard" style="background:color-mix(in srgb, var(--info) 8%, transparent); border:1px solid color-mix(in srgb, var(--info) 30%, transparent); border-radius:10px; padding:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+        <div id="sentinelUninstalledCard" class="u-tint-info u-bd-info u-r-10 u-p-16 u-flex u-jc-sb u-ai-c u-wrap u-gap-16">
           <div>
-            <div style="font-size:14px; font-weight:700; color:var(--info);">نصب و راه‌اندازی سنتینال</div>
-            <div style="font-size:12px; color:var(--tx2); margin-top:3px; line-height:1.5;">سرویس سنتینال با هسته Xray و تخصیص خودکار پورت رندوم امن نصب می‌گردد.</div>
+            <div class="u-fs-14 u-fw-700 u-c-info">نصب و راه‌اندازی سنتینال</div>
+            <div class="u-fs-12 u-c-tx2 u-mt-4 u-lh-15">سرویس سنتینال با هسته Xray و تخصیص خودکار پورت رندوم امن نصب می‌گردد.</div>
           </div>
           <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalInstallSentinel" onclick="installSentinelModalClick()">
             نصب خودکار سنتینال
@@ -3191,47 +3354,47 @@
         </div>
 
         <!-- Installed State -->
-        <div id="sentinelInstalledCard" class="hidden" style="background:color-mix(in srgb, var(--info) 6%, transparent); border:1px solid color-mix(in srgb, var(--info) 25%, transparent); border-radius:10px; padding:16px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
-            <div style="display:flex; align-items:center; gap:10px;">
+        <div id="sentinelInstalledCard" class="hidden u-tint-info u-bd-info u-r-10 u-p-16">
+          <div class="u-flex u-jc-sb u-ai-c u-wrap u-gap-12 u-mb-16">
+            <div class="u-flex u-ai-c u-gap-12">
               <span class="badge ok" id="sentinelModalStatusBadge">
                 ACTIVE / RUNNING
               </span>
-              <span style="font-size:13px; font-weight:700; color:var(--tx2);">پورت: <code id="sentinelModalPort">32836</code></span>
+              <span class="u-fs-13 u-fw-700 u-c-tx2">پورت: <code id="sentinelModalPort">32836</code></span>
             </div>
             <button type="button" class="hashem-btn hashem-btn-primary" id="btnModalOpenDashboard" onclick="openSentinelDashboardClick()">
               ورود به داشبورد سنتینال ↗
             </button>
           </div>
 
-          <div class="fg" style="margin-bottom:12px;">
-            <label for="sentinelModalUrl" style="font-size:12px; font-weight:700; color:var(--mu); display:block; margin-bottom:6px;">
+          <div class="fg u-mb-12">
+            <label for="sentinelModalUrl" class="u-fs-12 u-fw-700 u-c-mu u-block u-mb-8">
               آدرس کامل پنل سنتینال (Dashboard URL):
             </label>
-            <div style="display:flex; gap:8px;">
-              <input class="hashem-input" id="sentinelModalUrl" readonly style="font-family:monospace; font-size:12px; width:100%; color:var(--info); background:color-mix(in srgb, var(--bg) 40%, transparent); direction:ltr;" placeholder="http://...">
+            <div class="u-flex u-gap-8">
+              <input class="hashem-input u-mono u-fs-12 u-w-full u-c-info u-bg-inset u-ltr" id="sentinelModalUrl" readonly placeholder="http://...">
               <button type="button" class="hashem-btn" id="btnCopySentinelUrl" onclick="copySentinelUrlClick()">کپی آدرس</button>
             </div>
           </div>
 
-          <div class="fg" id="sentinelModalPassRow" style="margin-bottom:14px;">
-            <label for="sentinelModalPass" style="font-size:12px; font-weight:700; color:var(--mu); display:block; margin-bottom:6px;">
+          <div class="fg u-mb-16" id="sentinelModalPassRow">
+            <label for="sentinelModalPass" class="u-fs-12 u-fw-700 u-c-mu u-block u-mb-8">
               رمز عبور ورود (Admin Password):
             </label>
-            <div style="display:flex; gap:8px;">
-              <input class="hashem-input" id="sentinelModalPass" readonly style="font-family:monospace; font-size:12px; width:100%; color:var(--wr); background:color-mix(in srgb, var(--bg) 40%, transparent); direction:ltr;" placeholder="••••••••">
+            <div class="u-flex u-gap-8">
+              <input class="hashem-input u-mono u-fs-12 u-w-full u-c-wr u-bg-inset u-ltr" id="sentinelModalPass" readonly placeholder="••••••••">
               <button type="button" class="hashem-btn" id="btnCopySentinelPass" onclick="copySentinelPassClick()">کپی رمز</button>
             </div>
           </div>
 
-          <div style="display:flex; gap:10px;">
+          <div class="u-flex u-gap-12">
             <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="btnModalRestartSentinel" onclick="controlSentinelAction('restart')">ریستارت</button>
             <button type="button" class="hashem-btn hashem-btn-danger u-btn-30" id="btnModalUninstallSentinel" onclick="controlSentinelAction('uninstall')">حذف سنتینال</button>
           </div>
         </div>
       </div>
     </div>
-    <div class="ent-modal-f" id="sentinelModalFoot" style="display:flex; justify-content:flex-end; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:12px 18px; gap:8px;">
+    <div class="ent-modal-f u-flex u-jc-e u-ai-c u-bt-ln u-p-12x20 u-gap-8" id="sentinelModalFoot">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeSentinelModal()">بستن (Close)</button>
     </div>
   </div>
@@ -3239,45 +3402,45 @@
 
 <!-- Modal: Bagher Engine Quick Edit -->
 <div class="ent-modal-ov" id="bagherQuickEditModal" hidden>
-  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="bagherQuickEditTitle" style="max-width:540px; width:100%; border:1px solid color-mix(in srgb, var(--info) 35%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--info) 25%, transparent);">
-    <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--info) 25%, transparent); background:color-mix(in srgb, var(--info) 10%, transparent);">
-      <b id="bagherQuickEditTitle" style="display:flex; align-items:center; gap:8px; color:var(--info); font-size:15px; font-weight:700;">
+  <div class="ent-modal u-maxw-540 u-w-full u-bd-info u-lift" role="dialog" aria-modal="true" aria-labelledby="bagherQuickEditTitle">
+    <div class="ent-modal-h u-bb-info u-tint-info">
+      <b id="bagherQuickEditTitle" class="u-flex u-ai-c u-gap-8 u-c-info u-fs-16 u-fw-700">
         Quick Edit Bagher Tunnel
       </b>
       <button class="ent-x" onclick="closeBagherQuickEdit()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b" style="gap:14px; padding:20px;">
+    <div class="ent-modal-b u-gap-16 u-p-20">
       <div class="fg">
-        <label for="bagherQuickRemoteHost" style="font-size:12px; font-weight:700; color:var(--tx2); margin-bottom:6px; display:block;">
+        <label for="bagherQuickRemoteHost" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">
           Foreign Server Public IP / Host:
         </label>
-        <input class="hashem-input" id="bagherQuickRemoteHost" placeholder="e.g. 91.107.174.173" style="width:100%; font-family:monospace;">
-        <div class="u-hint-11" style="margin-top:4px;">Remote server endpoint receiving forwarded traffic.</div>
+        <input class="hashem-input u-w-full u-mono" id="bagherQuickRemoteHost" placeholder="e.g. 91.107.174.173">
+        <div class="u-hint-11 u-mt-4">Remote server endpoint receiving forwarded traffic.</div>
       </div>
       <div class="fg">
-        <label for="bagherQuickPorts" style="font-size:12px; font-weight:700; color:var(--tx2); margin-bottom:6px; display:block;">
+        <label for="bagherQuickPorts" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">
           Forwarded Ports (TCP &amp; UDP):
         </label>
-        <input class="hashem-input" id="bagherQuickPorts" placeholder="e.g. 443, 8443, 1020, 1030, 1040" style="width:100%; font-family:monospace;">
-        <div class="u-hint-11" style="margin-top:4px;">Comma-separated port numbers forwarded through the stealth tunnel.</div>
+        <input class="hashem-input u-w-full u-mono" id="bagherQuickPorts" placeholder="e.g. 443, 8443, 1020, 1030, 1040">
+        <div class="u-hint-11 u-mt-4">Comma-separated port numbers forwarded through the stealth tunnel.</div>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div class="u-grid u-gtc-1fr-1fr u-gap-12">
         <div class="fg">
-          <label for="bagherQuickPoolCount" style="font-size:12px; font-weight:700; color:var(--mu); margin-bottom:6px; display:block;">
+          <label for="bagherQuickPoolCount" class="u-fs-12 u-fw-700 u-c-mu u-mb-8 u-block">
             Pool Sockets:
           </label>
-          <input type="number" class="hashem-input" id="bagherQuickPoolCount" value="25" min="5" max="100" style="width:100%; font-family:monospace;">
+          <input type="number" class="hashem-input u-w-full u-mono" id="bagherQuickPoolCount" value="25" min="5" max="100">
         </div>
         <div class="fg">
-          <label for="bagherQuickBindPort" style="font-size:12px; font-weight:700; color:var(--mu); margin-bottom:6px; display:block;">
+          <label for="bagherQuickBindPort" class="u-fs-12 u-fw-700 u-c-mu u-mb-8 u-block">
             FRP Bind Port:
           </label>
-          <input type="number" class="hashem-input" id="bagherQuickBindPort" value="55400" min="1024" max="65535" style="width:100%; font-family:monospace;">
+          <input type="number" class="hashem-input u-w-full u-mono" id="bagherQuickBindPort" value="55400" min="1024" max="65535">
         </div>
       </div>
-      <div class="warnbox hidden" id="bagherQuickEditWarn" style="margin-top:6px;"></div>
+      <div class="warnbox hidden u-mt-8" id="bagherQuickEditWarn"></div>
     </div>
-    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:14px 20px;">
+    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeBagherQuickEdit()">Cancel</button>
       <button type="button" class="hashem-btn hashem-btn-primary" onclick="saveBagherQuickEdit()">
         Save &amp; Apply Changes
@@ -3288,42 +3451,42 @@
 
 <!-- Cluster Add Peer Node Modal -->
 <div class="ent-modal-ov" id="clusterNodeModal" hidden>
-  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="clusterNodeModalTitle" style="max-width:520px; width:100%; border:1px solid color-mix(in srgb, var(--sc) 35%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--sc) 20%, transparent);">
-    <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--sc) 25%, transparent); background:color-mix(in srgb, var(--sc) 10%, transparent);">
-      <b id="clusterNodeModalTitle" style="display:flex; align-items:center; gap:8px; color:var(--sc); font-size:15px; font-weight:700;">
+  <div class="ent-modal u-maxw-520 u-w-full u-bd-sc u-lift" role="dialog" aria-modal="true" aria-labelledby="clusterNodeModalTitle">
+    <div class="ent-modal-h u-bb-sc u-tint-sc">
+      <b id="clusterNodeModalTitle" class="u-flex u-ai-c u-gap-8 u-c-sc u-fs-16 u-fw-700">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#c084fc" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         Connect Peer Iran Server
       </b>
       <button class="ent-x" onclick="closeClusterAddNodeModal()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b" style="gap:14px; padding:20px;">
+    <div class="ent-modal-b u-gap-16 u-p-20">
       <div class="fg">
-        <label for="clusterPeerID" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterPeerID" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Peer Node ID (Unique Slug):
         </label>
-        <input type="text" class="hashem-input" id="clusterPeerID" placeholder="e.g. iran-2" style="width:100%; font-family:monospace;">
+        <input type="text" class="hashem-input u-w-full u-mono" id="clusterPeerID" placeholder="e.g. iran-2">
       </div>
       <div class="fg">
-        <label for="clusterPeerName" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterPeerName" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Display Label:
         </label>
-        <input type="text" class="hashem-input" id="clusterPeerName" placeholder="e.g. Tehran Hub (MCI)" style="width:100%;">
+        <input type="text" class="hashem-input u-w-full" id="clusterPeerName" placeholder="e.g. Tehran Hub (MCI)">
       </div>
       <div class="fg">
-        <label for="clusterPeerAPI" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterPeerAPI" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Peer Panel Base URL:
         </label>
-        <input type="text" class="hashem-input" id="clusterPeerAPI" placeholder="http://1.2.3.4:7777/secret-path" style="width:100%; font-family:monospace;">
+        <input type="text" class="hashem-input u-w-full u-mono" id="clusterPeerAPI" placeholder="http://1.2.3.4:7777/secret-path">
         <div class="u-hint-12 u-mt-4">Include http/https, port and panel secret path if applicable.</div>
       </div>
       <div class="fg">
-        <label for="clusterPeerIP" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterPeerIP" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Peer Public IP (For Failover DNAT):
         </label>
-        <input type="text" class="hashem-input" id="clusterPeerIP" placeholder="e.g. 1.2.3.4" style="width:100%; font-family:monospace;">
+        <input type="text" class="hashem-input u-w-full u-mono" id="clusterPeerIP" placeholder="e.g. 1.2.3.4">
       </div>
     </div>
-    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:14px 20px;">
+    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddNodeModal()">Cancel</button>
       <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddNode()">
         Handshake &amp; Save Node
@@ -3334,64 +3497,64 @@
 
 <!-- Cluster Add Foreign Server Modal -->
 <div class="ent-modal-ov" id="clusterForeignModal" hidden>
-  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="clusterForeignModalTitle" style="max-width:520px; width:100%; border:1px solid color-mix(in srgb, var(--info) 35%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--info) 20%, transparent);">
-    <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--info) 25%, transparent); background:color-mix(in srgb, var(--info) 10%, transparent);">
-      <b id="clusterForeignModalTitle" style="display:flex; align-items:center; gap:8px; color:var(--info); font-size:15px; font-weight:700;">
+  <div class="ent-modal u-maxw-520 u-w-full u-bd-info u-lift" role="dialog" aria-modal="true" aria-labelledby="clusterForeignModalTitle">
+    <div class="ent-modal-h u-bb-info u-tint-info">
+      <b id="clusterForeignModalTitle" class="u-flex u-ai-c u-gap-8 u-c-info u-fs-16 u-fw-700">
         <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> Add Foreign Exit Server (Kharej)
       </b>
       <button class="ent-x" onclick="closeClusterAddForeignModal()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b" style="gap:14px; padding:20px;">
+    <div class="ent-modal-b u-gap-16 u-p-20">
       <div class="fg">
-        <label for="clusterForeignID" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterForeignID" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Foreign Node ID (Unique Slug):
         </label>
-        <input type="text" class="hashem-input" id="clusterForeignID" placeholder="e.g. kharej-germany" style="width:100%; font-family:monospace;">
+        <input type="text" class="hashem-input u-w-full u-mono" id="clusterForeignID" placeholder="e.g. kharej-germany">
       </div>
       <div class="fg">
-        <label for="clusterForeignName" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterForeignName" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Display Label:
         </label>
-        <input type="text" class="hashem-input" id="clusterForeignName" placeholder="e.g. Frankfurt Hetzner" style="width:100%;">
+        <input type="text" class="hashem-input u-w-full" id="clusterForeignName" placeholder="e.g. Frankfurt Hetzner">
       </div>
       <div class="fg">
-        <label for="clusterForeignIP" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterForeignIP" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Kharej Public IP:
         </label>
-        <input type="text" class="hashem-input" id="clusterForeignIP" placeholder="e.g. 91.107.174.173" style="width:100%; font-family:monospace;">
+        <input type="text" class="hashem-input u-w-full u-mono" id="clusterForeignIP" placeholder="e.g. 91.107.174.173">
       </div>
       <div class="fg">
-        <label for="clusterForeignPort" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterForeignPort" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Tunnel / FRP Port:
         </label>
-        <input type="number" class="hashem-input" id="clusterForeignPort" placeholder="55354" style="width:100%; font-family:monospace;" value="55354">
+        <input type="number" class="hashem-input u-w-full u-mono" id="clusterForeignPort" placeholder="55354" value="55354">
       </div>
       <div class="fg">
-        <label for="clusterForeignProtocol" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterForeignProtocol" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Carrying Protocol:
         </label>
-        <select class="hashem-input" id="clusterForeignProtocol" style="width:100%;">
+        <select class="hashem-input u-w-full" id="clusterForeignProtocol">
           <option value="wss">WSS (WebSocket TLS)</option>
           <option value="gre">Direct GRE (Proto 47)</option>
           <option value="bagher">Bagher SSH Engine</option>
         </select>
       </div>
       <div class="fg">
-        <label for="clusterForeignWeight" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterForeignWeight" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Traffic Weight (Round-Robin Ratio):
         </label>
-        <input type="number" class="hashem-input" id="clusterForeignWeight" min="1" max="100" value="1" style="width:100%; font-family:monospace;">
+        <input type="number" class="hashem-input u-w-full u-mono" id="clusterForeignWeight" min="1" max="100" value="1">
         <div class="u-hint-12 u-mt-4">Higher weight receives proportionally more connections (e.g. 2 gets 2x traffic of 1).</div>
       </div>
       <div class="fg">
-        <label for="clusterForeignTargetPorts" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterForeignTargetPorts" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Custom Target Ports Mapping (Optional):
         </label>
-        <input type="text" class="hashem-input" id="clusterForeignTargetPorts" placeholder="e.g. 443:8443 (leave blank for identical 1:1 ports)" style="width:100%; font-family:monospace;">
+        <input type="text" class="hashem-input u-w-full u-mono" id="clusterForeignTargetPorts" placeholder="e.g. 443:8443 (leave blank for identical 1:1 ports)">
         <div class="u-hint-12 u-mt-4">Leave empty to forward to identical ports on this server.</div>
       </div>
     </div>
-    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:14px 20px;">
+    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddForeignModal()">Cancel</button>
       <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddForeign()">
         Save Foreign Exit
@@ -3402,42 +3565,42 @@
 
 <!-- Cluster Configuration Modal -->
 <div class="ent-modal-ov" id="clusterConfigModal" hidden>
-  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="clusterConfigModalTitle" style="max-width:540px; width:100%; border:1px solid color-mix(in srgb, var(--sc) 35%, transparent); box-shadow:0 20px 45px rgba(0,0,0,0.7), 0 0 30px color-mix(in srgb, var(--sc) 20%, transparent);">
-    <div class="ent-modal-h" style="border-bottom:1px solid color-mix(in srgb, var(--sc) 25%, transparent); background:color-mix(in srgb, var(--sc) 10%, transparent);">
-      <b id="clusterConfigModalTitle" style="display:flex; align-items:center; gap:8px; color:var(--sc); font-size:15px; font-weight:700;">
+  <div class="ent-modal u-maxw-540 u-w-full u-bd-sc u-lift" role="dialog" aria-modal="true" aria-labelledby="clusterConfigModalTitle">
+    <div class="ent-modal-h u-bb-sc u-tint-sc">
+      <b id="clusterConfigModalTitle" class="u-flex u-ai-c u-gap-8 u-c-sc u-fs-16 u-fw-700">
         Cluster Mesh Configuration
       </b>
       <button class="ent-x" onclick="closeClusterConfigModal()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b" style="gap:14px; padding:20px;">
-      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--sunk); border:1px solid color-mix(in srgb, var(--tx) 8%, transparent); border-radius:8px;">
+    <div class="ent-modal-b u-gap-16 u-p-20">
+      <div class="u-flex u-ai-c u-jc-sb u-p-12x16 u-bg-sunk u-bd-ln u-r-8">
         <div>
-          <b style="font-size:13px; color:var(--tx);">Enable Cluster Gossip</b>
+          <b class="u-fs-13 u-c-tx">Enable Cluster Gossip</b>
           <div class="u-hint-12">Participate in heartbeat health checks with peer Iran servers</div>
         </div>
-        <input type="checkbox" id="clusterCfgEnabled" style="width:18px; height:18px; cursor:pointer;">
+        <input type="checkbox" id="clusterCfgEnabled" class="u-w-18 u-h-18 u-cursor-pointer">
       </div>
 
-      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:var(--sunk); border:1px solid color-mix(in srgb, var(--tx) 8%, transparent); border-radius:8px;">
+      <div class="u-flex u-ai-c u-jc-sb u-p-12x16 u-bg-sunk u-bd-ln u-r-8">
         <div>
-          <b style="color:var(--er); font-size:13px;">Auto-Failover Rerouting</b>
+          <b class="u-c-er u-fs-13">Auto-Failover Rerouting</b>
           <div class="u-hint-12">Reroute client traffic to peer Iran server on tunnel drop</div>
         </div>
-        <input type="checkbox" id="clusterCfgAutoFailover" style="width:18px; height:18px; cursor:pointer;">
+        <input type="checkbox" id="clusterCfgAutoFailover" class="u-w-18 u-h-18 u-cursor-pointer">
       </div>
 
       <div class="fg">
-        <label for="clusterCfgNodeID" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterCfgNodeID" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           This Node Identifier:
         </label>
-        <input type="text" class="hashem-input" id="clusterCfgNodeID" style="width:100%; font-family:monospace;">
+        <input type="text" class="hashem-input u-w-full u-mono" id="clusterCfgNodeID">
       </div>
 
       <div class="fg">
-        <label for="clusterCfgBalancingMode" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterCfgBalancingMode" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Multi-Foreign Balancing Strategy:
         </label>
-        <select class="hashem-input" id="clusterCfgBalancingMode" style="width:100%;">
+        <select class="hashem-input u-w-full" id="clusterCfgBalancingMode">
           <option value="wrr">Weighted Round-Robin (WRR + Kernel Statistic)</option>
           <option value="failover">Active-Passive Priority Failover</option>
           <option value="lowest_latency">Lowest Latency Dynamic</option>
@@ -3446,24 +3609,24 @@
       </div>
 
       <div class="fg">
-        <label for="clusterCfgSecret" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterCfgSecret" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Cluster Shared Secret (Gossip Auth Token):
         </label>
-        <div style="display:flex; gap:8px;">
-          <input type="text" class="hashem-input" id="clusterCfgSecret" style="width:100%; font-family:monospace;" placeholder="Must match across all Iran servers">
+        <div class="u-flex u-gap-8">
+          <input type="text" class="hashem-input u-w-full u-mono" id="clusterCfgSecret" placeholder="Must match across all Iran servers">
           <button type="button" class="hashem-btn" onclick="generateClusterSecret()">Gen</button>
         </div>
       </div>
 
       <div class="fg">
-        <label for="clusterCfgPorts" style="font-size:12px; font-weight:600; margin-bottom:6px; display:block; color:var(--mu);">
+        <label for="clusterCfgPorts" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
           Failover Service Ports (comma-separated):
         </label>
-        <input type="text" class="hashem-input" id="clusterCfgPorts" placeholder="443, 8443, 2083" style="width:100%; font-family:monospace;">
+        <input type="text" class="hashem-input u-w-full u-mono" id="clusterCfgPorts" placeholder="443, 8443, 2083">
         <div class="u-hint-12 u-mt-4">Ports redirected via DNAT to the healthy Iran hub upon failure.</div>
       </div>
     </div>
-    <div class="ent-modal-f" style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); padding:14px 20px;">
+    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterConfigModal()">Cancel</button>
       <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterConfig()">
         Save Settings

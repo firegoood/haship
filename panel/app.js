@@ -123,6 +123,17 @@ function trapModal(ov, onClose) {
     if (opener && opener.focus && document.contains(opener)) { try { opener.focus(); } catch (_) { /* opener gone: nothing to restore */ } }
   };
 }
+// Show/hide a [hidden] modal overlay with trapModal wired in (idempotent).
+function modalShow(ov, onClose) {
+  if (!ov) return;
+  if (!ov._release) ov._release = trapModal(ov, onClose);
+  ov.hidden = false;
+}
+function modalHide(ov) {
+  if (!ov) return;
+  ov.hidden = true;
+  if (ov._release) { const r = ov._release; ov._release = null; r(); }
+}
 let _csrfToken = '';
 function getCSRFToken() {
   if (_csrfToken) return _csrfToken;
@@ -199,8 +210,8 @@ function entConfirm(title, body, confirmYes) {
 // Skeleton blocks for loading states (Dashboard/Logs/Update reuse).
 function skel(n) {
   let s = '';
-  for (let i = 0; i < (n || 3); i++) s += '<div class="ent-skel" style="height:14px"></div>';
-  return '<div style="display:grid;gap:8px">' + s + '</div>';
+  for (let i = 0; i < (n || 3); i++) s += '<div class="ent-skel u-h-14"></div>';
+  return '<div class="u-grid u-gap-8">' + s + '</div>';
 }
 // tabs (sidebar + mobile drawer)
 function isBagherLicensed() {
@@ -351,7 +362,7 @@ $('themeBtnM').onclick = () => setTheme(document.body.dataset.t === 'dark' ? 'li
 $('logoutBtnM').onclick = async () => { try { await api('/api/logout', {}); } catch(e){ /* logout best-effort: always fall through to login screen */ } showLogin(); };
 drawerSync();
 // theme (hashem-style: localStorage + data-t on html and body)
-function setTheme(t, persist = true) {
+function setTheme(t, persist = true, repaint = persist) {
   document.documentElement.dataset.t = t; document.body.dataset.t = t;
   if (persist) { try { localStorage.setItem('gre_theme', t); } catch(e) { /* storage blocked (private mode): theme just won't persist */ } }
   const b = $('themeBtn');
@@ -360,14 +371,15 @@ function setTheme(t, persist = true) {
     const u = b.querySelector('use'); if (u) u.setAttribute('href', t === 'dark' ? '#i-sun' : '#i-moon');
     b.setAttribute('aria-label', 'Switch to ' + lab.toLowerCase() + ' theme'); b.removeAttribute('data-i18n-aria'); }
   const bm = $('themeBtnM'); if (bm) bm.textContent = t === 'dark' ? 'Light' : 'Dark';
-  try { if (typeof refreshDash === 'function') refreshDash(); } catch(e) { /* dashboard not ready yet; polling repaints it */ }
+  // Canvas charts read theme colors when drawn; skip on first paint (I18N and the dashboard are not set up yet).
+  if (repaint) { try { if (typeof refreshDash === 'function') refreshDash(); } catch(e) { /* dashboard not ready yet; polling repaints it */ } }
 }
 $('themeBtn').onclick = () => setTheme(document.body.dataset.t === 'dark' ? 'light' : 'dark');
 // No saved choice: follow the system appearance, live, until the user picks one.
 function savedTheme() { try { return localStorage.getItem('gre_theme'); } catch(e) { return null; } }
 const sysLight = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
 setTheme(savedTheme() || (sysLight && sysLight.matches ? 'light' : 'dark'), false);
-if (sysLight && sysLight.addEventListener) sysLight.addEventListener('change', e => { if (!savedTheme()) setTheme(e.matches ? 'light' : 'dark', false); });
+if (sysLight && sysLight.addEventListener) sysLight.addEventListener('change', e => { if (!savedTheme()) setTheme(e.matches ? 'light' : 'dark', false, true); });
 
 // i18n & Persian (Farsi) Language System
 const I18N = {
@@ -1367,7 +1379,7 @@ function renderPeers(peers) {
   if (bagherHasCfg) {
     const fwdPorts = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
     const roleLabel = b.role === 'foreign' ? 'Foreign Client' : 'Iran Hub';
-    bagherCardHtml = `<div class="tunnel-card peer-card u-peer-card-wide" id="peer-card-bagher" style="border:1px solid color-mix(in srgb, var(--ok) 30%, transparent); background:linear-gradient(135deg, color-mix(in srgb, var(--s1) 85%, transparent) 0%, color-mix(in srgb, var(--bg) 20%, transparent) 100%);">
+    bagherCardHtml = `<div class="tunnel-card peer-card u-peer-card-wide u-bd-ok u-bg-s1" id="peer-card-bagher">
       <div class="tc-header u-flex-wrap-gap8">
         <div class="u-flex-center-gap10">
           <span class="status-indicator ${bagherUp ? 'active' : 'offline'}"><span class="dot"></span></span>
@@ -1388,7 +1400,7 @@ function renderPeers(peers) {
         <div class="det-card">
           <div class="det-card-head"><span>Link Status</span></div>
           <div class="det-row"><span class="det-k">Status</span><span class="det-v"><span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'Running' : 'Stopped'}</span></span></div>
-          <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono" style="color:var(--info)">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : (bagherUp ? 'Optimal' : '—')}</span></div>
+          <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono u-c-info">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : (bagherUp ? 'Optimal' : '—')}</span></div>
           <div class="det-row"><span class="det-k">Services</span><span class="det-v mono">${esc(b.active_services || (bagherUp ? 'frps, frpc, ssh-fwd' : 'none'))}</span></div>
         </div>
       </div>
@@ -2464,7 +2476,7 @@ async function refreshDash() {
         const hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
         const when = (dashRange === '1h' || dashRange === '24h') ? hhmm : M + ' ' + d.getDate() + ' ' + hhmm;
         tip.innerHTML = '<span class="tip-time">' + esc(when) + '</span><span class="tip-sep">·</span>' +
-          '<span style="color:var(--ok);font-weight:600">● ' + esc(String(p.conns ?? 0)) + ' active connections</span>';
+          '<span class="u-c-ok u-fw-600">● ' + esc(String(p.conns ?? 0)) + ' active connections</span>';
         tip.style.display = 'inline-flex';
         const tw = tip.offsetWidth || 160;
         const th = tip.offsetHeight || 30;
@@ -2510,7 +2522,7 @@ async function refreshDash() {
     const dval = v => `<span class="det-v">${esc(v ?? NA)}</span>`;
     const dmono = v => (!v || v === NA)
       ? `<span class="det-v">—</span>`
-      : `<span style="display:flex;align-items:center;gap:6px;min-width:0"><span class="det-v mono">${esc(v)}</span><button class="det-copy" data-copy="${esc(v)}" title="Copy" aria-label="Copy">⧉</button></span>`;
+      : `<span class="u-flex u-ai-c u-gap-8 u-minw-0"><span class="det-v mono">${esc(v)}</span><button class="det-copy" data-copy="${esc(v)}" title="Copy" aria-label="Copy">⧉</button></span>`;
     const dbadge = (txt, cls) => `<span class="det-v"><span class="badge ${cls || ''}"><span class="dot"></span>${esc(txt)}</span></span>`;
     const detCard = (icon, title, rows) =>
       `<div class="det-card"><div class="det-head"><span class="det-ico">${icon}</span>${esc(title)}</div><div class="det-rows">${rows}</div></div>`;
@@ -2534,7 +2546,7 @@ async function refreshDash() {
       detCard(ICO_SRV, tr('card_server_title', 'Server & Role'), detRow(tr('lbl_public_ip', 'Public IP'), dmono(d.local_pub)) + detRow(tr('lbl_role', 'Role'), roleBadge) + detRow(tr('lbl_forwarded_ports', 'Forwarded'), dval(proxyList)))
       + detCard(ICO_GRE, tr('card_gre_title', 'GRE Tunnel'), detRow(tr('lbl_gre_local', 'Local'), dmono(g.local)) + detRow(tr('lbl_gre_peer', 'Peer'), dmono(g.peer)) + detRow(tr('lbl_gre_interface', 'Inner'), dmono(g.inner)))
       + detCard(ICO_FRP, tr('card_frp_title', 'Tunnel Engine'), detRow(tr('lbl_frp_status', 'Status'), frpBadge) + detRow(tr('x007', "Engine"), dval(activeEng)) + detRow(portLabel, portCell)
-        + (proxyPorts.length ? detRow(tr('lbl_tunnel_ports', 'Tunnel Ports'), `<span class="det-v">${proxyPorts.map(p => `<span class="det-v mono" style="margin-right:4px">${esc(String(p))}</span>`).join('')}</span>`) : '')
+        + (proxyPorts.length ? detRow(tr('lbl_tunnel_ports', 'Tunnel Ports'), `<span class="det-v">${proxyPorts.map(p => `<span class="det-v mono u-mr-4">${esc(String(p))}</span>`).join('')}</span>`) : '')
         + (u.frp_since ? detRow(tr('lbl_uptime_since', 'Since'), dval(u.frp_since)) : ''))
       + detCard(ICO_BOLT, tr('x008', "Carrier & Failover"), detRow(tr('x009', "Active Carrier"), dmono(activeCarr)) + detRow(tr('x010', "Failover Policy"), failoverBadge) + detRow(tr('x011', "Diagnostics"), diagBadge))
       + dashPeersCard(d.peers || []));
@@ -2665,7 +2677,7 @@ function drawActivityChart(hist, isDown) {
 
 // ICMP is metadata (health.go): a link whose control session is live is healthy
 // even when ICMP is filtered, so show its TCP latency plus a muted chip - never "no ping".
-function icmpChip() { return '<span class="qs-hint" style="margin-left:6px;opacity:.7">' + esc(tr('fleet_icmp_filtered', 'ICMP filtered')) + '</span>'; }
+function icmpChip() { return '<span class="qs-hint u-ml-8 u-o-70">' + esc(tr('fleet_icmp_filtered', 'ICMP filtered')) + '</span>'; }
 function linkPing(o) {
   if (o.ping_ok) return { ok: true, txt: o.ping_ms || 'ok', chip: '' };
   if (o.health_state === 'healthy') {
@@ -2692,7 +2704,7 @@ function dashPeersCard(peers) {
     const statusTxt = up ? (tr('x012', "tunnel up")) : tr('status_down', 'down');
     return `<div class="dash-peer-row" data-goto-peer="${p.id}" title="${tr('x013', "Open full card in Tunnel tab")}">`
       + `<span class="ent-st ${up ? 'on' : 'off'}"><i></i></span>`
-      + `<b style="color:var(--tx)">${esc(nm)}</b><span class="qs-hint mono">#${p.id}</span>`
+      + `<b class="u-c-tx">${esc(nm)}</b><span class="qs-hint mono">#${p.id}</span>`
       + `<span class="badge ${up ? 'ok' : 'err'}"><span class="dot"></span>${statusTxt}</span>`
       + `<span class="det-v mono">${esc(p.remote_pub || '—')}</span>`
       + `<span class="qs-hint">${esc((p.ports || []).join(', ') || '—')} · </span><span class="badge ${pingCls}"${pgTip ? ` title="${pgTip}"` : ''}><span class="dot"></span>${esc(pingTxt)}</span>${pg.chip}`
@@ -2761,12 +2773,12 @@ function renderIranBundleBox(bundleStr) {
   if (!bb || !bundleStr) return;
   window._currentIranBundle = bundleStr;
   bb.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <span style="font-weight:600;color:var(--tx)">Setup Bundle (Copy to Foreign server)</span>
+    <div class="u-flex u-ai-c u-jc-sb u-gap-8 u-mb-8">
+      <span class="u-fw-600 u-c-tx">Setup Bundle (Copy to Foreign server)</span>
       <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" id="copyIranBundleBtn">Copy Bundle</button>
     </div>
-    <div style="font-family:var(--font-mono);font-size:12px;background:color-mix(in srgb, var(--bg) 35%, transparent);padding:10px 12px;border-radius:var(--r-sm);word-break:break-all;color:var(--cyan);user-select:all;border:1px solid color-mix(in srgb, var(--info) 25%, transparent)">${esc(bundleStr)}</div>
-    <div style="font-size:12px;color:var(--mu);margin-top:6px">Paste this single string into the Foreign server token box to establish the tunnel and peer link automatically.</div>
+    <div class="u-mono u-fs-12 u-bg-inset u-p-12x12 u-r-8 u-break u-c-info u-select-all u-bd-info">${esc(bundleStr)}</div>
+    <div class="u-fs-12 u-c-mu u-mt-8">Paste this single string into the Foreign server token box to establish the tunnel and peer link automatically.</div>
   `;
   bb.classList.remove('hidden');
   const btn = $('copyIranBundleBtn');
@@ -3040,7 +3052,7 @@ $('jToken').addEventListener('input', () => {
     if (adv && !adv.open) adv.open = true;
     w.innerHTML = 'Backhaul Standalone bundle detected (Iran: <b>' + esc(b.iranPub) + '</b>, Port: <b>' + b.port + '</b>, Transport: <b>' + esc(b.transport) + '</b>).';
     w.classList.remove('hidden');
-    w.style.color = '#38bdf8';
+    w.style.color = 'var(--info)';
   } else if (b.engine === 'gre-backhaul') {
     forceSet('jPorts', b.rawPorts || (b.ports.length ? b.ports.join(', ') : ''));
     forceSet('fRemotePub', b.iranPub);
@@ -3051,7 +3063,7 @@ $('jToken').addEventListener('input', () => {
     if (adv && !adv.open) adv.open = true;
     w.innerHTML = 'GRE+Backhaul bundle detected (Iran: <b>' + esc(b.iranPub) + '</b>, Port: <b>' + b.port + '</b>, Transport: <b>' + esc(b.transport) + '</b>).';
     w.classList.remove('hidden');
-    w.style.color = '#c084fc';
+    w.style.color = 'var(--sc)';
   } else {
     forceSet('jPorts', b.ports.length ? b.ports.join(', ') : '');
     forceSet('fRemotePub', b.iranPub);
@@ -3063,7 +3075,7 @@ $('jToken').addEventListener('input', () => {
     if (!b.ports.length) {
       w.innerHTML = 'ℹ️ Bundle parsed (Iran: <b>' + esc(b.iranPub) + '</b>, FRP port: <b>' + b.port + '</b>). Enter reverse ports above.';
       w.classList.remove('hidden');
-      w.style.color = 'var(--info, #38bdf8)';
+      w.style.color = 'var(--info)';
     }
   }
 });
@@ -3442,11 +3454,11 @@ function paintLogs() {
   const box = $('logFindings');
   if (!logFindings.length) { box.innerHTML = '<div class="qs-hint">\u2713 no known error signatures in these lines.</div>'; }
   else box.innerHTML = logFindings.map(f =>
-    `<div style="border:1px solid color-mix(in srgb, var(--er) 35%, transparent);background:color-mix(in srgb, var(--er) 7%, transparent);border-radius:10px;padding:10px 12px">` +
-    `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge err"><span class="dot" style="background:var(--er)"></span>${esc(f.code)}${f.count > 1 ? ' ×' + f.count : ''}</span>` +
+    `<div class="u-bd-er u-tint-er u-r-10 u-p-12x12">` +
+    `<div class="u-flex u-gap-8 u-ai-c u-wrap"><span class="badge err"><span class="dot u-bg-er"></span>${esc(f.code)}${f.count > 1 ? ' ×' + f.count : ''}</span>` +
     `<b>${esc(f.msg)}</b></div>` +
     (f.hint ? `<div class="qs-hint u-mt-4">\u21AA ${esc(f.hint)}</div>` : '') +
-    (f.line ? `<div class="qs-hint" style="margin-top:4px;font-family:monospace">“${esc(f.line)}”</div>` : '') +
+    (f.line ? `<div class="qs-hint u-mt-4 u-mono">“${esc(f.line)}”</div>` : '') +
     `</div>`).join('');
 }
 async function loadErrors() {
@@ -4031,7 +4043,7 @@ async function loadPerf() {
       const want = s.tcp_mux_set ? (s.tcp_mux ? 'on' : 'off') : 'not set';
       const warn = (s.tcp_mux_set && s.tcp_mux_live && live !== (s.tcp_mux ? 'on' : 'off')) ? ' — differs, press Apply & restart' : '';
       $('perfMuxLive').textContent = 'Setting: ' + want + ' · Live toml: ' + live + warn + (live === 'on' ? ' · slower path active' : '');
-      $('perfMuxLive').style.color = (live === 'on' || warn) ? 'var(--warn, #f0a020)' : '';
+      $('perfMuxLive').style.color = (live === 'on' || warn) ? 'var(--wr)' : '';
     }
 
     // Role badge
@@ -4397,11 +4409,11 @@ async function loadWatchdog() {
     const hVal = $('wdHealthVal');
     if (hVal) {
       if (!s.enabled) {
-        hVal.innerHTML = '<span style="color:var(--dim)">○ Disabled</span>';
+        hVal.innerHTML = '<span class="u-c-dim">○ Disabled</span>';
       } else if (s.status === 'up') {
-        hVal.innerHTML = '<span style="color:var(--ok)">● Online</span>';
+        hVal.innerHTML = '<span class="u-c-ok">● Online</span>';
       } else {
-        hVal.innerHTML = '<span style="color:var(--er)">● Offline</span>';
+        hVal.innerHTML = '<span class="u-c-er">● Offline</span>';
       }
     }
     const hDet = $('wdHealthDetail');
@@ -4794,7 +4806,7 @@ async function tlsRefresh() {
       if (s.enabled) {
         let txt = 'Domain <b>' + esc(s.domain || '') + '</b> · expires <b>' + esc(s.expiry || '') + '</b>' + (s.days_left != null ? ' (' + esc(String(s.days_left)) + ' days)' : '') + '<br>HTTPS: <b>' + esc(s.https_url || '') + '</b><br>HTTP IP access: ' + esc(s.http_url || '');
         if (s.port_conflict) {
-          txt += '<br><span style="color:var(--err);">Port conflict: ' + esc(s.port_conflict_detail || '') + '</span>';
+          txt += '<br><span class="u-c-er">Port conflict: ' + esc(s.port_conflict_detail || '') + '</span>';
         }
         info.innerHTML = txt;
       } else {
@@ -5089,9 +5101,9 @@ function renderDoctor(rep) {
           </div>
         </div>`;
       }
-      html += `<div style="margin-top:14px;padding-top:12px;border-top:1px solid color-mix(in srgb, var(--tx) 8%, transparent);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-        <span class="qs-hint" style="color:var(--mu);">${tr('x015', "Recommendation: Run automated repair to resolve bottlenecks and optimize parameters.")}</span>
-        <button class="hashem-btn hashem-btn-primary u-btn-sm" id="docBoxFixBtn" onclick="fixDoctor()" style="display:inline-flex; align-items:center; gap:6px;">
+      html += `<div class="u-mt-16 u-pt-12 u-bt-ln u-flex u-ai-c u-jc-sb u-gap-12 u-wrap">
+        <span class="qs-hint u-c-mu">${tr('x015', "Recommendation: Run automated repair to resolve bottlenecks and optimize parameters.")}</span>
+        <button class="hashem-btn hashem-btn-primary u-btn-sm u-iflex u-ai-c u-gap-8" id="docBoxFixBtn" onclick="fixDoctor()">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
           <span data-i18n="doc_fix_box_btn">${tr('x016', "Auto-Fix Detected Issues")}</span>
         </button>
@@ -5122,7 +5134,7 @@ function renderRevPath(entries) {
     const ev = (d.evidence || []).map(x => '<div class="qs-hint">· ' + esc(x) + '</div>').join('');
     const fix = d.suggested_fix ? '<div class="qs-hint">Fix: ' + esc(d.suggested_fix) + '</div>' : '';
     const btn = (d.verdict && d.verdict !== 'HEALTHY' && d.verdict !== 'UNKNOWN')
-      ? '<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">'
+      ? '<div class="u-flex u-gap-8 u-mt-8 u-wrap">'
         + '<button class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="revFix(' + e.peer_id + ',false)">Show plan</button>'
         + '<button class="hashem-btn hashem-btn-primary u-btn-xs" onclick="revFix(' + e.peer_id + ',true)">Apply fix</button>'
         + '</div><div class="qs-hint" id="revSteps' + e.peer_id + '"></div>'
@@ -5140,7 +5152,7 @@ async function revFix(peerId, apply) {
     const r = await api('/api/revpath/fix', { peer_id: peerId, apply: !!apply });
     const steps = (r.steps || []).map(s => (s.ok ? '✓ ' : '✗ ') + s.action + ': ' + (s.detail || '')).join('\n');
     const head = r.dry_run ? 'Plan (nothing applied):\n' : ('Before: ' + ((r.before || {}).verdict || '?') + ' → After: ' + ((r.after || {}).verdict || '?') + '\n');
-    if (out) out.innerHTML = '<pre class="qs-hint" style="white-space:pre-wrap">' + esc(head + steps) + '</pre>';
+    if (out) out.innerHTML = '<pre class="qs-hint u-pre-wrap">' + esc(head + steps) + '</pre>';
     if (r.after) await loadDoctor(false);
   } catch (e) { if (out) out.textContent = e.message; reportErr('revpath', e); }
 }
@@ -5192,12 +5204,12 @@ let usageTimer = null;
 function usageBars(days) {
   if (!days || !days.length) return '';
   const max = Math.max(1, ...days.map(d => d.rx + d.tx));
-  return '<div class="usage-bars" style="display:flex;gap:6px;align-items:flex-end;height:64px;margin:.5rem 0">' +
+  return '<div class="usage-bars u-flex u-gap-8 u-ai-e u-h-64 u-my-8">' +
     days.map(d => {
       const h = Math.max(2, Math.round(((d.rx + d.tx) / max) * 60));
-      return '<div title="' + esc(d.day + ' — ↓ ' + fmtBytes(d.rx) + ' · ↑ ' + fmtBytes(d.tx)) + '" style="flex:1;min-width:10px;text-align:center">' +
+      return '<div title="' + esc(d.day + ' — ↓ ' + fmtBytes(d.rx) + ' · ↑ ' + fmtBytes(d.tx)) + '" class="u-flex-1 u-minw-10 u-text-center">' +
         '<div style="height:' + h + 'px;background:var(--ac);border-radius:3px 3px 0 0"></div>' +
-        '<div class="qs-hint" style="font-size:.65rem">' + esc(d.day.slice(5)) + '</div></div>';
+        '<div class="qs-hint u-fs-12">' + esc(d.day.slice(5)) + '</div></div>';
     }).join('') + '</div>';
 }
 function renderUsage(d) {
@@ -5993,9 +6005,7 @@ function openEditPeer(peerId) {
   if ($('editPortsWarn')) $('editPortsWarn').classList.add('hidden');
 
   renderEditPortsChips();
-  if (_editModalRelease) _editModalRelease();
-  _editModalRelease = trapModal(modal, closeEditPorts);
-  modal.hidden = false;
+  modalShow(modal, closeEditPorts);
   if ($('editPeerName')) $('editPeerName').focus();
 }
 
@@ -6003,25 +6013,22 @@ function openEditPorts(peerId, peerName, currentPorts) {
   openEditPeer(peerId);
 }
 
-let _editModalRelease = null;
 function closeEditPorts() {
-  const modal = $('editPortsModal');
-  if (modal) modal.hidden = true;
-  if (_editModalRelease) { const r = _editModalRelease; _editModalRelease = null; r(); }
+  modalHide($('editPortsModal'));
 }
 
 function renderEditPortsChips() {
   const box = $('editPortsChips');
   if (!box) return;
   if (!_editPortsList.length) {
-    box.innerHTML = '<span style="color:var(--dim);font-size:12px">No ports \u2014 add one below.</span>';
+    box.innerHTML = '<span class="u-c-dim u-fs-12">No ports \u2014 add one below.</span>';
     return;
   }
   box.innerHTML = _editPortsList.map(p =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--ln);border-radius:8px;padding:4px 10px;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums">` +
+    `<span class="u-iflex u-ai-c u-gap-4 u-bg-s2 u-bd-ln u-r-8 u-p-4x12 u-fs-13 u-fw-600 u-tnum">` +
     esc(String(p)) +
     `<button type="button" onclick="removeEditPort(${jsArg(String(p))})" title="Remove port ${esc(String(p))}" ` +
-    `style="background:none;border:none;color:var(--er);cursor:pointer;padding:0 0 0 4px;font-size:14px;line-height:1;display:inline-flex">\u00d7</button></span>`
+ `class="u-bg-none u-bd-0 u-c-er u-cursor-pointer u-p-0x0x0x4 u-fs-14 u-lh-1 u-iflex">\u00d7</button></span>`
   ).join('');
 }
 
@@ -6393,31 +6400,31 @@ function renderBenchmark(bench, peer) {
       : (isWinner ? 'background:color-mix(in srgb, var(--ok) 4%, transparent);' : '');
 
     html += `<tr class="${isActive ? 'row-active' : ''}" style="${rowBg}">
-      <td style="text-align:center;width:44px;">${rankBadge}</td>
+      <td class="u-text-center u-w-44">${rankBadge}</td>
       <td>
         <div class="u-flex-center-gap8">
-          <strong style="color:var(--tx);font-size:13.5px;">${esc(cleanName)}</strong>
+          <strong class="u-c-tx u-fs-14">${esc(cleanName)}</strong>
           ${isActive ? `<span class="badge ok">Active</span>` : ''}
           ${isWinner ? `<span class="badge info">Recommended</span>` : ''}
         </div>
-        ${cleanSub ? `<div style="font-size:12px;color:var(--mu);margin-top:2px;">${esc(cleanSub)}</div>` : ''}
+        ${cleanSub ? `<div class="u-fs-12 u-c-mu u-mt-2">${esc(cleanSub)}</div>` : ''}
       </td>
       <td>${protoPill}</td>
-      <td><code class="mono" style="font-size:12px;background:var(--sunk);padding:3px 7px;border-radius:4px;border:1px solid color-mix(in srgb, var(--tx) 5%, transparent);">${portStr}</code></td>
-      <td><span style="font-weight:700;font-family:var(--font-mono);font-size:13px;color:var(--tx);">${m.avg_rtt_ms > 0 ? m.avg_rtt_ms + ' ms' : '—'}</span></td>
-      <td><span class="badge ${lossClass}" style="font-size:12px;font-weight:700;">${m.packet_loss}%</span></td>
-      <td><span style="color:var(--mu);font-size:12px;font-family:var(--font-mono);">${m.jitter_ms > 0 ? m.jitter_ms + ' ms' : '—'}</span></td>
+      <td><code class="mono u-fs-12 u-bg-sunk u-p-4x8 u-r-4 u-bd-ln">${portStr}</code></td>
+      <td><span class="u-fw-700 u-mono u-fs-13 u-c-tx">${m.avg_rtt_ms > 0 ? m.avg_rtt_ms + ' ms' : '—'}</span></td>
+      <td><span class="badge ${lossClass} u-fs-12 u-fw-700">${m.packet_loss}%</span></td>
+      <td><span class="u-c-mu u-fs-12 u-mono">${m.jitter_ms > 0 ? m.jitter_ms + ' ms' : '—'}</span></td>
       <td>
         <div class="bench-score-bar-wrap">
           <div class="bench-score-track">
             <div class="bench-score-fill" style="width:${Math.max(4, m.score)}%;background:${m.score >= 70 ? 'linear-gradient(90deg, #10b981, #34d399)' : (m.score >= 40 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #ef4444, #f87171)')};box-shadow:0 0 8px ${m.score >= 70 ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'};"></div>
           </div>
-          <strong style="font-size:12px;font-family:var(--font-mono);min-width:26px;color:var(--tx);">${m.score}</strong>
+          <strong class="u-fs-12 u-mono u-minw-26 u-c-tx">${m.score}</strong>
         </div>
       </td>
       <td><span class="badge ${statusClass} u-fs-12">${esc(statusLabel)}</span></td>
       <td>
-        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs u-btn-30" disabled style="opacity:0.65;">Current Carrier</button>` :
+        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs u-btn-30 u-o-65" disabled>Current Carrier</button>` :
           `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs u-btn-30" onclick="smartApplyOrSetupCarrier(${jsArg(m.id)}, ${jsArg(m.name || m.id)})">${isWinner ? 'Top Pick' : 'Switch'}</button>`}
       </td>
     </tr>`;
@@ -6756,13 +6763,13 @@ function renderSSHFwd() {
     if (d.connected) {
       connBadge.className = 'badge ok';
       connBadge.textContent = 'Connected (Online)';
-      connBadge.style.background = '#10b981';
+      connBadge.style.background = 'var(--ok-fill)';
       connBadge.style.color = '#fff';
     } else if (active) {
       connBadge.className = 'badge warn';
       connBadge.textContent = d.role === 'foreign' ? 'Connecting to Iran...' : 'Ready (Waiting for Peer)';
-      connBadge.style.background = '#f59e0b';
-      connBadge.style.color = '#000';
+      connBadge.style.background = 'var(--wr-fill)';
+      connBadge.style.color = '#fff';
     } else {
       connBadge.className = 'badge info';
       connBadge.textContent = 'Inactive (Offline)';
@@ -6865,7 +6872,7 @@ function renderSSHFwd() {
     if (navLock) navLock.classList.remove('hidden');
     const curTab = (typeof state !== 'undefined' && state && state.tab) ? state.tab : '';
     if (curTab === 'sshfwd' && bagherModal && bagherModal.hidden && !_bagherModalDismissed) {
-      bagherModal.hidden = false;
+      modalShow(bagherModal, closeBagherLicModal);
     }
   } else {
     _bagherModalDismissed = true;
@@ -6881,7 +6888,7 @@ function renderSSHFwd() {
       bagherLockedBanner.classList.add('hidden');
     }
     if (bagherModal) {
-      bagherModal.hidden = true;
+      modalHide(bagherModal);
     }
   }
 }
@@ -6933,7 +6940,7 @@ let _bagherModalDismissed = false;
 function openBagherLicModal() {
   _bagherModalDismissed = false;
   const m = $('bagherLicModal');
-  if (m) m.hidden = false;
+  modalShow(m, closeBagherLicModal);
   const hashEl = $('bagherLicMachineHash');
   if (hashEl) {
     if (_licenseData && _licenseData.machine_hash) {
@@ -6958,7 +6965,7 @@ function openBagherLicModal() {
 function closeBagherLicModal() {
   _bagherModalDismissed = true;
   const m = $('bagherLicModal');
-  if (m) m.hidden = true;
+  modalHide(m);
 }
 
 function cancelBagherLicModal() {
@@ -7169,6 +7176,26 @@ async function cleanBagherTunnelClick() {
   }
 }
 
+function sshfwdCopyForeignClick() {
+  copyTextSafe(($('sshfwdForeignCmd') || {}).value, 'Command Copied', 'Run it on the foreign server.');
+}
+function sshfwdCopyAuthClick() {
+  copyTextSafe(($('sshfwdAuthLine') || {}).value, 'Line Copied', 'Add it to authorized_keys on the foreign server.');
+}
+
+// Clears the Connectivity Rescue DNAT redirect that can steal Bagher's ports
+// (backend: /api/sshfwd clear_dnat -> cleanDnatConflict).
+async function sshfwdClearDnatClick() {
+  if (!await entConfirm('Clear DNAT Conflicts?', 'Turns off the Connectivity Rescue port redirect (hashem-rescue-dnat) so Bagher can use its ports. Rescue stays off until you enable it again.', 'Clear DNAT Conflicts')) return;
+  try {
+    const res = await api('/api/sshfwd', { action: 'clear_dnat' });
+    toastOk('DNAT Cleared', (res && res.message) || 'Rescue redirect removed.');
+    await loadSSHFwd();
+  } catch (err) {
+    toastErr('Clear Failed', err.message || err);
+  }
+}
+
 function bagherCopyBundleClick() {
   const t = $('bagherBundleText');
   const val = t ? t.value.trim() : '';
@@ -7264,7 +7291,7 @@ function renderLicense(d) {
     });
     if (badge) {
       badge.textContent = 'PREMIUM (Active)';
-      badge.style.background = '#10b981';
+      badge.style.background = 'var(--ok-fill)';
       badge.style.color = '#fff';
     }
     if (details) details.classList.remove('hidden');
@@ -7347,13 +7374,11 @@ function openBagherQuickEdit() {
   if ($('bagherQuickBindPort')) $('bagherQuickBindPort').value = d.frp_bind_port || 55400;
   const warn = $('bagherQuickEditWarn');
   if (warn) { warn.textContent = ''; warn.classList.add('hidden'); }
-  const m = $('bagherQuickEditModal');
-  if (m) m.hidden = false;
+  modalShow($('bagherQuickEditModal'), closeBagherQuickEdit);
 }
 
 function closeBagherQuickEdit() {
-  const m = $('bagherQuickEditModal');
-  if (m) m.hidden = true;
+  modalHide($('bagherQuickEditModal'));
 }
 
 async function saveBagherQuickEdit() {
@@ -7505,9 +7530,9 @@ function renderClusterUI(data) {
   const actRouteEl = $('clusterActiveRouting');
   if (actRouteEl) {
     if (data.active_failover && data.failover_target) {
-      actRouteEl.innerHTML = `<span style="color:var(--er);">Rerouted \u2192 ${esc(data.failover_target)}</span>`;
+      actRouteEl.innerHTML = `<span class="u-c-er">Rerouted \u2192 ${esc(data.failover_target)}</span>`;
     } else {
-      actRouteEl.innerHTML = `<span style="color:var(--ok);">Local Tunnel (Direct)</span>`;
+      actRouteEl.innerHTML = `<span class="u-c-ok">Local Tunnel (Direct)</span>`;
     }
   }
 
@@ -7532,10 +7557,10 @@ function renderClusterUI(data) {
   if (fContainer) {
     if (foreignNodes.length === 0) {
       fContainer.innerHTML = `
-        <div style="grid-column:1/-1; text-align:center; padding:24px 16px; background:color-mix(in srgb, var(--bg) 25%, transparent); border:1px dashed color-mix(in srgb, var(--info) 25%, transparent); border-radius:10px;">
-          <div style="font-size:22px; margin-bottom:6px;"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></div>
-          <div style="font-weight:700; color:var(--tx2); font-size:13px; margin-bottom:4px;">No Foreign Exit Servers Configured</div>
-          <div style="font-size:12px; color:var(--mu); max-width:440px; margin:0 auto 10px auto;">
+        <div class="u-col-full u-text-center u-p-24x16 u-bg-inset u-bdd-info u-r-10">
+          <div class="u-fs-24 u-mb-8"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></div>
+          <div class="u-fw-700 u-c-tx2 u-fs-13 u-mb-4">No Foreign Exit Servers Configured</div>
+          <div class="u-fs-12 u-c-mu u-maxw-440 u-m-0xautox12xauto">
             Add your foreign servers here to monitor latency, auto-failover, or manually switch exit paths.
           </div>
           <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddForeignModal()">
@@ -7552,42 +7577,42 @@ function renderClusterUI(data) {
         fhtml += `
           <div style="background:color-mix(in srgb, var(--bg) 70%, transparent); border:1px solid ${isActive ? '#0284c7' : 'rgba(2,132,199,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">
             <div>
-              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+              <div class="u-flex u-jc-sb u-ai-s u-mb-12">
                 <div>
-                  <div style="font-weight:700; color:var(--tx); font-size:14px; display:flex; align-items:center; gap:6px;">
+                  <div class="u-fw-700 u-c-tx u-fs-14 u-flex u-ai-c u-gap-8">
                     <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> ${esc(fn.name || fn.id)}
                   </div>
-                  <div style="font-size:12px; font-family:monospace; color:var(--mu); margin-top:2px;">ID: ${esc(fn.id)}</div>
+                  <div class="u-fs-12 u-mono u-c-mu u-mt-2">ID: ${esc(fn.id)}</div>
                 </div>
-                <div style="display:flex; gap:6px; align-items:center;">
+                <div class="u-flex u-gap-8 u-ai-c">
                   ${isActive ? `<span class="badge info">ACTIVE</span>` : ''}
-                  <span class="badge ${isHealthy ? 'ok' : 'err'}" style="font-size:12px; font-weight:700;">${isHealthy ? 'UP' : 'DOWN'}</span>
+                  <span class="badge ${isHealthy ? 'ok' : 'err'} u-fs-12 u-fw-700">${isHealthy ? 'UP' : 'DOWN'}</span>
                 </div>
               </div>
 
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; margin-bottom:14px; background:color-mix(in srgb, var(--bg) 30%, transparent); padding:8px 10px; border-radius:6px;">
+              <div class="u-grid u-gtc-1fr-1fr u-gap-8 u-fs-12 u-mb-16 u-bg-inset u-p-8x12 u-r-8">
                 <div>
-                  <span style="color:var(--mu);">Public IP:</span>
-                  <div style="font-family:monospace; color:var(--tx2); font-weight:600;">${esc(fn.public_ip || '--')}</div>
+                  <span class="u-c-mu">Public IP:</span>
+                  <div class="u-mono u-c-tx2 u-fw-600">${esc(fn.public_ip || '--')}</div>
                 </div>
                 <div>
-                  <span style="color:var(--mu);">Port / Proto:</span>
-                  <div style="font-family:monospace; color:var(--info); font-weight:600;">${fn.tunnel_port || 55354} / ${(fn.protocol || 'wss').toUpperCase()}</div>
+                  <span class="u-c-mu">Port / Proto:</span>
+                  <div class="u-mono u-c-info u-fw-600">${fn.tunnel_port || 55354} / ${(fn.protocol || 'wss').toUpperCase()}</div>
                 </div>
                 <div>
-                  <span style="color:var(--mu);">Weight (WRR):</span>
-                  <div style="font-family:monospace; color:var(--sc); font-weight:600;">${fn.weight || 1}</div>
+                  <span class="u-c-mu">Weight (WRR):</span>
+                  <div class="u-mono u-c-sc u-fw-600">${fn.weight || 1}</div>
                 </div>
                 <div>
-                  <span style="color:var(--mu);">TCP Latency:</span>
-                  <div style="font-family:monospace; color:var(--ok); font-weight:600;">${latency}</div>
+                  <span class="u-c-mu">TCP Latency:</span>
+                  <div class="u-mono u-c-ok u-fw-600">${latency}</div>
                 </div>
               </div>
             </div>
 
-            <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); margin-top:8px;">
+            <div class="u-flex u-jc-sb u-ai-c u-pt-8 u-bt-ln u-mt-8">
               ${isActive
-                ? `<span style="font-size:12px; color:var(--info); font-weight:700;">✓ In Use</span>`
+                ? `<span class="u-fs-12 u-c-info u-fw-700">✓ In Use</span>`
                 : `<button class="hashem-btn u-btn-30" onclick="switchClusterForeign(${jsArg(fn.id)})">Switch to This</button>`
               }
               <button class="hashem-btn u-btn-30 hashem-btn-danger" onclick="deleteClusterForeign(${jsArg(fn.id)})" title="Remove foreign node">&#128465;</button>
@@ -7608,10 +7633,10 @@ function renderClusterUI(data) {
 
   if (nodes.length === 0) {
     container.innerHTML = `
-      <div style="grid-column:1/-1; text-align:center; padding:32px 16px; background:color-mix(in srgb, var(--bg) 25%, transparent); border:1px dashed color-mix(in srgb, var(--sc) 25%, transparent); border-radius:10px;">
-        <div style="font-size:24px; margin-bottom:8px;"><svg class="i" aria-hidden="true"><use href="#i-antenna"/></svg></div>
-        <div style="font-weight:700; color:var(--tx2); font-size:14px; margin-bottom:4px;">No Peer Iran Servers Configured</div>
-        <div style="font-size:12px; color:var(--mu); max-width:440px; margin:0 auto 12px auto;">
+      <div class="u-col-full u-text-center u-p-32x16 u-bg-inset u-bdd-sc u-r-10">
+        <div class="u-fs-24 u-mb-8"><svg class="i" aria-hidden="true"><use href="#i-antenna"/></svg></div>
+        <div class="u-fw-700 u-c-tx2 u-fs-14 u-mb-4">No Peer Iran Servers Configured</div>
+        <div class="u-fs-12 u-c-mu u-maxw-440 u-m-0xautox12xauto">
           Connect at least one additional Iran server to establish a resilient intra-Iran failover mesh.
         </div>
         <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddNodeModal()">
@@ -7648,37 +7673,37 @@ function renderClusterUI(data) {
     html += `
       <div style="background:color-mix(in srgb, var(--bg) 70%, transparent); border:1px solid ${isCurrentFailoverTarget ? '#ef4444' : 'rgba(168,85,247,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">
         <div>
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+          <div class="u-flex u-jc-sb u-ai-s u-mb-12">
             <div>
-              <div style="font-weight:700; color:var(--tx); font-size:14px; display:flex; align-items:center; gap:6px;">
+              <div class="u-fw-700 u-c-tx u-fs-14 u-flex u-ai-c u-gap-8">
                 <span>🇮🇷</span> ${esc(node.name || node.id)}
               </div>
-              <div style="font-size:12px; font-family:monospace; color:var(--mu); margin-top:2px;">ID: ${esc(node.id)}</div>
+              <div class="u-fs-12 u-mono u-c-mu u-mt-2">ID: ${esc(node.id)}</div>
             </div>
-            <span class="badge ${statusBadgeClass}" style="font-size:12px; font-weight:700;">${statusText}</span>
+            <span class="badge ${statusBadgeClass} u-fs-12 u-fw-700">${statusText}</span>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; margin-bottom:14px; background:color-mix(in srgb, var(--bg) 30%, transparent); padding:8px 10px; border-radius:6px;">
+          <div class="u-grid u-gtc-1fr-1fr u-gap-8 u-fs-12 u-mb-16 u-bg-inset u-p-8x12 u-r-8">
             <div>
-              <span style="color:var(--mu);">Public IP:</span>
-              <div style="font-family:monospace; color:var(--tx2); font-weight:600;">${esc(node.public_ip || '--')}</div>
+              <span class="u-c-mu">Public IP:</span>
+              <div class="u-mono u-c-tx2 u-fw-600">${esc(node.public_ip || '--')}</div>
             </div>
             <div>
-              <span style="color:var(--mu);">Peer Ping:</span>
-              <div style="font-family:monospace; color:var(--info); font-weight:600;">${latency}</div>
+              <span class="u-c-mu">Peer Ping:</span>
+              <div class="u-mono u-c-info u-fw-600">${latency}</div>
             </div>
             <div>
-              <span style="color:var(--mu);">Kharej Tunnel:</span>
+              <span class="u-c-mu">Kharej Tunnel:</span>
               <div style="font-weight:600; color:${tunnelUp ? '#34d399' : '#f87171'};">${tunnelUp ? 'UP' : 'DOWN'}</div>
             </div>
             <div>
-              <span style="color:var(--mu);">Last Heartbeat:</span>
-              <div style="color:var(--tx2);">${lastSeen}</div>
+              <span class="u-c-mu">Last Heartbeat:</span>
+              <div class="u-c-tx2">${lastSeen}</div>
             </div>
           </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid color-mix(in srgb, var(--tx) 6%, transparent); margin-top:8px;">
+        <div class="u-flex u-jc-sb u-ai-c u-pt-8 u-bt-ln u-mt-8">
           ${isCurrentFailoverTarget
             ? `<button class="hashem-btn hashem-btn-danger u-btn-30" onclick="revertClusterFailover()">Revert Reroute</button>`
             : `<button class="hashem-btn u-btn-30" onclick="triggerClusterFailover(${jsArg(node.id)})" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''}>\u2192 Failover Here</button>`
@@ -7697,11 +7722,11 @@ function openClusterAddNodeModal() {
   $('clusterPeerName').value = '';
   $('clusterPeerAPI').value = '';
   $('clusterPeerIP').value = '';
-  $('clusterNodeModal').hidden = false;
+  modalShow($('clusterNodeModal'), closeClusterAddNodeModal);
 }
 
 function closeClusterAddNodeModal() {
-  $('clusterNodeModal').hidden = true;
+  modalHide($('clusterNodeModal'));
 }
 
 async function submitClusterAddNode() {
@@ -7746,11 +7771,11 @@ function openClusterConfigModal() {
   $('clusterCfgNodeID').value = _clusterData.node_id || '';
   $('clusterCfgSecret').value = _clusterData.cluster_secret || '';
   $('clusterCfgPorts').value = (_clusterData.service_ports || []).join(', ');
-  $('clusterConfigModal').hidden = false;
+  modalShow($('clusterConfigModal'), closeClusterConfigModal);
 }
 
 function closeClusterConfigModal() {
-  $('clusterConfigModal').hidden = true;
+  modalHide($('clusterConfigModal'));
 }
 
 function generateClusterSecret() {
@@ -7822,11 +7847,11 @@ function openClusterAddForeignModal() {
   $('clusterForeignProtocol').value = 'wss';
   if ($('clusterForeignWeight')) $('clusterForeignWeight').value = '1';
   if ($('clusterForeignTargetPorts')) $('clusterForeignTargetPorts').value = '';
-  $('clusterForeignModal').hidden = false;
+  modalShow($('clusterForeignModal'), closeClusterAddForeignModal);
 }
 
 function closeClusterAddForeignModal() {
-  $('clusterForeignModal').hidden = true;
+  modalHide($('clusterForeignModal'));
 }
 
 async function submitClusterAddForeign() {
@@ -7949,11 +7974,11 @@ function renderSentinel(d) {
   if (licBadge) {
     if (d.has_license) {
       licBadge.textContent = 'PRO LICENSE ✓';
-      licBadge.style.background = '#10b981';
+      licBadge.style.background = 'var(--ok-fill)';
       licBadge.style.color = '#fff';
     } else {
       licBadge.textContent = 'LICENSE REQUIRED';
-      licBadge.style.background = '#ef4444';
+      licBadge.style.background = 'var(--er-fill)';
       licBadge.style.color = '#fff';
     }
   }
@@ -7961,7 +7986,7 @@ function renderSentinel(d) {
   const regBadge = $('sentinelRegionBadge');
   if (regBadge) {
     regBadge.textContent = d.is_iran ? 'IRAN SERVER' : 'SERVER NODE';
-    regBadge.style.background = '#0ea5e9';
+    regBadge.style.background = 'var(--info-fill)';
     regBadge.style.color = '#fff';
   }
 
@@ -7970,7 +7995,7 @@ function renderSentinel(d) {
 
   if (!d.has_license) {
     sec.innerHTML = `
-      <div style="background:color-mix(in srgb, var(--er) 8%, transparent); border:1px solid color-mix(in srgb, var(--er) 20%, transparent); padding:12px; border-radius:6px; color:var(--er); font-size:13px;">
+      <div class="u-tint-er u-bd-er u-p-12 u-r-8 u-c-er u-fs-13">
         <b>License Gate:</b> Sentinel requires a license with the <code>sentinel</code> feature unlocked. Please activate a valid key above.
       </div>`;
     return;
@@ -7978,10 +8003,10 @@ function renderSentinel(d) {
 
   if (!d.installed) {
     sec.innerHTML = `
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background:var(--sunk); padding:14px; border-radius:6px; border:1px dashed var(--ln);">
+      <div class="u-flex u-jc-sb u-ai-c u-wrap u-gap-12 u-bg-sunk u-p-16 u-r-8 u-bdd-ln">
         <div>
-          <div style="font-size:13px; font-weight:600; color:var(--tx);">Sentinel is ready to install on this server.</div>
-          <div style="font-size:12px; color:var(--mu); margin-top:2px;">A random secure port (30000–39999) will be assigned automatically.</div>
+          <div class="u-fs-13 u-fw-600 u-c-tx">Sentinel is ready to install on this server.</div>
+          <div class="u-fs-12 u-c-mu u-mt-2">A random secure port (30000–39999) will be assigned automatically.</div>
         </div>
         <button class="hashem-btn hashem-btn-primary" id="btnInstallSentinel">Install Sentinel Addon</button>
       </div>`;
@@ -7990,16 +8015,16 @@ function renderSentinel(d) {
   } else {
     const isRunning = d.running;
     sec.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; background:color-mix(in srgb, var(--info) 6%, transparent); padding:12px; border-radius:6px; border:1px solid color-mix(in srgb, var(--info) 20%, transparent);">
+      <div class="u-flex u-col u-gap-12">
+        <div class="u-flex u-jc-sb u-ai-c u-wrap u-gap-12 u-tint-info u-p-12 u-r-8 u-bd-info">
           <div>
-            <div style="display:flex; align-items:center; gap:8px;">
+            <div class="u-flex u-ai-c u-gap-8">
               <span class="badge" style="background:${isRunning ? 'var(--ok-fill)' : 'var(--er-fill)'}; color:#fff; font-size:12px; font-weight:700;">${isRunning ? 'ACTIVE / RUNNING' : 'STOPPED'}</span>
-              <span style="font-size:13px; font-weight:600;">Port: <code>${d.port}</code></span>
+              <span class="u-fs-13 u-fw-600">Port: <code>${d.port}</code></span>
             </div>
-            <div style="font-size:12px; color:var(--mu); margin-top:4px;">Endpoint: <code>${d.path || '/'}</code></div>
+            <div class="u-fs-12 u-c-mu u-mt-4">Endpoint: <code>${d.path || '/'}</code></div>
           </div>
-          <div style="display:flex; gap:8px;">
+          <div class="u-flex u-gap-8">
             <button class="hashem-btn hashem-btn-primary" id="btnOpenSentinel">Open Sentinel (New Tab)</button>
             <button class="hashem-btn hashem-btn-secondary" id="btnRestartSentinel">Restart</button>
             <button class="hashem-btn hashem-btn-danger" id="btnUninstallSentinel">Uninstall</button>
@@ -8048,7 +8073,7 @@ function openSentinelModal() {
   if (typeof drawerClose === 'function') drawerClose();
   const m = $('sentinelModal');
   if (!m) return;
-  m.hidden = false;
+  modalShow(m, closeSentinelModal);
 
   const mHashEl = $('sentinelModalMachineHash');
   if (mHashEl) {
@@ -8074,8 +8099,7 @@ function openSentinelModal() {
 }
 
 function closeSentinelModal() {
-  const m = $('sentinelModal');
-  if (m) m.hidden = true;
+  modalHide($('sentinelModal'));
 }
 
 window.openSentinelModal = openSentinelModal;
@@ -8113,7 +8137,7 @@ function renderSentinelModal() {
       const bEl = $('sentinelModalStatusBadge');
       if (bEl) {
         bEl.textContent = d.running ? 'ACTIVE / RUNNING' : 'STOPPED';
-        bEl.style.background = d.running ? '#10b981' : '#ef4444';
+        bEl.style.background = d.running ? 'var(--ok-fill)' : 'var(--er-fill)';
       }
 
       const urlInp = $('sentinelModalUrl');

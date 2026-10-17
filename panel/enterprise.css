@@ -523,7 +523,7 @@ html[data-dens="compact"] .hashem-table th, html[data-dens="compact"] .hashem-ta
 
 @media (hover:none), (max-width:640px) {
   .pal-esc { width:44px; height:44px; padding:0; font-size:0; border-radius:12px; display:grid; place-items:center; }
-  .pal-esc::before { content:"\00D7"; font-size:24px; line-height:1; color:var(--tx2); font-family:var(--font); }
+  .pal-esc::before { content:"\00D7"; font-size:24px; line-height:1; color:var(--tx2); font-family:var(--font-sans); }
 }
 .pal-list { padding-bottom:20px; scroll-padding-block:8px; }
 
