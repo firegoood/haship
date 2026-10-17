@@ -4751,6 +4751,16 @@ $('wdBackupNowBtn').onclick = async () => {
   btn.textContent = 'Create Backup Now';
 };
 
+// Backup key export (needs the panel password again).
+if ($('wdKeyBtn')) $('wdKeyBtn').onclick = async () => {
+  const pw = $('wdKeyPass') ? $('wdKeyPass').value : '';
+  if (!pw) { toastWarn('Password required', 'Enter the panel password to reveal the backup key.'); return; }
+  try {
+    const r = await api('/api/watchdog', { action: 'backup-key', password: pw });
+    $('wdKeyPass').value = '';
+    copyTextSafe(r.key, 'Backup key copied', 'Store it outside this server. Decrypt: ' + r.decrypt);
+  } catch (e) { toastErr('Backup key', e.message || String(e)); }
+};
 async function restoreBackupFile(filename) {
   if (!await entConfirm('Restore Backup ' + filename + '?', 'This will decrypt the backup using your panel password, overwrite existing FRP configs and systemd units, and restart services.', 'Restore')) return;
   try {

@@ -404,6 +404,10 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.AutoPool != nil {
 			c.AutoPool = *body.AutoPool
+			if c.AutoPool {
+				// Auto-Pool runs from the hashem-watchdog timer (autopool_tick).
+				defer ensureWatchdogTimer()
+			}
 		}
 		if err := savePerfConfig(c); err != nil {
 			writeAPIError(w, r, "E-PERF-02", "failed to save config: "+err.Error())
@@ -421,6 +425,10 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.AutoPool != nil {
 			c.AutoPool = *body.AutoPool
+			if c.AutoPool {
+				// Auto-Pool runs from the hashem-watchdog timer (autopool_tick).
+				defer ensureWatchdogTimer()
+			}
 		}
 		if err := savePerfConfig(c); err != nil {
 			writeAPIError(w, r, "E-PERF-02", "failed to save config: "+err.Error())
@@ -438,6 +446,10 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 	case "apply":
 		if body.AutoPool != nil {
 			c.AutoPool = *body.AutoPool
+			if c.AutoPool {
+				// Auto-Pool runs from the hashem-watchdog timer (autopool_tick).
+				defer ensureWatchdogTimer()
+			}
 		}
 		if body.ProxyEncryption != nil {
 			c.ProxyEncryption = *body.ProxyEncryption

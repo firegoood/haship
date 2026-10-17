@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -81,6 +82,7 @@ type watchdogPostRequest struct {
 	File         string `json:"file,omitempty"`
 	AutoRestart  *bool  `json:"auto_restart,omitempty"`
 	RestartHours *int   `json:"restart_hours,omitempty"`
+	Password     string `json:"password,omitempty"` // re-auth for backup-key
 }
 
 func watchdogConfigPath() string {
@@ -246,6 +248,15 @@ func collectWatchdogEvents() []errEvent {
 	return events
 }
 
+// ensureWatchdogTimer starts the 1-minute hashem-watchdog timer, which runs
+// scheduled backups/restarts and Auto-Pool even when alerts are off (M6).
+// Best effort: a schedule is still saved when hashem.sh is unavailable.
+func ensureWatchdogTimer() {
+	if out, err := runWatchdogCmd("watchdog", "timer"); err != nil {
+		log.Printf("[watchdog] could not start the timer: %v %s", err, out)
+	}
+}
+
 func runWatchdogCmd(args ...string) (string, error) {
 	script, err := greScriptPath()
 	if err != nil {
@@ -327,6 +338,30 @@ func handleWatchdogPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch body.Action {
+	case "backup-key":
+		// Backups are encrypted with backup.key, which only exists on this
+		// server; without an exported copy a downloaded backup is useless once
+		// the server is lost (M6). It opens every backup, so the password is
+		// asked again.
+		ip := ClientIP(r)
+		if ok, _ := verifyPassword(cfg.PassHash, body.Password); !ok {
+			recordLoginFailure(ip)
+			LogSecurityAudit("backup_key_export_rejected", cfg.Username, ip, "bad password")
+			writeAPIError(w, r, "E-AUTH-07", "password incorrect")
+			return
+		}
+		key, err := os.ReadFile(filepath.Join(configDir, "backup.key"))
+		if err != nil || len(strings.TrimSpace(string(key))) == 0 {
+			writeAPIError(w, r, "E-WD-01", "no backup key yet: create a backup first")
+			return
+		}
+		LogSecurityAudit("backup_key_exported", cfg.Username, ip, "")
+		writeJSON(w, map[string]string{
+			"status":  "ok",
+			"key":     strings.TrimSpace(string(key)),
+			"decrypt": "openssl enc -d -aes-256-cbc -pbkdf2 -pass file:backup.key -in <backup>.enc | tar -xz",
+		})
+
 	case "on":
 		out, err := runWatchdogCmd("watchdog", "on")
 		if err != nil {
@@ -441,6 +476,7 @@ func handleWatchdogPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-WD-01", "failed to save schedule: "+err.Error())
 			return
 		}
+		ensureWatchdogTimer()
 		recordError("E-WD-00", "watchdog", "Backup schedule updated: "+formatSchedule(c))
 		writeJSON(w, map[string]string{"status": "ok", "detail": "Backup schedule saved"})
 
@@ -470,6 +506,7 @@ func handleWatchdogPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-WD-01", "failed to save config: "+err.Error())
 			return
 		}
+		ensureWatchdogTimer()
 		msg := "Tunnel auto-restart disabled"
 		if c.RestartEveryHours > 0 {
 			msg = fmt.Sprintf("Tunnel auto-restart scheduled every %d hours", c.RestartEveryHours)

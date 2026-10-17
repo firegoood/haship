@@ -2299,8 +2299,12 @@ perf_apply() {
 
     echo -e "${CYAN}[*] Applying performance settings (enc=${EFF_ENC} comp=${EFF_COMP} tcpmux=${EFF_MUX:-unchanged} pool=${EFF_POOL}/${EFF_MAXPOOL})...${NC}"
 
+    # Restart only what actually changed (M5): update_all calls this on every
+    # update, and an unconditional restart dropped every user connection.
+    local SUM_BEFORE SUM_AFTER
     if [[ "$IS_FOREIGN" -eq 1 ]]; then
         local TOML_FILE="${CONFIG_DIR}/frpc.toml"
+        SUM_BEFORE=$(sha256sum "$TOML_FILE" 2>/dev/null | cut -d' ' -f1)
         if command -v python3 >/dev/null 2>&1; then
             python3 -c '
 path = "'"$TOML_FILE"'"
@@ -2363,15 +2367,22 @@ with open(path, "w") as f:
     f.write(result)
 '
         fi
-        systemctl daemon-reload >/dev/null 2>&1 || true
-        systemctl restart frpc
-        autopool_state_set applied_pool="$EFF_POOL" last_restart="$(date +%s)"
-        echo -e "${GREEN}[✔️] frpc.toml updated & frpc service restarted.${NC}"
+        SUM_AFTER=$(sha256sum "$TOML_FILE" 2>/dev/null | cut -d' ' -f1)
+        if [[ "$SUM_BEFORE" != "$SUM_AFTER" ]]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            systemctl restart frpc
+            autopool_state_set applied_pool="$EFF_POOL" last_restart="$(date +%s)"
+            echo -e "${GREEN}[✔️] frpc.toml updated & frpc service restarted.${NC}"
+        else
+            echo -e "${GREEN}[✔️] frpc.toml already up to date — frpc not restarted.${NC}"
+        fi
     fi
 
     if [[ "$IS_IRAN" -eq 1 ]]; then
+        local CHANGED_SVCS=()
         for TOML_FILE in "${CONFIG_DIR}"/frps*.toml; do
             [[ -f "$TOML_FILE" ]] || continue
+            SUM_BEFORE=$(sha256sum "$TOML_FILE" 2>/dev/null | cut -d' ' -f1)
             if command -v python3 >/dev/null 2>&1; then
                 python3 -c '
 path = "'"$TOML_FILE"'"
@@ -2415,16 +2426,21 @@ with open(path, "w") as f:
     f.write(result)
 '
             fi
+            SUM_AFTER=$(sha256sum "$TOML_FILE" 2>/dev/null | cut -d' ' -f1)
+            # frps.toml -> frps, frps-N.toml -> frps-N
+            [[ "$SUM_BEFORE" != "$SUM_AFTER" ]] && CHANGED_SVCS+=("$(basename "$TOML_FILE" .toml)")
         done
-        systemctl daemon-reload >/dev/null 2>&1 || true
-        systemctl restart frps >/dev/null 2>&1 || true
-        for s in /etc/systemd/system/frps-*.service; do
-            [[ -f "$s" ]] || continue
-            local sname=$(basename "$s")
-            systemctl restart "$sname" >/dev/null 2>&1 || true
-        done
-        autopool_state_set frps_restart_needed=false
-        echo -e "${GREEN}[✔️] frps toml(s) updated & frps service(s) restarted.${NC}"
+        if [[ ${#CHANGED_SVCS[@]} -gt 0 ]]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            local sname
+            for sname in "${CHANGED_SVCS[@]}"; do
+                systemctl restart "$sname" >/dev/null 2>&1 || true
+            done
+            autopool_state_set frps_restart_needed=false
+            echo -e "${GREEN}[✔️] Updated & restarted: ${CHANGED_SVCS[*]}.${NC}"
+        else
+            echo -e "${GREEN}[✔️] frps toml(s) already up to date — nothing restarted.${NC}"
+        fi
     fi
 
     echo -e "${GREEN}[✔️] Performance settings successfully applied.${NC}"
@@ -2753,9 +2769,8 @@ EOF
     systemctl daemon-reload
     systemctl reset-failed frps >/dev/null 2>&1 || true
     systemctl enable frps >/dev/null 2>&1
-    if command -v fuser >/dev/null 2>&1; then
-        fuser -k "${BIND_PORT}/tcp" >/dev/null 2>&1 || true
-    fi
+    release_frps_port "$BIND_PORT" || true
+    reserve_service_ports
     systemctl restart frps
 
     local _frps_ok=0
@@ -2780,7 +2795,7 @@ EOF
     fi
 
     tune_apply >/dev/null 2>&1 || true
-    install_watchdog_units >/dev/null 2>&1 || true
+    watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
     init_watchdog_json >/dev/null 2>&1 || true
 
     # 3. Web Panel
@@ -3012,7 +3027,7 @@ EOF
     fi
 
     tune_apply >/dev/null 2>&1 || true
-    install_watchdog_units >/dev/null 2>&1 || true
+    watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
     init_watchdog_json >/dev/null 2>&1 || true
 
     if [[ "${GRE_SKIP_PANEL:-0}" == "1" ]]; then
@@ -3120,7 +3135,7 @@ setup_backhaul_iran_server_noninteractive() {
     fi
 
     tune_apply >/dev/null 2>&1 || true
-    install_watchdog_units >/dev/null 2>&1 || true
+    watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
     init_watchdog_json >/dev/null 2>&1 || true
 
     if [[ "${GRE_SKIP_PANEL:-0}" == "1" ]]; then
@@ -3205,7 +3220,7 @@ setup_backhaul_foreign_server_noninteractive() {
     fi
 
     tune_apply >/dev/null 2>&1 || true
-    install_watchdog_units >/dev/null 2>&1 || true
+    watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
     init_watchdog_json >/dev/null 2>&1 || true
 
     if [[ "${GRE_SKIP_PANEL:-0}" == "1" ]]; then
@@ -3300,7 +3315,7 @@ setup_gre_backhaul_iran_server_noninteractive() {
     fi
 
     tune_apply >/dev/null 2>&1 || true
-    install_watchdog_units >/dev/null 2>&1 || true
+    watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
     init_watchdog_json >/dev/null 2>&1 || true
 
     # 3. Web Panel
@@ -3422,7 +3437,7 @@ setup_gre_backhaul_foreign_server_noninteractive() {
     fi
 
     tune_apply >/dev/null 2>&1 || true
-    install_watchdog_units >/dev/null 2>&1 || true
+    watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
     init_watchdog_json >/dev/null 2>&1 || true
 
     if [[ "${GRE_SKIP_PANEL:-0}" == "1" ]]; then
@@ -3544,6 +3559,46 @@ peer_token() {
 }
 
 # write one frps instance: $1=suffix("" for legacy, "-N" for peers) $2=bind_port $3=token
+# release_frps_port PORT: free PORT only from a stray frps (M18). "fuser -k"
+# killed whatever held it, e.g. the user's xray on a port picked by mistake.
+# Any other owner is reported and left running; frps then fails to start and
+# the caller reports that.
+release_frps_port() {
+    local port=$1 pid comm busy=0
+    command -v fuser >/dev/null 2>&1 || return 0
+    for pid in $(fuser "${port}/tcp" 2>/dev/null); do
+        comm=$(cat "/proc/${pid}/comm" 2>/dev/null)
+        if [[ "$comm" == frps* ]]; then
+            kill "$pid" 2>/dev/null || true
+        else
+            echo -e "${RED}[!] Port ${port} is held by '${comm:-unknown}' (pid ${pid}); not killing it. Pick another control port or stop that service.${NC}" >&2
+            busy=1
+        fi
+    done
+    return "$busy"
+}
+
+# remove_hashem_tunnel_ifaces deletes only the tunnels hashem made (M19):
+# gre-tunnel, gre-tN and the gre_if names in peers.json, plus FOU ports that
+# carry GRE (ipproto 47) and the WSS bridge port. It used to delete every
+# tunnel in "ip tunnel show" (the admin's own sit/ipip/gre too) and every FOU.
+remove_hashem_tunnel_ifaces() {
+    command -v ip >/dev/null 2>&1 || return 0
+    local gif names
+    names="$TUNNEL_NAME $(ip -o link show 2>/dev/null | awk -F': ' '{sub(/@.*/, "", $2); print $2}' | grep -E '^gre-t[0-9]+$')"
+    if [[ -f "$PEERS_FILE" ]]; then
+        names="$names $(grep -o '"gre_if": *"[^"]*"' "$PEERS_FILE" 2>/dev/null | cut -d'"' -f4)"
+    fi
+    for gif in $names; do
+        [[ -n "$gif" && "$gif" != gre0 && "$gif" != gretap0 ]] || continue
+        ip link del "$gif" >/dev/null 2>&1 || ip tunnel del "$gif" >/dev/null 2>&1 || true
+    done
+    ip fou show 2>/dev/null | awk '$0 ~ /ipproto 47/ {for (i = 1; i < NF; i++) if ($i == "port") print $(i + 1)}' | while read -r fp; do
+        [[ -n "$fp" ]] && ip fou del port "$fp" 2>/dev/null || true
+    done
+    ip fou del port 19998 >/dev/null 2>&1 || true
+}
+
 peer_write_frps() {
     local SUF=$1 BIND_PORT=$2 TOKEN=$3
     local _POOL MAX_POOL
@@ -3589,9 +3644,8 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable "$SVC" >/dev/null 2>&1
-    if command -v fuser >/dev/null 2>&1; then
-        fuser -k "${BIND_PORT}/tcp" >/dev/null 2>&1 || true
-    fi
+    release_frps_port "$BIND_PORT" || true
+    reserve_service_ports
     systemctl restart "$SVC"
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
         ufw allow "${BIND_PORT}/tcp" >/dev/null 2>&1
@@ -4879,17 +4933,8 @@ uninstall_all_force() {
         systemctl daemon-reload
         systemctl reset-failed >/dev/null 2>&1 || true
 
-        # 4. Remove all GRE and FOU interfaces
-        local gif
-        for gif in "$TUNNEL_NAME" $(ip tunnel show 2>/dev/null | awk -F: '{print $1}') $(ip -d link show type gre 2>/dev/null | awk -F: '/^[0-9]+: / {print $2}' | tr -d ' '); do
-            [[ -n "$gif" ]] && { ip link del "$gif" >/dev/null 2>&1 || ip tunnel del "$gif" >/dev/null 2>&1 || true; }
-        done
-        if command -v ip >/dev/null 2>&1; then
-            ip fou show 2>/dev/null | awk '{print $3}' | while read -r fp; do
-                [[ -n "$fp" ]] && ip fou del port "$fp" 2>/dev/null || true
-            done
-            ip fou del port 19998 >/dev/null 2>&1 || true
-        fi
+        # 4. Remove our GRE interfaces and FOU ports
+        remove_hashem_tunnel_ifaces
 
         # 5. Clean iptables / firewall rules
         if command -v iptables >/dev/null 2>&1; then
@@ -4911,6 +4956,8 @@ uninstall_all_force() {
         # 8. Remove configs, data, registries, logs, cron
         rm -rf "$CONFIG_DIR" "$BACKHAUL_CONFIG_DIR"
         rm -rf /etc/gre-panel /usr/local/gre-panel
+        rm -f /etc/sysctl.d/99-hashem-reserved-ports.conf
+        sysctl -w net.ipv4.ip_local_reserved_ports="" >/dev/null 2>&1 || true
         rm -rf /var/log/hashem* /var/log/gre-panel* /var/lock/hashem* /tmp/hashem*
         rm -f /etc/cron.d/hashem* /etc/cron.daily/hashem*
         crontab -l 2>/dev/null | grep -v 'hashem' | crontab - 2>/dev/null || true
@@ -4955,17 +5002,8 @@ remove_tunnel_force() {
         systemctl daemon-reload
         systemctl reset-failed >/dev/null 2>&1 || true
 
-        # Remove GRE interfaces
-        local gif
-        for gif in "$TUNNEL_NAME" $(ip tunnel show 2>/dev/null | awk -F: '{print $1}') $(ip -d link show type gre 2>/dev/null | awk -F: '/^[0-9]+: / {print $2}' | tr -d ' '); do
-            [[ -n "$gif" ]] && { ip link del "$gif" >/dev/null 2>&1 || ip tunnel del "$gif" >/dev/null 2>&1 || true; }
-        done
-        if command -v ip >/dev/null 2>&1; then
-            ip fou show 2>/dev/null | awk '{print $3}' | while read -r fp; do
-                [[ -n "$fp" ]] && ip fou del port "$fp" 2>/dev/null || true
-            done
-            ip fou del port 19998 >/dev/null 2>&1 || true
-        fi
+        # Remove our GRE interfaces and FOU ports
+        remove_hashem_tunnel_ifaces
 
         # Clean firewall rules
         if command -v iptables >/dev/null 2>&1; then
@@ -5048,6 +5086,41 @@ tune_mem_mb() {
     [[ "$kb" =~ ^[0-9]+$ ]] && echo $(( kb / 1024 )) || echo 1024
 }
 
+# reserve_service_ports keeps the panel, frps, backhaul and forwarded ports out
+# of the ephemeral range (net.ipv4.ip_local_reserved_ports), at runtime and
+# in /etc/sysctl.d/99-hashem-reserved-ports.conf. Safe to call repeatedly.
+reserve_service_ports() {
+    local ports="" p f
+    if [[ -f "${PANEL_CONFIG_DIR}/panel.json" ]]; then
+        p=$(grep -o '"port": *[0-9]*' "${PANEL_CONFIG_DIR}/panel.json" | grep -o '[0-9]*$' | head -1); ports+=" ${p:-7777}"
+        p=$(grep -o '"tls_port": *[0-9]*' "${PANEL_CONFIG_DIR}/panel.json" | grep -o '[0-9]*$' | head -1); ports+=" ${p:-7443}"
+    fi
+    for f in "${CONFIG_DIR}"/frps*.toml; do
+        [[ -f "$f" ]] || continue
+        ports+=" $(grep -E '^[[:space:]]*(bindPort|quicBindPort)[[:space:]]*=' "$f" | grep -o '[0-9]*$' | tr '
+' ' ')"
+    done
+    for f in "${BACKHAUL_CONFIG_DIR}"/*.toml; do
+        [[ -f "$f" ]] || continue
+        ports+=" $(grep -E '^[[:space:]]*bind_addr[[:space:]]*=' "$f" | grep -o ':[0-9]*"' | tr -d ':"' | tr '
+' ' ')"
+    done
+    if [[ -f "$PEERS_FILE" ]] && command -v python3 >/dev/null 2>&1; then
+        ports+=" $(PEERS_F="$PEERS_FILE" python3 -c 'import json,os
+d=json.load(open(os.environ["PEERS_F"]))
+print(" ".join(str(x) for p in d.get("peers",[]) for x in [p.get("frp_port")]+list(p.get("ports") or []) if isinstance(x,int)))' 2>/dev/null)"
+    fi
+    # keep 1024-65535 only (lower ports are never ephemeral), dedupe, sort
+    local list
+    list=$(printf '%s
+' $ports | grep -E '^[0-9]+$' | awk '$1 >= 1024 && $1 <= 65535' | sort -n -u | paste -sd, -)
+    [[ -n "$list" ]] || return 0
+    sysctl -w net.ipv4.ip_local_reserved_ports="$list" >/dev/null 2>&1 || return 0
+    printf '# hashem: service ports kept out of the ephemeral range (rewritten automatically)
+net.ipv4.ip_local_reserved_ports = %s
+' "$list"         > /etc/sysctl.d/99-hashem-reserved-ports.conf 2>/dev/null || true
+}
+
 tune_apply() {
     tune_scale_values "$(tune_mem_mb)"
     tune_backup_once
@@ -5096,6 +5169,10 @@ tune_apply() {
     # Wider ephemeral port range: default 32768-60999 → 1024-65535
     # Prevents port exhaustion under high connection load
     sysctl -w net.ipv4.ip_local_port_range="1024 65535" >/dev/null 2>&1 || true
+    # ...but keep the service ports out of it, or an outgoing connection can
+    # grab 7777 or an frps control port and the restart fails with
+    # "address already in use" (M20).
+    reserve_service_ports
 
     # Conntrack table size & timeout optimization for high concurrent conns
     modprobe nf_conntrack >/dev/null 2>&1 || true
@@ -5946,6 +6023,14 @@ except Exception:
     pass
 PYEOF
 
+    echo ""
+    echo -e "${GREEN}[✔️] Web panel password successfully updated!${NC}"
+    echo -e "${GREEN}Username:     ${CYAN}admin${NC}"
+    echo -e "${GREEN}New Password: ${CYAN}${PASS}${NC}"
+    echo -e "${YELLOW}Please save this password securely.${NC}"
+    echo ""
+}
+
 
 # panel_cfg_set KEY VALUE — atomic JSON edit of /etc/gre-panel/panel.json (python3), 0600.
 panel_cfg_set() {
@@ -6009,13 +6094,6 @@ cli_panel_path() {
     systemctl restart gre-panel 2>/dev/null || true
     echo -e "${GREEN}[✔️] Panel path set to ${CYAN}${BASE}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
     show_panel_url
-}
-    echo ""
-    echo -e "${GREEN}[✔️] Web panel password successfully updated!${NC}"
-    echo -e "${GREEN}Username:     ${CYAN}admin${NC}"
-    echo -e "${GREEN}New Password: ${CYAN}${PASS}${NC}"
-    echo -e "${YELLOW}Please save this password securely.${NC}"
-    echo ""
 }
 
 # panel_tls_custom: install the admin's own cert/key (files or server paths).
@@ -6338,8 +6416,12 @@ watchdog_check() {
     # Foreign spoke resilience: if GRE ICMP ping fails (datacenter firewall/filtering or relay),
     # but frpc is active AND holds established TCP sockets to the FRP control/reverse port,
     # the transport is alive and passing traffic — do NOT trigger false-down restart loops.
+    # The port comes from frpc.toml (L19): the old hardcoded 4773x/7000 also
+    # matched unrelated connections and missed custom control ports.
     if [[ $GRE_OK -eq 0 && "$FRP_NAME" == "frpc" && $FRP_OK -eq 1 ]]; then
-        if ss -tn state established 2>/dev/null | grep -qE ':(4773[0-9]|7000)'; then
+        local _sp
+        _sp=$(autopool_live_toml_int "${CONFIG_DIR}/frpc.toml" serverPort 2>/dev/null)
+        if [[ "$_sp" =~ ^[0-9]+$ ]] && [[ -n "$(ss -Htn state established "( dport = :${_sp} )" 2>/dev/null)" ]]; then
             GRE_OK=1
         fi
     fi
@@ -6666,6 +6748,9 @@ backup_file_list() {
         "$r"/etc/gre-panel/alerts.json "$r"/etc/gre-panel/carrier.json "$r"/etc/gre-panel/wss_carrier.json
         "$r"/etc/gre-panel/auto_pool.json "$r"/etc/gre-panel/peer_link.json "$r"/etc/gre-panel/setup.json
         "$r"/etc/gre-panel/rescue.json "$r"/etc/gre-panel/tls/*
+        "$r"/etc/gre-panel/cluster.json "$r"/etc/gre-panel/sshfwd.json "$r"/etc/gre-panel/license.key
+        "$r"/etc/gre-panel/sentinel.json "$r"/etc/gre-panel/update.json "$r"/etc/gre-panel/bagher/*.toml
+        "$r"/etc/systemd/system/hashem-bagher*.service
         "$r"/etc/systemd/system/gre-*.service "$r"/etc/systemd/system/frps*.service
         "$r"/etc/systemd/system/frpc*.service "$r"/etc/systemd/system/backhaul-*.service
     )
@@ -6875,10 +6960,19 @@ except Exception:
     echo -e "${GREEN}[✔️] Watchdog enabled (systemd timer active, checks every 1 min).${NC}"
 }
 
+# watchdog_timer_ensure installs and starts the 1-minute timer. It drives more
+# than the down-alerts: scheduled backups, scheduled tunnel restarts and
+# Auto-Pool all run from watchdog_tick, each with its own on/off setting.
+watchdog_timer_ensure() {
+    install_watchdog_units
+    systemctl enable --now hashem-watchdog.timer >/dev/null 2>&1 || true
+}
+
+# watchdog_off turns off the down-alerts only (M6). Stopping the timer here
+# also silently stopped scheduled backups, scheduled restarts and Auto-Pool.
 watchdog_off() {
     init_watchdog_json
-    systemctl stop hashem-watchdog.timer hashem-watchdog.service >/dev/null 2>&1 || true
-    systemctl disable hashem-watchdog.timer >/dev/null 2>&1 || true
+    watchdog_timer_ensure
     python3 -c '
 import json
 path = "'"$WATCHDOG_FILE"'"
@@ -6894,7 +6988,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null || true
-    echo -e "${YELLOW}[*] Watchdog disabled (systemd timer stopped).${NC}"
+    echo -e "${YELLOW}[*] Watchdog alerts disabled (the timer keeps running scheduled backups/restarts and Auto-Pool).${NC}"
 }
 
 watchdog_status_full() {
@@ -7295,6 +7389,7 @@ cli_watchdog() {
     case "$SUB" in
         on) watchdog_on ;;
         off) watchdog_off ;;
+        timer) watchdog_timer_ensure ;;
         status) watchdog_status_full ;;
         test) watchdog_test ;;
         tick) watchdog_tick ;;
@@ -7309,6 +7404,16 @@ cli_backup() {
     case "$SUB" in
         now) backup_now "$@" ;;
         restore) backup_restore "$@" ;;
+        key)
+            # Backups are encrypted with this key, which lives only on this
+            # server: without a copy, a downloaded backup cannot be opened
+            # once the server is gone (M6). Keep it somewhere safe.
+            ensure_backup_key
+            [[ -s /etc/gre-panel/backup.key ]] || { echo -e "${RED}[!] No backup key on this server.${NC}"; return 1; }
+            echo -e "${YELLOW}[!] Backup encryption key — store it outside this server (password manager):${NC}" >&2
+            cat /etc/gre-panel/backup.key; echo
+            echo -e "${CYAN}Decrypt elsewhere: openssl enc -d -aes-256-cbc -pbkdf2 -pass file:backup.key -in <backup>.enc | tar -tz${NC}" >&2
+            ;;
         status)
             echo -e "${CYAN}=== Hashem Backups (${BACKUP_DIR}) ===${NC}"
             if [[ -d "$BACKUP_DIR" ]]; then
@@ -7503,21 +7608,9 @@ update_all() {
         done
     fi
     perf_apply >/dev/null 2>&1 || true
-    if [[ -f "$WATCHDOG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
-        local WD_EN
-        WD_EN=$(python3 -c '
-import json
-try:
-    with open("'"$WATCHDOG_FILE"'") as f:
-        print(json.load(f).get("enabled", False))
-except Exception:
-    print(False)
-' 2>/dev/null)
-        if [[ "$WD_EN" == "True" || "$WD_EN" == "true" ]]; then
-            install_watchdog_units
-            systemctl enable --now hashem-watchdog.timer >/dev/null 2>&1 || true
-        fi
-    fi
+    # The timer runs whether or not alerts are on: scheduled backups,
+    # restarts and Auto-Pool depend on it (M6).
+    watchdog_timer_ensure >/dev/null 2>&1 || true
     PANEL_VER=$("$PANEL_BIN" --version 2>/dev/null || echo "unknown")
     echo -e "${GREEN}[✔️] Update complete — script + panel are latest (panel: ${PANEL_VER}). Re-run the script to use the new menu.${NC}"
 }
@@ -8294,7 +8387,7 @@ Usage:
   hashem dial [status|auto|gre|public]         # foreign side: reach the Iran hub over GRE, its public IP, or auto (GRE if it works)
   hashem perf status|enc on|off|comp on|off|tcpmux on|off|autopool on|off|status|tick|pool|apply
   hashem watchdog on|off|status|test|tick      # tunnel watchdog monitoring & alerts
-  hashem backup now [--keep N] | restore <f> | schedule ... | status
+  hashem backup now [--keep N] | restore <f> | schedule ... | status | key
   hashem tgsend "msg"                          # send Telegram alert manually
   hashem doctor [server|stop-server|fix]       # full latency, jitter, MTU & speed diagnostics
   hashem stress-test [host] [port] [conns]     # high-concurrency connection stress test (verify zero drops)
@@ -8376,11 +8469,20 @@ cli_setup_foreign() {
     done
     if [[ -n "$BUNDLE" ]]; then
         bundle_parse "$BUNDLE" || { echo -e "${RED}[!] Bad --bundle (want hsh1_<IRAN_PUB>_<PORT>_<IRAN_GRE>_<FOREIGN_GRE>_<TOKEN>[_<PORTS>]).${NC}"; return 1; }
-        if [[ "$B_ENGINE" == "backhaul" ]]; then
-            cli_setup_backhaul_foreign "$@"
-            return $?
-        elif [[ "$B_ENGINE" == "gre-backhaul" ]]; then
-            cli_setup_gre_backhaul_foreign "$@"
+        # Backhaul bundles go to their own setup. "$@" is empty here (the
+        # flag loop shifted everything), so pass the bundle and the flags
+        # those setups understand explicitly.
+        if [[ "$B_ENGINE" == "backhaul" || "$B_ENGINE" == "gre-backhaul" ]]; then
+            local BH_ARGS=(--bundle "$BUNDLE")
+            [[ -n "$LOCAL_PUB" ]] && BH_ARGS+=(--local-pub "$LOCAL_PUB")
+            [[ "$FORCE" -eq 1 ]] && BH_ARGS+=(--force)
+            if [[ "$B_ENGINE" == "backhaul" ]]; then
+                cli_setup_backhaul_foreign "${BH_ARGS[@]}"
+            else
+                [[ -n "$LOCAL_GRE" ]] && BH_ARGS+=(--local-gre "$LOCAL_GRE")
+                [[ -n "$PEER_GRE" ]] && BH_ARGS+=(--peer-gre "$PEER_GRE")
+                cli_setup_gre_backhaul_foreign "${BH_ARGS[@]}"
+            fi
             return $?
         fi
         TOKEN=$B_TOKEN
@@ -8421,8 +8523,9 @@ cli_setup_foreign() {
         return 1
     fi
 
-    # Port availability check.
-    FRP_PORT=$(ensure_port_available "$FRP_PORT" "FRP Control Port" ${BUNDLE:+1}) || return 1
+    # No local check of FRP_PORT here (M21): on the foreign side frpc only
+    # dials Iran:FRP_PORT and never binds it, and letting the admin "pick
+    # another port" made it disagree with the Iran server's frps.
 
     case "$FRP_TRANSPORT" in
         tcp|kcp|quic|websocket|wss) ;;
@@ -9267,7 +9370,8 @@ cli_cluster() {
                 local AUTO_FO
                 AUTO_FO=$(jq -r '.auto_failover // false' "$CONF_FILE")
                 local ACT_FO
-                ACT_FO=$(jq -r '.active_failover // false' "$CONF_FILE")
+                # active_failover is the target node id ("" = not rerouted)
+                ACT_FO=$(jq -r '.active_failover // ""' "$CONF_FILE")
                 local FO_TGT
                 FO_TGT=$(jq -r '.failover_target // "None"' "$CONF_FILE")
                 local PEER_CNT
@@ -9277,7 +9381,7 @@ cli_cluster() {
                 echo -e "Node ID:          ${GREEN}${NODE_ID}${NC}"
                 echo -e "Public IP:        ${GREEN}${PUB_IP}${NC}"
                 echo -e "Auto-Failover:    $([[ "$AUTO_FO" == "true" ]] && echo -e "${GREEN}Enabled${NC}" || echo -e "${YELLOW}Disabled${NC}")"
-                echo -e "Failover State:   $([[ "$ACT_FO" == "true" ]] && echo -e "${RED}ACTIVE (Rerouted to ${FO_TGT})${NC}" || echo -e "${GREEN}NORMAL (Local)${NC}")"
+                echo -e "Failover State:   $([[ -n "$ACT_FO" && "$ACT_FO" != "false" ]] && echo -e "${RED}ACTIVE (Rerouted to ${ACT_FO} / ${FO_TGT})${NC}" || echo -e "${GREEN}NORMAL (Local)${NC}")"
                 echo -e "Connected Peers:  ${CYAN}${PEER_CNT}${NC}"
             else
                 cat "$CONF_FILE"
@@ -9293,16 +9397,27 @@ cli_cluster() {
             ;;
         revert)
             echo -e "${CYAN}[*] Reverting failover iptables rules...${NC}"
-            iptables -t nat -S PREROUTING 2>/dev/null | grep -E 'HASHEM-CLUSTER-FAILOVER|hashem_cluster' | while read -r line; do
-                local rule="${line#-A }"
-                # shellcheck disable=SC2086
-                iptables -t nat -D $rule 2>/dev/null || true
-            done
+            # The panel owns the cluster state: let it flush its chains and save
+            # cluster.json (it also updates its in-memory copy).
+            if [[ -x "${PANEL_BIN:-/usr/local/bin/gre-panel}" ]] && "${PANEL_BIN:-/usr/local/bin/gre-panel}" cluster revert >/dev/null 2>&1; then
+                systemctl restart gre-panel 2>/dev/null || true  # drop the panel's cached cluster state
+                echo -e "${GREEN}[✔️] Failover rules removed and state reverted to local tunnel.${NC}"
+                return 0
+            fi
+            # Fallback: the chains the panel uses, and string fields (the panel
+            # stores node ids/IPs there; a bool made cluster.json unreadable).
+            iptables -t nat -F HASHEM-CLUSTER-PREROUTING 2>/dev/null || true
+            iptables -t nat -F HASHEM-CLUSTER-POSTROUTING 2>/dev/null || true
             if [[ -f "$CONF_FILE" ]] && command -v jq >/dev/null 2>&1; then
                 local tmp
-                tmp=$(jq '.active_failover = false | .failover_target = ""' "$CONF_FILE")
-                echo "$tmp" > "$CONF_FILE"
+                tmp=$(mktemp "${CONF_FILE}.XXXXXX")
+                if jq '.active_failover = "" | .failover_target = ""' "$CONF_FILE" > "$tmp"; then
+                    chmod 600 "$tmp"; mv -f "$tmp" "$CONF_FILE"
+                else
+                    rm -f "$tmp"
+                fi
             fi
+            systemctl restart gre-panel 2>/dev/null || true  # reload the panel's cached state
             echo -e "${GREEN}[✔️] Failover rules removed and state reverted to local tunnel.${NC}"
             ;;
         *)
@@ -9360,6 +9475,9 @@ if [[ $# -gt 0 ]]; then
         stress-test|test-load|stress) shift; cli_stress_test "$@" ;;
         panel-tls) shift; panel_tls_issue "$@" ;;
         panel-tls-custom) shift; panel_tls_custom "$@" ;;
+        panel-port) shift; cli_panel_port "${1:-}" ;;
+        panel-user) shift; cli_panel_user "${1:-}" ;;
+        panel-path) shift; cli_panel_path "${1:-}" ;;
         panel-tls-ip) shift; panel_tls_ip "${1:-}" ;;
         panel-remove-domain|panel-tls-remove) panel_tls_remove ;;
         carrier) shift; cli_carrier "$@" ;;

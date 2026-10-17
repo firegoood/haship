@@ -2193,6 +2193,15 @@
               <div class="qs-hint">No backups yet.</div>
             </div>
           </div>
+          <!-- Backup key export: backups only open with this server's key -->
+          <div class="u-mt-16">
+            <div class="u-fw-600 u-color-tx u-fs-14 u-mb-8">Backup encryption key</div>
+            <div class="qs-hint u-mb-8">Backups are encrypted with a key stored only on this server. Keep a copy elsewhere, or a downloaded backup cannot be opened if the server is lost.</div>
+            <div class="u-flex-center-gap8">
+              <input class="hashem-input u-max-w-180" id="wdKeyPass" type="password" autocomplete="current-password" placeholder="Panel password">
+              <button class="hashem-btn hashem-btn-secondary" id="wdKeyBtn">Show &amp; copy key</button>
+            </div>
+          </div>
         </div>
 
         <!-- Event mini-log -->
