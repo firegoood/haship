@@ -3,6 +3,42 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
+## Unreleased — audit fixes (docs/audit/BUG_REPORT_2026-10-17.md)
+
+Fixes for the 61 findings of the 2026-10-17 code audit, plus the Sentinel addon. IDs (C1, H4, …) refer to the report.
+
+### Upgrade notes (behaviour changes)
+- **Reverse proxy on the same server (nginx/Caddy):** loopback is no longer trusted for `X-Forwarded-For` by default. Add `Environment=TRUSTED_PROXY_IPS=127.0.0.1` to `gre-panel` (`systemctl edit gre-panel`), or every visitor is seen as 127.0.0.1. The generated proxy configs say so.
+- **Peer Link** works best with both servers updated: the peer API is now also served at the fixed prefix `/_hp` (peer secret only; bare 404 otherwise). An old peer is still reached when its full panel URL (with its base path) is entered as Peer URL.
+- **Updates and installs fail closed** when `checksums.txt` cannot be fetched from github.com itself; set `GRE_PANEL_ALLOW_UNVERIFIED_UPDATE=1` to accept the risk.
+- **Connectivity Rescue** no longer activates on its own; it shows the banner, and auto-activation is a separate opt-in toggle.
+- **`hashem watchdog off`** turns off alerts only; the `hashem-watchdog` timer keeps running scheduled backups, scheduled restarts and Auto-Pool.
+- Editing an FRP peer's ports on the Iran server no longer touches `frps-N.toml`; apply the ports on the foreign server too.
+- The benchmark reports KCP/QUIC as "Not measured" and never recommends them; Apply refuses Backhaul/Bagher (use Switch Engine / the Bagher page).
+- The peer limit is 10 everywhere (`GRE_MAX_PEERS` overrides it in the panel and in `hashem.sh`).
+
+### Security
+- 2FA, terminal and TLS settings were wiped from `panel.json` on every restart of a licensed panel (C1).
+- The stored password hash was accepted as the password (C2).
+- Peer-supplied SSH keys could add an unrestricted root key or delete all root keys (C4, L18).
+- License deactivation did not stick (H10); `X-Forwarded-For` via loopback bypassed the login lockout and terminal allowlist (H11).
+- Downloads: checksum manifest only from GitHub, verified install in `hashem.sh`, no mirrors for unverifiable files (H12).
+- WSS carrier refuses to run without a token (M12); revpath firewall fix limited to the peer IP (M10); token files are 0600 (M15); inline handlers can no longer be broken out of (L10, L11).
+- Backup encryption key can be exported (`hashem backup key`, panel with password re-check) (M6).
+
+### Fixed
+- Panel crash `concurrent map iteration and map write` in the cluster code (C3).
+- Peer Link reported "Connected" while every call landed on the login page (H1); status writes no longer clobber settings (M13).
+- frpc restarted every minute by two competing Auto-Pool controllers (H2); editing Iran peer ports broke frps (H3).
+- Switch Engine: real ports only, GRE inner address, kcp/quic listeners, Backhaul v2 schema, health check and rollback (H4).
+- Web terminal closed after 30 s without output (H5); installer killed after 60 s (H7); `add-peer --frp-transport` rejected (H8).
+- Benchmark faked UDP/loopback results and Apply could leave the two ends on different carriers (H9, L13, L14).
+- Let's Encrypt certificate is renewed and reloaded without dropping the HTTPS connection (M7).
+- `hashem cluster revert`, `panel-port|user|path`, `setup-foreign --bundle bh1_/gh1_`, `install_panel` stop/overwrite order, update restarting every tunnel, `fuser -k`, removal of unrelated tunnels, ephemeral port clashes, foreign control-port check (M1–M5, M18–M21).
+- Private/CGNAT address reported as the public IP (M8); 5-second snapshot running ssh-keygen and IP lookups (M9); Doctor on GRE-less servers (M11); per-proxy options lost on port edits (M14); cluster UI fields (M16); bundles with default GRE IPs (M22).
+- Plus L1–L9, L12, L15–L17, L19–L23 (error codes, telegram settings, backup dir, alerts after re-enable, LimitNOFILE source, fleet history, release-list caching, …).
+- **Sentinel addon:** install/start/stop/uninstall errors are reported, the chosen port is honoured, concurrent installs are refused, credentials and URL are correct.
+
 ## v1.3.3 — downgrade list covers every release
 
 ### Changed
