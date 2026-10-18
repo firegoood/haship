@@ -729,9 +729,9 @@ const I18N = {
     close: "Close",
     x002: "Iran",
     x003: "Foreign",
-    x004: "[ ON ] Auto-Switching",
-    x005: "[ OFF ] Manual Mode",
-    x006: "Stable / Zero Drops",
+    x004: "Automatic",
+    x005: "Manual",
+    x006: "No recent errors",
     x007: "Engine",
     x008: "Carrier & Failover",
     x009: "Active Carrier",
@@ -961,11 +961,44 @@ if ($('langToggleBtnM')) $('langToggleBtnM').onclick = toggleLang;
 try { setLanguage(localStorage.getItem('hashem_lang') || 'en', true); } catch(e) { /* storage blocked: stay on default language */ }
 
 // Each value in its own <bdi> so "0.0 B/s" keeps its order inside a Persian line.
-function trafficSub(el, rtDown, rtUp, down, up) {
-  if (!el) return;
-  const v = x => '<bdi>' + esc(x) + '</bdi>';
-  el.innerHTML = esc(tr('kpi_speed_l', 'Speed:')) + ' ↓ ' + v(rtDown) + ' · ↑ ' + v(rtUp) +
-    ' | ' + esc(tr('kpi_tot_l', 'Tot:')) + ' ↓ ' + v(down) + ' · ↑ ' + v(up);
+// Live traffic card: current rates are the numbers, the lifetime total is a footnote.
+// Rates are null when unknown (cached page load), shown as a dash.
+function setTraffic(t, rtDown, rtUp) {
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+  set('kpiDown', rtDown != null ? fmtRate(rtDown) : '—');
+  set('kpiUpRate', rtUp != null ? fmtRate(rtUp) : '—');
+  set('kpiTraffic', t && t.total != null ? fmtBytes(t.total) : '—');
+  const sub = $('kpiTrafficSub');
+  if (sub) sub.innerHTML = t && t.down != null ? '(↓ <bdi>' + esc(fmtBytes(t.down)) + '</bdi> · ↑ <bdi>' + esc(fmtBytes(t.up)) + '</bdi>)' : '';
+  const ico = $('icoTraffic');
+  if (ico) ico.dataset.lvl = (rtDown || 0) + (rtUp || 0) > 0 ? 'ok' : 'dim';
+}
+// Canvas cannot read CSS variables, so charts resolve the theme token to rgb.
+const _tokCtx = document.createElement('canvas').getContext('2d');
+function tokenRGB(name) {
+  const v = getComputedStyle(document.body).getPropertyValue(name).trim();
+  _tokCtx.fillStyle = 'gray';
+  if (v) _tokCtx.fillStyle = v;
+  const c = _tokCtx.fillStyle;
+  if (c[0] === '#') return [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16));
+  return (c.match(/[\d.]+/g) || [128, 128, 128]).slice(0, 3).map(Number);
+}
+const rgba = (c, a) => 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')';
+function engLabel(e) {
+  e = String(e || '').toLowerCase();
+  return e === 'backhaul' ? 'Backhaul' : e === 'frp' ? 'FRP' : e === 'bagher' ? 'Bagher' : '';
+}
+// Dashboard state: unset (fresh install), ok, warn, err.
+function dashState(d, unset, bagherUp) {
+  if (unset) return 'unset';
+  if (d.health === 'HEALTHY') return 'ok';
+  if (d.health === 'DEGRADED') return 'warn';
+  if (bagherUp) return 'ok';
+  return d.health ? 'err' : (d.online ? 'ok' : 'err');
+}
+function latBadge(ms) {
+  const [txt, cls] = ms < 150 ? ['Good', 'ok'] : ms < 300 ? ['Fair', ''] : ['High', 'warn'];
+  return '<span class="badge ' + cls + '"><span class="dot"></span>' + esc(tr('', txt)) + '</span>';
 }
 function dot(ok) { return `<span class="dot ${ok ? 'up' : 'down'}"></span>`; }
 // Shared detail-card icons + builder (Dashboard AND peer cards use these;
@@ -1488,6 +1521,13 @@ const fmtRate = bps => {
   while (v >= 1024 && i < u.length-1) { v /= 1024; i++; }
   return v.toFixed(1) + ' ' + u[i];
 };
+// Axis labels share the unit of the top gridline (0.5 MB/s, not 512 KB/s),
+// with at most one decimal and none when whole.
+const fmtAxis = (bps, unit) => {
+  const u = ['B/s','KB/s','MB/s','GB/s'];
+  const i = Math.max(0, Math.min(3, Math.round(Math.log(unit || 1) / Math.log(1024))));
+  return (Math.round((bps || 0) / Math.pow(1024, i) * 10) / 10) + ' ' + u[i];
+};
 const fmtSecs = s => {
   if (s == null) return NA;
   const d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60);
@@ -1512,13 +1552,7 @@ function hydrateCachedTraffic() {
     const cache = JSON.parse(raw);
     if (!cache || !cache.traffic) return;
     const t = cache.traffic;
-    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-    if (t.total != null) set('kpiTraffic', fmtBytes(t.total));
-    if (t.down != null && t.up != null) {
-      const rtUp = t.speed_up != null ? fmtRate(t.speed_up) : '0.0 B/s';
-      const rtDown = t.speed_down != null ? fmtRate(t.speed_down) : '0.0 B/s';
-      trafficSub($('kpiTrafficSub'), rtDown, rtUp, fmtBytes(t.down), fmtBytes(t.up));
-    }
+    setTraffic(t, null, null);
     if (cache.history && cache.history.length >= 2) {
       setTimeout(() => {
         drawChart(cache.history, false);
@@ -1610,12 +1644,13 @@ function drawChart(hist, isDown) {
     return;
   }
 
-  // Nice ceiling: 1/2/5 × 10^n rule.
+  // Nice ceiling in the 1024-based unit the axis prints, so the four gridlines
+  // read 20 / 15 / 10 / 5 MB/s instead of 18.6 / 14.0 / 9.3 GB/s.
+  const LADDER = [1, 2, 4, 6, 8, 10];
+  const unitOf = v => Math.pow(1024, Math.max(0, Math.min(3, Math.floor(Math.log(Math.max(v, 1)) / Math.log(1024)))));
   const niceCeil = val => {
-    const v = val || 1;
-    const p = Math.pow(10, Math.floor(Math.log10(v)));
-    const n = v / p;
-    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+    const v = val || 1, u = unitOf(v), x = v / u, p = Math.pow(10, Math.floor(Math.log10(x)));
+    return LADDER.find(n => n * p >= x - 1e-9) * p * u;
   };
 
   let rawMax = 0;
@@ -1634,10 +1669,13 @@ function drawChart(hist, isDown) {
     max = candidate;
   } else if (candidate > stored) {
     max = candidate;
+  } else if (candidate < stored * 0.15) {
+    // a spike left the visible range: rescale at once instead of a rung per poll
+    max = candidate;
   } else if (candidate < stored * 0.6) {
     // one nice-rung down per draw: next lower 1/2/5 step below stored
-    const rung = v => { const p = Math.pow(10, Math.floor(Math.log10(v || 1))); const n = v / p;
-      return (n > 5 ? 5 : n > 2 ? 2 : n > 1 ? 1 : 0.5) * p; };
+    const rung = v => { const u = unitOf(v), x = v / u, p = Math.pow(10, Math.floor(Math.log10(x)));
+      const lower = LADDER.filter(k => k * p < x - 1e-9).pop(); return (lower ? lower * p : 0.8 * p) * u; };
     max = Math.max(candidate, rung(stored));
   } else {
     max = stored;
@@ -1731,43 +1769,15 @@ function drawChart(hist, isDown) {
     }
   };
 
-  // Pre-generate styles & gradients
-  const gradDl = ctx.createLinearGradient(padL, 0, W - padR, 0);
-  const gradUl = ctx.createLinearGradient(padL, 0, W - padR, 0);
+  // Colors follow the legend tokens (--info download, --sc upload). A stopped
+  // tunnel greys both lines: the history is stale, not an alarm.
+  const cDl = tokenRGB(isDown ? '--dim' : '--info'), cUl = tokenRGB(isDown ? '--dim' : '--sc');
+  const gradDl = rgba(cDl, 1), gradUl = rgba(cUl, isDown ? 0.6 : 1);
+  const colDlEnd = gradDl, colUlEnd = gradUl;
   const gradFill = ctx.createLinearGradient(0, padT, 0, padT + ih);
-
-  let glowDl, glowUl, colDlEnd, colUlEnd;
-  if (isDown) {
-    if (light) {
-      gradDl.addColorStop(0, '#dc2626'); gradDl.addColorStop(1, '#b91c1c');
-      gradUl.addColorStop(0, 'rgba(220,38,38,0.4)'); gradUl.addColorStop(1, 'rgba(185,28,28,0.55)');
-      glowDl = 'rgba(220,38,38,0.35)'; glowUl = 'rgba(220,38,38,0.2)';
-      colDlEnd = '#dc2626'; colUlEnd = '#b91c1c';
-      gradFill.addColorStop(0, 'rgba(220,38,38,0.12)'); gradFill.addColorStop(1, 'rgba(220,38,38,0)');
-    } else {
-      gradDl.addColorStop(0, '#f87171'); gradDl.addColorStop(1, '#ef4444');
-      gradUl.addColorStop(0, 'rgba(248,113,113,0.45)'); gradUl.addColorStop(1, 'rgba(239,68,68,0.6)');
-      glowDl = 'rgba(239,68,68,0.5)'; glowUl = 'rgba(248,113,113,0.35)';
-      colDlEnd = '#ef4444'; colUlEnd = '#f87171';
-      gradFill.addColorStop(0, 'rgba(239,68,68,0.18)'); gradFill.addColorStop(1, 'rgba(239,68,68,0)');
-    }
-  } else {
-    if (light) {
-      // Light theme: crisp, high-contrast cyan-blue & violet readable on pure white cards
-      gradDl.addColorStop(0, '#0284c7'); gradDl.addColorStop(1, '#0369a1');
-      gradUl.addColorStop(0, '#6366f1'); gradUl.addColorStop(1, '#7c3aed');
-      glowDl = 'rgba(2,132,199,0.35)'; glowUl = 'rgba(99,102,241,0.25)';
-      colDlEnd = '#0284c7'; colUlEnd = '#6366f1';
-      gradFill.addColorStop(0, 'rgba(2,132,199,0.14)'); gradFill.addColorStop(1, 'rgba(2,132,199,0)');
-    } else {
-      // Dark theme: Hashem cyan (#38bdf8) & lighter blue/violet (#a78bfa)
-      gradDl.addColorStop(0, '#0ea5e9'); gradDl.addColorStop(1, '#38bdf8');
-      gradUl.addColorStop(0, '#818cf8'); gradUl.addColorStop(1, '#a78bfa');
-      glowDl = 'rgba(56,189,248,0.55)'; glowUl = 'rgba(167,139,250,0.4)';
-      colDlEnd = '#38bdf8'; colUlEnd = '#a78bfa';
-      gradFill.addColorStop(0, 'rgba(56,189,248,0.22)'); gradFill.addColorStop(1, 'rgba(56,189,248,0)');
-    }
-  }
+  gradFill.addColorStop(0, rgba(cDl, light ? 0.16 : 0.22)); gradFill.addColorStop(1, rgba(cDl, 0));
+  const gradFillUl = ctx.createLinearGradient(0, padT, 0, padT + ih);
+  gradFillUl.addColorStop(0, rgba(cUl, light ? 0.08 : 0.1)); gradFillUl.addColorStop(1, rgba(cUl, 0));
 
   // Pre-compute x tick labels
   const fmtTick = t => {
@@ -1789,7 +1799,7 @@ function drawChart(hist, isDown) {
     for (let g = 0; g <= 4; g++) {
       const y = Math.round(padT + ih * g / 4) + 0.5, val = max * (1 - g / 4);
       ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-      ctx.fillText(fmtRate(val), 4, y + 3);
+      ctx.fillText(fmtAxis(val, unitOf(max)), 4, y + 3);
     }
 
     ctx.fillStyle = C_AXIS; ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
@@ -1808,9 +1818,12 @@ function drawChart(hist, isDown) {
 
     if (seqUl.length) {
       traceCurve(seqUl);
+      const lastU = seqUl[seqUl.length - 1];
+      ctx.lineTo(lastU.x, padT + ih); ctx.lineTo(seqUl[0].x, padT + ih); ctx.closePath();
+      ctx.fillStyle = gradFillUl; ctx.fill();
+      traceCurve(seqUl);
       ctx.strokeStyle = gradUl; ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.shadowColor = glowUl; ctx.shadowBlur = light ? 4 : 7;
-      ctx.stroke(); ctx.shadowBlur = 0;
+      ctx.stroke();
 
       const lastUl = seqUl[seqUl.length - 1];
       ctx.beginPath(); ctx.arc(lastUl.x, lastUl.y, 2.5, 0, Math.PI * 2);
@@ -1830,15 +1843,14 @@ function drawChart(hist, isDown) {
     if (seqDl.length) {
       traceCurve(seqDl);
       ctx.strokeStyle = gradDl; ctx.lineWidth = 2.2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.shadowColor = glowDl; ctx.shadowBlur = light ? 6 : 10;
-      ctx.stroke(); ctx.shadowBlur = 0;
+      ctx.stroke();
     }
 
     ctx.restore();
 
     if (peakPt && peakPt.val > 0 && progress >= Math.min(1, Math.max(0.2, (peakPt.x - padL) / iw))) {
       const px = peakPt.x, py = peakPt.y;
-      const peakTxt = 'Peak ' + fmtRate(peakPt.val);
+      const peakTxt = tr('', 'Peak') + ' ' + fmtRate(peakPt.val);
       ctx.font = '600 12px -apple-system, system-ui, sans-serif';
       const tw = ctx.measureText(peakTxt).width;
       const tagW = Math.round(tw + 12), tagH = 17;
@@ -1858,10 +1870,7 @@ function drawChart(hist, isDown) {
       if (tagX < padL + 4) tagX = padL + 4;
       if (tagX + tagW > W - padR - 4) tagX = W - padR - 4 - tagW;
 
-      const peakBorder = isDown ? (light ? 'rgba(220,38,38,0.45)' : 'rgba(239,68,68,0.45)') : (light ? 'rgba(2,132,199,0.45)' : 'rgba(56,189,248,0.45)');
-      const peakTxtCol = isDown ? (light ? '#dc2626' : '#f87171') : (light ? '#0369a1' : '#38bdf8');
-      const peakDotCol = isDown ? (light ? '#dc2626' : '#ef4444') : (light ? '#0284c7' : '#38bdf8');
-      const peakGlow = isDown ? (light ? 'rgba(220,38,38,0.5)' : 'rgba(239,68,68,0.8)') : (light ? 'rgba(2,132,199,0.5)' : 'rgba(56,189,248,0.8)');
+      const peakBorder = rgba(cDl, 0.45), peakTxtCol = rgba(cDl, 1), peakDotCol = rgba(cDl, 1), peakGlow = rgba(cDl, 0.6);
 
       ctx.beginPath();
       ctx.moveTo(px, placeAbove ? (py - 3) : (py + 3));
@@ -1898,7 +1907,7 @@ function drawChart(hist, isDown) {
         ctx.fillStyle = colDlEnd; ctx.fill();
       } else if (prefersReduced) {
         ctx.beginPath(); ctx.arc(lastDl.x, lastDl.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = light ? 'rgba(2,132,199,0.25)' : 'rgba(56,189,248,0.25)';
+        ctx.fillStyle = rgba(cDl, 0.25);
         ctx.fill();
         ctx.beginPath(); ctx.arc(lastDl.x, lastDl.y, 3, 0, Math.PI * 2);
         ctx.fillStyle = colDlEnd; ctx.fill();
@@ -1908,11 +1917,11 @@ function drawChart(hist, isDown) {
         const ripR = 3.5 + pulsePhase * 7.5;
         const ripAlpha = (1 - pulsePhase) * (light ? 0.45 : 0.65);
         ctx.beginPath(); ctx.arc(lastDl.x, lastDl.y, ripR, 0, Math.PI * 2);
-        ctx.strokeStyle = light ? ('rgba(2,132,199,' + ripAlpha.toFixed(2) + ')') : ('rgba(56,189,248,' + ripAlpha.toFixed(2) + ')');
+        ctx.strokeStyle = rgba(cDl, ripAlpha.toFixed(2));
         ctx.lineWidth = 1.5; ctx.stroke();
 
         ctx.beginPath(); ctx.arc(lastDl.x, lastDl.y, 4.5, 0, Math.PI * 2);
-        ctx.fillStyle = light ? 'rgba(2,132,199,0.22)' : 'rgba(56,189,248,0.3)';
+        ctx.fillStyle = rgba(cDl, light ? 0.22 : 0.3);
         ctx.fill();
 
         ctx.beginPath(); ctx.arc(lastDl.x, lastDl.y, 3, 0, Math.PI * 2);
@@ -1982,94 +1991,98 @@ function drawChart(hist, isDown) {
 async function refreshDash() {
   const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
   const setHTML = (id, v) => { const el = $(id); if (el) el.innerHTML = v; };
-  const setBar = (id, pct) => { const el = $(id); if (el) el.style.width = pct; };
+  const chip = (txt, cls) => '<span class="badge ' + (cls || '') + '"><span class="dot"></span>' + esc(txt) + '</span>';
   try {
     const d = await api('/api/dashboard?range=' + dashRange);
     if (!d || typeof d !== 'object') return;
     const on = !!d.online;
-    const nPeers = d.peer_count || 0;
+    const peers = d.peers || [];
+    const nPeers = d.peer_count || peers.length;
     { const g0 = $('dashGrid'); if (g0) g0.classList.remove('dash-loading'); }
     const multi = nPeers > 0;
     const bObj = d.bagher || {};
     window._lastBagher = bObj;
     const bagherUp = !!(bObj.is_active || bObj.enabled || bObj.connected);
-    let statusText = d.health ? (d.health === 'HEALTHY' ? 'Healthy' : (d.health === 'DEGRADED' ? 'Degraded' : 'Down')) : (on ? 'Online' : 'Offline');
-    let statusColor = d.health ? (d.health === 'HEALTHY' ? 'var(--ok)' : (d.health === 'DEGRADED' ? 'var(--wr)' : 'var(--er)')) : (on ? 'var(--ok)' : 'var(--er)');
-    if (bagherUp && (statusText === 'Down' || statusText === 'Offline')) {
-      statusText = 'Healthy';
-      statusColor = 'var(--ok)';
-    }
     // Fresh install: nothing to be "down" yet, so no red state (onboarding card explains next steps).
     const unset = window._hashemEmpty === true && !on && !bagherUp;
-    if (unset) { statusText = 'Not set up'; statusColor = 'var(--mu)'; }
-    set('kpiStatus', statusText);
-    const kpiStatus = $('kpiStatus'); if (kpiStatus) kpiStatus.style.color = statusColor;
-    set('kpiStatusSub', (multi ? nPeers + ' tunnel' + (nPeers > 1 ? 's' : '') + ' · ' : (bagherUp && !nPeers ? 'Bagher tunnel · ' : '')) + (unset ? 'Not configured' : (d.role || 'Not configured')) + ' · ' + (d.checked ? 'checked ' + String(d.checked).slice(11, 19) + ' UTC' : ''));
+    const state = dashState(d, unset, bagherUp);
     const g = d.gre || {}, f = d.frp || {};
-    const peers = d.peers || [];
-    const kpiLinks = $('kpiLinks');
+    const role = String(d.role || '').toLowerCase();
+    const iran = /iran|master/.test(role), foreign = /foreign/.test(role);
+    const engine = engLabel(d.active_engine);
+    const upPeers = peers.filter(p => p.gre_up || p.frp_up).length;
+
+    // Hero: overall state, the link between the two servers, latency.
+    const hero = $('dashHero');
+    if (hero) hero.dataset.state = state;
+    set('kpiStatus', tr('', { unset: 'Not set up', ok: 'Healthy', warn: 'Degraded', err: 'Down' }[state]));
+    const reasons = d.reasons || [];
+    set('kpiStatusSub', state === 'unset' ? tr('', 'Run Setup to create the tunnel')
+      : (state !== 'ok' && reasons.length) ? reasons[0]
+      : multi ? upPeers + ' / ' + nPeers + ' ' + tr('', 'tunnels up')
+      : state === 'ok' ? tr('', 'All links are working') : tr('', 'No link is answering'));
+    set('heroLocalName', tr('', iran ? 'Iran server' : foreign ? 'Foreign server' : 'This server'));
+    set('heroLocalIp', d.local_pub || '—');
+    let remName, remIp;
+    if (unset) { remName = 'Not linked yet'; remIp = '—'; }
+    else if (multi && nPeers > 1) { remName = nPeers + ' ' + tr('', 'foreign servers'); remIp = upPeers + ' / ' + nPeers + ' ' + tr('', 'up'); }
+    else if (multi) { remName = peers[0].name || 'Foreign server'; remIp = peers[0].remote_pub || '—'; }
+    else {
+      remName = iran ? 'Foreign server' : foreign ? 'Iran server' : 'Other server';
+      remIp = d.remote_pub || g.peer || (bagherUp ? bObj.remote_host : '') || '—';
+    }
+    set('heroRemoteName', tr('', remName));
+    set('heroRemoteIp', remIp);
+    const chips = [];
+    const engName = engine && engine !== 'Bagher' ? engine : 'FRP';
     if (multi) {
-      // multi-peer: count legs up
       const greUp = peers.filter(p => p.gre_up).length, frpUp = peers.filter(p => p.frp_up).length;
-      let multiLinks = '<span class="badge ' + (greUp ? 'ok' : 'err') + '"><span class="dot"></span>GRE ' + greUp + '/' + nPeers + '</span> <span class="badge ' + (frpUp ? 'ok' : 'err') + '"><span class="dot"></span>FRP ' + frpUp + '/' + nPeers + '</span>';
-      if (bagherUp) {
-        multiLinks += ' <span class="badge ok"><span class="dot"></span>Bagher</span>';
-      }
-      if (kpiLinks) kpiLinks.innerHTML = multiLinks;
-    } else {
-      const greUp = !!g.exists, frpUp = !!f.up;
-      let linksHtml = '';
-      if (bagherUp) {
-        linksHtml += '<span class="badge ok"><span class="dot"></span>Bagher</span>';
-      }
-      if (greUp || frpUp || !bagherUp) {
-        if (linksHtml) linksHtml += ' ';
-        const off = unset ? 'dim' : 'err'; // nothing configured yet: not a failure
-        linksHtml += '<span class="badge ' + (greUp ? 'ok' : off) + '"><span class="dot"></span>GRE</span> <span class="badge ' + (frpUp ? 'ok' : off) + '"><span class="dot"></span>FRP</span>';
-      }
-      if (kpiLinks) kpiLinks.innerHTML = linksHtml;
+      chips.push(chip('GRE ' + greUp + '/' + nPeers, greUp ? 'ok' : 'err'), chip(engName + ' ' + frpUp + '/' + nPeers, frpUp ? 'ok' : 'err'));
+    } else if (!unset) {
+      // Backhaul and Bagher run without GRE: a missing GRE there is not a fault.
+      if (g.exists || (!/backhaul/.test(role) && !(bagherUp && !f.up))) chips.push(chip('GRE', g.exists ? 'ok' : 'err'));
+      if (f.up || f.svc || !bagherUp) chips.push(chip(engName, f.up ? 'ok' : 'err'));
     }
+    if (bagherUp) chips.push(chip('Bagher', bObj.connected ? 'ok' : 'warn'));
+    setHTML('kpiLinks', chips.join(''));
+    const nPorts = (f.proxy_ports || []).length || (bObj.ports || []).length;
+    const carrier = d.active_carrier && d.active_carrier !== 'direct' ? String(d.active_carrier).toUpperCase() : '';
+    set('kpiLinksSub', unset ? tr('', 'Not configured')
+      : [carrier ? tr('', 'via') + ' ' + carrier : '', nPorts ? nPorts + ' ' + tr('', nPorts === 1 ? 'port' : 'ports') : ''].filter(Boolean).join(' · '));
+    let ms = null;
     if (multi) {
-      // multi-peer: best ping across legs, sub lists per-peer names
-      let best = null;
-      peers.forEach(p => { const v = (p.ping_ok && p.ping_ms) ? parseFloat(p.ping_ms) : (p.health_state === 'healthy' && p.latency_ms >= 0 ? p.latency_ms : null); if (v != null && (best == null || v < best)) best = v; });
-      set('kpiLinksSub', peers.map(p => (p.gre_up || p.frp_up ? '● ' : '○ ') + (p.name || ('peer-' + p.id))).join(' · '));
-      set('kpiPing', best != null ? Math.round(best) + 'ms' : NA);
-      setHTML('kpiPingSub', best == null ? 'no answer' : best < 80 ? '<span class="badge ok"><span class="dot"></span>Optimal</span>' : best < 200 ? '<span class="badge ok"><span class="dot"></span>Good</span>' : '<span class="badge warn"><span class="dot"></span>High</span>');
+      peers.forEach(p => { const v = (p.ping_ok && p.ping_ms) ? parseFloat(p.ping_ms) : (p.health_state === 'healthy' && p.latency_ms >= 0 ? p.latency_ms : null); if (v != null && (ms == null || v < ms)) ms = v; });
     } else {
-      if (bagherUp && !g.exists && !f.up) {
-        set('kpiLinksSub', 'Bagher stealth tunnel · ' + ((bObj.ports || []).length ? bObj.ports.length + ' forwarded ports' : 'active link') + ' · ' + (bObj.remote_host || 'connected'));
-      } else if (unset) {
-        set('kpiLinksSub', 'Not configured');
-      } else {
-        set('kpiLinksSub', (f.svc || 'no frp') + ((f.proxies || []).length ? ' · ' + f.proxies.length + ' proxies' : '') + ' · ' + (g.inner || 'no gre ip'));
-      }
-      const ms = d.ping_ok && d.ping ? parseFloat(d.ping) : (d.health_state === 'healthy' && d.latency_ms >= 0 ? d.latency_ms : null);
-      if (ms != null) {
-        set('kpiPing', d.ping_ok && d.ping ? d.ping : (Math.round(ms) + 'ms'));
-        setHTML('kpiPingSub', (ms < 80 ? '<span class="badge ok"><span class="dot"></span>Optimal</span>' : ms < 200 ? '<span class="badge ok"><span class="dot"></span>Good</span>' : '<span class="badge warn"><span class="dot"></span>High</span>') + (d.icmp_filtered ? icmpChip() : ''));
-      } else if (bagherUp && typeof bObj.latency_ms === 'number' && bObj.latency_ms > 0) {
-        set('kpiPing', Math.round(bObj.latency_ms) + 'ms');
-        setHTML('kpiPingSub', '<span class="badge ok"><span class="dot"></span>Optimal</span>');
-      } else {
-        set('kpiPing', NA);
-        setHTML('kpiPingSub', 'no answer');
-      }
+      ms = d.ping_ok && d.ping ? parseFloat(d.ping) : (d.health_state === 'healthy' && d.latency_ms >= 0 ? d.latency_ms : null);
+      if (ms == null && bagherUp && bObj.latency_ms > 0) ms = bObj.latency_ms;
     }
+    const hasMs = ms != null && isFinite(ms);
+    set('kpiPing', hasMs ? Math.round(ms) + ' ms' : '—');
+    setHTML('kpiPingSub', hasMs ? latBadge(ms) + (d.icmp_filtered ? icmpChip() : '') : esc(tr('', unset ? 'No tunnel yet' : 'No answer')));
+
+    // Live traffic
     const t = d.traffic || {};
-    set('kpiTraffic', fmtBytes(t.total));
-    let rtUp = '0.0 B/s', rtDown = '0.0 B/s';
+    let rtUp = null, rtDown = null;
     if (t.speed_up != null && t.speed_down != null) {
-      rtUp = fmtRate(t.speed_up);
-      rtDown = fmtRate(t.speed_down);
+      rtUp = t.speed_up; rtDown = t.speed_down;
     } else if (d.history && d.history.length >= 2) {
-      const b = d.history[d.history.length - 1];
-      const a = d.history[d.history.length - 2];
+      const b = d.history[d.history.length - 1], a = d.history[d.history.length - 2];
       const dt = (b.t - a.t) || 1;
-      if (b.up != null && a.up != null && b.up >= a.up) rtUp = fmtRate((b.up - a.up) / dt);
-      if (b.down != null && a.down != null && b.down >= a.down) rtDown = fmtRate((b.down - a.down) / dt);
+      if (b.up != null && a.up != null && b.up >= a.up) rtUp = (b.up - a.up) / dt;
+      if (b.down != null && a.down != null && b.down >= a.down) rtDown = (b.down - a.down) / dt;
     }
-    trafficSub($('kpiTrafficSub'), rtDown, rtUp, fmtBytes(t.down), fmtBytes(t.up));
+    setTraffic(t, rtDown, rtUp);
+
+    // Connections: now, and the peak over the chart range
+    let peak = null;
+    (d.history || []).forEach(p => { if (p && p.conns != null && (peak == null || p.conns > peak)) peak = p.conns; });
+    const hasConns = d.conns != null;
+    set('kpiConns', hasConns ? String(d.conns) : '—');
+    set('kpiConnsSub', peak != null ? tr('', 'Peak') + ' ' + peak + ' · ' + dashRange.toUpperCase() : tr('', 'Established TCP and UDP'));
+    { const ic = $('icoConns'); if (ic) ic.dataset.lvl = d.conns > 0 ? 'ok' : 'dim'; }
+    set('actNow', hasConns ? d.conns + ' ' + tr('', 'now') : '—');
+    { const ab = $('actLiveBadge'); if (ab) { ab.hidden = !hasConns; ab.classList.add('is-ok'); } }
+
     drawChart(d.history, !on);
     drawActivityChart(d.history, !on);
     try {
@@ -2083,13 +2096,14 @@ async function refreshDash() {
     } catch (e) {}
     const cd = $('chartDown'), cc = $('chartCard');
     if (cd) cd.classList.toggle('hidden', on || unset);
-    if (cc) cc.classList.toggle('is-down', !on && !unset);
+    if (cc) cc.classList.toggle('is-down', !on);
     const badge = $('chartLiveBadge');
     if (badge) {
+      badge.hidden = unset;
       const paused = !on || document.hidden;
       badge.classList.toggle('is-paused', paused);
       const txt = badge.querySelector('.live-txt');
-      if (txt) txt.textContent = paused ? 'PAUSED' : 'LIVE';
+      if (txt) txt.textContent = tr('', paused ? 'Paused' : 'Live');
     }
 
     const b = d.bagher || {};
@@ -2231,34 +2245,30 @@ async function refreshDash() {
       acv.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
     }
     if (cv && d.history) cv._hist = d.history;
-    const w = $('tunnelWarn');
-    if (w) {
-      if (!on && !unset) { w.innerHTML = '<b>Tunnel is not running.</b> Go to Setup to configure GRE + FRP, or check the Tunnel tab.'; w.classList.remove('hidden'); }
-      else w.classList.add('hidden');
-    }
+    // System: ring gauges colored by load
     const s = d.system || {};
-    let cpu = s.cpu_pct != null ? parseFloat(s.cpu_pct) : null;
-    if (cpu != null && !isFinite(cpu)) cpu = null;
-    set('kpiCpu', cpu != null ? cpu.toFixed(1) + '%' : '…');
-    set('kpiCpuSub', 'load ' + (s.load || NA) + ' · ' + (s.cores || '?') + ' cores');
-    setBar('cpuBar', (cpu != null ? Math.min(100, Math.max(0, cpu)) : 0) + '%');
+    const gauge = (gid, vid, pct) => {
+      const ok = pct != null && isFinite(pct), el = $(gid);
+      if (el) {
+        el.style.setProperty('--p', ok ? Math.min(100, Math.max(0, pct)).toFixed(1) : 0);
+        el.dataset.lvl = !ok ? 'dim' : pct >= 90 ? 'err' : pct >= 75 ? 'warn' : 'ok';
+      }
+      set(vid, ok ? Math.round(pct) + '%' : '—');
+    };
+    gauge('gCpu', 'kpiCpu', s.cpu_pct != null ? parseFloat(s.cpu_pct) : null);
+    set('kpiCpuSub', [s.cores ? s.cores + ' ' + tr('', 'cores') : '', s.load ? tr('', 'load') + ' ' + String(s.load).split(' ')[0] : ''].filter(Boolean).join(' · ') || '—');
     const m = s.mem || {};
-    let memp = m.pct != null ? parseFloat(m.pct) : null;
-    if (memp != null && !isFinite(memp)) memp = null;
-    set('kpiRam', memp != null ? memp.toFixed(1) + '%' : '…');
-    set('kpiRamSub', m.used != null ? fmtBytes(m.used) + ' / ' + fmtBytes(m.total) + (m.cache ? ' · cache ' + fmtBytes(m.cache) : '') : '—');
-    setBar('ramBar', (memp != null ? Math.min(100, Math.max(0, memp)) : 0) + '%');
-    let dp = s.disk_pct != null ? parseFloat(s.disk_pct) : null;
-    if (dp != null && !isFinite(dp)) dp = null;
-    set('kpiDisk', dp != null ? dp.toFixed(1) + '%' : '…');
-    set('kpiDiskSub', 'root partition');
-    setBar('diskBar', (dp != null ? Math.min(100, Math.max(0, dp)) : 0) + '%');
+    gauge('gRam', 'kpiRam', m.pct != null ? parseFloat(m.pct) : null);
+    set('kpiRamSub', m.used != null ? fmtBytes(m.used) + ' / ' + fmtBytes(m.total) : '—');
+    gauge('gDisk', 'kpiDisk', s.disk_pct != null ? parseFloat(s.disk_pct) : null);
+    set('kpiDiskSub', tr('', 'Root partition'));
     const u = d.uptime || {};
-    set('kpiUp', fmtSecs(u.system));
-    set('kpiUpSub', 'panel ' + fmtSecs(u.panel) + ' · ' + (d.conns != null ? d.conns + ' conns' : 'conns N/A'));
-    // premium details: 3 categorized glass cards with badges + copy buttons.
-    // dval() = plain text cell, dmono(ip) = mono pill + one-click copy,
-    // dbadge() = status pill (ok/err/warn/neutral).
+    set('kpiUp', u.system != null ? fmtSecs(u.system) : '—');
+    set('kpiUpSub', tr('', 'Panel up') + ' ' + fmtSecs(u.panel));
+
+    renderDashPeers(peers);
+
+    // Details: what is configured, and nothing about parts that do not exist.
     const dval = v => `<span class="det-v">${esc(v ?? NA)}</span>`;
     const dmono = v => (!v || v === NA)
       ? `<span class="det-v">—</span>`
@@ -2267,45 +2277,43 @@ async function refreshDash() {
     const detCard = (icon, title, rows) =>
       `<div class="det-card"><div class="det-head"><span class="det-ico">${icon}</span>${esc(title)}</div><div class="det-rows">${rows}</div></div>`;
     const detRow = (k, cell) => `<div class="det-row"><span class="det-k">${esc(k)}</span>${cell}</div>`;
-    const frpBadge = f.up ? dbadge(f.svc || tr('status_running', 'running'), 'ok') : dbadge(tr('status_down', 'down'), 'err');
-    const roleBadge = d.role === 'iran' ? dbadge('' + (tr('x002', "Iran")), 'ok') : d.role === 'foreign' ? dbadge('' + (tr('x003', "Foreign")), '') : dval(d.role);
+    const roleCell = iran ? dbadge(tr('', 'Iran server'), 'ok') : foreign ? dbadge(tr('', 'Foreign server'), '') : dval(tr('', 'Not configured'));
     const bindPort = (f.port && f.port !== NA) ? String(f.port) : '';
     const proxyPorts = (f.proxy_ports || []).filter(p => p && String(p) !== bindPort);
-    const isFrpc = (f.svc === 'frpc') || /foreign/i.test(d.role || '');
+    const isFrpc = (f.svc === 'frpc') || foreign;
     const portLabel = isFrpc ? tr('lbl_control_port', 'Server Port') : tr('lbl_bind_port', 'Bind Port');
-    const portCell = bindPort ? dmono(bindPort) : dval('—');
     const proxyList = (f.proxy_ports && f.proxy_ports.length) ? f.proxy_ports.join(', ') : ((f.proxies || []).join(', ') || '—');
-    const activeEng = String(d.active_engine || 'frp').toUpperCase();
-    const activeCarr = String(d.active_carrier || 'direct');
-    const failoverBadge = d.auto_failover ? dbadge(tr('x004', "[ ON ] Auto-Switching"), 'warn') : dbadge(tr('x005', "[ OFF ] Manual Mode"), 'dim');
-    const diagBadge = d.last_error
-      ? `<span class="badge err" title="${esc(d.last_error.detail || '')}"><span class="dot"></span>${esc(d.last_error.code || 'ERR')} (${esc(String(d.last_error.time || '').slice(11, 19))})</span>`
-      : dbadge(tr('x006', "Stable / Zero Drops"), 'ok');
     const ICO_BOLT = '<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
-    setHTML('dashDetails',
-      detCard(ICO_SRV, tr('card_server_title', 'Server & Role'), detRow(tr('lbl_public_ip', 'Public IP'), dmono(d.local_pub)) + detRow(tr('lbl_role', 'Role'), roleBadge) + detRow(tr('lbl_forwarded_ports', 'Forwarded'), dval(proxyList)))
-      + detCard(ICO_GRE, tr('card_gre_title', 'GRE Tunnel'), detRow(tr('lbl_gre_local', 'Local'), dmono(g.local)) + detRow(tr('lbl_gre_peer', 'Peer'), dmono(g.peer)) + detRow(tr('lbl_gre_interface', 'Inner'), dmono(g.inner)))
-      + detCard(ICO_FRP, tr('card_frp_title', 'Tunnel Engine'), detRow(tr('lbl_frp_status', 'Status'), frpBadge) + detRow(tr('x007', "Engine"), dval(activeEng)) + detRow(portLabel, portCell)
-        + (proxyPorts.length ? detRow(tr('lbl_tunnel_ports', 'Tunnel Ports'), `<span class="det-v det-ports">${proxyPorts.map(p => `<span class="det-v mono">${esc(String(p))}</span>`).join('')}</span>`) : '')
-        + (u.frp_since ? detRow(tr('lbl_uptime_since', 'Since'), dval(u.frp_since)) : ''))
-      + detCard(ICO_BOLT, tr('x008', "Carrier & Failover"), detRow(tr('x009', "Active Carrier"), dmono(activeCarr)) + detRow(tr('x010', "Failover Policy"), failoverBadge) + detRow(tr('x011', "Diagnostics"), diagBadge))
-      + dashPeersCard(d.peers || []));
+    const serverCard = detCard(ICO_SRV, tr('card_server_title', 'Server & Role'), detRow(tr('lbl_public_ip', 'Public IP'), dmono(d.local_pub)) + detRow(tr('lbl_role', 'Role'), roleCell)
+      + (unset ? '' : detRow(tr('lbl_forwarded_ports', 'Forwarded'), dval(proxyList))));
+    let det;
+    if (unset) {
+      det = serverCard + `<div class="det-empty">${esc(tr('', 'Tunnel, engine and carrier details appear here after Setup.'))}</div>`;
+    } else {
+      const engCell = f.up ? dbadge(tr('status_running', 'Running'), 'ok') : dbadge(tr('', 'Stopped'), 'err');
+      const failCell = d.auto_failover ? dbadge(tr('x004', 'Automatic'), 'ok') : dbadge(tr('x005', 'Manual'), '');
+      const diagCell = d.last_error
+        ? `<span class="badge err" title="${esc(d.last_error.detail || '')}"><span class="dot"></span>${esc(d.last_error.code || 'ERR')} (${esc(String(d.last_error.time || '').slice(11, 19))})</span>`
+        : dbadge(tr('x006', 'No recent errors'), on ? 'ok' : '');
+      det = serverCard
+        + ((g.exists || g.local || g.peer || g.inner) ? detCard(ICO_GRE, tr('card_gre_title', 'GRE Tunnel'), detRow(tr('lbl_gre_local', 'Local'), dmono(g.local)) + detRow(tr('lbl_gre_peer', 'Peer'), dmono(g.peer)) + detRow(tr('lbl_gre_interface', 'Inner'), dmono(g.inner))) : '')
+        + ((f.svc || f.up || f.port) ? detCard(ICO_FRP, tr('card_frp_title', 'Tunnel Engine'), detRow(tr('x007', 'Engine'), dval(engine || f.svc || '—')) + detRow(tr('lbl_frp_status', 'Status'), engCell) + detRow(portLabel, bindPort ? dmono(bindPort) : dval('—'))
+          + (proxyPorts.length ? detRow(tr('lbl_tunnel_ports', 'Tunnel Ports'), `<span class="det-v det-ports">${proxyPorts.map(p => `<span class="det-v mono">${esc(String(p))}</span>`).join('')}</span>`) : '')
+          + (u.frp_since ? detRow(tr('lbl_uptime_since', 'Since'), dval(u.frp_since)) : '')) : '')
+        + detCard(ICO_BOLT, tr('x008', 'Carrier & Failover'), detRow(tr('x009', 'Active Carrier'), dmono(String(d.active_carrier || 'direct'))) + detRow(tr('x010', 'Failover Policy'), failCell) + detRow(tr('x011', 'Diagnostics'), diagCell));
+    }
+    setHTML('dashDetails', det);
     // one-click copy for IP/port pills
     document.querySelectorAll('#dashDetails [data-copy]').forEach(b => { if (!b.dataset.cpBound) { b.dataset.cpBound = '1';
       b.onclick = () => { const v = b.dataset.copy; (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject())
         .then(() => { b.textContent = '✓'; b.classList.add('ok'); setTimeout(() => { b.textContent = '⧉'; b.classList.remove('ok'); }, 1200); })
         .catch(() => toastWarn('copy failed', v)); }; } });
-    set('dashChecked', 'checked ' + String(d.checked || '').slice(11, 19));
-    // click-through for dashboard peer rows → jump to the full card.
-    document.querySelectorAll('#dashDetails [data-goto-peer]').forEach(b => { if (!b.dataset.cpBound) { b.dataset.cpBound = '1';
-      b.onclick = () => gotoPeerCard(parseInt(b.dataset.gotoPeer, 10)); }; });
+    { const dp = $('detPulse'); if (dp) dp.classList.toggle('off', !on); }
+    const ck = d.checked ? new Date(d.checked) : null;
+    set('dashChecked', ck && !isNaN(ck) ? tr('', 'Checked') + ' ' + ck.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—');
   } catch(e) { reportErr('dashboard', e); /* keep old values; N/A already default */ return false; }
   return true;
 }
-// Dashboard per-peer summary: one compact row per tunnel (name, status,
-// foreign IP, forwarded ports, ping) + a jump to the full card in Tunnel.
-// Hidden when there are no peers (single-tunnel servers stay unchanged).
-
 function drawActivityChart(hist, isDown) {
   const cv = $('activityChart');
   if (!cv) return;
@@ -2386,20 +2394,12 @@ function drawActivityChart(hist, isDown) {
     }
   }
   
+  const cOk = tokenRGB('--ok');
   const grad = ctx.createLinearGradient(0, padT, 0, padT + ih);
-  if (light) {
-    grad.addColorStop(0, 'rgba(16, 185, 129, 0.35)'); grad.addColorStop(1, 'rgba(16, 185, 129, 0)');
-    ctx.strokeStyle = '#059669';
-  } else {
-    grad.addColorStop(0, 'rgba(52, 211, 153, 0.35)'); grad.addColorStop(1, 'rgba(52, 211, 153, 0)');
-    ctx.strokeStyle = '#10b981';
-  }
-  
+  grad.addColorStop(0, rgba(cOk, light ? 0.22 : 0.28)); grad.addColorStop(1, rgba(cOk, 0));
+  ctx.strokeStyle = rgba(cOk, 1);
   ctx.lineWidth = 2; ctx.lineJoin = 'round';
-  ctx.shadowColor = light ? 'rgba(5,150,105,0.3)' : 'rgba(16,185,129,0.5)';
-  ctx.shadowBlur = 6;
   ctx.stroke();
-  ctx.shadowBlur = 0;
   
   ctx.lineTo(seq[seq.length-1].x, padT + ih);
   ctx.lineTo(seq[0].x, padT + ih);
@@ -2409,7 +2409,7 @@ function drawActivityChart(hist, isDown) {
   // End live point
   const last = seq[seq.length - 1];
   ctx.beginPath(); ctx.arc(last.x, last.y, 3.5, 0, Math.PI * 2);
-  ctx.fillStyle = light ? '#059669' : '#34d399';
+  ctx.fillStyle = rgba(cOk, 1);
   ctx.fill();
   ctx.beginPath(); ctx.arc(last.x, last.y, 1.5, 0, Math.PI * 2);
   ctx.fillStyle = '#ffffff'; ctx.fill();
@@ -2433,25 +2433,33 @@ function pingBadge(o) {
   return '<span class="badge ' + (p.ok ? 'ok' : 'err') + '"' + (tip ? ' title="' + tip + '"' : '') + '><span class="dot"></span>' + esc(p.ok ? p.txt : 'no answer') + '</span>' + p.chip;
 }
 function fleetMs(n) { return n.ping_ms >= 0 ? n.ping_ms : (n.latency_ms >= 0 ? n.latency_ms : -1); }
-function dashPeersCard(peers) {
-  if (!peers || !peers.length) return '';
-  const rows = peers.map(p => {
+function renderDashPeers(peers) {
+  const card = $('dashPeersCard'), list = $('dashPeersList');
+  if (!card || !list) return;
+  card.hidden = !peers.length;
+  if (!peers.length) { list.innerHTML = ''; return; }
+  const ttl = $('dashPeersTitle');
+  if (ttl) ttl.textContent = tr('', 'Tunnels') + ' (' + peers.length + ')';
+  const k = txt => '<small class="pt-k">' + esc(tr('', txt)) + '</small>';
+  list.innerHTML = peers.map(p => {
     const up = !!(p.gre_up || p.frp_up);
-    const nm = p.name || ('peer-' + p.id);
-    const pg = linkPing(p), pgTip = reasonsTip(p);
-    const pingTxt = pg.ok ? pg.txt : tr('status_down', 'down');
-    const pingCls = pg.ok ? 'ok' : 'err';
-    const statusTxt = up ? (tr('x012', "tunnel up")) : tr('status_down', 'down');
-    return `<div class="dash-peer-row" data-goto-peer="${p.id}" title="${tr('x013', "Open full card in Tunnel tab")}">`
-      + `<span class="ent-st ${up ? 'on' : 'off'}"><i></i></span>`
-      + `<b class="u-c-tx">${esc(nm)}</b><span class="qs-hint mono">#${p.id}</span>`
-      + `<span class="badge ${up ? 'ok' : 'err'}"><span class="dot"></span>${statusTxt}</span>`
-      + `<span class="det-v mono">${esc(p.remote_pub || '—')}</span>`
-      + `<span class="qs-hint">${esc((p.ports || []).join(', ') || '—')} · </span><span class="badge ${pingCls}"${pgTip ? ` title="${pgTip}"` : ''}><span class="dot"></span>${esc(pingTxt)}</span>${pg.chip}`
-      + `</div>`;
+    const pg = linkPing(p), tip = reasonsTip(p);
+    const traffic = (p.rx != null || p.tx != null) ? fmtBytes((p.rx || 0) + (p.tx || 0)) : '—';
+    return '<div class="pt-row" role="row" tabindex="0" data-goto-peer="' + p.id + '"' + (tip ? ' title="' + tip + '"' : '') + '>'
+      + '<span class="pt-name" role="cell"><i class="pt-dot' + (up ? ' on' : '') + '"></i><b data-no-i18n>' + esc(p.name || ('peer-' + p.id)) + '</b></span>'
+      + '<span role="cell">' + k('Foreign server') + '<span class="pt-mono">' + esc(p.remote_pub || '—') + '</span></span>'
+      + '<span role="cell">' + k('Engine') + esc(engLabel(p.engine) || 'FRP') + '</span>'
+      + '<span role="cell">' + k('Ports') + '<span class="pt-mono">' + esc((p.ports || []).join(', ') || '—') + '</span></span>'
+      + '<span role="cell">' + k('Ping') + '<span class="badge ' + (pg.ok ? 'ok' : 'err') + '"><span class="dot"></span>' + esc(pg.ok ? pg.txt : tr('', 'No answer')) + '</span>' + pg.chip + '</span>'
+      + '<span role="cell">' + k('Traffic') + '<span class="pt-mono">' + esc(traffic) + '</span></span>'
+      + '</div>';
   }).join('');
-  return `<div class="det-card u-col-full"><div class="det-head"><span class="det-ico">${ICO_SRV}</span>${esc(tr('card_peers_title', 'Peer Tunnels'))} (${peers.length})</div><div>${rows}</div></div>`;
+  list.querySelectorAll('[data-goto-peer]').forEach(r => {
+    r.onclick = () => gotoPeerCard(parseInt(r.dataset.gotoPeer, 10));
+    r.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); r.click(); } };
+  });
 }
+if ($('dashPeersOpen')) $('dashPeersOpen').onclick = () => goTab('tunnel');
 // Scroll to a peer's full card (switches tab if needed).
 function gotoPeerCard(peerId) {
   goTab('tunnel');
@@ -5208,7 +5216,7 @@ document.addEventListener('visibilitychange', () => {
     const paused = document.hidden || (cv && !!cv._isDown);
     badge.classList.toggle('is-paused', paused);
     const txt = badge.querySelector('.live-txt');
-    if (txt) txt.textContent = paused ? 'PAUSED' : 'LIVE';
+    if (txt) txt.textContent = tr('', paused ? 'Paused' : 'Live');
   }
   if (document.hidden) {
     if (cv) {

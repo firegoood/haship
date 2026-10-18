@@ -3,6 +3,16 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
+## Unreleased — Dashboard redesign
+
+- **Status hero:** one card answers "is the tunnel up": Healthy / Degraded / Down / Not set up, the first reason when it is not healthy, this server ⇄ the other server with their IPs and the engine chips (GRE, FRP, Backhaul, Bagher; GRE is not shown as a fault on engines that do not use it), and latency rated Good / Fair / High instead of always "Optimal".
+- **Live traffic:** download and upload rates are the numbers; the lifetime total is a footnote. A separate Connections card shows the current count and the peak over the chart range.
+- **Charts:** colors come from the theme tokens and match the legend (the connections legend was violet on a green line). A stopped tunnel greys the history instead of drawing it red. The axis uses round values in one unit (20 / 15 / 10 MB/s, not 18.6 GB/s and 512 KB/s), and rescales at once after a spike. The connections chart says what it counts: established TCP/UDP connections on the server.
+- **Details:** no green "Stable / Zero Drops" and red "Down" before anything is set up; GRE and engine cards appear only when they exist; Role shows Iran/Foreign server (it never matched before); failover reads Automatic / Manual; times are local.
+- **System:** CPU, RAM and disk as ring gauges colored by load, with uptime.
+- **Tunnels table** for multi-peer hubs: status, foreign IP, engine, ports, ping and traffic per peer; a row opens its card in the Tunnel tab.
+- Layout follows the space the dashboard has (container queries), so the activity side panel no longer squeezes it; works at 375px and in RTL.
+
 ## v2.3.6 — 2026-10-18
 
 Audit fixes, a Persian UI, and working Bagher, Diagnostics and engine switch. Update both servers.

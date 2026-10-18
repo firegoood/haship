@@ -176,7 +176,7 @@
     overflow:auto; max-height:340px; font-size:12.5px; line-height:1.6;
     font-family:var(--font-mono); color:var(--tx2); margin:0; white-space:pre-wrap;
     box-shadow:inset 0 2px 8px rgba(0,0,0,.12); }
-  .dash-grid { display:grid; grid-template-columns:repeat(12,1fr); gap:12px; }
+  .dash-grid { display:grid; grid-template-columns:repeat(12,1fr); gap:12px; container:dash / inline-size; }
   .kpi { grid-column:span 3; container-type:inline-size; }
   .dash-span { grid-column:1 / -1; }
   @media (max-width:900px) { .kpi { grid-column:span 6; } }
@@ -190,27 +190,115 @@
     font-variant-numeric:tabular-nums; line-height:1.2; }
   .kpi-sub { font-size:var(--fs-small); color:var(--dim); }
   .kpi-sub .pos { color:var(--ok); } .kpi-sub .neg { color:var(--er); }
-  /* premium hero: first row (traffic/status/links/latency) gets big values,
-   * glossy icon, tighter label, roomier card */
-  .kpi-hero .kpi { padding:22px 20px; gap:14px; }
-  .kpi-hero .kpi-label { font-size:12.5px; font-weight:600; letter-spacing:.02em; color:var(--mu); }
-  /* Values shrink with the card instead of wrapping ("Not set up" in a narrow column). */
-  .kpi-hero .kpi-val { font-size:clamp(20px, 15cqi, 30px) !important; white-space:nowrap; font-weight:700; letter-spacing:-.03em; line-height:1.05; }
-  .kpi-hero .kpi-val .badge { font-size:14px; padding:4px 10px; border-radius:9px; font-weight:700; }
-  .kpi-hero .kpi-val .badge .dot { width:8px; height:8px; }
-  .kpi-hero .kpi-ico { width:38px; height:38px; border-radius:12px;
-    background:linear-gradient(135deg, var(--ac-soft), color-mix(in srgb, var(--ac) 12%, transparent));
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.12), 0 2px 10px color-mix(in srgb, var(--ac) 25%, transparent); }
-  .kpi-hero .kpi-ico svg { width:19px; height:19px; }
-  .kpi-hero .kpi-sub { font-size:12.5px; }
-  @media (max-width:560px) { .kpi-hero .kpi-val { font-size:26px !important; } }
+  /* Dashboard hero: tunnel state, the link between the two servers, latency */
+  .dash-hero { --hero-c:var(--dim); display:grid; grid-template-columns:minmax(210px,1fr) minmax(0,2fr) minmax(130px,auto);
+    align-items:center; gap:24px; padding:22px 24px; position:relative; overflow:hidden; }
+  .dash-hero::before { content:""; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(110% 160% at 0% 0%, color-mix(in srgb, var(--hero-c) 11%, transparent), transparent 55%); }
+  html[dir="rtl"] .dash-hero::before { background:radial-gradient(110% 160% at 100% 0%, color-mix(in srgb, var(--hero-c) 11%, transparent), transparent 55%); }
+  .dash-hero[data-state="ok"] { --hero-c:var(--ok); }
+  .dash-hero[data-state="warn"] { --hero-c:var(--wr); border-color:var(--wr-b40); }
+  .dash-hero[data-state="err"] { --hero-c:var(--er); border-color:var(--er-b45); }
+  .hero-status { display:flex; align-items:center; gap:14px; min-width:0; position:relative; }
+  .hero-orb { width:44px; height:44px; border-radius:50%; flex:none; display:grid; place-items:center;
+    background:color-mix(in srgb, var(--hero-c) 14%, transparent); border:1px solid color-mix(in srgb, var(--hero-c) 35%, transparent); }
+  .hero-orb i { width:14px; height:14px; border-radius:50%; background:var(--hero-c); }
+  .dash-hero[data-state="ok"] .hero-orb i { animation:heroPing 2.4s ease-out infinite; }
+  @keyframes heroPing { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--hero-c) 55%, transparent); }
+    80%, 100% { box-shadow:0 0 0 11px transparent; } }
+  .hero-txt { min-width:0; display:grid; gap:2px; }
+  .hero-txt .kpi-sub { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .hero-val { font-size:26px; font-weight:700; letter-spacing:-.02em; line-height:1.2; color:var(--hero-c);
+    font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .dash-hero[data-state="unset"] .hero-val, .hero-lat .hero-val { color:var(--tx); }
+  .hero-link { display:grid; grid-template-columns:auto minmax(64px,1fr) auto; align-items:center; gap:12px; min-width:0; position:relative; }
+  .hero-node { display:grid; justify-items:center; gap:3px; text-align:center; min-width:0; max-width:170px; }
+  .hero-node-ic { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; margin-bottom:3px;
+    background:var(--s2); border:1px solid var(--ln2); color:var(--tx2); }
+  .hero-node-ic svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .hero-node-name { font-size:var(--fs-small); font-weight:600; color:var(--tx); }
+  .hero-node-ip { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; color:var(--mu);
+    direction:ltr; unicode-bidi:isolate; overflow-wrap:anywhere; }
+  .hero-wire { display:grid; justify-items:center; gap:8px; min-width:0; }
+  .hero-line { width:100%; height:2px; border-radius:2px; opacity:.9;
+    background:repeating-linear-gradient(90deg, var(--hero-c) 0 8px, transparent 8px 14px); }
+  .dash-hero[data-state="ok"] .hero-line { animation:heroFlow 1.2s linear infinite; }
+  @keyframes heroFlow { to { background-position:28px 0; } }
+  html[dir="rtl"] .dash-hero[data-state="ok"] .hero-line { animation-direction:reverse; }
+  .dash-hero[data-state="unset"] .hero-line { background:repeating-linear-gradient(90deg, var(--ln2) 0 3px, transparent 3px 8px); }
+  .hero-chips { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
+  .hero-wire-sub { font-size:12px; color:var(--dim); text-align:center; }
+  .hero-lat { display:grid; gap:2px; justify-items:end; text-align:end; position:relative; }
+  @media (prefers-reduced-motion: reduce) { .hero-orb i, .hero-line { animation:none !important; } }
+  /* Layout follows the space the dashboard has (side panel open or not), not the window. */
+  @container dash (max-width:900px) { .dash-hero { grid-template-columns:minmax(0,1fr) auto; } .hero-link { grid-column:1 / -1; grid-row:2; } }
+  @container dash (max-width:520px) { .dash-hero { padding:16px; gap:16px 12px; } .hero-val { font-size:22px; }
+    .hero-orb { width:38px; height:38px; } .hero-node { max-width:120px; } .hero-node-ic { width:34px; height:34px; } .hero-link { gap:8px; } }
+  /* Live traffic: the current rate is the number; the lifetime total is a footnote */
+  .kpi-traffic { grid-column:span 8; }
+  .kpi-conns { grid-column:span 4; }
+  @container dash (max-width:640px) { .kpi-traffic, .kpi-conns { grid-column:1 / -1; } }
+  .trf-cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .trf-col { display:grid; gap:4px; min-width:0; }
+  .trf-col + .trf-col { border-inline-start:1px solid var(--ln); padding-inline-start:16px; }
+  .trf-k { display:flex; align-items:center; gap:8px; font-size:var(--fs-small); color:var(--mu); }
+  .dash-grid .trf-col .kpi-val { font-size:clamp(20px, 5.5cqi, 30px); white-space:nowrap; }
+  .trf-total { display:flex; flex-wrap:wrap; gap:4px 8px; align-items:baseline; padding-top:12px; border-top:1px solid var(--ln); }
+  .trf-total b { color:var(--tx2); font-weight:600; font-variant-numeric:tabular-nums; }
+  .sw { display:inline-block; width:12px; height:4px; border-radius:2px; vertical-align:middle; flex:none; }
+  .sw-dl { background:var(--info); } .sw-ul { background:var(--sc); }
+  .kpi-ico[data-lvl="ok"] { background:var(--ok-soft); border-color:var(--ok-b40); color:var(--ok); }
+  .kpi-ico[data-lvl="warn"] { background:var(--wr-soft); border-color:var(--wr-b40); color:var(--wr); }
+  .kpi-ico[data-lvl="err"] { background:var(--er-soft); border-color:var(--er-b45); color:var(--er); }
+  .kpi-ico[data-lvl="dim"] { background:var(--sunk); border-color:var(--ln); color:var(--dim); }
+  /* System: ring gauges */
+  .sys-grid { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; }
+  @container dash (max-width:760px) { .sys-grid { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .sys-item { display:flex; align-items:center; gap:12px; min-width:0; padding:12px 14px; border-radius:14px;
+    background:var(--sunk); border:1px solid var(--ln); }
+  .sys-item > div:last-child { min-width:0; }
+  .sys-k { font-size:var(--fs-small); font-weight:600; color:var(--tx); }
+  .sys-v { font-size:18px; font-weight:700; color:var(--tx); font-variant-numeric:tabular-nums; }
+  .gauge { --p:0; --g:var(--ok); position:relative; width:56px; height:56px; flex:none; display:grid; place-items:center; }
+  .gauge svg { position:absolute; inset:0; width:100%; height:100%; transform:rotate(-90deg); }
+  .gauge circle { fill:none; stroke-width:4; }
+  .g-bg { stroke:var(--ln2); }
+  .g-fg { stroke:var(--g); stroke-linecap:round; stroke-dasharray:var(--p) 100; transition:stroke-dasharray .6s var(--spring), stroke .3s ease; }
+  .gauge[data-lvl="warn"] { --g:var(--wr); } .gauge[data-lvl="err"] { --g:var(--er); } .gauge[data-lvl="dim"] { --g:transparent; }
+  .g-val { position:relative; font-size:12px; font-weight:700; color:var(--tx); font-variant-numeric:tabular-nums; }
+  .gauge-plain { border-radius:50%; background:var(--s2); border:1px solid var(--ln); }
+  .gauge-plain svg { position:static; transform:none; width:24px; height:24px; fill:none; stroke:var(--mu); stroke-width:1.8; stroke-linecap:round; }
+  @container dash (max-width:400px) { .sys-item { flex-direction:column; text-align:center; gap:8px; padding:12px 8px; } }
+  /* Tunnels table (one row per foreign server) */
+  .pt { display:grid; min-width:0; }
+  .pt-row { display:grid; grid-template-columns:minmax(130px,1.4fr) minmax(120px,1fr) 84px minmax(70px,1fr) 84px 96px;
+    gap:12px; align-items:center; padding:10px 12px; border-radius:12px; font-size:var(--fs-small); color:var(--tx2); min-width:0; }
+  .pt-head { padding-block:0 4px; font-size:12px; font-weight:600; color:var(--dim); }
+  #dashPeersList .pt-row { background:var(--sunk); border:1px solid var(--ln); cursor:pointer; margin-top:6px; transition:border-color .15s ease; }
+  #dashPeersList .pt-row:hover { border-color:var(--ln2); }
+  .pt-row > span { min-width:0; }
+  .pt-name { display:flex; align-items:center; gap:8px; font-weight:600; color:var(--tx); }
+  .pt-name b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pt-dot { width:8px; height:8px; border-radius:50%; flex:none; background:var(--er); }
+  .pt-dot.on { background:var(--ok); }
+  .pt-mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; direction:ltr; unicode-bidi:isolate; overflow-wrap:anywhere; }
+  .pt-k { display:none; }
+  @container dash (max-width:720px) {
+    .pt-head { display:none; }
+    .pt-row { grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px 12px; }
+    .pt-name { grid-column:1 / -1; }
+    .pt-k { display:block; font-size:12px; color:var(--dim); font-weight:500; }
+  }
+  @container dash (max-width:440px) { .pt-row { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .det-empty { grid-column:1 / -1; font-size:var(--fs-small); color:var(--mu); padding:14px 16px;
+    border:1px dashed var(--ln2); border-radius:14px; }
+  .det-pulse.off { background:var(--dim); animation:none; }
   .chart-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
   .chart-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .chart-live-badge {
     display:inline-flex; align-items:center; gap:6px;
     padding:4px 9px; border-radius:99px;
-    font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
-    line-height:1; font-variant-numeric:tabular-nums;
+    font-size:12px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums;
     background:color-mix(in srgb, var(--info) 9%, transparent); border:1px solid color-mix(in srgb, var(--info) 25%, transparent);
     color:var(--info); -webkit-user-select:none; user-select:none;
     transition:background .2s ease, border-color .2s ease, color .2s ease;
@@ -237,6 +325,9 @@
   @media (prefers-reduced-motion: reduce) {
     .chart-live-badge .live-dot { animation:none !important; }
   }
+  #actLiveBadge.is-ok { background:var(--ok-soft); border-color:var(--ok-b40); color:var(--ok); }
+  #actLiveBadge.is-ok .live-dot { background:var(--ok); box-shadow:none; animation:none; }
+  .chart-live-badge[hidden] { display:none; }
   .chart-filters { display:flex; gap:4px; padding:4px; border-radius:10px; border:1px solid var(--ln); background:var(--s2); }
   .chart-filters button { border:0; background:transparent; color:var(--mu); border-radius:7px;
     padding:6px 12px; font-size:var(--fs-small); font-weight:600; cursor:pointer;
@@ -258,16 +349,10 @@
   .chart-card .chart-filters button[aria-pressed="true"] { background:color-mix(in srgb, var(--tx) 13%, transparent);
     color:var(--tx); box-shadow:0 1px 6px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.08); }
   #trafficChart { width:100%; height:260px; display:block; }
-  .chart-down { border:1px solid var(--er-b45); border-radius:var(--r-md);
-    padding:10px 14px; font-size:var(--fs-body); color:var(--er);
-    background:var(--er-soft); box-shadow:0 0 0 1px color-mix(in srgb, var(--er) 20%, transparent);
-    margin-top:10px; margin-bottom:6px; }
-  .chart-card.is-down { border-color:var(--er-b45);
-    box-shadow:0 0 24px color-mix(in srgb, var(--er) 12%, transparent), var(--lift-sm); }
+  .chart-down { border:1px solid var(--ln); border-radius:var(--r-md); padding:10px 14px;
+    font-size:var(--fs-small); color:var(--mu); background:var(--sunk); margin-top:10px; margin-bottom:6px; }
   .chart-legend { display:flex; gap:16px; font-size:var(--fs-small); color:var(--mu); flex-wrap:wrap; margin-top:10px; align-items:center; }
-  .chart-legend .sw { display:inline-block; width:12px; height:4px; border-radius:2px; margin-inline-end:6px; vertical-align:middle; transition:background .2s ease; }
-  .chart-legend .sw-dl, .chart-legend span:first-child .sw { background:var(--info); box-shadow:0 0 6px color-mix(in srgb, var(--info) 45%, transparent); }
-  .chart-legend .sw-ul, .chart-legend span:last-child .sw { background:var(--sc); box-shadow:0 0 6px rgba(167,139,250,.35); }
+  .chart-legend .sw { margin-inline-end:6px; transition:background .2s ease; }
   /* Glass tooltip */
   .ent-chart-tip {
     position:absolute; z-index:40; pointer-events:none; display:none; align-items:center; gap:8px;
@@ -315,10 +400,7 @@
     box-shadow:none;
     animation:none;
   }
-  body[data-t="light"] .chart-legend .sw-dl, body[data-t="light"] .chart-legend span:first-child .sw { background:var(--info) !important; box-shadow:none; }
-  body[data-t="light"] .chart-legend .sw-ul, body[data-t="light"] .chart-legend span:last-child .sw { background:var(--sc) !important; box-shadow:none; }
-  .chart-card.is-down .chart-legend .sw-dl, .chart-card.is-down .chart-legend span:first-child .sw { background:var(--er) !important; box-shadow:none; }
-  .chart-card.is-down .chart-legend .sw-ul, .chart-card.is-down .chart-legend span:last-child .sw { background:color-mix(in srgb, var(--er) 50%, transparent) !important; box-shadow:none; }
+  .chart-card.is-down .chart-legend .sw { background:var(--dim); }
   body[data-t="light"] .ent-chart-tip {
     background:color-mix(in srgb, var(--s1) 96%, transparent); border-color:var(--ln2); color:var(--tx);
     box-shadow:0 8px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -389,8 +471,7 @@
     background:linear-gradient(180deg, color-mix(in srgb, var(--sunk) 70%, transparent), var(--sunk));
     border:1px solid var(--ln); box-shadow:inset 0 1px 0 rgba(255,255,255,.05); transition:border-color .2s ease; }
   .det-card:hover { border-color:var(--ln2); }
-  .det-head { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700;
-    letter-spacing:.07em; text-transform:uppercase; color:var(--mu); }
+  .det-head { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:var(--tx); }
   /* peer cards reuse the same header look (class alias, same rules) */
   .det-card-head { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700;
     letter-spacing:.07em; text-transform:uppercase; color:var(--mu); }
@@ -1308,32 +1389,57 @@
           </div>
         </div>
 
-        <div class="dash-grid ent-dense kpi-hero dash-loading" id="dashGrid">
-          <div class="tunnel-card kpi">
-            <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_traffic">Traffic &amp; Speed</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg></span></div>
-            <div class="kpi-val" id="kpiTraffic">N/A</div>
-            <div class="kpi-sub" id="kpiTrafficSub">↑ — · ↓ —</div>
+        <div class="dash-grid ent-dense dash-loading" id="dashGrid">
+          <div class="tunnel-card dash-span dash-hero" id="dashHero" data-state="unset">
+            <div class="hero-status">
+              <span class="hero-orb" aria-hidden="true"><i></i></span>
+              <div class="hero-txt">
+                <span class="kpi-label" data-i18n="kpi_status">Tunnel Status</span>
+                <div class="hero-val" id="kpiStatus">—</div>
+                <div class="kpi-sub" id="kpiStatusSub">—</div>
+              </div>
+            </div>
+            <div class="hero-link" id="heroLink">
+              <div class="hero-node">
+                <span class="hero-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>
+                <span class="hero-node-name" id="heroLocalName">This server</span>
+                <span class="hero-node-ip" id="heroLocalIp" data-no-i18n>—</span>
+              </div>
+              <div class="hero-wire">
+                <span class="hero-chips" id="kpiLinks"></span>
+                <span class="hero-line" aria-hidden="true"></span>
+                <span class="hero-wire-sub" id="kpiLinksSub"></span>
+              </div>
+              <div class="hero-node">
+                <span class="hero-node-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
+                <span class="hero-node-name" id="heroRemoteName">Other server</span>
+                <span class="hero-node-ip" id="heroRemoteIp" data-no-i18n>—</span>
+              </div>
+            </div>
+            <div class="hero-lat">
+              <span class="kpi-label" data-i18n="kpi_latency">Latency</span>
+              <div class="hero-val" id="kpiPing">—</div>
+              <div class="kpi-sub" id="kpiPingSub">—</div>
+            </div>
           </div>
-          <div class="tunnel-card kpi">
-            <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_status">Tunnel Status</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span></div>
-            <div class="kpi-val" id="kpiStatus">—</div>
-            <div class="kpi-sub" id="kpiStatusSub">—</div>
+          <div class="tunnel-card kpi kpi-traffic">
+            <div class="kpi-top"><span class="kpi-label">Live traffic</span><span class="kpi-ico" id="icoTraffic"><svg viewBox="0 0 24 24"><path d="M7 4v16M7 20l-4-4M7 20l4-4M17 20V4M17 4l-4 4M17 4l4 4"/></svg></span></div>
+            <div class="trf-cols">
+              <div class="trf-col"><span class="trf-k"><i class="sw sw-dl"></i>Download</span><span class="kpi-val" id="kpiDown">—</span></div>
+              <div class="trf-col"><span class="trf-k"><i class="sw sw-ul"></i>Upload</span><span class="kpi-val" id="kpiUpRate">—</span></div>
+            </div>
+            <div class="kpi-sub trf-total"><span>Total transferred</span><b id="kpiTraffic">—</b><span id="kpiTrafficSub"></span></div>
           </div>
-          <div class="tunnel-card kpi">
-            <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_links">Links (GRE / FRP)</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span></div>
-            <div class="kpi-val" id="kpiLinks">—</div>
-            <div class="kpi-sub" id="kpiLinksSub">—</div>
-          </div>
-          <div class="tunnel-card kpi">
-            <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_latency">Latency</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></span></div>
-            <div class="kpi-val" id="kpiPing">N/A</div>
-            <div class="kpi-sub" id="kpiPingSub">—</div>
+          <div class="tunnel-card kpi kpi-conns">
+            <div class="kpi-top"><span class="kpi-label">Connections</span><span class="kpi-ico" id="icoConns"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span></div>
+            <div class="kpi-val" id="kpiConns">—</div>
+            <div class="kpi-sub" id="kpiConnsSub">—</div>
           </div>
           <div class="tunnel-card dash-span chart-card" id="chartCard">
             <div class="chart-head">
               <div><p class="chart-title" data-i18n="chart_traffic_title">Tunnel Traffic Throughput</p><div class="chart-sub" id="chartHint" data-i18n="chart_traffic_sub">Real-time download and upload speeds over time</div></div>
               <div class="chart-actions">
-                <div class="chart-live-badge" id="chartLiveBadge"><span class="live-dot"></span><span class="live-txt">LIVE</span></div>
+                <div class="chart-live-badge" id="chartLiveBadge"><span class="live-dot"></span><span class="live-txt">Live</span></div>
                 <div class="chart-filters" role="group" aria-label="Range">
                   <button data-range="1h" aria-pressed="false">1H</button>
                   <button data-range="24h" aria-pressed="true">24H</button>
@@ -1341,48 +1447,51 @@
                 </div>
               </div>
             </div>
-            <div class="chart-down hidden" id="chartDown">Tunnel is down — no live traffic. History below is stale until the tunnel comes back up.</div>
+            <div class="chart-down hidden" id="chartDown">Tunnel is down. The history below is from before it stopped.</div>
             <canvas id="trafficChart" height="260"></canvas>
             <div class="chart-legend"><span><i class="sw sw-dl"></i><span data-i18n="download">Download</span></span><span><i class="sw sw-ul"></i><span data-i18n="upload">Upload</span></span></div>
-            <div class="warnbox hidden" id="tunnelWarn"></div>
           </div>
           <div class="tunnel-card dash-span chart-card" id="activityCard">
             <div class="chart-head">
-              <div><p class="chart-title">Tunnel Activity &amp; Connections</p><div class="chart-sub">Active concurrent connections and session stream over time</div></div>
+              <div><p class="chart-title">Active Connections</p><div class="chart-sub">Established TCP and UDP connections on this server</div></div>
               <div class="chart-actions">
-                <div class="chart-live-badge" id="actLiveBadge"><span class="live-dot u-bg-ok u-noglow"></span><span class="live-txt">STREAM</span></div>
+                <div class="chart-live-badge" id="actLiveBadge"><span class="live-dot"></span><span class="live-txt" id="actNow">—</span></div>
               </div>
             </div>
             <canvas id="activityChart" height="130" class="u-w-full u-h-130 u-block"></canvas>
-            <div class="chart-legend"><span class="u-c-ok"><i class="sw u-bg-ok u-noglow"></i>Active Connections</span></div>
           </div>
-          <div class="tunnel-card kpi">
-            <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_cpu">CPU</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></span></div>
-            <div class="kpi-val" id="kpiCpu">N/A</div>
-            <div class="kpi-sub" id="kpiCpuSub">—</div>
-            <div class="sysbar"><i id="cpuBar"></i></div>
+          <div class="tunnel-card dash-span sys-card">
+            <div class="tc-header"><p class="tc-title">System</p><span class="det-checked" id="kpiUpSub">—</span></div>
+            <div class="sys-grid">
+              <div class="sys-item">
+                <div class="gauge" id="gCpu"><svg viewBox="0 0 40 40" aria-hidden="true"><circle class="g-bg" cx="20" cy="20" r="16"/><circle class="g-fg" cx="20" cy="20" r="16" pathLength="100"/></svg><span class="g-val" id="kpiCpu">—</span></div>
+                <div><div class="sys-k" data-i18n="kpi_cpu">CPU</div><div class="kpi-sub" id="kpiCpuSub">—</div></div>
+              </div>
+              <div class="sys-item">
+                <div class="gauge" id="gRam"><svg viewBox="0 0 40 40" aria-hidden="true"><circle class="g-bg" cx="20" cy="20" r="16"/><circle class="g-fg" cx="20" cy="20" r="16" pathLength="100"/></svg><span class="g-val" id="kpiRam">—</span></div>
+                <div><div class="sys-k" data-i18n="kpi_ram">RAM</div><div class="kpi-sub" id="kpiRamSub">—</div></div>
+              </div>
+              <div class="sys-item">
+                <div class="gauge" id="gDisk"><svg viewBox="0 0 40 40" aria-hidden="true"><circle class="g-bg" cx="20" cy="20" r="16"/><circle class="g-fg" cx="20" cy="20" r="16" pathLength="100"/></svg><span class="g-val" id="kpiDisk">—</span></div>
+                <div><div class="sys-k" data-i18n="kpi_disk">Disk</div><div class="kpi-sub" id="kpiDiskSub">—</div></div>
+              </div>
+              <div class="sys-item">
+                <div class="gauge gauge-plain"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div>
+                <div><div class="sys-k">Uptime</div><div class="sys-v" id="kpiUp">—</div></div>
+              </div>
+            </div>
           </div>
-          <div class="tunnel-card kpi">
-            <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_ram">RAM</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 7v10h16V7M4 7l2-3h12l2 3"/></svg></span></div>
-            <div class="kpi-val" id="kpiRam">N/A</div>
-            <div class="kpi-sub" id="kpiRamSub">—</div>
-            <div class="sysbar"><i id="ramBar"></i></div>
-          </div>
-          <div class="tunnel-card kpi">
-            <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_disk">Disk</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg></span></div>
-            <div class="kpi-val" id="kpiDisk">N/A</div>
-            <div class="kpi-sub" id="kpiDiskSub">—</div>
-            <div class="sysbar"><i id="diskBar"></i></div>
-          </div>
-          <div class="tunnel-card kpi">
-            <div class="kpi-top"><span class="kpi-label" data-i18n="kpi_conns">Uptime / Conns</span><span class="kpi-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></span></div>
-            <div class="kpi-val" id="kpiUp">N/A</div>
-            <div class="kpi-sub" id="kpiUpSub">—</div>
+          <div class="tunnel-card dash-span" id="dashPeersCard" hidden>
+            <div class="tc-header"><p class="tc-title" id="dashPeersTitle">Tunnels</p><button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="dashPeersOpen">Open Tunnel tab</button></div>
+            <div class="pt" role="table" aria-label="Tunnels">
+              <div class="pt-row pt-head" role="row"><span role="columnheader">Name</span><span role="columnheader">Foreign server</span><span role="columnheader">Engine</span><span role="columnheader">Ports</span><span role="columnheader">Ping</span><span role="columnheader">Traffic</span></div>
+              <div id="dashPeersList" role="rowgroup"></div>
+            </div>
           </div>
           <div class="tunnel-card dash-span">
             <div class="tc-header">
               <div class="det-head-live">
-                <span class="det-pulse"></span>
+                <span class="det-pulse" id="detPulse"></span>
                 <p class="tc-title" data-i18n="details">Details</p>
               </div>
               <span class="det-checked" id="dashChecked">—</span>
