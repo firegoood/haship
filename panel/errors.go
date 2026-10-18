@@ -88,6 +88,7 @@ var errCatalog = map[string]errInfo{
 	"E-UPDATE-06": {500, "cannot sync hashem.sh installer script", "Panel binary updated, but installer script download failed — check internet or DNS."},
 	"E-UPDATE-07": {502, "checksum verification failed", "Downloaded binary or script failed SHA256 checksum check."},
 	"E-UPDATE-08": {400, "invalid update channel", "Channel must be stable or dev."},
+	"E-UPDATE-09": {500, "new version did not start (rolled back)", "The panel went back to the previous version. Check the Logs tab, then try again or pick another version."},
 	// license & premium
 	"E-LIC-01": {403, "premium license required for this feature", "Activate a valid Premium license key in Settings to unlock this feature."},
 	"E-LIC-02": {400, "invalid license key format", "Check that the complete license string was pasted without extra spaces or line breaks."},

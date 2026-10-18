@@ -5,6 +5,14 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
 ## Unreleased — Dashboard and Performance redesign
 
+### Update tab
+- **Automatic rollback that actually happens.** The old binary was kept as `.bak`, but nothing put it back if the new version did not start, so the panel stayed down (the confirm dialog promised a rollback). Now a short-lived systemd unit outside the panel's own service waits 60 s after an update; if the new binary has not started listening by then, it restores the previous one and restarts the panel. The tab then says which version failed and that it went back, and the error log records it (`E-UPDATE-09`).
+- **Check Now works.** On an up-to-date panel the Check button was disabled, so it could never be pressed. It now asks GitHub again instead of answering from the 10-minute cache (at most every 30 s), and a failed check no longer retries every 5 s forever.
+- **The page waits for the new version.** It reloaded as soon as `/api/health` answered, which the old panel often did before restarting, so the page came back on the old version. It now waits until the version changes and shows the steps: download and verify, restart, reload.
+- **What's New:** release notes for every version between the installed and the latest one.
+- **Other server:** shows the linked server's panel version and says when the two differ (peers now report their version).
+- Installed and available versions side by side, last-checked time, release dates in the version list, the installed version cannot be "reinstalled" from it, and older versions moved under "Install a specific version". Fully translated to Persian.
+
 ### Setup tab
 - **A foreign server could not join an Iran server set up with KCP, QUIC, WebSocket or WSS.** That bundle has eight parts (`…_fou443-55555_tr-kcp`) and the Setup form refused anything over seven. It now reads the transport too, shows it, and locks the FRP transport list to it (the server applied the bundle's transport anyway, whatever the list said).
 - **Add Another Server Instead** (shown when the form is locked) did nothing; it now jumps to the add-server form.

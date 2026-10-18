@@ -639,6 +639,7 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/update/channel", requireAuth(handleUpdateChannelGet))
 	mux.HandleFunc("POST "+base+"/api/update/channel", requireAuth(requireCSRF(handleUpdateChannelPost)))
 	mux.HandleFunc("GET "+base+"/api/releases", requireAuth(handleReleases))
+	mux.HandleFunc("GET "+base+"/api/update/peer", requireAuth(handleUpdatePeer))
 	mux.HandleFunc("POST "+base+"/api/setup", requireAuth(requireCSRF(handleSetupPost)))
 	mux.HandleFunc("GET "+base+"/api/peers", requireAuth(handlePeersGet))
 	mux.HandleFunc("POST "+base+"/api/peers", requireAuth(requireCSRF(handlePeersPost)))
@@ -766,6 +767,9 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 	applyServerLimits(srv)
+	// Listening: an update that brought this binary in worked.
+	clearUpdatePending()
+	reportRollback()
 	// systemd stop sends SIGTERM: flush history, then stop serving.
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)

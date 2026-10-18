@@ -3304,86 +3304,215 @@ $('savePass').onclick = async () => {
   catch(e) { toastErr('password change failed', e.message); }
   b.disabled = false;
 };
-async function loadVersion() {
+// ---------- Update tab ----------
+let updState = { current: '', latest: '', avail: false, busy: false };
+
+// Release notes are Markdown; render the few parts they use, escaped first.
+function mdLite(src) {
+  const inline = t => esc(t)
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  let html = '', list = false;
+  for (const raw of String(src || '').replace(/\r/g, '').split('\n')) {
+    const line = raw.trimEnd();
+    const li = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (li) { if (!list) { html += '<ul>'; list = true; } html += '<li>' + inline(li[1]) + '</li>'; continue; }
+    if (list) { html += '</ul>'; list = false; }
+    const h = /^#{1,6}\s+(.*)$/.exec(line);
+    if (h) html += '<h4>' + inline(h[1]) + '</h4>';
+    else if (line.trim()) html += '<p>' + inline(line) + '</p>';
+  }
+  return html + (list ? '</ul>' : '');
+}
+
+function updAgo(ts) {
+  if (!ts) return '—';
+  const d = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (d < 60) return tr('', 'just now');
+  if (d < 3600) return docTpl('{0} min ago', [Math.round(d / 60)]);
+  return docTpl('{0} h ago', [Math.round(d / 3600)]);
+}
+function updRow(k, vHTML) { return '<div class="ver-row"><span class="k">' + esc(k) + '</span><span>' + vHTML + '</span></div>'; }
+function updDot(cls, txt) { $('updDot').className = 'status-indicator ' + cls; $('updDotTxt').textContent = txt; }
+
+async function loadVersion(force) {
+  const chk = $('updCheckBtn');
+  if (force) { chk.disabled = true; chk.textContent = tr('', 'Checking…'); }
   try {
-    const v = await api('/api/version');
-    const cur = $('verCurrent'); if (cur) cur.textContent = v.current || '—';
+    const v = await api('/api/version' + (force ? '?refresh=1' : ''));
+    updState.current = v.current || ''; updState.latest = v.latest || ''; updState.avail = !!v.update_available;
+    $('verCurrent').textContent = v.current || '—';
     const isDev = v.channel === 'dev';
-    if ($('updChannel')) $('updChannel').value = isDev ? 'dev' : 'stable';
+    $('updChannel').value = isDev ? 'dev' : 'stable';
     $('updDevBadge').classList.toggle('hidden', !isDev);
     $('updChannelWarn').classList.toggle('hidden', !isDev);
-    const rows = $('verRowsUpd');
-    if (rows) rows.innerHTML = '<div class="ver-row"><span class="k">Latest release</span><span>' + esc(v.latest || 'unknown') + '</span></div>'
-      + '<div class="ver-row"><span class="k">Status</span><span>' + (v.update_available ? '<span class="badge info"><span class="dot"></span>update available</span>' : '<span class="badge ok"><span class="dot"></span>up to date</span>') + '</span></div>';
     const badge = $('updBadge'); if (badge) badge.classList.toggle('hidden', !v.update_available);
     if (typeof drawerSync === 'function') drawerSync();
-    const dot = $('updDot');
-    if (dot) { dot.className = 'status-indicator ' + (v.update_available ? 'offline' : 'active'); $('updDotTxt').textContent = v.update_available ? 'update available' : 'up to date'; }
+
+    const failed = !v.latest || v.latest === 'unknown';
+    $('updTo').hidden = !v.update_available;
+    $('verLatest').textContent = v.latest || '—';
+    if (failed) updDot('warn', tr('', 'Check failed'));
+    else updDot(v.update_available ? 'warn' : 'ok', tr('', v.update_available ? 'Update available' : 'Up to date'));
+
+    let rows = updRow(tr('', 'Latest release'), failed ? esc(tr('', 'Unknown: GitHub could not be reached')) : '<bdi dir="ltr">' + esc(v.latest) + '</bdi>');
+    rows += updRow(tr('', 'Last checked'), esc(updAgo(v.checked_at)));
+    rows += '<div class="ver-row" id="updPeerRow" hidden></div>';
+    $('verRowsUpd').innerHTML = rows;
+
+    const rb = $('updRollback');
+    rb.hidden = !v.rolled_back;
+    if (v.rolled_back) rb.textContent = docTpl('Version {0} did not start, so the panel went back to {1} by itself. See the Logs tab before trying again.', [v.rolled_back, v.current]);
+
     const btn = $('updateBtn');
-    if (v.update_available) { btn.disabled = false; btn.textContent = 'Update to ' + v.latest; }
-    else { btn.disabled = true; btn.textContent = 'Check for Updates'; }
-    loadRollback();
-    $('updateMsg').textContent = v.update_available ? 'A newer release (' + v.latest + ') is ready. Press Update to install it here.' : 'You are on the latest release.';
-  } catch(e) {
-    const rows = $('verRowsUpd'); if (rows) rows.innerHTML = '<div class="warnbox">Version check failed: ' + esc(e.message) + '</div>';
-    $('updateMsg').textContent = 'Check failed — will retry. (' + e.message + ')';
-    // Auto-retry once after 5s so a transient GitHub hiccup doesn't stick.
-    setTimeout(async () => { try { await api('/api/status'); loadVersion(); } catch(_){ /* panel still restarting: ignore */ } }, 5000);
+    btn.hidden = !v.update_available || updState.busy;
+    btn.disabled = updState.busy;
+    btn.textContent = docTpl('Update to {0}', [v.latest]);
+    if (!updState.busy) {
+      $('updateMsg').textContent = failed
+        ? tr('', 'Could not reach GitHub to check for a new version. Check that this server can reach github.com, then press Check Now.')
+        : v.update_available ? tr('', 'A new version is ready. Updating restarts only the panel; tunnels keep running.') : '';
+    }
+
+    const changes = v.changes || [];
+    $('updNotesCard').hidden = !changes.length;
+    $('updNotes').innerHTML = changes.map(c =>
+      `<section class="upd-rel"><div class="upd-rel-head"><b data-no-i18n>${esc(c.tag)}</b><span class="qs-hint">${esc(c.date ? new Date(c.date).toLocaleDateString() : '')}</span></div><div class="upd-md" data-no-i18n>${mdLite(String(c.notes || '').replace(/^\s*#{1,6}[^\n]*\n?/, m => m.includes(c.tag) ? '' : m)) || '<p>' + esc(tr('', 'No notes for this release.')) + '</p>'}</div></section>`).join('');
+  } catch (e) {
+    updDot('warn', tr('', 'Check failed'));
+    if (!updState.busy) $('updateMsg').textContent = e.message;
+  } finally {
+    chk.disabled = updState.busy;
+    chk.textContent = tr('', 'Check Now');
   }
+  if (!$('tab-update').hidden) { loadRollback(); loadPeerVersion(); }
 }
+
+async function loadPeerVersion() {
+  let p;
+  try { p = await api('/api/update/peer'); } catch (_) { return; }
+  const row = $('updPeerRow');
+  if (!row || !p.configured) return;
+  let v;
+  if (!p.reachable) v = '<span class="qs-hint">' + esc(tr('', 'Not reachable')) + '</span>';
+  else if (!p.version) v = '<span class="badge warn">' + esc(tr('', 'Older version: update it too')) + '</span>';
+  else if (p.same) v = '<bdi dir="ltr">' + esc(p.version) + '</bdi> <span class="badge ok">' + esc(tr('', 'Same')) + '</span>';
+  else v = '<bdi dir="ltr">' + esc(p.version) + '</bdi> <span class="badge warn">' + esc(tr('', 'Different: update both servers')) + '</span>';
+  row.innerHTML = '<span class="k">' + esc(tr('', 'Other server')) + '</span><span>' + v + '</span>';
+  row.hidden = false;
+}
+
 async function loadRollback() {
-  const sel = $('rbTag'), b = $('rbBtn'); if (!sel) return;
+  const sel = $('rbTag'), b = $('rbBtn');
   try {
     const r = await api('/api/releases');
-    const cur = $('verCurrent') ? $('verCurrent').textContent : '';
-    sel.innerHTML = (r.releases || []).map(x => '<option value="' + esc(x.tag) + '">' + esc(x.tag) + (x.tag === cur ? ' (installed)' : '') + '</option>').join('') || '<option value="">No releases</option>';
-    b.disabled = !(r.releases || []).length;
-  } catch(e) { sel.innerHTML = '<option value="">' + esc(e.message) + '</option>'; b.disabled = true; }
+    const cur = updState.current;
+    const rels = r.releases || [];
+    sel.innerHTML = rels.map(x => '<option value="' + esc(x.tag) + '">' + esc(x.tag) +
+      (x.date ? ' · ' + esc(new Date(x.date).toLocaleDateString()) : '') +
+      (x.tag === cur ? ' · ' + esc(tr('', 'installed')) : '') + '</option>').join('') ||
+      '<option value="">' + esc(tr('', 'No releases')) + '</option>';
+    const syncBtn = () => { b.disabled = !sel.value || sel.value === updState.current || updState.busy; };
+    sel.onchange = syncBtn;
+    syncBtn();
+  } catch (e) { sel.innerHTML = '<option value="">' + esc(e.message) + '</option>'; b.disabled = true; }
 }
+
+function updStep(name, state) {
+  const li = $('updSteps').querySelector('[data-step="' + name + '"]');
+  if (li) li.dataset.state = state;
+}
+
+// Install `tag` (or the newest of the channel) and follow the restart until
+// the panel answers with a different version.
+async function runUpdate(tag) {
+  let before = '';
+  try { before = (await (await fetch(at('/api/health'), {cache: 'no-store'})).json()).version || ''; } catch (_) { /* unknown */ }
+  updState.busy = true;
+  ['updateBtn', 'updCheckBtn', 'rbBtn', 'updChannel'].forEach(id => { $(id).disabled = true; });
+  const steps = $('updSteps');
+  steps.hidden = false;
+  steps.querySelectorAll('li').forEach(li => { delete li.dataset.state; });
+  updStep('dl', 'active');
+  const msg = $('updateMsg');
+  msg.textContent = tr('', 'Downloading and checking the new version. This can take a minute on slow links.');
+  let r;
+  try {
+    r = await api('/api/update', tag ? {tag} : {});
+  } catch (e) {
+    updStep('dl', 'fail');
+    msg.textContent = e.message;
+    toastErr(tr('', 'Update failed'), e.message);
+    updState.busy = false;
+    ['updCheckBtn', 'updChannel'].forEach(id => { $(id).disabled = false; });
+    loadVersion();
+    return;
+  }
+  if (/already latest/.test(r.detail || '')) {
+    steps.hidden = true;
+    updState.busy = false;
+    msg.textContent = tr('', 'Already on the newest version.');
+    loadVersion();
+    return;
+  }
+  updStep('dl', 'done');
+  updStep('restart', 'active');
+  msg.textContent = r.guarded
+    ? tr('', 'Restarting the panel. If the new version does not start within a minute, the previous one is put back automatically.')
+    : tr('', 'Restarting the panel.');
+  const t0 = Date.now();
+  let warned = false;
+  const tick = async () => {
+    let h = null;
+    try { h = await (await fetch(at('/api/health'), {cache: 'no-store'})).json(); } catch (_) { /* restarting */ }
+    if (h && h.status === 'ok' && h.version && h.version !== before) {
+      updStep('restart', 'done');
+      updStep('back', 'active');
+      msg.textContent = docTpl('Running {0}. Reloading…', [r.to || h.version]);
+      setTimeout(() => location.reload(), 1200);
+      return;
+    }
+    const secs = (Date.now() - t0) / 1000;
+    if (secs > 75 && !warned) {
+      warned = true;
+      msg.textContent = r.guarded
+        ? tr('', 'The new version has not answered yet. If it does not start, the previous version comes back by itself; this page follows.')
+        : tr('', 'The panel has not come back yet. If this lasts, run "systemctl status gre-panel" on the server.');
+    }
+    if (secs > 150) {
+      updStep('restart', 'fail');
+      updState.busy = false;
+      ['updCheckBtn', 'updChannel'].forEach(id => { $(id).disabled = false; });
+      loadVersion();
+      return;
+    }
+    setTimeout(tick, 2000);
+  };
+  setTimeout(tick, 2500);
+}
+
+$('updateBtn').onclick = async () => {
+  if (!await entConfirm(docTpl('Update to {0}?', [updState.latest]),
+    tr('', 'Only the panel restarts, for a few seconds; tunnels keep running. If the new version does not start, the previous one is put back automatically. Update the other server too, so both run the same version.'),
+    tr('', 'Update'))) return;
+  runUpdate('');
+};
+$('updCheckBtn').onclick = () => loadVersion(true);
 $('rbBtn').onclick = async () => {
   const tag = $('rbTag').value; if (!tag) return;
-  if (!await entConfirm('Install ' + tag + '?', 'Install ' + tag + ' now (can be older than the running version). The panel will restart; tunnels keep running. A failed install rolls back automatically.', 'Install')) return;
-  $('rbBtn').disabled = true;
-  try {
-    const r = await api('/api/update', {tag});
-    $('updateMsg').textContent = (r.detail || 'installed') + ' — refreshing…';
-    let n = 0;
-    const iv = setInterval(async () => {
-      n++;
-      try { const h = await (await fetch(at('/api/health'), {cache: 'no-store'})).json(); if (h && h.status === 'ok') { clearInterval(iv); location.reload(); } }
-      catch(_){ /* restarting */ }
-      if (n > 30) clearInterval(iv);
-    }, 2000);
-  } catch(e) { toastErr('install failed', e.message); $('rbBtn').disabled = false; }
+  if (!await entConfirm(docTpl('Install {0}?', [tag]),
+    docTpl('Installs {0} in place of {1}, even when it is older. Only the panel restarts; tunnels keep running. Install the same version on the other server too.', [tag, updState.current]),
+    tr('', 'Install'))) return;
+  runUpdate(tag);
 };
 $('updChannel').onchange = async () => {
   const sel = $('updChannel');
-  try { await api('/api/update/channel', {channel: sel.value}); toastOk(tr('upd_channel', 'Update channel'), sel.value); }
-  catch(e) { toastErr('channel change failed', e.message); }
-  loadVersion();
-};
-$('updateBtn').onclick = async () => {
-  const btn = $('updateBtn');
-  // First click = check; second click (when update known) = install.
-  if (btn.disabled) return;
-  if (/^Check/.test(btn.textContent)) { btn.disabled = true; btn.textContent = 'Checking…'; loadVersion(); setTimeout(() => { if (/^Checking/.test(btn.textContent)) { btn.disabled = false; btn.textContent = 'Check for Updates'; } }, 8000); return; }
-  if (!await entConfirm('Update Panel?', 'Update panel to the latest release? The panel will restart (a few seconds downtime). Tunnel services keep running.', 'Update')) return;
-  btn.disabled = true;
-  $('updateMsg').textContent = 'Updating… the panel will restart. This page refreshes automatically.';
   try {
-    const r = await api('/api/update', {});
-    $('updateMsg').textContent = (r.detail || 'updated') + ' — refreshing…';
-    toastOk('update started', r.detail || '');
-    // Poll health until the new binary is up, then reload (max ~60s).
-    let n = 0;
-    const iv = setInterval(async () => {
-      n++;
-      try { const h = await (await fetch(at('/api/health'), {cache: 'no-store'})).json(); if (h && h.status === 'ok') { clearInterval(iv); location.reload(); } }
-      catch(_){ /* health endpoint down while restarting: keep polling */ }
-      if (n > 30) { clearInterval(iv); $('updateMsg').textContent = 'Update sent — if this page does not refresh, reload it manually in ~20s.'; }
-    }, 2000);
-  }
-  catch(e) { $('updateMsg').textContent = e.message; toastErr('update failed', e.message); btn.disabled = false; }
+    await api('/api/update/channel', {channel: sel.value});
+    toastOk(tr('upd_channel', 'Update channel'), sel.value === 'dev' ? tr('upd_channel_dev', 'Dev') : tr('upd_channel_stable', 'Stable'));
+  } catch (e) { toastErr(tr('', 'Could not change the channel'), e.message); }
+  loadVersion(true);
 };
 // ---------- interactive terminal (Phase 3: xterm.js + WS + PTY) ----------
 const termState = { ready: false, enabled: false, ws: null, term: null, fit: null, search: null, hb: null, fontSize: 14, libs: false, connecting: false };

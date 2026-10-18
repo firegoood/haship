@@ -427,6 +427,7 @@ func handlePeerPing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"status":         "pong",
 		"active_carrier": carrierCfg.ActiveCarrier,
+		"version":        panelVersion,
 		"time":           time.Now().UnixNano(),
 	})
 }

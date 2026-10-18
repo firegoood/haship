@@ -117,6 +117,7 @@ type ghRelease struct {
 	Draft       bool   `json:"draft"`
 	Prerelease  bool   `json:"prerelease"`
 	PublishedAt string `json:"published_at"`
+	Body        string `json:"body"`
 }
 
 // releasesFetcher / latestTagFetcher are swapped in tests.
@@ -170,6 +171,23 @@ var (
 // fetchReleases returns the release list, cached for 10 minutes (failures
 // for 1 minute). Every /api/version GET used to walk up to 10 pages of the
 // GitHub API, whose unauthenticated limit is 60 requests an hour (L23).
+// dropReleaseCache makes the next fetch ask GitHub again (Check Now). At most
+// every 30 s, to stay well inside the unauthenticated API limit.
+func dropReleaseCache() {
+	relCacheMu.Lock()
+	defer relCacheMu.Unlock()
+	if time.Since(relCacheAt) > 30*time.Second {
+		relCacheAt = time.Time{}
+	}
+}
+
+// releaseCheckedAt is when the release list was last fetched (zero: never).
+func releaseCheckedAt() time.Time {
+	relCacheMu.Lock()
+	defer relCacheMu.Unlock()
+	return relCacheAt
+}
+
 func fetchReleases() ([]ghRelease, error) {
 	relCacheMu.Lock()
 	defer relCacheMu.Unlock()
@@ -338,14 +356,68 @@ func updateAvailable(current, latest, ch string) bool {
 }
 
 func handleVersion(w http.ResponseWriter, r *http.Request) {
-	latest, _ := latestReleaseTag()
+	if r.URL.Query().Get("refresh") == "1" {
+		dropReleaseCache()
+	}
+	latest, lerr := latestReleaseTag()
 	ch := updateChannel()
-	writeJSON(w, map[string]any{
+	avail := updateAvailable(panelVersion, latest, ch)
+	resp := map[string]any{
 		"current":          displayVersion(panelVersion),
 		"latest":           displayVersion(latest),
 		"channel":          ch,
-		"update_available": updateAvailable(panelVersion, latest, ch),
-	})
+		"update_available": avail,
+	}
+	if lerr != nil && latest == "" {
+		resp["error"] = lerr.Error()
+	}
+	if t := releaseCheckedAt(); !t.IsZero() {
+		resp["checked_at"] = t.Unix()
+	}
+	if avail {
+		resp["changes"] = releaseChanges(ch, panelVersion, latest)
+	}
+	if m := lastRollback(); m != nil {
+		resp["rolled_back"] = displayVersion(m.To)
+	}
+	writeJSON(w, resp)
+}
+
+// releaseChanges lists the release notes between the running version and
+// latest (newest first, at most 5, each cut to 6000 bytes).
+func releaseChanges(ch, current, latest string) []map[string]string {
+	rels, err := releasesFetcher()
+	if err != nil {
+		return nil
+	}
+	sort.SliceStable(rels, func(i, j int) bool { return compareVersions(rels[i].Tag, rels[j].Tag) > 0 })
+	out := []map[string]string{}
+	for _, rel := range rels {
+		if rel.Draft || len(out) >= 5 {
+			continue
+		}
+		if ch == channelDev {
+			if !devTagRe.MatchString(rel.Tag) {
+				continue
+			}
+		} else if rel.Prerelease || !semverRe.MatchString(rel.Tag) {
+			continue
+		}
+		if compareVersions(rel.Tag, latest) > 0 {
+			continue
+		}
+		if k, _ := parseVersion(current); k == 2 || ch != channelDev {
+			if compareVersions(rel.Tag, current) <= 0 {
+				continue
+			}
+		}
+		body := rel.Body
+		if len(body) > 6000 {
+			body = body[:6000] + "\n…"
+		}
+		out = append(out, map[string]string{"tag": rel.Tag, "date": rel.PublishedAt, "notes": body})
+	}
+	return out
 }
 
 // handleReleases lists every release of a channel (newest first) for the UI.

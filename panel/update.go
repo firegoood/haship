@@ -133,7 +133,9 @@ func handleUpdate(w http.ResponseWriter, r *http.Request) {
 	syncPanelScriptFrom(latest)
 
 	LogSecurityAudit("update_success", cfg.Username, ClientIP(r), "installed version "+latest)
-	writeJSON(w, map[string]string{"status": "ok", "detail": "updated to " + displayVersion(latest) + " — restarting panel"})
+	guarded := guardUpdate(exe, panelVersion, latest)
+	writeJSON(w, map[string]any{"status": "ok", "detail": "updated to " + displayVersion(latest) + " — restarting panel",
+		"from": displayVersion(panelVersion), "to": displayVersion(latest), "guarded": guarded})
 	go func() {
 		time.Sleep(1000 * time.Millisecond)
 		restartSelf()
