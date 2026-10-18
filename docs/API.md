@@ -127,6 +127,7 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/update` | session + CSRF | `handleUpdate` |
 | `GET` | `/api/update/channel` | session | `handleUpdateChannelGet` |
 | `POST` | `/api/update/channel` | session + CSRF | `handleUpdateChannelPost` |
+| `GET` | `/api/update/peer` | session | `handleUpdatePeer` |
 | `GET` | `/api/version` | session | `handleVersion` |
 | `GET` | `/api/watchdog` | session | `handleWatchdogGet` |
 | `POST` | `/api/watchdog` | session + CSRF | `handleWatchdogPost` |
@@ -134,4 +135,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 110 routes.
+Total: 111 routes.
