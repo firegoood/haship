@@ -1428,16 +1428,25 @@ async function refresh() {
   return ok;
 }
 // peer add-form: prefill Iran IP + suggest next control port / GRE pair
+let setupDefaults = null;
 async function updatePeerHints(s) {
   try {
-    const d = await api('/api/setup');
+    const d = setupDefaults || {};
     if (!$('pLocalPub').value) $('pLocalPub').value = d.local_public || '';
     const n = (s && s.peer_count) || 0;
     const hint = $('peerCountHint');
-    if (hint) hint.textContent = n + ' / ' + ((s && s.peer_max) || 10) + ' tunnels';
-    if (!$('pFrpPort').value) $('pFrpPort').value = 7000 + n;
-    if (!$('pLocalGre').value) $('pLocalGre').value = '10.1' + (n + 1) + '.0.2';
-    if (!$('pPeerGre').value) $('pPeerGre').value = '10.1' + (n + 1) + '.0.1';
+    if (hint) hint.textContent = docTpl('{0} / {1} tunnels', [n, (s && s.peer_max) || 10]);
+    // Suggest a control port and GRE pair no tunnel here uses yet.
+    const peers = (s && s.peers) || [], L = (s && s.local) || {};
+    const usedPorts = new Set([L.frp_port, L.bind_port, ...peers.map(p => p.frp_port)].filter(Boolean).map(Number));
+    const usedGre = new Set([(L.gre && L.gre.inner || '').split('/')[0], ...peers.map(p => p.local_gre)].filter(Boolean));
+    let port = 7001;
+    while (usedPorts.has(port)) port++;
+    let k = n + 1;
+    while (usedGre.has('10.1' + k + '.0.2') && k < 99) k++;
+    if (!$('pFrpPort').value) $('pFrpPort').value = port;
+    if (!$('pLocalGre').value) $('pLocalGre').value = '10.1' + k + '.0.2';
+    if (!$('pPeerGre').value) $('pPeerGre').value = '10.1' + k + '.0.1';
   } catch(e) { reportErr('peers', e); }
 }
 $('addPeerBtn').onclick = async () => {
@@ -1482,7 +1491,7 @@ $('addPeerBtn').onclick = async () => {
       }
       if (/Unknown command|old version/i.test(e.message)) {
         const w = $('peerWarn');
-        w.innerHTML = '' + esc(e.message) + '<br>Go to <b>Update</b> tab → install latest, then add the server again.';
+        w.innerHTML = esc(e.message) + '<br>' + esc(tr('', 'Install the latest version in the Update tab, then add the server again.'));
         w.classList.remove('hidden');
         toastWarn('panel files outdated', e.code ? '[' + e.code + ']' : '');
         b.disabled = false;
@@ -1494,15 +1503,11 @@ $('addPeerBtn').onclick = async () => {
     const out = $('peerOut');
     out.classList.remove('hidden');
     out.textContent = (r.steps || []).join('\n');
-    if (r.bundle || r.token) {
-      const t = $('peerToken');
-      const show = r.bundle || r.token;
-      t.innerHTML = 'Bundle (paste on the Foreign side — fills everything): <b>' + esc(show) + '</b>';
-      t.classList.remove('hidden');
-    }
-    toastOk('tunnel added', $('pName').value.trim() || 'peer');
+    if (r.bundle || r.token) renderBundleBox($('peerToken'), r.bundle || r.token);
+    toastOk(tr('', 'Tunnel added'), $('pName').value.trim() || tr('', 'new server'));
+    ['pName', 'pRemotePub', 'pPorts', 'pFrpPort', 'pLocalGre', 'pPeerGre'].forEach(id => { $(id).value = ''; });
     refresh();
-  } catch(e) { toastErr('add tunnel failed', e.message); }
+  } catch(e) { toastErr(tr('', 'Could not add the tunnel'), e.message); }
   b.disabled = false;
   b.textContent = oldTxt;
 };
@@ -2499,51 +2504,55 @@ function renderSetupLock() {
   const lw = $('setupLockWarn');
   if (lw) {
     if (locked) {
-      lw.innerHTML = 'A tunnel <b>already exists</b> on this server — the form is <b>locked</b> so it can\'t be replaced by accident. Applying a new setup generates a <b>new token</b> and old Foreign sides disconnect.';
+      lw.textContent = tr('', 'A tunnel already exists on this server, so the form is locked to stop it being replaced by accident. A new setup makes a new token and the foreign servers linked now disconnect. To connect one more foreign server, use Add Another Server instead.');
       lw.classList.remove('hidden');
     } else lw.classList.add('hidden');
   }
   const show = (id, on) => { const el = $(id); if (el) el.classList.toggle('hidden', !on); };
   if (!iran) { show('setupBtn', false); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', false); return; }
   if (!setupExists) {
-    $('setupBtn').textContent = 'Apply Setup';
+    $('setupBtn').textContent = tr('', 'Apply Setup');
     show('setupBtn', true); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', false);
   } else if (locked) {
     show('setupBtn', false); show('setupUnlockBtn', true); show('setupAddBtn', true); show('setupRelockBtn', false);
   } else {
-    $('setupBtn').textContent = 'Apply Setup (Replace)';
+    $('setupBtn').textContent = tr('', 'Apply Setup (Replace)');
     show('setupBtn', true); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', true);
   }
 }
 $('setupUnlockBtn').onclick = () => { setupUnlocked = true; renderSetupLock(); };
 $('setupRelockBtn').onclick = () => { setupUnlocked = false; renderSetupLock(); };
-function renderIranBundleBox(bundleStr) {
-  const bb = $('setupBundle');
+$('setupAddBtn').onclick = () => {
+  const step = $('setupAddPeerStep');
+  step.hidden = false;
+  step.scrollIntoView({behavior: 'smooth', block: 'start'});
+  setTimeout(() => $('pName').focus({preventScroll: true}), 400);
+};
+function renderBundleBox(bb, bundleStr) {
   if (!bb || !bundleStr) return;
-  window._currentIranBundle = bundleStr;
   bb.innerHTML = `
     <div class="u-flex u-ai-c u-jc-sb u-gap-8 u-mb-8">
-      <span class="u-fw-600 u-c-tx">Setup Bundle (Copy to Foreign server)</span>
-      <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" id="copyIranBundleBtn">Copy Bundle</button>
+      <span class="u-fw-600 u-c-tx">${esc(tr('', 'Setup bundle for the foreign server'))}</span>
+      <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" data-copy-bundle>${esc(tr('', 'Copy Bundle'))}</button>
     </div>
-    <div class="u-mono u-fs-12 u-bg-inset u-p-12x12 u-r-8 u-break u-c-info u-select-all u-bd-info">${esc(bundleStr)}</div>
-    <div class="u-fs-12 u-c-mu u-mt-8">Paste this single string into the Foreign server token box to establish the tunnel and peer link automatically.</div>
+    <div class="u-mono u-fs-12 u-bg-inset u-p-12x12 u-r-8 u-break u-c-info u-select-all u-bd-info" data-no-i18n>${esc(bundleStr)}</div>
+    <div class="u-fs-12 u-c-mu u-mt-8">${esc(tr('', 'On the foreign server, open Setup, choose Foreign and paste this into the bundle box. It fills in everything else.'))}</div>
   `;
   bb.classList.remove('hidden');
-  const btn = $('copyIranBundleBtn');
-  if (btn) {
-    btn.onclick = () => {
-      (navigator.clipboard ? navigator.clipboard.writeText(bundleStr) : Promise.reject())
-        .then(() => {
-          btn.textContent = '✓ Copied!';
-          setTimeout(() => { btn.textContent = 'Copy Bundle'; }, 2000);
-          toastOk('Bundle Copied!', 'Paste into Foreign server');
-        })
-        .catch(() => {
-          prompt('Copy setup bundle:', bundleStr);
-        });
-    };
-  }
+  const btn = bb.querySelector('[data-copy-bundle]');
+  btn.onclick = () => {
+    (navigator.clipboard ? navigator.clipboard.writeText(bundleStr) : Promise.reject())
+      .then(() => {
+        btn.textContent = tr('', 'Copied');
+        setTimeout(() => { btn.textContent = tr('', 'Copy Bundle'); }, 2000);
+        toastOk(tr('', 'Bundle copied'), tr('', 'Paste it on the foreign server.'));
+      })
+      .catch(() => { prompt(tr('', 'Copy setup bundle:'), bundleStr); });
+  };
+}
+function renderIranBundleBox(bundleStr) {
+  window._currentIranBundle = bundleStr;
+  renderBundleBox($('setupBundle'), bundleStr);
 }
 
 async function copyMainIranBundle() {
@@ -2571,6 +2580,7 @@ async function copyMainIranBundle() {
 async function loadSetupDefaults() {
   try {
     const d = await api('/api/setup');
+    setupDefaults = d;
     setupExists = !!d.exists;
     setupUnlocked = false;
     if (d.bundle) {
@@ -2579,6 +2589,7 @@ async function loadSetupDefaults() {
     }
     if (!$('sLocalPub').value) $('sLocalPub').value = d.local_public || '';
     if (!$('fLocalPub').value) $('fLocalPub').value = d.local_public || '';
+    if (!$('pLocalPub').value) $('pLocalPub').value = d.local_public || '';
     $('sLocalGre').value = '10.10.10.2'; $('sPeerGre').value = '10.10.10.1';
     $('fLocalGre').value = '10.10.10.1'; $('fPeerGre').value = '10.10.10.2';
     if (d.iran_gre) { $('sLocalGre').value = d.iran_gre; $('fPeerGre').value = d.iran_gre; }
@@ -2593,11 +2604,11 @@ async function loadSetupDefaults() {
 // the form must be unlocked first (the lock IS the replace consent).
 async function doSetup() {
   if ($('sRole').value === 'foreign') return;
-  if (setupExists && !setupUnlocked) { toastWarn('form is locked', 'unlock to replace'); return; }
+  if (setupExists && !setupUnlocked) { toastWarn(tr('', 'The form is locked'), tr('', 'Unlock it to replace the tunnel.')); return; }
   const btn = $('setupBtn');
   btn.disabled = true;
   const oldTxt = btn.textContent;
-  btn.innerHTML = '<span class="ent-spinner"></span> Applying…';
+  btn.innerHTML = '<span class="ent-spinner"></span> ' + esc(tr('', 'Applying…'));
   $('setupToken').classList.add('hidden');
   $('setupWarn').classList.add('hidden');
   try {
@@ -2621,9 +2632,10 @@ async function doSetup() {
       r = await api('/api/setup', body);
     } catch(e) {
       const w = $('setupWarn');
-      w.innerHTML = '' + esc(e.message);
+      w.textContent = e.message;
       w.classList.remove('hidden');
-      toastErr('setup failed', e.message);
+      toastErr(tr('', 'Setup failed'), e.message);
+      if (e.steps && e.steps.length) { $('setupOut').classList.remove('hidden'); $('setupOut').textContent = e.steps.join('\n'); }
       btn.disabled = false;
       btn.textContent = oldTxt;
       return;
@@ -2639,13 +2651,15 @@ async function doSetup() {
     }
     if (r.token) {
       const t = $('setupToken');
-      t.innerHTML = 'Token (legacy 32-char, for old panels): <b>' + esc(r.token) + '</b>';
+      t.innerHTML = esc(tr('', 'Token, only for panels older than the bundle format:')) + ' <b data-no-i18n>' + esc(r.token) + '</b>';
       t.classList.remove('hidden');
     }
-    toastOk('setup done', 'iran');
+    toastOk(tr('', 'Setup done'), tr('', 'Copy the bundle to the foreign server.'));
+    setupExists = true;
     setupUnlocked = false;
+    refresh();
   } catch(e) {
-    toastErr('setup failed', e.message);
+    toastErr(tr('', 'Setup failed'), e.message);
     if (e.steps && e.steps.length) {
       const out = $('setupOut');
       out.classList.remove('hidden');
@@ -2664,7 +2678,7 @@ function updateTransportSelect(selId, eng) {
   const cur = el.value;
   if (eng === 'frp') {
     el.innerHTML = `
-      <option value="tcp">TCP Multiplexed (Default)</option>
+      <option value="tcp">TCP (Default)</option>
       <option value="kcp">KCP ARQ UDP (Anti-Loss)</option>
       <option value="quic">QUIC UDP Stream (High-Speed)</option>
       <option value="websocket">WebSocket (HTTP Upgrade)</option>
@@ -2698,13 +2712,14 @@ function setIranEngine(eng) {
   if ($('wrapTransport')) $('wrapTransport').classList.remove('hidden');
   updateTransportSelect('sTransport', eng);
   if ($('wrapIranPorts')) $('wrapIranPorts').classList.toggle('hidden', eng === 'frp');
+  if ($('qsLinkTxt')) $('qsLinkTxt').textContent = eng === 'frp' ? 'GRE ⇄ FRP' : isGreBh ? 'GRE ⇄ Backhaul' : 'Backhaul';
   if ($('engHint')) {
     if (eng === 'frp') {
-      $('engHint').textContent = 'High-stability Linux GRE kernel tunnel paired with FRP reverse proxy.';
+      $('engHint').textContent = tr('', 'High-stability Linux GRE kernel tunnel paired with FRP reverse proxy.');
     } else if (isGreBh) {
-      $('engHint').textContent = 'Linux GRE tunnel carries multiplexed Backhaul connections for ultra-low overhead and maximum throughput.';
+      $('engHint').textContent = tr('', 'Linux GRE tunnel carries multiplexed Backhaul connections for ultra-low overhead and maximum throughput.');
     } else {
-      $('engHint').textContent = 'Pure user-space multiplexed reverse tunnel over public IP. No GRE interfaces required.';
+      $('engHint').textContent = tr('', 'Pure user-space multiplexed reverse tunnel over public IP. No GRE interfaces required.');
     }
   }
 }
@@ -2753,7 +2768,7 @@ function parseBundleClient(s) {
   }
   if (s.startsWith('hsh1_')) {
     const parts = s.slice(5).split('_');
-    if (parts.length < 5 || parts.length > 7) return {error: 'bundle must have 5, 6, or 7 underscore parts'};
+    if (parts.length < 5 || parts.length > 8) return {error: 'bundle must have 5 to 8 underscore parts'};
     const [iranPub, portS, iranGre, foreignGre, token] = parts;
     if (!v4(iranPub)) return {error: 'bad Iran public IP in bundle'};
     const port = parseInt(portS, 10);
@@ -2763,10 +2778,13 @@ function parseBundleClient(s) {
     if (!token || token.length > 128) return {error: 'bad token in bundle'};
     let ports = [];
     let fouPorts = [];
+    let transport = 'tcp';
     for (let i = 5; i < parts.length; i++) {
       const p = parts[i];
       if (!p) continue;
-      if (p.startsWith('fou')) {
+      if (p.startsWith('tr-')) {
+        transport = p.slice(3);
+      } else if (p.startsWith('fou')) {
         const fps = p.slice(3).split('-').map(x => parseInt(x.trim(), 10)).filter(x => x >= 1 && x <= 65535);
         if (fps.length) fouPorts = fps;
       } else {
@@ -2774,67 +2792,58 @@ function parseBundleClient(s) {
         if (parsed.length) ports = parsed;
       }
     }
-    return {engine: 'frp', iranPub, port, iranGre, foreignGre, token, ports, fouPorts};
+    return {engine: 'frp', iranPub, port, iranGre, foreignGre, token, ports, fouPorts, transport};
   }
   return null;
 }
 
-// Pasting a bundle auto-fills ports + advanced fields
-$('jToken').addEventListener('input', () => {
-  const w = $('joinWarn');
+// Pasting a bundle auto-fills ports + advanced fields. The bundle decides the
+// engine and the FRP transport (the server applies them over the form), so the
+// form shows them and hides options the engine does not use.
+const JOIN_ENGINE = { frp: 'GRE + FRP', 'gre-backhaul': 'GRE + Backhaul', backhaul: 'Backhaul' };
+function joinBundleSync() {
+  const w = $('joinWarn'), info = $('joinBundleInfo'), sel = $('jFRPTransport');
   const raw = $('jToken').value.trim();
   const isBundle = raw.startsWith('hsh1_') || raw.startsWith('bh1_') || raw.startsWith('gh1_');
+  w.classList.add('hidden');
+  info.hidden = true;
+  sel.disabled = false;
+  $('joinFrpOpts').hidden = false;
   if (!isBundle) return;
   const b = parseBundleClient(raw);
   if (!b || b.error) {
-    w.innerHTML = '' + esc(b ? b.error : 'bad bundle') + ' — check the paste, or use a legacy token + manual fields.';
+    w.textContent = tr('', b ? b.error : 'bad bundle') + '. ' + tr('', 'Check the paste, or use a legacy token and the manual fields.');
     w.classList.remove('hidden');
     return;
   }
-  w.classList.add('hidden');
   const forceSet = (id, v) => { const el = $(id); if (el) el.value = v; };
-  if (b.engine === 'backhaul') {
-    forceSet('jPorts', b.rawPorts || (b.ports.length ? b.ports.join(', ') : ''));
-    forceSet('fRemotePub', b.iranPub);
-    forceSet('fFrpPort', String(b.port));
-    const adv = $('foreignAdv');
-    if (adv && !adv.open) adv.open = true;
-    w.innerHTML = 'Backhaul Standalone bundle detected (Iran: <b>' + esc(b.iranPub) + '</b>, Port: <b>' + b.port + '</b>, Transport: <b>' + esc(b.transport) + '</b>).';
-    w.classList.remove('hidden');
-    w.style.color = 'var(--info)';
-  } else if (b.engine === 'gre-backhaul') {
-    forceSet('jPorts', b.rawPorts || (b.ports.length ? b.ports.join(', ') : ''));
-    forceSet('fRemotePub', b.iranPub);
-    forceSet('fLocalGre', b.foreignGre);
-    forceSet('fPeerGre', b.iranGre);
-    forceSet('fFrpPort', String(b.port));
-    const adv = $('foreignAdv');
-    if (adv && !adv.open) adv.open = true;
-    w.innerHTML = 'GRE+Backhaul bundle detected (Iran: <b>' + esc(b.iranPub) + '</b>, Port: <b>' + b.port + '</b>, Transport: <b>' + esc(b.transport) + '</b>).';
-    w.classList.remove('hidden');
-    w.style.color = 'var(--sc)';
-  } else {
-    forceSet('jPorts', b.ports.length ? b.ports.join(', ') : '');
-    forceSet('fRemotePub', b.iranPub);
-    forceSet('fLocalGre', b.foreignGre);
-    forceSet('fPeerGre', b.iranGre);
-    forceSet('fFrpPort', String(b.port));
-    const adv = $('foreignAdv');
-    if (adv && !adv.open) adv.open = true;
-    if (!b.ports.length) {
-      w.innerHTML = 'ℹ️ Bundle parsed (Iran: <b>' + esc(b.iranPub) + '</b>, FRP port: <b>' + b.port + '</b>). Enter reverse ports above.';
-      w.classList.remove('hidden');
-      w.style.color = 'var(--info)';
-    }
+  forceSet('jPorts', b.rawPorts || (b.ports.length ? b.ports.join(', ') : ''));
+  forceSet('fRemotePub', b.iranPub);
+  forceSet('fFrpPort', String(b.port));
+  if (b.engine !== 'backhaul') { forceSet('fLocalGre', b.foreignGre); forceSet('fPeerGre', b.iranGre); }
+  if (b.engine === 'frp') {
+    if ([...sel.options].some(o => o.value === b.transport)) sel.value = b.transport;
+    sel.disabled = true;
   }
-});
+  $('joinFrpOpts').hidden = b.engine !== 'frp';
+  let msg = docTpl('{0} bundle: Iran server {1}, port {2}, transport {3}.', [JOIN_ENGINE[b.engine] || b.engine, b.iranPub, b.port, b.transport]);
+  if (!b.ports.length) msg += ' ' + tr('', 'It has no ports: enter the reverse ports above.');
+  info.textContent = msg;
+  info.hidden = false;
+}
+$('jToken').addEventListener('input', joinBundleSync);
 
 $('joinBtn').onclick = async () => {
   const b = $('joinBtn');
   b.disabled = true;
   const oldTxt = b.textContent;
-  b.innerHTML = '<span class="ent-spinner"></span> Connecting…';
   $('joinWarn').classList.add('hidden');
+  // A join replaces whatever tunnel this server has: ask first.
+  if (setupExists && !await entConfirm(tr('', 'Replace This Tunnel?'), tr('', 'This server already has a tunnel. Connecting replaces it, and anything it carries now stops.'), tr('', 'Replace and Connect'))) {
+    b.disabled = false;
+    return;
+  }
+  b.innerHTML = '<span class="ent-spinner"></span> ' + esc(tr('', 'Connecting…'));
   try {
     const st = await api('/api/status').then(s => s.local || {}).catch(() => ({}));
     const d = await api('/api/setup').catch(() => ({}));
@@ -2845,7 +2854,7 @@ $('joinBtn').onclick = async () => {
       bundle = parseBundleClient(rawToken);
       if (!bundle || bundle.error) {
         const w = $('joinWarn');
-        w.innerHTML = '' + esc(bundle ? bundle.error : 'bad bundle') + ' — check the paste, or use a legacy token + manual fields.';
+        w.textContent = tr('', bundle ? bundle.error : 'bad bundle') + '. ' + tr('', 'Check the paste, or use a legacy token and the manual fields.');
         w.classList.remove('hidden');
         b.disabled = false; b.textContent = oldTxt; return;
       }
@@ -2857,7 +2866,7 @@ $('joinBtn').onclick = async () => {
     const ports = $('jPorts').value.trim() || ((st.proxy_ports || []).join(', ') || (st.proxies || []).join(', '));
     if (!token) {
       const w = $('joinWarn');
-      w.innerHTML = 'Token is required — paste the bundle or token from the Iran side (Setup tab → step 4 bundle box, or Tunnel tab peer card → Bundle).';
+      w.textContent = tr('', 'Paste the bundle from the Iran server first: its Setup tab after Apply Setup, or Copy Bundle on its Tunnel tab.');
       w.classList.remove('hidden');
       b.disabled = false; b.textContent = oldTxt; return;
     }
@@ -2898,9 +2907,9 @@ $('joinBtn').onclick = async () => {
     if (!body.ports) {
       const w = $('joinWarn');
       const bundleNoPorts = bundle && bundle.ports.length === 0;
-      w.innerHTML = bundleNoPorts
-        ? 'This bundle does not include ports — enter the reverse ports (e.g. 443, 2083) in the Reverse Ports field above.'
-        : 'Reverse ports are required (e.g. 443, 2083).';
+      w.textContent = bundleNoPorts
+        ? tr('', 'This bundle has no ports. Enter the reverse ports (for example 443, 2083) above.')
+        : tr('', 'Enter the reverse ports, for example 443, 2083.');
       w.classList.remove('hidden');
       b.disabled = false; b.textContent = oldTxt; return;
     }
@@ -2908,11 +2917,11 @@ $('joinBtn').onclick = async () => {
     const out = $('joinOut');
     out.classList.remove('hidden');
     out.textContent = (r.steps || []).join('\n');
-    toastOk('connected to Iran');
+    toastOk(tr('', 'Connected to the Iran server'));
     refresh(); loadSetupDefaults();
   } catch(e) {
     const w = $('joinWarn');
-    w.innerHTML = '' + esc(e.message);
+    w.textContent = e.message;
     w.classList.remove('hidden');
     if (e.steps && e.steps.length) {
       const out = $('joinOut');

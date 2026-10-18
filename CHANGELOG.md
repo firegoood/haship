@@ -5,6 +5,15 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
 ## Unreleased — Dashboard and Performance redesign
 
+### Setup tab
+- **A foreign server could not join an Iran server set up with KCP, QUIC, WebSocket or WSS.** That bundle has eight parts (`…_fou443-55555_tr-kcp`) and the Setup form refused anything over seven. It now reads the transport too, shows it, and locks the FRP transport list to it (the server applied the bundle's transport anyway, whatever the list said).
+- **Add Another Server Instead** (shown when the form is locked) did nothing; it now jumps to the add-server form.
+- Joining from a foreign server that already has a tunnel asks before replacing it (it replaced it silently).
+- Encryption and compression chosen while joining are saved to the performance settings too. Before, the Performance tab showed them as not applied and the next update removed them from frpc.
+- The public IP lookup asks over IPv4 only: on a dual-stack server behind NAT it could fill in the IPv6 address, which GRE and the bundles cannot use.
+- A new server's suggested control port and GRE pair skip the ones already in use (it suggested 7000 next to a tunnel on 7000), and the form clears after adding so the next suggestion is fresh. The added server's bundle has a Copy button.
+- After an Iran setup the form locks right away instead of offering Apply again. The bundle info no longer turns later error messages blue, options a Backhaul bundle does not use are hidden, the diagram follows the chosen engine, the panel no longer calls `/api/setup` on every 15-second refresh, and plain TCP is no longer labelled "Multiplexed".
+
 ### Performance tab
 - **Says what applies here.** On a server with no tunnel or with Backhaul, the FRP settings are greyed out with a note instead of offering an Apply that fails. On the Iran server, encryption and compression are greyed out: frps ignores them, they are set on the foreign servers. A hub with only numbered `frps-N.toml` files is now recognised as the Iran server.
 - **New Network Stack card:** live congestion control and queue, socket buffers, connection-tracking use (warns at 70 % full), GRE MTU, MSS clamp and whether the settings survive a reboot, with Optimize Network and Restore right there.

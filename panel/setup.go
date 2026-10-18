@@ -400,9 +400,16 @@ func externalPublicIPCached() string {
 	return extIPVal
 }
 
+// The tunnel and the bundles are IPv4 only, so the lookup dials over IPv4:
+// on a dual-stack host these services otherwise answer with the IPv6 address.
 func lookupExternalPublicIP() string {
-	client := &http.Client{Timeout: 1200 * time.Millisecond}
-	for _, u := range []string{"https://api.ipify.org", "https://icanhazip.com", "https://ifconfig.me/ip"} {
+	dialer := &net.Dialer{Timeout: 1200 * time.Millisecond}
+	client := &http.Client{Timeout: 1200 * time.Millisecond, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "tcp4", addr)
+		},
+	}}
+	for _, u := range []string{"https://api.ipify.org", "https://ipv4.icanhazip.com", "https://ifconfig.me/ip"} {
 		resp, err := client.Get(u)
 		if err != nil {
 			continue
@@ -410,7 +417,7 @@ func lookupExternalPublicIP() string {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
 		_ = resp.Body.Close()
 		candidate := strings.TrimSpace(string(body))
-		if resp.StatusCode == 200 && net.ParseIP(candidate) != nil && !isPrivateIP(candidate) {
+		if resp.StatusCode == 200 && isV4(candidate) && !isPrivateIP(candidate) {
 			return candidate
 		}
 	}
@@ -606,6 +613,13 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = savePeerConfig(pcfg)
 	} else if body.Role == "foreign" {
+		// perf.json is what perf apply (also run on every update) writes back
+		// into frpc.toml; without this the setup choice was removed again.
+		if body.Engine == "" || body.Engine == "frp" {
+			pc := loadPerfConfig()
+			pc.ProxyEncryption, pc.ProxyCompression = body.UseEncryption, body.UseCompression
+			_ = savePerfConfig(pc)
+		}
 		pcfg := loadPeerConfig()
 		pcfg.Role = "worker"
 		if body.Token != "" {

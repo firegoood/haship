@@ -1975,7 +1975,7 @@
           <div class="qs-diagram" aria-hidden="true">
             <span class="qs-node-box">Users</span><span>→</span>
             <span class="qs-node-box on">Iran<b>public ports here</b></span>
-            <span class="qs-line-link">GRE ⇄ FRP</span>
+            <span class="qs-line-link" id="qsLinkTxt">GRE ⇄ FRP</span>
             <span class="qs-node-box on">Foreign<b>the service runs here</b></span>
           </div>
           <div class="qs-step"><span class="qs-num">1</span><div class="qs-body">
@@ -2010,7 +2010,7 @@
                   <div class="fg" id="wrapTransport">
                     <label for="sTransport" data-i18n="setup_transport">Transport Protocol</label>
                     <select class="hashem-input" id="sTransport">
-                      <option value="tcp" selected>TCP Multiplexed (Default)</option>
+                      <option value="tcp" selected>TCP (Default)</option>
                       <option value="kcp">KCP ARQ UDP (Anti-Loss)</option>
                       <option value="quic">QUIC UDP Stream (High-Speed)</option>
                       <option value="websocket">WebSocket (HTTP Upgrade)</option>
@@ -2046,10 +2046,11 @@
               <div class="u-grid-gap-10">
                 <div class="fg"><label for="jToken" data-i18n="setup_bundle_paste_lbl">Setup bundle or token (from Iran side)</label><input class="hashem-input" id="jToken" autocomplete="off" data-i18n-ph="setup_bundle_paste_ph" placeholder="paste hsh1_..., bh1_..., or gh1_... bundle"></div>
                 <div class="fg"><label for="jPorts">Reverse ports (ranges &amp; mappings allowed)</label><input class="hashem-input" id="jPorts" placeholder="auto-filled from bundle, or 443, 10000-10050"></div>
+                <div id="joinFrpOpts" class="u-grid-gap-10">
                 <div class="fg u-mt-2">
                   <label class="u-label-up" for="jFRPTransport" data-i18n="setup_transport">FRP Transport Protocol</label>
                   <select class="hashem-input u-mt-4" id="jFRPTransport">
-                    <option value="tcp" selected>TCP (Standard multiplexed stream)</option>
+                    <option value="tcp" selected>TCP (Default)</option>
                     <option value="kcp">KCP (UDP with ARQ — Anti-packet-loss for unstable ISPs)</option>
                     <option value="quic">QUIC (UDP QUIC — 0-RTT fast multiplexing)</option>
                     <option value="websocket">WebSocket (HTTP Upgrade protocol)</option>
@@ -2070,7 +2071,9 @@
                     <span><b>PROXY Protocol v2</b> (Real client IP for Xray)</span>
                   </label>
                 </div>
+                </div>
                 <div class="qs-hint" id="joinBundleHint">Paste any bundle (hsh1_, bh1_, gh1_) → all fields auto-fill. A legacy token works too.</div>
+                <div class="qs-hint u-hint-accent" id="joinBundleInfo" aria-live="polite" hidden></div>
                 <div id="joinWarn" class="warnbox hidden"></div>
                 <div class="qs-actions">
                   <button class="hashem-btn hashem-btn-primary" id="joinBtn" data-i18n="setup_join_btn">Connect to Iran</button>
@@ -2112,7 +2115,7 @@
                   <div class="fg u-col-span-2" id="wrapPeerTransport">
                     <label for="pTransport" data-i18n="setup_transport">Transport Protocol</label>
                     <select class="hashem-input" id="pTransport">
-                      <option value="tcp" selected>TCP Multiplexed (Default)</option>
+                      <option value="tcp" selected>TCP (Default)</option>
                       <option value="kcp">KCP ARQ UDP (Anti-Loss)</option>
                       <option value="quic">QUIC UDP Stream (High-Speed)</option>
                       <option value="websocket">WebSocket (HTTP Upgrade)</option>
