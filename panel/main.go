@@ -27,7 +27,7 @@ import (
 	"time"
 )
 
-//go:embed index.html app.js i18n-fa.js fonts.css tokens.css base.css enterprise.css favicon.png xterm.js xterm-fit.js xterm-search.js xterm.css fonts/vazirmatn.woff2
+//go:embed index.html app.js i18n-fa.js fonts.css tokens.css base.css enterprise.css favicon.png favicon.svg apple-touch-icon.png xterm.js xterm-fit.js xterm-search.js xterm.css fonts/vazirmatn.woff2
 var panelFS embed.FS
 
 var configDir = "/etc/gre-panel"
@@ -588,6 +588,8 @@ func main() {
 	mux.HandleFunc("GET "+base+"/base.css", serveAsset("base.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/enterprise.css", serveAsset("enterprise.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/favicon.png", serveAsset("favicon.png", "image/png"))
+	mux.HandleFunc("GET "+base+"/favicon.svg", serveAsset("favicon.svg", "image/svg+xml"))
+	mux.HandleFunc("GET "+base+"/apple-touch-icon.png", serveAsset("apple-touch-icon.png", "image/png"))
 	mux.HandleFunc("GET "+base+"/xterm.js", serveAsset("xterm.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/xterm-fit.js", serveAsset("xterm-fit.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/xterm-search.js", serveAsset("xterm-search.js", "text/javascript; charset=utf-8"))

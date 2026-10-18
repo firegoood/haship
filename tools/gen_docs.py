@@ -16,7 +16,7 @@ ROUTE = re.compile(r'mux\.HandleFunc\("(GET|POST|PUT|PATCH|DELETE) "\+base\+"([^
 # Peer routes live in a table in peer.go: {"POST", "/api/peer/x", handleX},
 PEER_ROUTE = re.compile(r'^\{"(GET|POST|PUT|PATCH|DELETE)", "(/api/peer/[^"]+)", (handle[A-Za-z0-9]+)\},$')
 STATIC = ("/app.js", "/i18n-fa.js", "/tokens.css", "/fonts.css", "/base.css", "/enterprise.css",
-          "/favicon.png", "/xterm", "/fonts/")
+          "/favicon.", "/apple-touch-icon.png", "/xterm", "/fonts/")
 
 
 def auth_of(expr: str) -> str:
