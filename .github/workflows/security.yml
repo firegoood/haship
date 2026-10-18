@@ -23,7 +23,14 @@ jobs:
       - name: Run Go Unit & Security Tests
         run: |
           cd panel
-          go test -v -race ./...
+          go version
+          set +e
+          go test -v -race ./... 2>&1 | tee test.log
+          rc=${PIPESTATUS[0]}
+          # Surface failures as annotations: they are readable without opening the log.
+          grep -E -e '--- FAIL|^panic:|DATA RACE|_test\.go:[0-9]+:|^FAIL' test.log | head -40 |
+            while IFS= read -r l; do echo "::error::$l"; done
+          exit $rc
 
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master
