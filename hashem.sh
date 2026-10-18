@@ -8787,6 +8787,7 @@ auto_install_and_show() {
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${GREEN}${BOLD}DNC MADE THIS${NC}"
+    echo -e "Hashem is free. If it keeps your connection alive, support it: ${CYAN}https://pdnczone.com${NC}"
     echo ""
 
     if [[ -t 0 ]]; then

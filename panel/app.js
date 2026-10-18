@@ -707,6 +707,7 @@ const I18N = {
     sup_title: "Enjoying a stable tunnel?",
     sup_body: "Hashem is free and built by one developer. If it keeps your connection alive, a small donation helps keep it improving.",
     sup_donate: "Donate",
+    sup_title_new: "Thanks for installing Hashem",
     sup_later: "Maybe Later",
     sup_snooze: "Don't Remind Me for 30 Days",
     sup_card_title: "Support Hashem",
@@ -5375,12 +5376,14 @@ accRender();
 
 // ============================================================
 // Support (donate) nudge: rare, calm, and coordinated by the server.
-// Shown only after the tunnel has been healthy for SUP_DELAY_MS while the
-// user is actively on a visible panel tab. The server's claim() hands the
-// popup to exactly one tab/device per window (7 days) so it cannot spam.
+// First visit after install (server says fresh): shown SUP_FIRST_DELAY_MS
+// into the session. After that only once the tunnel has been healthy for
+// SUP_DELAY_MS while the user is actively on a visible panel tab. The
+// server's claim() hands the popup to exactly one tab/device per window
+// (7 days; 30 after "don't remind", 90 after Donate) so it cannot spam.
 // ============================================================
-const SUP_DELAY_MS = 30000;
-const SUP = { since: 0, shown: false, busy: false };
+const SUP_DELAY_MS = 30000, SUP_FIRST_DELAY_MS = 8000;
+const SUP = { since: 0, shown: false, busy: false, fresh: null, openAt: 0 };
 function supHealthy(s) {
   const L = (s && s.local) || {}; const g = L.gre || {};
   const localOk = !!L.frp_up && (g.exists ? !!(L.ping_ok || L.health_state === 'healthy') : /foreign/i.test(L.role || ''));
@@ -5401,16 +5404,29 @@ function supBlocked() {
 }
 async function supTick() {
   if (document.hidden) return; // C2.7: support popup never polls a hidden tab
-  if (SUP.shown || SUP.busy || !SUP.since || Date.now() - SUP.since < SUP_DELAY_MS || supBlocked()) return;
+  if ($('app').classList.contains('hidden')) { SUP.openAt = 0; return; } // counts from login
+  if (!SUP.openAt) SUP.openAt = Date.now();
+  if (SUP.shown || SUP.busy) return;
+  if (SUP.fresh === null) { // once per page: has this install ever shown it?
+    SUP.busy = true;
+    try { const r = await api('/api/support'); SUP.fresh = !!(r && r.fresh); }
+    catch (e) { /* retry next tick */ }
+    finally { SUP.busy = false; }
+    return;
+  }
+  const due = SUP.fresh ? Date.now() - SUP.openAt >= SUP_FIRST_DELAY_MS
+    : SUP.since && Date.now() - SUP.since >= SUP_DELAY_MS;
+  if (!due || supBlocked()) return;
   SUP.busy = true;
   try {
     const r = await api('/api/support', { action: 'claim' });
-    if (r && r.show) supShow();
+    if (r && r.show) supShow(SUP.fresh);
   } catch (e) { /* offline or logged out: stay quiet, retry later */ }
   finally { SUP.busy = false; }
 }
-function supShow() {
+function supShow(fresh) {
   const c = $('supCard'); SUP.shown = true;
+  $('supTitle').textContent = fresh ? tr('sup_title_new', 'Thanks for installing Hashem') : tr('sup_title', 'Enjoying a stable tunnel?');
   c.hidden = false; document.body.classList.add('sup-open'); c.classList.remove('out'); void c.offsetWidth; c.classList.add('in');
   document.body.style.setProperty('--sup-h', c.offsetHeight + 'px');
   if (window.ResizeObserver && !c._ro) { c._ro = new ResizeObserver(() => document.body.style.setProperty('--sup-h', c.offsetHeight + 'px')); c._ro.observe(c); }
@@ -5776,7 +5792,7 @@ function palItems() {
   it.push({ g: act, t: tr('pal_refresh', 'Refresh data'), k: 'refresh reload', run: () => $('refreshBtn').click() });
   it.push({ g: act, t: tr('pal_diag', 'Run diagnostics'), k: 'doctor health check diagnostics', run: () => { goTab('doctor'); loadDoctor(true); } });
   it.push({ g: act, t: tr('pal_stream', 'Show / hide Live Activity Stream'), k: 'stream logs live activity', run: () => rsSet(!rsIsHidden(), true) });
-  it.push({ g: act, t: tr('pal_donate', 'Support Hashem'), k: 'donate support pdnczone', run: () => window.open('https://www.pdnczone.ir', '_blank', 'noopener,noreferrer') });
+  it.push({ g: act, t: tr('pal_donate', 'Support Hashem'), k: 'donate support pdnczone', run: () => window.open('https://pdnczone.com', '_blank', 'noopener,noreferrer') });
   it.push({ g: act, t: tr('pal_logout', 'Log out'), k: 'logout sign out exit', run: () => $('logoutBtn').click() });
   it.push({ g: look, t: tr('pal_theme', 'Toggle dark / light theme'), k: 'theme dark light mode', run: () => $('themeBtn').click() });
   it.push({ g: look, t: tr('pal_lang', 'Switch language'), k: 'language persian farsi english', run: () => toggleLang() });

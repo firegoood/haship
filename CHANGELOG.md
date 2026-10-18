@@ -12,6 +12,7 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 - **System:** CPU, RAM and disk as ring gauges colored by load, with uptime.
 - **Tunnels table** for multi-peer hubs: status, foreign IP, engine, ports, ping and traffic per peer; a row opens its card in the Tunnel tab.
 - Layout follows the space the dashboard has (container queries), so the activity side panel no longer squeezes it; works at 375px and in RTL.
+- **Donate popup** now appears on the first visit after install ("Thanks for installing Hashem"), not only after a tunnel has been healthy, then every 7 days while the tunnel is healthy (30 days after "Don't remind me", 90 after Donate). It and the Settings/palette links point to pdnczone.com; the installer's final screen prints the link too.
 
 ## v2.3.6 — 2026-10-18
 

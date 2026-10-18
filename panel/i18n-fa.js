@@ -2051,5 +2051,6 @@ window.FA_TEXT = {
 "Panel up": "مدت روشن بودن پنل",
 "Automatic": "خودکار",
 "No recent errors": "خطای اخیر ندارد",
-"Tunnel, engine and carrier details appear here after Setup.": "جزئیات تونل، موتور و حامل بعد از راه‌اندازی اینجا نشان داده می‌شود."
+"Tunnel, engine and carrier details appear here after Setup.": "جزئیات تونل، موتور و حامل بعد از راه‌اندازی اینجا نشان داده می‌شود.",
+"Thanks for installing Hashem": "ممنون که هاشم را نصب کردید"
 };

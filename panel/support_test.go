@@ -114,3 +114,23 @@ func TestSupportHandler(t *testing.T) {
 		t.Fatalf("GET lacks url: %s", rr.Body.String())
 	}
 }
+
+// A fresh install reports fresh=true so the UI shows the first popup without
+// waiting for a healthy tunnel; once shown it is no longer fresh.
+func TestSupportFreshUntilFirstShow(t *testing.T) {
+	resetSupport(t)
+	get := func() string {
+		rr := httptest.NewRecorder()
+		handleSupport(rr, httptest.NewRequest(http.MethodGet, "/api/support", nil))
+		return rr.Body.String()
+	}
+	if b := get(); !strings.Contains(b, `"fresh":true`) || !strings.Contains(b, "https://pdnczone.com") {
+		t.Fatalf("fresh install: %s", b)
+	}
+	if !supportClaim(time.Now()) {
+		t.Fatal("first claim must show")
+	}
+	if b := get(); !strings.Contains(b, `"fresh":false`) {
+		t.Fatalf("after first show: %s", b)
+	}
+}

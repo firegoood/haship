@@ -1,7 +1,8 @@
 package main
 
-// Donation / support nudge: a calm, rate-limited popup the panel UI shows a
-// few seconds after a tunnel has been healthy. All pacing state lives on the
+// Donation / support nudge: a calm, rate-limited popup. The first one appears
+// a few seconds into the first visit after install (fresh: never shown);
+// later ones only after a tunnel has been healthy for a while. All pacing state lives on the
 // server (support.json) so phones, desktops and several tabs stay in sync and
 // the popup can never be spammed: a claim atomically pushes the next window
 // out, so only one tab on one device wins it.
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	supportURL = "https://www.pdnczone.ir"
+	supportURL = "https://pdnczone.com"
 
 	// How long to stay quiet after each outcome.
 	supportAfterShown  = 7 * 24 * time.Hour  // shown (or dismissed with ×/Later)
@@ -108,6 +109,7 @@ func handleSupport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{
 			"url": supportURL, "delay_s": supportDelaySeconds,
 			"next_show_at": st.NextShowAt, "due": time.Now().Unix() >= st.NextShowAt,
+			"fresh": st.Shown == 0,
 		})
 		return
 	}
