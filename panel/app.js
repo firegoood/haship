@@ -3158,31 +3158,8 @@ $('removeTunnelBtn').onclick = async () => {
   } catch(e) { toastErr('tunnel remove failed', e.message); }
   b.disabled = false;
 };
-$('optimizeBtn').onclick = async () => {
-  if (!await entConfirm(tr('', 'Optimize Network?'), tr('', 'Applies FQ + BBR, larger TCP buffers, GRE MTU 1380 and MSS clamp 1340. The current settings are saved first, so Restore can bring them back. The tunnel keeps running.'), tr('', 'Optimize'))) return;
-  const b = $('optimizeBtn');
-  b.disabled = true;
-  try {
-    const r = await api('/api/action', {action: 'optimize'});
-    showActOut(tr('', 'Optimize Network'), r.output || 'optimized');
-    $('restoreBtn').classList.remove('hidden');
-    toastOk(tr('', 'Network optimized'));
-    refresh();
-  } catch(e) { toastErr('optimize failed', e.message); }
-  b.disabled = false;
-};
-$('restoreBtn').onclick = async () => {
-  if (!await entConfirm(tr('', 'Restore Previous Settings?'), tr('', 'Puts back the network settings saved before Optimize Network ran.'), tr('', 'Restore'))) return;
-  const b = $('restoreBtn');
-  b.disabled = true;
-  try {
-    const r = await api('/api/action', {action: 'restore'});
-    showActOut(tr('', 'Restore Previous Settings'), r.output || 'restored');
-    toastOk(tr('', 'Settings restored'));
-    refresh();
-  } catch(e) { toastErr('restore failed', e.message); }
-  b.disabled = false;
-};
+$('optimizeBtn').onclick = () => runNetOptimize($('optimizeBtn'));
+$('restoreBtn').onclick = () => runNetRestore($('restoreBtn'));
 if ($('actOutClose')) $('actOutClose').onclick = () => $('actOutWrap').classList.add('hidden');
 let logSvc = 'frps', logTimer = null, logRaw = '', logFindings = [];
 function logLevelMatch(line, lvl) {
@@ -3752,285 +3729,387 @@ window.addEventListener('resize', () => {
 });
 // ---------- Performance (tab-perf) ----------
 let perfState = { proxy_encryption: false, proxy_compression: false, auto_pool: true };
+const PERF_LIMITS = { pool: [2, 1000], max: [10, 2000] };
+const AP_DECISION = { hold: 'Holding', scale_up: 'Scaled up', scale_down: 'Scaled down', deferred: 'Waiting', applied: 'Applied', hub_raise_max: 'Max raised' };
 
 function perfAgo(ts) {
   if (!ts) return '—';
   const d = Math.max(0, Math.floor(Date.now() / 1000) - ts);
-  if (d < 90) return d + 's ago';
-  if (d < 5400) return Math.round(d / 60) + ' min ago';
-  if (d < 172800) return Math.round(d / 3600) + ' h ago';
+  if (d < 90) return docTpl('{0} s ago', [d]);
+  if (d < 5400) return docTpl('{0} min ago', [Math.round(d / 60)]);
+  if (d < 172800) return docTpl('{0} h ago', [Math.round(d / 3600)]);
   return new Date(ts * 1000).toLocaleDateString();
+}
+function onOff(v) { return tr('', v ? 'On' : 'Off'); }
+function perfSetText(id, v) { const el = $(id); if (el) el.textContent = v; }
+// Numbers, ports and units keep left-to-right order inside Persian text.
+function perfSetLtr(id, v) { const el = $(id); if (el) el.innerHTML = '<bdi dir="ltr">' + esc(v) + '</bdi>'; }
+
+// Checkbox values as typed, and whether they differ from the saved ones.
+function perfForm() {
+  return {
+    proxy_encryption: $('perfEncCheck').checked,
+    proxy_compression: $('perfCompCheck').checked,
+    tcp_mux: $('perfMuxCheck').checked,
+  };
+}
+function perfDirty() {
+  const f = perfForm(), s = perfState;
+  return f.proxy_encryption !== !!s.proxy_encryption || f.proxy_compression !== !!s.proxy_compression || f.tcp_mux !== !!s.tcp_mux;
+}
+function perfSyncDirty() {
+  const dirty = perfDirty();
+  $('perfDirty').hidden = !dirty;
+  $('perfSaveOnlyBtn').disabled = !dirty;
+}
+['perfEncCheck', 'perfCompCheck', 'perfMuxCheck'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', perfSyncDirty); });
+
+function fmtBufMB(b) { return b ? (b >= 1048576 ? (Math.round(b / 104857.6) / 10) + ' MB' : Math.round(b / 1024) + ' KB') : '—'; }
+
+// Kernel network stack rows: [label, value, level, note]
+function netStackRows(n) {
+  const rows = [];
+  const bbr = n.cc === 'bbr', fq = /^fq/.test(n.qdisc || '');
+  rows.push([tr('', 'Congestion control'), (n.cc || '?') + ' · ' + (n.qdisc || '?'), bbr && fq ? 'ok' : 'warn',
+    bbr ? (fq ? tr('', 'BBR with fq pacing') : tr('', 'BBR works best with the fq queue')) : tr('', 'BBR keeps speed up on lossy links')]);
+  const buf = Math.min(n.rmem_max || 0, n.wmem_max || 0);
+  rows.push([tr('', 'Socket buffers'), fmtBufMB(n.rmem_max) + ' / ' + fmtBufMB(n.wmem_max), buf >= 8388608 ? 'ok' : 'warn',
+    buf >= 8388608 ? tr('', 'Receive / send maximum') : tr('', 'Too small for fast, long links')]);
+  if (n.conntrack_max > 0) {
+    const pct = Math.round(100 * (n.conntrack || 0) / n.conntrack_max);
+    rows.push([tr('', 'Connection tracking'), (n.conntrack || 0).toLocaleString() + ' / ' + n.conntrack_max.toLocaleString(),
+      pct >= 90 ? 'err' : pct >= 70 || n.conntrack_max < 65536 ? 'warn' : 'ok',
+      pct >= 70 ? docTpl('{0}% full: new connections may be dropped', [pct]) : docTpl('{0}% in use', [pct])]);
+  } else {
+    rows.push([tr('', 'Connection tracking'), '—', '', tr('', 'Module not loaded')]);
+  }
+  if (n.gre_mtu > 0) {
+    rows.push([tr('', 'GRE MTU'), String(n.gre_mtu), n.gre_mtu <= 1420 ? 'ok' : 'warn',
+      n.gre_mtu <= 1420 ? tr('', 'Leaves room for the outer headers') : tr('', 'Large packets may fragment')]);
+  } else {
+    rows.push([tr('', 'GRE MTU'), '—', '', tr('', 'No GRE interface')]);
+  }
+  rows.push([tr('', 'MSS clamp'), n.mss_rule ? (n.mss_rule === 'pmtu' ? 'PMTU' : n.mss_rule) : onOff(false), n.mss_rule ? 'ok' : 'warn',
+    n.mss_rule ? tr('', 'TCP segments fit the tunnel') : tr('', 'Some sites may stall on large packets')]);
+  rows.push([tr('', 'Kept after reboot'), tr('', n.persisted ? 'Yes' : 'No'), n.persisted ? 'ok' : 'warn',
+    n.persisted ? tr('', 'Saved in sysctl.d') : tr('', 'Lost on the next reboot')]);
+  return rows;
+}
+
+function renderNetStack(n) {
+  const list = $('netStackList'), badge = $('netStackBadge');
+  if (!n || !n.known) {
+    list.innerHTML = '<div class="ns-empty">' + esc(tr('', 'Kernel values cannot be read on this system.')) + '</div>';
+    badge.className = 'badge'; badge.textContent = '—';
+    perfSetText('perfNetVal', '—'); perfSetText('perfNetSub', '—');
+    return;
+  }
+  const rows = netStackRows(n);
+  list.innerHTML = rows.map(([k, v, lvl, note]) =>
+    `<div class="ns-row" data-lvl="${lvl}"><span class="ns-dot" aria-hidden="true"></span><span class="ns-k">${esc(k)}<span class="ns-sub">${esc(note)}</span></span><span class="ns-v" data-no-i18n><bdi dir="ltr">${esc(v)}</bdi></span></div>`).join('');
+  const bad = rows.filter(r => r[2] === 'warn' || r[2] === 'err').length;
+  badge.className = 'badge ' + (bad ? 'warn' : 'ok');
+  badge.textContent = bad ? docTpl('{0} to improve', [bad]) : tr('', 'Optimized');
+  perfSetText('perfNetVal', bad ? tr('', 'Not optimized') : tr('', 'Optimized'));
+  perfSetLtr('perfNetSub', (n.cc || '?') + ' + ' + (n.qdisc || '?') + (n.gre_mtu ? ' · MTU ' + n.gre_mtu : ''));
+  $('perfRestoreBtn').hidden = !n.backup;
 }
 
 async function loadPerf() {
+  let s;
   try {
-    const s = await api('/api/perf');
-    perfState = s;
-    const ap = s.auto_pool_state || {};
-
-    // Status hero card
-    const ind = $('perfSyncInd');
-    if (ind) {
-      ind.className = 'status-indicator ' + (s.in_sync ? 'active' : 'offline');
-      $('perfSyncTxt').textContent = s.in_sync ? 'In Sync' : 'Needs Apply';
-    }
-    const cVal = $('perfCryptoVal');
-    if (cVal) cVal.textContent = 'Mux: ' + (s.tcp_mux_live ? s.tcp_mux_live : (s.tcp_mux ? 'On' : 'Off'));
-    const cSub = $('perfCryptoSub');
-    if (cSub) cSub.textContent = `Enc: ${s.proxy_encryption ? 'On' : 'Off'} · Comp: ${s.proxy_compression ? 'On' : 'Off'}`;
-    if ($('perfPoolVal')) $('perfPoolVal').textContent = `${s.effective_pool_count} / ${s.effective_max_pool}`;
-    if ($('perfPoolSub')) $('perfPoolSub').textContent = s.auto_pool ? tr('perf_mode_auto', 'Auto Pool') : tr('perf_mode_manual', 'Manual');
-    if ($('perfDecisionVal')) $('perfDecisionVal').textContent = s.auto_pool ? (ap.last_decision || 'waiting') : 'off';
-    if ($('perfDecisionSub')) $('perfDecisionSub').textContent = s.auto_pool ? (ap.last_reason || 'first tick pending (runs every minute)') : tr('perf_mode_manual', 'Manual');
-
-    // Checkboxes
-    if ($('perfEncCheck')) $('perfEncCheck').checked = !!s.proxy_encryption;
-    if ($('perfCompCheck')) $('perfCompCheck').checked = !!s.proxy_compression;
-    if ($('perfMuxCheck')) $('perfMuxCheck').checked = !!s.tcp_mux;
-    if ($('perfMuxLive')) {
-      const live = s.tcp_mux_live || 'n/a';
-      const want = s.tcp_mux_set ? (s.tcp_mux ? 'on' : 'off') : 'not set';
-      const warn = (s.tcp_mux_set && s.tcp_mux_live && live !== (s.tcp_mux ? 'on' : 'off')) ? ' — differs, press Apply & restart' : '';
-      $('perfMuxLive').textContent = 'Setting: ' + want + ' · Live toml: ' + live + warn + (live === 'on' ? ' · slower path active' : '');
-      $('perfMuxLive').style.color = (live === 'on' || warn) ? 'var(--wr)' : '';
-    }
-
-    // Role badge
-    if ($('perfRoleBadge')) {
-      const rName = s.role === 'iran' ? 'Iran (Server)' : (s.role === 'foreign' ? 'Foreign (Client)' : 'No Tunnel');
-      $('perfRoleBadge').textContent = rName;
-      $('perfRoleBadge').className = 'badge ' + (s.role === 'iran' ? 'ok' : 'info');
-    }
-
-    // Auto Pool card
-    if ($('perfAutoPool')) $('perfAutoPool').checked = !!s.auto_pool;
-    if ($('perfApDecision')) $('perfApDecision').textContent = ap.last_decision || '—';
-    if ($('perfApReason')) $('perfApReason').textContent = ap.last_reason || '—';
-    if ($('perfApErrors')) $('perfApErrors').textContent = ap.last_tick ? String(ap.errors_last_tick || 0) : '—';
-    if ($('perfApConns')) $('perfApConns').textContent = ap.last_tick ? `active conns ≈ ${ap.active_conns || 0}` : '—';
-    if ($('perfApRestart')) $('perfApRestart').textContent = perfAgo(ap.last_restart);
-    if ($('perfApQuiet')) $('perfApQuiet').textContent = ap.last_tick ? `quiet ticks: ${ap.quiet_ticks || 0}` : '—';
-    if ($('perfApFrpsNote')) $('perfApFrpsNote').hidden = !(s.auto_pool && ap.frps_restart_needed);
-    if ($('perfPoolCount')) $('perfPoolCount').value = s.auto_pool ? s.effective_pool_count : (s.frp_pool_count || 20);
-    if ($('perfMaxPool')) $('perfMaxPool').value = s.auto_pool ? s.effective_max_pool : (s.frp_max_pool || 60);
-    updateAutoPoolUI(!!s.auto_pool);
+    s = await api('/api/perf');
   } catch (e) {
-    toastErr('performance error', e.message);
+    toastErr(tr('', 'Could not load performance settings'), e.message);
+    return;
   }
+  perfState = s;
+  const ap = s.auto_pool_state || {};
+  const isFrp = s.engine === 'frp';
+
+  // What this server runs decides which cards apply.
+  const note = $('perfEngineNote');
+  note.hidden = isFrp;
+  if (!s.engine) note.textContent = tr('', 'No tunnel is set up on this server yet. The FRP settings take effect once an FRP tunnel exists; the network stack can be optimized now.');
+  else if (!isFrp) note.textContent = tr('', 'This server runs Backhaul, so the FRP settings below do not apply. The network stack and carrier settings still do.');
+  $('perfFrpSet').disabled = !isFrp;
+  $('perfPoolSet').disabled = !isFrp;
+
+  // Sync status
+  const ind = $('perfSyncInd');
+  if (!isFrp) {
+    ind.className = 'status-indicator offline';
+    perfSetText('perfSyncTxt', tr('', s.engine ? 'FRP not used' : 'No tunnel'));
+    ind.title = '';
+  } else {
+    ind.className = 'status-indicator ' + (s.in_sync ? 'ok' : 'warn');
+    perfSetText('perfSyncTxt', tr('', s.in_sync ? 'Applied' : 'Not applied yet'));
+    ind.title = s.sync_details || '';
+  }
+  $('perfApplyTopBtn').hidden = !isFrp || s.in_sync;
+
+  // Overview
+  const speedFirst = !s.proxy_encryption && !s.proxy_compression && !s.tcp_mux;
+  perfSetText('perfCryptoVal', isFrp ? tr('', speedFirst ? 'Speed-first' : 'Custom') : tr('', 'Not used'));
+  perfSetText('perfCryptoSub', docTpl('Encryption {0} · Compression {1} · Multiplexing {2}', [onOff(s.proxy_encryption), onOff(s.proxy_compression), onOff(s.tcp_mux)]));
+  perfSetLtr('perfPoolVal', isFrp ? `${s.effective_pool_count} / ${s.effective_max_pool}` : '—');
+  perfSetText('perfPoolSub', s.auto_pool ? tr('perf_mode_auto', 'Auto Pool') : tr('perf_mode_manual', 'Manual'));
+  renderNetStack(s.net);
+
+  // FRP transport
+  $('perfEncCheck').checked = !!s.proxy_encryption;
+  $('perfCompCheck').checked = !!s.proxy_compression;
+  $('perfMuxCheck').checked = !!s.tcp_mux;
+  const mux = $('perfMuxLive');
+  const live = s.tcp_mux_live;
+  const want = s.tcp_mux ? 'on' : 'off';
+  if (!live) {
+    mux.textContent = '';
+    mux.hidden = true;
+  } else {
+    mux.hidden = false;
+    let t = docTpl('In the running config: {0}', [live === 'mixed' ? tr('', 'mixed (servers disagree)') : onOff(live === 'on')]);
+    if (s.tcp_mux_set && live !== want) t += ' · ' + tr('', 'differs from the setting above, press Apply & Restart Tunnels');
+    else if (live === 'on') t += ' · ' + tr('', 'the slower path is active');
+    mux.textContent = t;
+    mux.classList.toggle('perf-err', live === 'mixed' || (s.tcp_mux_set && live !== want) || live === 'on');
+  }
+  const roleBadge = $('perfRoleBadge');
+  roleBadge.textContent = tr('', s.role === 'iran' ? 'Iran server' : s.role === 'foreign' ? 'Foreign server' : 'No FRP tunnel');
+  roleBadge.className = 'badge ' + (s.role === 'none' ? '' : 'info');
+  // frps ignores proxy encryption and compression: they live in frpc's proxies.
+  const onIran = s.role === 'iran';
+  $('perfEncCheck').disabled = onIran;
+  $('perfCompCheck').disabled = onIran;
+  const rh = $('perfRoleHint');
+  rh.hidden = !onIran;
+  rh.textContent = onIran ? tr('', 'Encryption and compression are set on each foreign server; this server follows them. Multiplexing must match on both sides.') : '';
+  perfSyncDirty();
+
+  // Auto Pool
+  $('perfAutoPool').checked = !!s.auto_pool;
+  perfSetText('perfApDecision', s.auto_pool ? (ap.last_decision ? tr('', AP_DECISION[ap.last_decision] || ap.last_decision) : tr('', 'Waiting')) : tr('', 'Off'));
+  perfSetText('perfApReason', s.auto_pool ? (ap.last_reason || tr('', 'The first check runs within a minute')) : tr('perf_mode_manual', 'Manual'));
+  perfSetText('perfApErrors', ap.last_tick ? String(ap.errors_last_tick || 0) : '—');
+  perfSetText('perfApConns', ap.last_tick ? docTpl('{0} active connections', [ap.active_conns || 0]) : '—');
+  perfSetText('perfApRestart', perfAgo(ap.last_restart));
+  perfSetText('perfApQuiet', ap.last_tick ? docTpl('Checked {0}', [perfAgo(ap.last_tick)]) : '—');
+  $('perfApFrpsNote').hidden = !(s.auto_pool && ap.frps_restart_needed);
+  $('perfPoolCount').value = s.auto_pool ? s.effective_pool_count : (s.frp_pool_count || 20);
+  $('perfMaxPool').value = s.auto_pool ? s.effective_max_pool : (s.frp_max_pool || 60);
+  perfSetText('perfPoolHint', s.role === 'iran' ? tr('', 'Used by the foreign servers, not by this one.') : tr('perf_pool_sub', 'Pre-opened work connections on foreign spokes.'));
+  perfSetText('perfMaxHint', s.role === 'foreign' ? tr('', 'Used by the Iran server, not by this one.') : tr('perf_max_sub', 'Server-side maximum work connection headroom (always at least 1.5 × poolCount).'));
+  updateAutoPoolUI(!!s.auto_pool);
 }
 
 function updateAutoPoolUI(isAuto) {
   const badge = $('perfAutoPoolBadge');
-  if (badge) {
-    badge.className = 'badge ' + (isAuto ? 'ok' : 'info');
-    badge.textContent = isAuto ? tr('perf_mode_auto', 'Auto Pool') : tr('perf_mode_manual', 'Manual');
+  badge.className = 'badge ' + (isAuto ? 'ok' : 'info');
+  badge.textContent = isAuto ? tr('perf_mode_auto', 'Auto Pool') : tr('perf_mode_manual', 'Manual');
+  $('perfPoolCount').readOnly = isAuto;
+  $('perfMaxPool').readOnly = isAuto;
+  $('perfSaveTuningBtn').hidden = isAuto;
+  perfSetText('perfTuningStatus', isAuto ? tr('', 'Turn off Auto Pool to set these by hand.') : '');
+  perfPoolCheck();
+}
+
+// Inline check of the manual pool values; returns [pool, maxPool] or null.
+function perfPoolCheck() {
+  const err = $('perfPoolErr');
+  if ($('perfAutoPool').checked) { err.hidden = true; return null; }
+  const pool = Number($('perfPoolCount').value), maxPool = Number($('perfMaxPool').value);
+  let msg = '', bad = true;
+  if (!Number.isInteger(pool) || pool < PERF_LIMITS.pool[0] || pool > PERF_LIMITS.pool[1]) msg = docTpl('Client Pool Count must be a whole number from {0} to {1}.', PERF_LIMITS.pool);
+  else if (!Number.isInteger(maxPool) || maxPool < PERF_LIMITS.max[0] || maxPool > PERF_LIMITS.max[1]) msg = docTpl('Max Pool Count must be a whole number from {0} to {1}.', PERF_LIMITS.max);
+  else {
+    bad = false;
+    const need = Math.ceil(pool * 1.5);
+    if (maxPool < need) msg = docTpl('Max Pool Count will be raised to {0} (1.5 × Client Pool Count).', [need]);
   }
-  if ($('perfPoolCount')) $('perfPoolCount').readOnly = isAuto;
-  if ($('perfMaxPool')) $('perfMaxPool').readOnly = isAuto;
-  if ($('perfSaveTuningBtn')) $('perfSaveTuningBtn').disabled = isAuto;
+  err.hidden = !msg;
+  err.textContent = msg;
+  err.classList.toggle('perf-err', bad);
+  $('perfSaveTuningBtn').disabled = bad;
+  return bad ? null : [pool, maxPool];
 }
+['perfPoolCount', 'perfMaxPool'].forEach(id => $(id).addEventListener('input', perfPoolCheck));
 
-if ($('perfAutoPool')) {
-  $('perfAutoPool').onchange = async () => {
-    const on = $('perfAutoPool').checked;
-    updateAutoPoolUI(on);
-    try {
-      await api('/api/perf', { action: 'update', auto_pool: on });
-      toastOk(tr('perf_ap_saved', 'Auto Pool updated'), on ? tr('perf_ap_on_msg', 'Pool is resized automatically every minute.') : tr('perf_ap_off_msg', 'Manual values apply after Save & Apply.'));
-      await loadPerf();
-    } catch (e) {
-      toastErr('Auto Pool error', e.message);
-      await loadPerf();
-    }
-  };
-}
+$('perfAutoPool').onchange = async () => {
+  const on = $('perfAutoPool').checked;
+  updateAutoPoolUI(on);
+  try {
+    await api('/api/perf', { action: 'update', auto_pool: on });
+    toastOk(tr('perf_ap_saved', 'Auto Pool updated'), on ? tr('perf_ap_on_msg', 'Pool is resized automatically every minute.') : tr('perf_ap_off_msg', 'Manual values apply after Save & Apply.'));
+  } catch (e) {
+    toastErr(tr('', 'Could not change Auto Pool'), e.message);
+  }
+  await loadPerf();
+};
 
-if ($('perfSaveTuningBtn')) {
-  $('perfSaveTuningBtn').onclick = async () => {
-    const btn = $('perfSaveTuningBtn');
-    btn.disabled = true;
-    const pool = parseInt($('perfPoolCount') ? $('perfPoolCount').value : 20, 10) || 20;
-    const maxPool = parseInt($('perfMaxPool') ? $('perfMaxPool').value : 60, 10) || 60;
-    try {
-      const res = await api('/api/perf', {
-        action: 'set-tuning',
-        auto_pool: false,
-        frp_pool_count: pool,
-        frp_max_pool: maxPool,
-      });
-      toastOk('Capacity Updated', res.detail || 'FRP scaling settings saved and applied.');
-      if ($('perfTuningStatus')) {
-        $('perfTuningStatus').textContent = '✓ Saved & Applied';
-        setTimeout(() => { if ($('perfTuningStatus')) $('perfTuningStatus').textContent = ''; }, 3000);
-      }
-      await loadPerf();
-    } catch (e) {
-      toastErr('Tuning error', e.message);
-    } finally {
-      btn.disabled = false;
-    }
-  };
-}
+$('perfSaveTuningBtn').onclick = async () => {
+  const v = perfPoolCheck();
+  if (!v) return;
+  const btn = $('perfSaveTuningBtn');
+  btn.disabled = true;
+  try {
+    await api('/api/perf', { action: 'set-tuning', auto_pool: false, frp_pool_count: v[0], frp_max_pool: v[1] });
+    toastOk(tr('', 'Capacity updated'), tr('', 'Pool sizes saved and the tunnel restarted with them.'));
+    await loadPerf();
+  } catch (e) {
+    toastErr(tr('', 'Could not apply pool sizes'), e.message);
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 async function doPerfApply(btnEl) {
-  const orig = btnEl ? btnEl.textContent : '';
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Applying…'; }
+  const orig = btnEl.textContent;
+  const buttons = [$('perfApplyBtn'), $('perfApplyTopBtn'), $('perfSaveOnlyBtn'), $('perfResetBtn')];
+  buttons.forEach(b => { b.disabled = true; });
+  btnEl.textContent = tr('', 'Applying…');
   const msgEl = $('perfApplyMsg');
-  if (msgEl) msgEl.textContent = 'Regenerating configs and restarting services…';
+  msgEl.textContent = tr('', 'Rewriting the FRP config and restarting the tunnel. Connections drop for a few seconds.');
   try {
-    const enc = $('perfEncCheck') ? $('perfEncCheck').checked : perfState.proxy_encryption;
-    const comp = $('perfCompCheck') ? $('perfCompCheck').checked : perfState.proxy_compression;
-    const mux = $('perfMuxCheck') ? $('perfMuxCheck').checked : !!perfState.tcp_mux;
-    const res = await api('/api/perf', {
-      action: 'apply',
-      proxy_encryption: enc,
-      proxy_compression: comp,
-      tcp_mux: mux
-    });
-    toastOk('Settings applied', res.detail || 'Live tunnels updated and restarted.');
-    if (msgEl) msgEl.textContent = 'Applied successfully.';
-    await loadPerf();
+    await api('/api/perf', Object.assign({ action: 'apply' }, perfForm()));
+    toastOk(tr('', 'Settings applied'), tr('', 'The tunnel restarted with the new settings.'));
+    msgEl.textContent = '';
   } catch (e) {
-    toastErr('apply failed', e.message);
-    if (msgEl) msgEl.textContent = 'Error: ' + e.message;
+    toastErr(tr('', 'Could not apply settings'), e.message);
+    msgEl.textContent = e.message;
   } finally {
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = orig; }
+    btnEl.textContent = orig;
+    buttons.forEach(b => { b.disabled = false; });
+    await loadPerf();
   }
 }
 
-async function doPerfSaveOnly() {
-  const enc = $('perfEncCheck') ? $('perfEncCheck').checked : perfState.proxy_encryption;
-  const comp = $('perfCompCheck') ? $('perfCompCheck').checked : perfState.proxy_compression;
-  const mux = $('perfMuxCheck') ? $('perfMuxCheck').checked : !!perfState.tcp_mux;
+$('perfApplyBtn').onclick = () => doPerfApply($('perfApplyBtn'));
+$('perfApplyTopBtn').onclick = () => doPerfApply($('perfApplyTopBtn'));
+$('perfSaveOnlyBtn').onclick = async () => {
   try {
-    await api('/api/perf', {
-      action: 'update',
-      proxy_encryption: enc,
-      proxy_compression: comp,
-      tcp_mux: mux
-    });
-    toastOk('Settings saved', 'Remember to Apply & restart tunnels to make them active.');
+    await api('/api/perf', Object.assign({ action: 'update' }, perfForm()));
+    toastOk(tr('', 'Settings saved'), tr('', 'They take effect after Apply & Restart Tunnels.'));
     await loadPerf();
   } catch (e) {
-    toastErr('save failed', e.message);
+    toastErr(tr('', 'Could not save settings'), e.message);
   }
+};
+$('perfResetBtn').onclick = async () => {
+  const ok = await entConfirm(tr('', 'Reset to Defaults?'), tr('', 'Turns Auto Pool on and encryption, compression and multiplexing off, then restarts the tunnel. Connections drop for a few seconds.'), tr('', 'Reset to Defaults'));
+  if (!ok) return;
+  const b = $('perfResetBtn');
+  b.disabled = true;
+  try {
+    await api('/api/perf', { action: 'reset' });
+    toastOk(tr('', 'Settings reset'), tr('', 'The tunnel restarted with the default settings.'));
+  } catch (e) {
+    toastErr(tr('', 'Could not reset settings'), e.message);
+  } finally {
+    b.disabled = false;
+    await loadPerf();
+  }
+};
+
+// Optimize Network / Restore are shared by the Tunnel and Performance tabs.
+async function runNetOptimize(b) {
+  if (!await entConfirm(tr('', 'Optimize Network?'), tr('', 'Applies FQ + BBR, larger TCP buffers, GRE MTU 1380 and MSS clamp 1340. The current settings are saved first, so Restore can bring them back. The tunnel keeps running.'), tr('', 'Optimize'))) return;
+  b.disabled = true;
+  try {
+    const r = await api('/api/action', {action: 'optimize'});
+    showActOut(tr('', 'Optimize Network'), r.output || 'optimized');
+    $('restoreBtn').classList.remove('hidden');
+    toastOk(tr('', 'Network optimized'));
+    refresh();
+    if (!$('tab-perf').hidden) loadPerf();
+  } catch(e) { toastErr(tr('', 'Could not optimize the network'), e.message); }
+  b.disabled = false;
 }
-
-const perfApplyBtn = $('perfApplyBtn');
-if (perfApplyBtn) perfApplyBtn.onclick = () => doPerfApply(perfApplyBtn);
-const perfApplyTopBtn = $('perfApplyTopBtn');
-if (perfApplyTopBtn) perfApplyTopBtn.onclick = () => doPerfApply(perfApplyTopBtn);
-const perfSaveOnlyBtn = $('perfSaveOnlyBtn');
-if (perfSaveOnlyBtn) perfSaveOnlyBtn.onclick = () => doPerfSaveOnly();
-
-const perfResetBtn = $('perfResetBtn');
-if (perfResetBtn) {
-  perfResetBtn.onclick = async () => {
-    const ok = await entConfirm('Reset Performance Settings', 'This will turn Auto Pool on, disable extra proxy encryption/compression and TCP multiplexing, and restart tunnels in clean wire-speed mode. Continue?', 'Reset to Safe Defaults');
-    if (!ok) return;
-    perfResetBtn.disabled = true;
-    try {
-      const res = await api('/api/perf', { action: 'reset' });
-      toastOk('Settings Reset', res.detail || 'Restored clean wire-speed settings.');
-      await loadPerf();
-    } catch (e) {
-      toastErr('Reset failed', e.message);
-    } finally {
-      perfResetBtn.disabled = false;
-    }
-  };
+async function runNetRestore(b) {
+  if (!await entConfirm(tr('', 'Restore Previous Settings?'), tr('', 'Puts back the network settings saved before Optimize Network ran.'), tr('', 'Restore'))) return;
+  b.disabled = true;
+  try {
+    const r = await api('/api/action', {action: 'restore'});
+    showActOut(tr('', 'Restore Previous Settings'), r.output || 'restored');
+    toastOk(tr('', 'Settings restored'));
+    refresh();
+    if (!$('tab-perf').hidden) loadPerf();
+  } catch(e) { toastErr(tr('', 'Could not restore the settings'), e.message); }
+  b.disabled = false;
 }
+$('perfOptimizeBtn').onclick = () => runNetOptimize($('perfOptimizeBtn'));
+$('perfRestoreBtn').onclick = () => runNetRestore($('perfRestoreBtn'));
 
-// ---------- Multi-Carrier & UDP Encapsulation (FOU) ----------
-let carrierState = { mode: 'direct', active: 'direct', fou_ports: [], direct_gre: true, watchdog_auto: false };
+// ---------- Carrier: direct GRE or GRE inside WSS ----------
+let carrierState = { mode: 'direct', active: 'direct', wss_port: 8443 };
+
+function carrierName(c) {
+  return (c || '').startsWith('wss') ? 'WSS :' + (c.split(':')[1] || '8443') : tr('', 'Direct GRE');
+}
 
 async function loadCarrier() {
+  let s;
   try {
-    const s = await api('/api/carrier');
-    carrierState = s;
-
-    const curActive = s.active || s.active_carrier || 'direct';
-    const curPorts = s.fou_ports || [s.fou_port1 || 443, s.fou_port2 || 55555];
-
-    const badge = $('carrierActiveBadge');
-    if (badge) {
-      if (curActive.startsWith('wss')) {
-        badge.textContent = '' + curActive.toUpperCase() + ' (TLS)';
-        badge.className = 'badge ok';
-      } else if (curActive.startsWith('fou:')) {
-        badge.textContent = '' + curActive.toUpperCase();
-        badge.className = 'badge ok';
-      } else {
-        badge.textContent = 'Direct GRE';
-        badge.className = 'badge info';
-      }
-    }
-
-    if ($('carrierActiveVal')) {
-      $('carrierActiveVal').textContent = curActive.toUpperCase();
-    }
-    if ($('carrierModeVal')) {
-      $('carrierModeVal').textContent = 'MANUAL';
-    }
-    if ($('carrierModeSub')) {
-      $('carrierModeSub').textContent = 'Auto Failover OFF';
-    }
-    if ($('carrierPortsVal')) {
-      $('carrierPortsVal').textContent = (curPorts && curPorts.length > 0) ? curPorts.join(', ') : 'None';
-    }
-
-    const cms = $('carrierModeSelect');
-    if (cms && document.activeElement !== cms) {
-      const wp = s.wss_port || 8443;
-      const opts = [
-        { v: 'direct', t: 'Direct GRE (Protocol 47)' },
-        { v: `wss:${wp}`, t: `Obfuscated WSS (TLS ${wp})` }
-      ];
-      cms.innerHTML = opts.map(o => `<option value="${o.v}" ${o.v === curActive ? 'selected' : ''}>${o.t}</option>`).join('');
-    }
-
-    if ($('carrierWSSPortInput') && s.wss_port && document.activeElement !== $('carrierWSSPortInput')) {
-      $('carrierWSSPortInput').value = s.wss_port;
-    }
-    if ($('carrierWSSTxt') && s.wss) {
-      $('carrierWSSTxt').textContent = s.wss.running
-        ? (s.wss.connected ? `Connected (${s.wss.packets_sent || 0} pkts sent / ${s.wss.packets_recv || 0} recv)` : 'Active / Listening')
-        : 'Idle';
-    }
-
-    const ind = $('carrierStatusInd');
-    if (ind) {
-      ind.className = 'status-indicator active';
-      $('carrierStatusTxt').textContent = s.status_text || (s.ping_status === 'ok' ? ('Ping ' + (s.ping_rtt || 'OK')) : 'Active');
-    }
-
-    const tunCarrier = $('tunnelCarrierTxt');
-    if (tunCarrier) tunCarrier.textContent = curActive.toUpperCase();
+    s = await api('/api/carrier');
   } catch (e) {
     reportErr('carrier', e);
-    const ind = $('carrierStatusInd');
-    if (ind) {
-      ind.className = 'status-indicator offline';
-      $('carrierStatusTxt').textContent = 'Error';
-    }
+    perfSetText('carrierLinkVal', tr('', 'Error'));
+    perfSetText('carrierLinkSub', e.message);
+    return;
   }
-}
+  carrierState = s;
+  const cur = s.active || s.active_carrier || 'direct';
+  const isWss = cur.startsWith('wss');
 
-const carrierCycleBtn = $('carrierCycleBtn');
-if (carrierCycleBtn) {
-  carrierCycleBtn.onclick = async () => {
-    carrierCycleBtn.disabled = true;
-    try {
-      const res = await api('/api/carrier', { action: 'cycle' });
-      toastOk('Carrier Switched', 'Active: ' + (res.active || res.active_carrier || 'updated'));
-      await loadCarrier();
-    } catch (e) {
-      toastErr('Switch failed', e.message);
-    } finally {
-      carrierCycleBtn.disabled = false;
-    }
-  };
+  const badge = $('carrierActiveBadge');
+  badge.textContent = carrierName(cur);
+  badge.className = 'badge ' + (isWss ? 'ok' : 'info');
+  badge.dir = isWss ? 'ltr' : '';
+  (isWss ? perfSetLtr : perfSetText)('carrierActiveVal', carrierName(cur));
+  perfSetText('carrierActiveSub', tr('', isWss ? 'GRE inside TLS WebSocket' : 'Raw GRE, protocol 47'));
+
+  const lv = $('carrierLinkVal');
+  if (!s.gre_exists) {
+    lv.textContent = tr('', 'No tunnel');
+    perfSetText('carrierLinkSub', tr('', 'No GRE interface on this server'));
+  } else if (s.ping_status === 'ok') {
+    perfSetLtr('carrierLinkVal', s.ping_rtt || tr('', 'Up'));
+    perfSetText('carrierLinkSub', tr('', 'The other server replies over GRE'));
+  } else {
+    lv.textContent = tr('', 'No reply');
+    perfSetText('carrierLinkSub', tr('', 'The other server did not answer a ping over GRE'));
+  }
+  lv.classList.toggle('perf-err', !!s.gre_exists && s.ping_status !== 'ok');
+
+  const w = s.wss || {};
+  perfSetText('carrierWSSVal', !w.running ? tr('', 'Off') : w.connected ? tr('', 'Connected') : tr('', 'Listening'));
+  perfSetText('carrierWSSTxt', w.running
+    ? docTpl('Port {0} · {1} packets out, {2} in', [s.wss_port, (w.packets_sent || 0).toLocaleString(), (w.packets_recv || 0).toLocaleString()])
+    : docTpl('Port {0}', [s.wss_port || 8443]));
+
+  const cms = $('carrierModeSelect');
+  if (document.activeElement !== cms) {
+    const wp = s.wss_port || 8443;
+    const opts = [
+      { v: 'direct', t: tr('', 'Direct GRE (Protocol 47)') },
+      { v: `wss:${wp}`, t: docTpl('WSS (TLS {0})', [wp]) },
+    ];
+    cms.innerHTML = opts.map(o => `<option value="${o.v}" ${o.v === cur ? 'selected' : ''}>${esc(o.t)}</option>`).join('');
+  }
+  // Without a GRE interface there is nothing to carry yet.
+  $('carrierSaveModeBtn').disabled = !s.gre_exists || cms.value === cur;
+  $('carrierApplyBtn').disabled = !s.gre_exists;
+  const wpIn = $('carrierWSSPortInput');
+  if (s.wss_port && document.activeElement !== wpIn) wpIn.value = s.wss_port;
+  const sniIn = $('carrierWSSSNIInput');
+  if (document.activeElement !== sniIn) sniIn.value = s.wss_sni || '';
+
+  const tunCarrier = $('tunnelCarrierTxt');
+  if (tunCarrier) tunCarrier.textContent = cur.toUpperCase();
 }
+$('carrierModeSelect').addEventListener('change', () => {
+  const cur = carrierState.active || carrierState.active_carrier || 'direct';
+  $('carrierSaveModeBtn').disabled = !carrierState.gre_exists || $('carrierModeSelect').value === cur;
+});
 
 const tunnelCarrierCycleBtn = $('tunnelCarrierCycleBtn');
 if (tunnelCarrierCycleBtn) {
@@ -4056,11 +4135,11 @@ if (carrierApplyBtn) {
   carrierApplyBtn.onclick = async () => {
     carrierApplyBtn.disabled = true;
     try {
-      const res = await api('/api/carrier', { action: 'apply' });
-      toastOk('Carrier Applied', res.detail || 'Encapsulation refreshed');
+      await api('/api/carrier', { action: 'apply' });
+      toastOk(tr('', 'Carrier re-applied'), carrierName(carrierState.active || carrierState.active_carrier));
       await loadCarrier();
     } catch (e) {
-      toastErr('Apply failed', e.message);
+      toastErr(tr('', 'Could not re-apply the carrier'), e.message);
     } finally {
       carrierApplyBtn.disabled = false;
     }
@@ -4068,21 +4147,18 @@ if (carrierApplyBtn) {
 }
 
 const carrierSaveModeBtn = $('carrierSaveModeBtn');
-if (carrierSaveModeBtn) {
-  carrierSaveModeBtn.onclick = async () => {
-    const m = $('carrierModeSelect') ? $('carrierModeSelect').value : 'direct';
-    carrierSaveModeBtn.disabled = true;
-    try {
-      const res = await api('/api/carrier', { action: 'set-active', target: m });
-      toastOk('Carrier Switched', 'Active: ' + (res.active || res.active_carrier || m));
-      await loadCarrier();
-    } catch (e) {
-      toastErr('Save mode failed', e.message);
-    } finally {
-      carrierSaveModeBtn.disabled = false;
-    }
-  };
-}
+carrierSaveModeBtn.onclick = async () => {
+  const m = $('carrierModeSelect').value;
+  if (!await entConfirm(tr('', 'Switch Carrier?'), docTpl('GRE packets will be carried over {0}. The tunnel reconnects, which takes a few seconds. The other server switches too when it is linked.', [carrierName(m)]), tr('', 'Switch Carrier'))) return;
+  carrierSaveModeBtn.disabled = true;
+  try {
+    const res = await api('/api/carrier', { action: 'set-active', target: m });
+    toastOk(tr('', 'Carrier switched'), carrierName(res.active || res.active_carrier || m));
+  } catch (e) {
+    toastErr(tr('', 'Could not switch the carrier'), e.message);
+  }
+  await loadCarrier();
+};
 
 const liveSwitchEngineBtn = $('liveSwitchEngineBtn');
 ['liveEngineSelect', 'liveTransportSelect'].forEach(id => {
@@ -4128,22 +4204,25 @@ if (liveSwitchEngineBtn) {
 }
 
 const carrierSaveWSSBtn = $('carrierSaveWSSBtn');
-if (carrierSaveWSSBtn) {
-  carrierSaveWSSBtn.onclick = async () => {
-    const p = parseInt($('carrierWSSPortInput') ? $('carrierWSSPortInput').value : '8443', 10);
-    const sni = $('carrierWSSSNIInput') ? $('carrierWSSSNIInput').value.trim() : '';
-    carrierSaveWSSBtn.disabled = true;
-    try {
-      await api('/api/carrier', { action: 'set_wss', wss_port: p, wss_sni: sni });
-      toastOk('WSS Settings Saved', `Port: ${p}${sni ? ' · SNI: ' + sni : ''}`);
-      await loadCarrier();
-    } catch (e) {
-      toastErr('Save WSS failed', e.message);
-    } finally {
-      carrierSaveWSSBtn.disabled = false;
-    }
-  };
-}
+carrierSaveWSSBtn.onclick = async () => {
+  const p = Number($('carrierWSSPortInput').value);
+  const sni = $('carrierWSSSNIInput').value.trim();
+  if (!Number.isInteger(p) || p < 1 || p > 65535) {
+    toastErr(tr('', 'Invalid port'), tr('', 'Enter a port from 1 to 65535.'));
+    $('carrierWSSPortInput').focus();
+    return;
+  }
+  carrierSaveWSSBtn.disabled = true;
+  try {
+    await api('/api/carrier', { action: 'set_wss', wss_port: p, wss_sni: sni });
+    toastOk(tr('', 'WSS settings saved'), docTpl('Port {0}', [p]) + (sni ? ' · SNI ' + sni : ''));
+  } catch (e) {
+    toastErr(tr('', 'Could not save WSS settings'), e.message);
+  } finally {
+    carrierSaveWSSBtn.disabled = false;
+  }
+  await loadCarrier();
+};
 
 // ---------- Watchdog & Backup (tab-watchdog) ----------
 let wdState = { enabled: false, tg_bot_token_masked: '', ports: [] };

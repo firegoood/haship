@@ -39,6 +39,8 @@ type carrierStatusResponse struct {
 	PingStatus    string           `json:"ping_status"`
 	PingRTT       string           `json:"ping_rtt"`
 	StatusText    string           `json:"status_text"`
+	GREExists     bool             `json:"gre_exists"`
+	WSSSNI        string           `json:"wss_sni"`
 	WSS           wssCarrierStatus `json:"wss"`
 }
 
@@ -51,7 +53,8 @@ type carrierPostRequest struct {
 	FOUPort2  int    `json:"fou_port2,omitempty"`
 	WSSPort   int    `json:"wss_port,omitempty"`
 	WSSRemote string `json:"wss_remote,omitempty"`
-	WSSSNI    string `json:"wss_sni,omitempty"`
+	// WSSSNI: nil leaves the SNI as it is, "" clears it.
+	WSSSNI *string `json:"wss_sni,omitempty"`
 }
 
 func carrierConfigPath() string {
@@ -181,10 +184,16 @@ func getCarrierPingStatus() (string, string) {
 
 func handleCarrierGet(w http.ResponseWriter, r *http.Request) {
 	cfg := loadCarrierConfig()
-	st, rtt := getCarrierPingStatus()
-	statusText := "Active"
-	if st == "fail" {
-		statusText = "Packet Loss / Link Down"
+	// Without a GRE interface there is nothing to ping: say so instead of
+	// reporting packet loss to the 10.10.10.1 fallback.
+	greExists := fileExists(filepath.Join(sysClassNet, "gre-tunnel"))
+	st, rtt, statusText := "no_tunnel", "", "No tunnel"
+	if greExists {
+		st, rtt = getCarrierPingStatus()
+		statusText = "Peer replies"
+		if st == "fail" {
+			statusText = "Peer not replying"
+		}
 	}
 	resp := carrierStatusResponse{
 		Mode:          cfg.Mode,
@@ -200,6 +209,8 @@ func handleCarrierGet(w http.ResponseWriter, r *http.Request) {
 		PingStatus:    st,
 		PingRTT:       rtt,
 		StatusText:    statusText,
+		GREExists:     greExists,
+		WSSSNI:        loadWSSConfig().SNI,
 		WSS:           getWSSStatus(),
 	}
 	writeJSON(w, resp)
@@ -301,23 +312,40 @@ func handleCarrierPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"status": "ok", "fou_port1": p1, "fou_port2": p2, "fou_ports": []int{p1, p2}})
 
 	case "set_wss", "set-wss":
+		if req.WSSPort < 0 || req.WSSPort > 65535 {
+			writeAPIError(w, r, "E-ACTION-01", "invalid port: must be between 1 and 65535")
+			return
+		}
 		wssCfg := loadWSSConfig()
 		if req.WSSPort > 0 {
+			ps := strconv.Itoa(req.WSSPort)
 			wssCfg.ListenPort = req.WSSPort
+			if host, _, err := net.SplitHostPort(wssCfg.RemoteAddr); err == nil && host != "" {
+				wssCfg.RemoteAddr = net.JoinHostPort(host, ps)
+			}
 			cfg.WSSPort = req.WSSPort
+			// Keep the carrier names on the new port, or Cycle and the
+			// active carrier still point at the old one.
+			cfg.Candidates = []string{"direct", "wss:" + ps}
+			if strings.HasPrefix(cfg.ActiveCarrier, "wss") {
+				cfg.ActiveCarrier = "wss:" + ps
+			}
+			if strings.HasPrefix(cfg.Mode, "wss") {
+				cfg.Mode = "wss:" + ps
+			}
 			_ = saveCarrierConfig(cfg)
 		}
 		if req.WSSRemote != "" {
 			wssCfg.RemoteAddr = req.WSSRemote
 		}
-		if req.WSSSNI != "" {
-			wssCfg.SNI = req.WSSSNI
+		if req.WSSSNI != nil {
+			wssCfg.SNI = strings.TrimSpace(*req.WSSSNI)
 		}
 		_ = saveWSSConfig(wssCfg)
 		if strings.HasPrefix(cfg.ActiveCarrier, "wss") {
 			_ = startWSSCarrier(wssCfg)
 		}
-		writeJSON(w, map[string]any{"status": "ok", "wss": wssCfg})
+		writeJSON(w, map[string]any{"status": "ok", "wss_port": cfg.WSSPort, "wss_sni": wssCfg.SNI, "active": cfg.ActiveCarrier})
 
 	default:
 		writeAPIError(w, r, "E-ACTION-01", "unknown action: want set_mode, set_active, cycle_next, set_ports, or set_wss")

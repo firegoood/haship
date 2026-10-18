@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -57,8 +59,31 @@ type perfStatusResponse struct {
 	InSync           bool            `json:"in_sync"`
 	SyncDetails      string          `json:"sync_details"`
 	Role             string          `json:"role"`
+	Engine           string          `json:"engine"` // "frp", "backhaul" or "" (no tunnel)
 	Overridden       map[string]bool `json:"overridden,omitempty"`
+	Net              netStackStatus  `json:"net"`
 }
+
+// netStackStatus is the kernel side of throughput: what Optimize Network sets.
+type netStackStatus struct {
+	Known        bool   `json:"known"`
+	CC           string `json:"cc"`
+	Qdisc        string `json:"qdisc"`
+	RmemMax      int    `json:"rmem_max"`
+	WmemMax      int    `json:"wmem_max"`
+	Conntrack    int    `json:"conntrack"`
+	ConntrackMax int    `json:"conntrack_max"`
+	GREMTU       int    `json:"gre_mtu"`
+	MSSRule      string `json:"mss_rule"` // "1340", "pmtu" or ""
+	Persisted    bool   `json:"persisted"`
+	Backup       bool   `json:"backup"`
+}
+
+// Pool bounds, shared by the API and the inputs in the Performance tab.
+const (
+	perfPoolMin, perfPoolMax       = 2, 1000
+	perfMaxPoolMin, perfMaxPoolMax = 10, 2000
+)
 
 type perfPostRequest struct {
 	Action           string `json:"action"`
@@ -292,7 +317,7 @@ func checkLiveTomlSync(c perfConfig) (bool, string, string) {
 	role := "none"
 	if _, err := os.Stat(filepath.Join(frpDir, "frpc.toml")); err == nil {
 		role = "foreign"
-	} else if _, err := os.Stat(filepath.Join(frpDir, "frps.toml")); err == nil {
+	} else if matches, _ := filepath.Glob(filepath.Join(frpDir, "frps*.toml")); len(matches) > 0 {
 		role = "iran"
 	}
 
@@ -319,16 +344,22 @@ func checkLiveTomlSync(c perfConfig) (bool, string, string) {
 		}
 		return true, "All settings match live frpc.toml", role
 	case "iran":
-		data, err := os.ReadFile(filepath.Join(frpDir, "frps.toml"))
+		hub := filepath.Join(frpDir, "frps.toml")
+		if !fileExists(hub) {
+			if matches, _ := filepath.Glob(filepath.Join(frpDir, "frps*.toml")); len(matches) > 0 {
+				hub = matches[0]
+			}
+		}
+		data, err := os.ReadFile(hub)
 		if err != nil {
-			return false, "cannot read " + filepath.Join(frpDir, "frps.toml"), role
+			return false, "cannot read " + hub, role
 		}
 		if !c.AutoPool {
 			if live := tomlInt(string(data), "transport.maxPoolCount"); live != c.FRPMaxPool {
-				return false, fmt.Sprintf("maxPoolCount (%d) does not match frps.toml (%d)", c.FRPMaxPool, live), role
+				return false, fmt.Sprintf("maxPoolCount (%d) does not match %s (%d)", c.FRPMaxPool, filepath.Base(hub), live), role
 			}
 		}
-		return true, "All settings match live frps.toml", role
+		return true, "All settings match live " + filepath.Base(hub), role
 	default:
 		return true, "No tunnel configured yet", role
 	}
@@ -370,9 +401,79 @@ func handlePerfGet(w http.ResponseWriter, r *http.Request) {
 		InSync:           inSync,
 		SyncDetails:      details,
 		Role:             role,
+		Engine:           perfEngine(),
 		Overridden:       over,
+		Net:              readNetStack(),
 	}
 	writeJSON(w, resp)
+}
+
+// perfEngine names the tunnel engine from its config files, without running
+// a command: "frp", "backhaul", or "" when no tunnel is set up.
+func perfEngine() string {
+	if m, _ := filepath.Glob(filepath.Join(frpDir, "frp[sc]*.toml")); len(m) > 0 {
+		return "frp"
+	}
+	for _, c := range staleConfigCandidates() {
+		if c.engine == "backhaul" && fileExists(c.path) {
+			return "backhaul"
+		}
+	}
+	return ""
+}
+
+func procInt(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	v, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	return v
+}
+
+func procStr(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// readNetStack reads the live kernel values that Optimize Network changes.
+func readNetStack() netStackStatus {
+	if runtime.GOOS == "windows" { // local development: show a tuned host
+		return netStackStatus{Known: true, CC: "bbr", Qdisc: "fq", RmemMax: 16777216, WmemMax: 16777216,
+			Conntrack: 1834, ConntrackMax: 262144, GREMTU: 1380, MSSRule: "1340", Persisted: true, Backup: true}
+	}
+	ns := netStackStatus{
+		CC:        procStr("/proc/sys/net/ipv4/tcp_congestion_control"),
+		Qdisc:     procStr("/proc/sys/net/core/default_qdisc"),
+		RmemMax:   procInt("/proc/sys/net/core/rmem_max"),
+		WmemMax:   procInt("/proc/sys/net/core/wmem_max"),
+		GREMTU:    interfaceMTU("gre-tunnel"),
+		Persisted: fileExists("/etc/sysctl.d/99-gre-tune.conf"),
+		Backup:    fileExists(filepath.Join(configDir, "tune.bak")),
+	}
+	ns.Known = ns.CC != ""
+	ns.Conntrack = procInt("/proc/sys/net/netfilter/nf_conntrack_count")
+	if ns.ConntrackMax = procInt("/proc/sys/net/netfilter/nf_conntrack_max"); ns.ConntrackMax == 0 {
+		ns.ConntrackMax = procInt("/proc/sys/net/nf_conntrack_max")
+	}
+	if out, err := runCmdTimeoutOut(3*time.Second, "iptables-save", "-t", "mangle"); err == nil {
+		ns.MSSRule = mssRuleFrom(string(out))
+	}
+	return ns
+}
+
+// validPoolValues checks typed pool sizes; nil values were not sent.
+func validPoolValues(pool, maxPool *int) error {
+	if pool != nil && (*pool < perfPoolMin || *pool > perfPoolMax) {
+		return fmt.Errorf("pool count must be between %d and %d", perfPoolMin, perfPoolMax)
+	}
+	if maxPool != nil && (*maxPool < perfMaxPoolMin || *maxPool > perfMaxPoolMax) {
+		return fmt.Errorf("max pool count must be between %d and %d", perfMaxPoolMin, perfMaxPoolMax)
+	}
+	return nil
 }
 
 func handlePerfPost(w http.ResponseWriter, r *http.Request) {
@@ -383,6 +484,10 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c := loadPerfConfig()
+	if err := validPoolValues(body.FRPPoolCount, body.FRPMaxPool); err != nil {
+		writeAPIError(w, r, "E-PERF-01", err.Error())
+		return
+	}
 
 	switch body.Action {
 	case "update":
@@ -392,10 +497,10 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 		if body.ProxyCompression != nil {
 			c.ProxyCompression = *body.ProxyCompression
 		}
-		if body.FRPPoolCount != nil && *body.FRPPoolCount >= 2 {
+		if body.FRPPoolCount != nil {
 			c.FRPPoolCount = *body.FRPPoolCount
 		}
-		if body.FRPMaxPool != nil && *body.FRPMaxPool >= 10 {
+		if body.FRPMaxPool != nil {
 			c.FRPMaxPool = *body.FRPMaxPool
 		}
 		if body.TCPMux != nil {
@@ -417,10 +522,10 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"status": "ok", "detail": "Settings updated in perf.json"})
 
 	case "set-tuning":
-		if body.FRPPoolCount != nil && *body.FRPPoolCount >= 2 {
+		if body.FRPPoolCount != nil {
 			c.FRPPoolCount = *body.FRPPoolCount
 		}
-		if body.FRPMaxPool != nil && *body.FRPMaxPool >= 10 {
+		if body.FRPMaxPool != nil {
 			c.FRPMaxPool = *body.FRPMaxPool
 		}
 		if body.AutoPool != nil {

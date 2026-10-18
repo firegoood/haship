@@ -265,3 +265,59 @@ func TestAutoPoolStatePersistence(t *testing.T) {
 		t.Fatalf("loaded state mismatch: %+v", loaded)
 	}
 }
+
+// Out-of-range pool sizes are refused instead of silently ignored.
+func TestPerfRejectsBadPoolValues(t *testing.T) {
+	oldConfigDir := configDir
+	configDir = t.TempDir()
+	defer func() { configDir = oldConfigDir }()
+
+	for _, body := range []string{
+		`{"action":"set-tuning","frp_pool_count":1}`,
+		`{"action":"set-tuning","frp_pool_count":1001}`,
+		`{"action":"update","frp_max_pool":9}`,
+		`{"action":"update","frp_max_pool":2001}`,
+	} {
+		rr := httptest.NewRecorder()
+		handlePerfPost(rr, httptest.NewRequest("POST", "/api/perf", strings.NewReader(body)))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s: want 400, got %d %s", body, rr.Code, rr.Body.String())
+		}
+	}
+	if c := loadPerfConfig(); c.FRPPoolCount != 20 || c.FRPMaxPool != 60 {
+		t.Fatalf("rejected values were saved: %+v", c)
+	}
+
+	rr := httptest.NewRecorder()
+	handlePerfPost(rr, httptest.NewRequest("POST", "/api/perf", strings.NewReader(`{"action":"update","frp_pool_count":2,"frp_max_pool":2000}`)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bounds must be accepted, got %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// GET reports which engine the FRP settings apply to.
+func TestPerfEngineFromConfigs(t *testing.T) {
+	oldFrp, oldBh, oldCfg := frpDir, backhaulDir, configDir
+	frpDir, backhaulDir, configDir = t.TempDir(), t.TempDir(), t.TempDir()
+	defer func() { frpDir, backhaulDir, configDir = oldFrp, oldBh, oldCfg }()
+
+	if e := perfEngine(); e != "" {
+		t.Fatalf("no configs: want \"\", got %q", e)
+	}
+	if err := os.WriteFile(filepath.Join(backhaulDir, "server.toml"), []byte("[server]\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if e := perfEngine(); e != "backhaul" {
+		t.Fatalf("backhaul config: want backhaul, got %q", e)
+	}
+	if err := os.WriteFile(filepath.Join(frpDir, "frps-2.toml"), []byte("bindPort = 7000\ntransport.maxPoolCount = 60\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if e := perfEngine(); e != "frp" {
+		t.Fatalf("frps-2.toml: want frp, got %q", e)
+	}
+	// A hub with only numbered frps tomls is still the Iran role.
+	if _, _, role := checkLiveTomlSync(loadPerfConfig()); role != "iran" {
+		t.Fatalf("frps-2.toml only: want role iran, got %q", role)
+	}
+}

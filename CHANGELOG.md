@@ -3,7 +3,18 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
-## Unreleased — Dashboard redesign
+## Unreleased — Dashboard and Performance redesign
+
+### Performance tab
+- **Says what applies here.** On a server with no tunnel or with Backhaul, the FRP settings are greyed out with a note instead of offering an Apply that fails. On the Iran server, encryption and compression are greyed out: frps ignores them, they are set on the foreign servers. A hub with only numbered `frps-N.toml` files is now recognised as the Iran server.
+- **New Network Stack card:** live congestion control and queue, socket buffers, connection-tracking use (warns at 70 % full), GRE MTU, MSS clamp and whether the settings survive a reboot, with Optimize Network and Restore right there.
+- **FRP transport:** an "Unsaved changes" marker, Save is disabled until something changes, the top Apply button only shows when the running config differs, and the multiplexing line reads "In the running config: On / Off / mixed".
+- **Auto Pool:** decisions in words (Scaled up, Waiting, …), last check time, and manual pool sizes are checked as you type. The API now refuses out-of-range values (pool 2–1000, max 10–2000) instead of ignoring them silently.
+- **Carrier card:** the leftover FOU wording and fake "Manual / Auto Failover OFF" box are gone. It shows the active carrier, the ping to the other server ("No tunnel" instead of "Packet Loss / Link Down" when there is no GRE interface) and the WSS state. Switch Carrier asks first and is disabled until you pick a different carrier.
+- **WSS settings:** a new port now moves the active carrier and Cycle to that port (they kept the old one), an empty SNI clears it, the saved SNI is shown, the port is validated, and the response no longer includes the WSS auth token.
+- Fully translated to Persian; numbers and ports keep their order in RTL.
+
+### Dashboard
 
 - **Status hero:** one card answers "is the tunnel up": Healthy / Degraded / Down / Not set up, the first reason when it is not healthy, this server ⇄ the other server with their IPs and the engine chips (GRE, FRP, Backhaul, Bagher; GRE is not shown as a fault on engines that do not use it), and latency rated Good / Fair / High instead of always "Optimal".
 - **Live traffic:** download and upload rates are the numbers; the lifetime total is a footnote. A separate Connections card shows the current count and the peak over the chart range.

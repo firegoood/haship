@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -144,5 +146,44 @@ func TestWSSOriginPolicy(t *testing.T) {
 	}
 	if !wssTokenEqual("abc", "abc") || wssTokenEqual("abc", "abd") || wssTokenEqual("", "abc") {
 		t.Fatal("token compare wrong")
+	}
+}
+
+// Changing the WSS port keeps the carrier names on the new port, and an empty
+// SNI clears the old one.
+func TestCarrierSetWSSPortAndSNI(t *testing.T) {
+	oldConfigDir := configDir
+	configDir = t.TempDir()
+	defer func() { configDir = oldConfigDir }()
+	defer func() { _ = stopWSSCarrier() }()
+
+	post := func(body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		handleCarrierPost(w, httptest.NewRequest("POST", "/api/carrier", strings.NewReader(body)))
+		return w
+	}
+	if w := post(`{"action":"set_mode","mode":"wss:8443"}`); w.Code != http.StatusOK {
+		t.Fatalf("set_mode: %d %s", w.Code, w.Body.String())
+	}
+	if w := post(`{"action":"set_wss","wss_port":9443,"wss_sni":"example.com"}`); w.Code != http.StatusOK {
+		t.Fatalf("set_wss: %d %s", w.Code, w.Body.String())
+	} else if strings.Contains(w.Body.String(), "auth_token") {
+		t.Fatalf("set_wss response leaks the auth token: %s", w.Body.String())
+	}
+	cfg := loadCarrierConfig()
+	if cfg.ActiveCarrier != "wss:9443" || cfg.WSSPort != 9443 || !reflect.DeepEqual(cfg.Candidates, []string{"direct", "wss:9443"}) {
+		t.Fatalf("carrier not moved to the new port: %+v", cfg)
+	}
+	if w := loadWSSConfig(); w.ListenPort != 9443 || w.SNI != "example.com" {
+		t.Fatalf("wss config: %+v", w)
+	}
+	if w := post(`{"action":"set_wss","wss_sni":""}`); w.Code != http.StatusOK {
+		t.Fatalf("clear sni: %d", w.Code)
+	}
+	if w := loadWSSConfig(); w.SNI != "" || w.ListenPort != 9443 {
+		t.Fatalf("empty SNI must clear it and keep the port: %+v", w)
+	}
+	if w := post(`{"action":"set_wss","wss_port":70000}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("port 70000: want 400, got %d", w.Code)
 	}
 }

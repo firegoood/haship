@@ -608,6 +608,33 @@
   #login .foot { margin-top:22px; color:var(--dim); font-size:12px; letter-spacing:.02em; }
   #login .foot b { color:var(--tx2); font-weight:600; }
   .hidden { display:none !important; }
+  /* Performance tab */
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+  .perf-fs { border:0; margin:0; padding:0; min-width:0; }
+  .perf-fs:disabled { opacity:.5; }
+  #tab-perf .wd-radio-opt:has(input:disabled) { opacity:.5; cursor:not-allowed; }
+  .perf-fs:disabled .wd-radio-opt:has(input:disabled) { opacity:1; }
+  .perf-key { font-family:var(--font-mono); font-weight:500; font-size:12px; color:var(--dim); margin-inline-start:6px; }
+  .perf-note { margin-top:12px; padding:10px 12px; border-radius:var(--r-md); border:1px solid var(--info-badge-b); background:var(--info-soft); color:var(--tx2); font-size:13px; line-height:1.5; }
+  .perf-err { color:var(--er); }
+  #tab-perf .tc-header:has(> div > .qs-hint) { flex-wrap:nowrap; align-items:flex-start; }
+  #tab-perf .tc-header > div:has(> .qs-hint) { flex:1; min-width:0; }
+  #autoPoolCard .hashem-input[readonly] { color:var(--mu); cursor:default; }
+  .status-indicator.ok { color:var(--tx2); }
+  .status-indicator.ok .dot { background:var(--ok); }
+  .status-indicator.warn { color:var(--wr); }
+  .status-indicator.warn .dot { background:var(--wr); }
+  .ns-list { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:8px 12px; }
+  .ns-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; padding:10px 12px;
+    background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); min-width:0; }
+  .ns-dot { width:8px; height:8px; border-radius:50%; background:var(--dim); }
+  .ns-row[data-lvl="ok"] .ns-dot { background:var(--ok); }
+  .ns-row[data-lvl="warn"] .ns-dot { background:var(--wr); }
+  .ns-row[data-lvl="err"] .ns-dot { background:var(--er); }
+  .ns-k { color:var(--tx2); font-size:13px; font-weight:500; }
+  .ns-sub { display:block; color:var(--dim); font-size:12px; margin-top:2px; }
+  .ns-v { font-family:var(--font-mono); font-size:12px; color:var(--tx); text-align:end; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .ns-empty { color:var(--dim); font-size:13px; padding:8px 0; }
   /* Watchdog & Backup styles */
   .wd-hero-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:8px; }
   .wd-stat-box { background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); padding:12px; display:flex; flex-direction:column; gap:4px; }
@@ -2158,21 +2185,22 @@
         </div>
       </section>
       <section id="tab-perf" role="tabpanel" hidden>
-        <!-- Status hero card -->
+        <!-- Overview -->
         <div class="tunnel-card wd-hero-card">
           <div class="tc-header">
             <p class="tc-title">Performance</p>
             <div class="u-flex-center-gap10">
               <span class="status-indicator" id="perfSyncInd"><span class="dot"></span><span id="perfSyncTxt">—</span></span>
-              <button class="hashem-btn hashem-btn-primary" id="perfApplyTopBtn">Apply &amp; Restart</button>
+              <button class="hashem-btn hashem-btn-primary" id="perfApplyTopBtn" hidden>Apply Now</button>
             </div>
           </div>
-          <div class="qs-hint">Speed-first controls for wire-speed streaming. Keep proxy encryption and compression OFF for already-encrypted streams (VLESS, Reality, Trojan) to eliminate latency and CPU bottlenecks.</div>
+          <div class="qs-hint">Speed settings for the tunnel engine and the server's network stack. The defaults suit traffic that is already encrypted, such as VLESS, Reality and Trojan.</div>
+          <div class="perf-note" id="perfEngineNote" role="status" hidden></div>
           <div class="wd-hero-grid">
             <div class="wd-stat-box">
-              <span class="wd-stat-label">FRP Crypto &amp; Mux</span>
+              <span class="wd-stat-label">FRP transport</span>
               <div class="wd-stat-val" id="perfCryptoVal">—</div>
-              <span class="wd-stat-sub" id="perfCryptoSub">Enc: Off · Comp: Off</span>
+              <span class="wd-stat-sub" id="perfCryptoSub">—</span>
             </div>
             <div class="wd-stat-box">
               <span class="wd-stat-label" data-i18n="perf_status_pool">Work-conn pool (frpc / frps)</span>
@@ -2180,58 +2208,58 @@
               <span class="wd-stat-sub" id="perfPoolSub">—</span>
             </div>
             <div class="wd-stat-box">
-              <span class="wd-stat-label" data-i18n="perf_status_decision">Auto Pool decision</span>
-              <div class="wd-stat-val" id="perfDecisionVal">—</div>
-              <span class="wd-stat-sub" id="perfDecisionSub">—</span>
+              <span class="wd-stat-label">Network stack</span>
+              <div class="wd-stat-val" id="perfNetVal">—</div>
+              <span class="wd-stat-sub" id="perfNetSub">—</span>
             </div>
           </div>
         </div>
 
-        <!-- FRP Crypto & Compression Toggles -->
-        <div class="tunnel-card">
+        <!-- FRP encryption, compression and multiplexing -->
+        <div class="tunnel-card" id="perfFrpCard">
           <div class="tc-header">
-            <p class="tc-title">FRP Tunnel Crypto &amp; Compression</p>
+            <p class="tc-title">FRP Transport</p>
             <span class="badge" id="perfRoleBadge">—</span>
           </div>
-          <div class="qs-hint">Configures layer-2 crypto and snappy compression on FRP reverse tunnels. Speed-first defaults keep encryption and compression OFF so already-encrypted protocols (VLESS, Trojan) run at wire speed.</div>
-          
-          <div class="u-flex-col-gap14 u-mt-12">
-            <label class="wd-radio-opt u-items-start" >
-              <input type="checkbox" id="perfEncCheck" class="u-checkbox-ac">
-              <div>
-                <b class="u-color-tx">Proxy Encryption (transport.useEncryption)</b>
-                <div class="qs-hint u-mt-2" >Encrypts data between frpc and frps with AES-128. Keep disabled for already-encrypted streams (e.g. VLESS) to eliminate double-crypto overhead on low-power VPS.</div>
-              </div>
-            </label>
-
-            <label class="wd-radio-opt u-items-start" >
-              <input type="checkbox" id="perfCompCheck" class="u-checkbox-ac">
-              <div>
-                <b class="u-color-tx">Proxy Compression (transport.useCompression)</b>
-                <div class="qs-hint u-mt-2" >Snappy compression per proxy. Keep disabled when streaming incompressible encrypted data (VLESS, TLS) to avoid wasting CPU cycles.</div>
-              </div>
-            </label>
-
-            <label class="wd-radio-opt u-items-start" >
-              <input type="checkbox" id="perfMuxCheck" class="u-checkbox-ac">
-              <div>
-                <b class="u-color-tx" data-i18n="perf_mux_title">TCP Multiplexing (transport.tcpMux)</b>
-                <div class="qs-hint u-mt-2" data-i18n="perf_mux_hint">Packs every user stream into ONE TCP connection between frpc and frps. Measured over GRE it roughly halves tunnel throughput (e.g. 460 vs 1010 Mbit on Finland). Default is OFF (max speed). It must be identical on the Iran hub AND every foreign server, otherwise frpc cannot log in.</div>
-                <div class="qs-hint u-mt-2" id="perfMuxLive">Live: —</div>
-              </div>
-            </label>
-          </div>
-
-          <div class="qs-actions u-mt-16" >
-            <button class="hashem-btn hashem-btn-primary" id="perfApplyBtn">Apply &amp; Restart Tunnels</button>
-            <button class="hashem-btn hashem-btn-secondary" id="perfSaveOnlyBtn">Save Settings</button>
-            <button class="hashem-btn hashem-btn-danger" id="perfResetBtn" title="Reset all performance settings to clean wire-speed defaults">Reset to Safe Defaults</button>
-          </div>
-          <div class="qs-hint" id="perfApplyMsg"></div>
+          <div class="qs-hint">Extra encryption, compression and multiplexing between frpc and frps. Leave all three off for VLESS, Reality and Trojan: their traffic is already encrypted, so these only cost CPU and speed.</div>
+          <fieldset class="perf-fs" id="perfFrpSet">
+            <legend class="sr-only">FRP transport options</legend>
+            <div class="u-flex-col-gap14 u-mt-12">
+              <label class="wd-radio-opt u-items-start">
+                <input type="checkbox" id="perfEncCheck" class="u-checkbox-ac">
+                <div>
+                  <b class="u-color-tx">Proxy Encryption <span class="perf-key" data-no-i18n>transport.useEncryption</span></b>
+                  <div class="qs-hint u-mt-2">Encrypts traffic between frpc and frps with AES-128. Only worth it for plain, unencrypted services.</div>
+                </div>
+              </label>
+              <label class="wd-radio-opt u-items-start">
+                <input type="checkbox" id="perfCompCheck" class="u-checkbox-ac">
+                <div>
+                  <b class="u-color-tx">Proxy Compression <span class="perf-key" data-no-i18n>transport.useCompression</span></b>
+                  <div class="qs-hint u-mt-2">Snappy compression per proxy. Encrypted traffic does not compress, so this only uses CPU.</div>
+                </div>
+              </label>
+              <label class="wd-radio-opt u-items-start">
+                <input type="checkbox" id="perfMuxCheck" class="u-checkbox-ac">
+                <div>
+                  <b class="u-color-tx">TCP Multiplexing <span class="perf-key" data-no-i18n>transport.tcpMux</span></b>
+                  <div class="qs-hint u-mt-2">Carries every user connection inside one TCP connection. Over GRE this roughly halves throughput (measured 460 against 1010 Mbit). It must be the same on the Iran server and every foreign server, or frpc cannot log in.</div>
+                  <div class="qs-hint u-mt-2" id="perfMuxLive">—</div>
+                </div>
+              </label>
+            </div>
+            <div class="qs-hint u-mt-12" id="perfRoleHint" hidden></div>
+            <div class="qs-actions u-mt-16 u-ai-c">
+              <button class="hashem-btn hashem-btn-primary" id="perfApplyBtn">Apply &amp; Restart Tunnels</button>
+              <button class="hashem-btn hashem-btn-secondary" id="perfSaveOnlyBtn">Save Without Restart</button>
+              <button class="hashem-btn hashem-btn-danger" id="perfResetBtn">Reset to Defaults</button>
+              <span class="badge warn" id="perfDirty" hidden>Unsaved changes</span>
+            </div>
+            <div class="qs-hint u-mt-8" id="perfApplyMsg" aria-live="polite"></div>
+          </fieldset>
         </div>
 
-        
-        <!-- Auto Pool Card -->
+        <!-- Auto Pool -->
         <div class="tunnel-card" id="autoPoolCard">
           <div class="tc-header">
             <div>
@@ -2240,114 +2268,119 @@
             </div>
             <span class="badge ok" id="perfAutoPoolBadge">Auto</span>
           </div>
-          <div class="u-flex-col-gap14 u-mt-12">
-            <label class="wd-radio-opt u-items-start">
-              <input type="checkbox" id="perfAutoPool" class="u-checkbox-ac" checked>
-              <div>
-                <b class="u-color-tx" data-i18n="perf_ap_toggle">Auto Pool (recommended)</b>
-                <div class="qs-hint u-mt-2" data-i18n="perf_ap_toggle_hint">When off, the manual values below are written to frpc.toml / frps.toml as typed.</div>
+          <fieldset class="perf-fs" id="perfPoolSet">
+            <legend class="sr-only">Auto Pool</legend>
+            <div class="u-flex-col-gap14 u-mt-12">
+              <label class="wd-radio-opt u-items-start">
+                <input type="checkbox" id="perfAutoPool" class="u-checkbox-ac" checked>
+                <div>
+                  <b class="u-color-tx" data-i18n="perf_ap_toggle">Auto Pool (recommended)</b>
+                  <div class="qs-hint u-mt-2" data-i18n="perf_ap_toggle_hint">When off, the manual values below are written to frpc.toml / frps.toml as typed.</div>
+                </div>
+              </label>
+            </div>
+            <div class="wd-hero-grid u-mt-12">
+              <div class="wd-stat-box">
+                <span class="wd-stat-label" data-i18n="perf_ap_last_decision">Last decision</span>
+                <div class="wd-stat-val u-fs-18" id="perfApDecision">—</div>
+                <span class="wd-stat-sub" id="perfApReason">—</span>
               </div>
-            </label>
+              <div class="wd-stat-box">
+                <span class="wd-stat-label" data-i18n="perf_ap_errors">Pool-full errors (last tick)</span>
+                <div class="wd-stat-val u-fs-18" id="perfApErrors">—</div>
+                <span class="wd-stat-sub" id="perfApConns">—</span>
+              </div>
+              <div class="wd-stat-box">
+                <span class="wd-stat-label" data-i18n="perf_ap_last_restart">Last frpc restart</span>
+                <div class="wd-stat-val u-fs-18" id="perfApRestart">—</div>
+                <span class="wd-stat-sub" id="perfApQuiet">—</span>
+              </div>
+            </div>
+            <div class="qs-hint u-mt-8" id="perfApFrpsNote" hidden data-i18n="perf_ap_frps_note">maxPoolCount was raised in frps.toml; restart frps during a quiet period to apply it.</div>
+            <div class="qs-row u-mt-12">
+              <div class="fg">
+                <label for="perfPoolCount" data-i18n="perf_pool_count">Client Pool Count (frpc)</label>
+                <input type="number" id="perfPoolCount" class="hashem-input" min="2" max="1000" step="1" value="20" inputmode="numeric" aria-describedby="perfPoolHint">
+                <div class="tc-sub" id="perfPoolHint" data-i18n="perf_pool_sub">Pre-opened work connections on foreign spokes.</div>
+              </div>
+              <div class="fg">
+                <label for="perfMaxPool" data-i18n="perf_max_pool">Max Pool Count (frps)</label>
+                <input type="number" id="perfMaxPool" class="hashem-input" min="10" max="2000" step="1" value="60" inputmode="numeric" aria-describedby="perfMaxHint">
+                <div class="tc-sub" id="perfMaxHint" data-i18n="perf_max_sub">Server-side maximum work connection headroom (always at least 1.5 × poolCount).</div>
+              </div>
+            </div>
+            <div class="qs-hint u-mt-8" id="perfPoolErr" aria-live="polite" hidden></div>
+            <div class="qs-actions u-mt-12 u-ai-c">
+              <button class="hashem-btn hashem-btn-primary" id="perfSaveTuningBtn" type="button" data-i18n="perf_save_tuning">Save &amp; Apply Capacity</button>
+              <span class="u-hint-12" id="perfTuningStatus" aria-live="polite"></span>
+            </div>
+          </fieldset>
+        </div>
+
+        <!-- Kernel network stack -->
+        <div class="tunnel-card" id="netStackCard">
+          <div class="tc-header">
+            <div>
+              <p class="tc-title">Network Stack</p>
+              <div class="qs-hint">Kernel settings that decide speed on long, lossy links. Optimize Network sets all of them and saves the current values first, so Restore can bring them back.</div>
+            </div>
+            <span class="badge" id="netStackBadge">—</span>
           </div>
-          <div class="wd-hero-grid u-mt-12">
-            <div class="wd-stat-box">
-              <span class="wd-stat-label" data-i18n="perf_ap_last_decision">Last decision</span>
-              <div class="wd-stat-val u-fs-18" id="perfApDecision">—</div>
-              <span class="wd-stat-sub" id="perfApReason">—</span>
-            </div>
-            <div class="wd-stat-box">
-              <span class="wd-stat-label" data-i18n="perf_ap_errors">Pool-full errors (last tick)</span>
-              <div class="wd-stat-val u-fs-18" id="perfApErrors">—</div>
-              <span class="wd-stat-sub" id="perfApConns">—</span>
-            </div>
-            <div class="wd-stat-box">
-              <span class="wd-stat-label" data-i18n="perf_ap_last_restart">Last frpc restart</span>
-              <div class="wd-stat-val u-fs-18" id="perfApRestart">—</div>
-              <span class="wd-stat-sub" id="perfApQuiet">—</span>
-            </div>
-          </div>
-          <div class="qs-hint u-mt-8" id="perfApFrpsNote" hidden data-i18n="perf_ap_frps_note">maxPoolCount was raised in frps.toml; restart frps during a quiet period to apply it.</div>
-          <div class="qs-row u-mt-12">
-            <div class="fg">
-              <label for="perfPoolCount" data-i18n="perf_pool_count">Client Pool Count (frpc)</label>
-              <input type="number" id="perfPoolCount" class="hashem-input" min="2" max="1000" value="20">
-              <div class="tc-sub" id="perfPoolHint" data-i18n="perf_pool_sub">Pre-opened work connections on foreign spokes.</div>
-            </div>
-            <div class="fg">
-              <label for="perfMaxPool" data-i18n="perf_max_pool">Max Pool Count (frps)</label>
-              <input type="number" id="perfMaxPool" class="hashem-input" min="10" max="2000" value="60">
-              <div class="tc-sub" data-i18n="perf_max_sub">Server-side maximum work connection headroom (always at least 1.5 × poolCount).</div>
-            </div>
-          </div>
-          <div class="qs-actions u-mt-12 u-flex u-gap-12 u-ai-c">
-            <button class="hashem-btn hashem-btn-primary" id="perfSaveTuningBtn" type="button" data-i18n="perf_save_tuning">
-              Save &amp; Apply Capacity
-            </button>
-            <span class="u-hint-12" id="perfTuningStatus"></span>
+          <div class="ns-list u-mt-8" id="netStackList"></div>
+          <div class="qs-actions u-mt-12">
+            <button class="hashem-btn hashem-btn-primary" id="perfOptimizeBtn">Optimize Network</button>
+            <button class="hashem-btn hashem-btn-secondary" id="perfRestoreBtn" hidden>Restore Previous Settings</button>
           </div>
         </div>
 
-        <!-- Multi-Carrier Failover (Direct GRE <-> FOU UDP) Card -->
+        <!-- Carrier: direct GRE or GRE inside WSS -->
         <div class="tunnel-card" id="carrierCard">
           <div class="tc-header">
-            <div class="u-flex-center-gap10">
-              <p class="tc-title">Carrier &amp; UDP Encapsulation (FOU)</p>
-              <span class="badge info" id="carrierActiveBadge">Direct GRE</span>
+            <div>
+              <p class="tc-title">Carrier</p>
+              <div class="qs-hint">How GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47).</div>
             </div>
-            <div class="u-flex-center-gap8">
-              <button class="hashem-btn hashem-btn-secondary" id="carrierCycleBtn" title="Switch immediately to next carrier">Cycle Carrier</button>
-              <button class="hashem-btn hashem-btn-primary" id="carrierApplyBtn">Apply Active</button>
-            </div>
+            <span class="badge info" id="carrierActiveBadge">Direct GRE</span>
           </div>
-          <div class="qs-hint">
-            Dynamic transport switching between raw GRE (Protocol 47) and Kernel-Native Foo-over-UDP (FOU). 
-            Bypasses ISP protocol-47 throttling and random IP drops by wrapping GRE inside symmetric UDP packets.
-          </div>
-
-          <div class="wd-hero-grid u-mt-12" >
+          <div class="wd-hero-grid u-mt-12">
             <div class="wd-stat-box">
-              <span class="wd-stat-label">Active Carrier</span>
-              <div class="wd-stat-val u-fs-18" id="carrierActiveVal" >—</div>
-              <span class="wd-stat-sub" id="carrierActiveSub">Kernel encapsulation</span>
+              <span class="wd-stat-label">Active carrier</span>
+              <div class="wd-stat-val u-fs-18" id="carrierActiveVal">—</div>
+              <span class="wd-stat-sub" id="carrierActiveSub">—</span>
             </div>
             <div class="wd-stat-box">
-              <span class="wd-stat-label">Configured Mode</span>
-              <div class="wd-stat-val u-fs-18" id="carrierModeVal" >—</div>
-              <span class="wd-stat-sub" id="carrierModeSub">Failover policy</span>
+              <span class="wd-stat-label">Link to other server</span>
+              <div class="wd-stat-val u-fs-18" id="carrierLinkVal">—</div>
+              <span class="wd-stat-sub" id="carrierLinkSub">—</span>
             </div>
             <div class="wd-stat-box">
-              <span class="wd-stat-label">FOU Listeners</span>
-              <div class="wd-stat-val u-fs-18" id="carrierPortsVal" >—</div>
-              <span class="wd-stat-sub" id="carrierPortsSub">UDP ipproto 47</span>
-            </div>
-          </div>
-
-          <div class="fg u-mt-16" >
-            <label for="carrierModeSelect">Carrier Selection / Policy</label>
-            <div class="u-flex-center-wrap10">
-              <select class="hashem-input u-max-w-260" id="carrierModeSelect" >
-                <option value="direct" selected>Direct GRE (Protocol 47)</option>
-                <option value="wss:8443">Obfuscated WSS (TLS 8443)</option>
-              </select>
-              <button class="hashem-btn hashem-btn-secondary" id="carrierSaveModeBtn">Save Mode</button>
-              <span class="status-indicator" id="carrierStatusInd"><span class="dot"></span><span id="carrierStatusTxt">—</span></span>
-            </div>
-            <div class="ent-help">
-              <strong>Direct GRE mode:</strong> Uses raw GRE (Protocol 47) for lowest latency. Switch to WSS if your network blocks raw GRE.
+              <span class="wd-stat-label">WSS carrier</span>
+              <div class="wd-stat-val u-fs-18" id="carrierWSSVal">—</div>
+              <span class="wd-stat-sub" id="carrierWSSTxt">—</span>
             </div>
           </div>
 
           <div class="fg u-mt-16">
-            <label for="carrierWSSPortInput">WSS Obfuscated Carrier (WebSocket / TLS 1.3)</label>
+            <label for="carrierModeSelect">Carrier</label>
             <div class="u-flex-center-wrap10">
-              <input type="number" class="hashem-input u-max-w-140" id="carrierWSSPortInput" value="8443" placeholder="Port: 8443">
-              <input type="text" class="hashem-input u-max-w-180" id="carrierWSSSNIInput" aria-label="SNI mask (optional)" placeholder="SNI Mask (optional)">
+              <select class="hashem-input u-max-w-260" id="carrierModeSelect">
+                <option value="direct" selected>Direct GRE (Protocol 47)</option>
+                <option value="wss:8443">WSS (TLS 8443)</option>
+              </select>
+              <button class="hashem-btn hashem-btn-secondary" id="carrierSaveModeBtn" disabled>Switch Carrier</button>
+              <button class="hashem-btn hashem-btn-ghost" id="carrierApplyBtn">Re-apply</button>
+            </div>
+            <div class="ent-help">Switching reconnects the tunnel for a few seconds. Re-apply sets up the current carrier again, which can fix a stuck link.</div>
+          </div>
+
+          <div class="fg u-mt-16">
+            <label for="carrierWSSPortInput">WSS port</label>
+            <div class="u-flex-center-wrap10">
+              <input type="number" class="hashem-input u-max-w-140" id="carrierWSSPortInput" min="1" max="65535" value="8443" inputmode="numeric">
+              <input type="text" class="hashem-input u-max-w-180" id="carrierWSSSNIInput" aria-label="SNI (optional)" placeholder="SNI (optional)" autocomplete="off" spellcheck="false">
               <button class="hashem-btn hashem-btn-secondary" id="carrierSaveWSSBtn">Save WSS Settings</button>
             </div>
-            <div class="ent-help">
-              Encapsulates GRE packets inside an encrypted WebSocket stream. Completely indistinguishable from normal web browsing.
-              Status: <span id="carrierWSSTxt" class="u-fw-600">—</span>
-            </div>
+            <div class="ent-help">Use the same port on both servers. The SNI is the host name shown in the TLS handshake; leave it empty to send none.</div>
           </div>
         </div>
       </section>
