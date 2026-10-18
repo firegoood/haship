@@ -92,7 +92,14 @@ func TestHTTPSCertReloadKeepsListener(t *testing.T) {
 // M7: a certificate renewed by certbot's own timer is copied in and served.
 func TestTLSRenewTickInstallsRenewedCert(t *testing.T) {
 	withTLSDir(t)
-	cfg.TLSPort = 1 // never bound: the listener start is not part of this test
+	// A free port: a privileged one fails to bind on Linux, and the listener
+	// goroutine then records the error while cleanup resets configDir (a race).
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.TLSPort = l.Addr().(*net.TCPAddr).Port
+	_ = l.Close()
 	writeServedCert(t, "old.example")
 	meta, _ := json.Marshal(tlsMeta{Domain: "panel.example"})
 	_ = os.WriteFile(tlsMetaFile(), meta, 0600)
