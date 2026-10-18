@@ -50,8 +50,6 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-PEER-06` | 400 | use POST /api/setup with role=add-peer | This endpoint is read-only; create peers from the Tunnel tab. |
 | `E-PEER-07` | 400 | invalid peer edit request | Check the peer ID and forwarded ports list. |
 | `E-PEER-08` | 409 | foreign IP already used by another tunnel | One foreign server can only back one tunnel; edit the existing peer instead. |
-| `E-CARRIER-01` | 500 | carrier switch failed | See the detail; both servers must be able to apply the same carrier (check the Peer Link). |
-| `E-ENGINE-01` | 500 | engine switch failed | See the detail: nothing changed or the previous engine was restored. Check journalctl for the unit it names. |
 
 ## E-INSTALL-xx — Installer script
 
@@ -122,12 +120,12 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 
 | Code | HTTP | Meaning | What to do |
 | --- | --- | --- | --- |
+| `E-WD-00` | — | Watchdog settings updated | Informational: watchdog, backup or schedule settings changed. |
 | `E-WD-01` | 400 | bad watchdog request | Check request parameters and try again. |
 | `E-WD-02` | 502 | telegram alert failed | Verify bot token, chat ID, and selected route. |
 | `E-WD-03` | 500 | backup creation failed | Check disk space and write permissions in /var/backups/hashem. |
 | `E-WD-04` | 500 | backup restore failed | Decryption failed or backup archive is corrupted. |
 | `E-WD-05` | 502 | telegram route unreachable | Ensure tunnel is up or switch route to direct. |
-| `E-WD-00` | — | Watchdog settings updated | Informational: watchdog, backup or schedule settings changed. |
 
 ## E-SUPPORT-xx — Support popup
 
@@ -194,6 +192,29 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-PERF-02` | 500 | cannot save performance settings | Disk write failed — check /etc/gre-panel permissions. |
 | `E-PERF-03` | 500 | cannot apply performance settings | Check FRP services and configuration. |
 
+## E-CARRIER-xx — Carrier switch
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-CARRIER-01` | 500 | carrier switch failed | See the detail; both servers must be able to apply the same carrier (check the Peer Link). |
+
+## E-ENGINE-xx — Engine switch
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-ENGINE-01` | 500 | engine switch failed | See the detail: nothing changed or the previous engine was restored. Check journalctl for the unit it names. |
+
+## E-SENTINEL-xx — Sentinel addon
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-SENTINEL-01` | 403 | license missing the sentinel feature | Activate a license that includes the 'sentinel' feature. |
+| `E-SENTINEL-02` | 500 | sentinel install failed | The installer output is appended; check internet access for dependencies and Xray. |
+| `E-SENTINEL-03` | 500 | sentinel service failed | Check: journalctl -u sentinel -n 50 |
+| `E-SENTINEL-04` | 409 | sentinel is not installed | Install Sentinel first. |
+| `E-SENTINEL-05` | 409 | a sentinel install is already running | Wait for the current install to finish, then refresh. |
+| `E-SENTINEL-06` | 400 | bad sentinel request | Reload the page and try again. |
+
 ## E-LIC-xx — LIC
 
 | Code | HTTP | Meaning | What to do |
@@ -226,16 +247,5 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-ACCESS-01` | 400 | bad access-settings request | Send current_password plus at least one of port, username, base_path. |
 | `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
 | `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
-
-## E-SENTINEL-xx — Sentinel addon
-
-| Code | HTTP | Meaning | What to do |
-| --- | --- | --- | --- |
-| `E-SENTINEL-01` | 403 | license missing the sentinel feature | Activate a license that includes the 'sentinel' feature. |
-| `E-SENTINEL-02` | 500 | sentinel install failed | The installer output is appended; check internet access for dependencies and Xray. |
-| `E-SENTINEL-03` | 500 | sentinel service failed | Check: journalctl -u sentinel -n 50 |
-| `E-SENTINEL-04` | 409 | sentinel is not installed | Install Sentinel first. |
-| `E-SENTINEL-05` | 409 | a sentinel install is already running | Wait for the current install to finish, then refresh. |
-| `E-SENTINEL-06` | 400 | bad sentinel request | Reload the page and try again. |
 
 Total: 132 codes.

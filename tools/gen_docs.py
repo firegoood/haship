@@ -13,7 +13,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 PANEL = ROOT / "panel"
 
 ROUTE = re.compile(r'mux\.HandleFunc\("(GET|POST|PUT|PATCH|DELETE) "\+base\+"([^"]+)",\s*(.+)\)\s*$')
-STATIC = ("/app.js", "/tokens.css", "/fonts.css", "/base.css", "/enterprise.css",
+# Peer routes live in a table in peer.go: {"POST", "/api/peer/x", handleX},
+PEER_ROUTE = re.compile(r'^\{"(GET|POST|PUT|PATCH|DELETE)", "(/api/peer/[^"]+)", (handle[A-Za-z0-9]+)\},$')
+STATIC = ("/app.js", "/i18n-fa.js", "/tokens.css", "/fonts.css", "/base.css", "/enterprise.css",
           "/favicon.png", "/xterm", "/fonts/")
 
 
@@ -44,6 +46,11 @@ def gen_api() -> str:
         if path == "/" or path.startswith(STATIC):
             continue
         rows.append((path, method, auth_of(expr), handler_of(expr)))
+    for line in (PANEL / "peer.go").read_text().splitlines():
+        m = PEER_ROUTE.search(line.strip())
+        if m:
+            method, path, handler = m.groups()
+            rows.append((path, method, "peer secret (or session)", handler))
     rows.sort(key=lambda r: (r[0], r[1]))
     out = [
         "# HTTP API reference",
@@ -100,6 +107,9 @@ FAMILIES = {
     "TERM": "In-browser terminal",
     "TLS": "Panel TLS (Let's Encrypt)",
     "PERF": "Performance tuning",
+    "CARRIER": "Carrier switch",
+    "ENGINE": "Engine switch",
+    "SENTINEL": "Sentinel addon",
 }
 
 
@@ -139,6 +149,7 @@ def gen_errors() -> str:
 
 
 if __name__ == "__main__":
-    (ROOT / "docs" / "API.md").write_text(gen_api())
-    (ROOT / "docs" / "ERROR_CODES.md").write_text(gen_errors())
+    for name, text in (("API.md", gen_api()), ("ERROR_CODES.md", gen_errors())):
+        with open(ROOT / "docs" / name, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
     print("wrote docs/API.md and docs/ERROR_CODES.md")
