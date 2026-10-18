@@ -3,7 +3,11 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
-## Unreleased — Dashboard and Performance redesign
+## v2.3.6 — 2026-10-18
+
+Audit fixes, a Persian UI, a redesigned dashboard, and working Bagher, Diagnostics and engine switch. Update both servers.
+
+The release was rebuilt the same day with the Dashboard, Performance, Setup, Update and Diagnostics changes below; a server that installed the first v2.3.6 build gets them with `hashem update` on the server (the Update tab sees the same version number and offers nothing).
 
 ### Diagnostics
 - **Quick Repair fixes the MTU it finds.** Diagnostics reported "Packets of 1380 bytes do not cross the tunnel" but left the fix to the user, and even a manual fix did not last: `hashem.sh` set MTU 1380 and MSS 1340 again on every tunnel restart, carrier switch and Optimize. Quick Repair now saves the measured size in `/etc/gre-panel/gre_mtu`, lowers the GRE interfaces to it and replaces the larger MSS clamps with MTU − 40. `hashem.sh` honours that file wherever it sets the MTU or the clamp, the panel re-checks it every minute (for an older `hashem.sh`), and the Network Stack card shows the held value. Removing the tunnel clears it.
@@ -44,10 +48,6 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 - **Tunnels table** for multi-peer hubs: status, foreign IP, engine, ports, ping and traffic per peer; a row opens its card in the Tunnel tab.
 - Layout follows the space the dashboard has (container queries), so the activity side panel no longer squeezes it; works at 375px and in RTL.
 - **Donate popup** now appears on the first visit after install ("Thanks for installing Hashem"), not only after a tunnel has been healthy, then every 7 days while the tunnel is healthy (30 days after "Don't remind me", 90 after Donate). It and the Settings/palette links point to pdnczone.com; the installer's final screen prints the link too.
-
-## v2.3.6 — 2026-10-18
-
-Audit fixes, a Persian UI, and working Bagher, Diagnostics and engine switch. Update both servers.
 
 ### Upgrade notes (this release)
 - **Bagher:** after updating, re-apply the bundle from the Bagher tab on the foreign server once. Its frpc config is only rewritten then (the old one made frpc exit at start). The Iran key line in `authorized_keys` is tightened automatically when the panel starts; other keys are not touched.
