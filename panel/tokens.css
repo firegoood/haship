@@ -101,6 +101,11 @@ html{-webkit-text-size-adjust:100%;-moz-text-size-adjust:100%;text-size-adjust:1
   --er-fill: #b91c1c;
   --wr-fill: #a16207;
   --sc-fill: #7c3aed;
+  /* Premium tier: champagne gold, not the warning yellow (11:1 on the dark sidebar). */
+  --gold: #e6c67e;
+  --gold-2: #c9a24f;
+  --gold-soft: color-mix(in srgb, var(--gold) 10%, transparent);
+  --gold-line: color-mix(in srgb, var(--gold) 34%, transparent);
   --spring: cubic-bezier(.32, .72, 0, 1);
   /* Accent — single identity color, derived tints. Dark & light share the hue. */
   --accent-h: 217;
@@ -239,6 +244,8 @@ body[data-t="dark"], body {
   --wr: #854d0e;
   --er: #b91c1c;
   --info: #075985;
+  --gold: #7a5a14; /* 6.4:1 on white */
+  --gold-2: #9c7426;
 }
 
 /* Custom Scrollbar */

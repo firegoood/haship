@@ -7004,6 +7004,13 @@ async function loadLicense() {
   }
 }
 
+// Premium tier: the tag under the name and a gold hairline on the logo tile.
+function setBrandTier(on) {
+  document.querySelectorAll('[data-brand-tier]').forEach(el => el.classList.toggle('hidden', !on));
+  const b = document.querySelector('.sidebar-brand');
+  if (b) b.classList.toggle('is-premium', on);
+}
+
 function renderLicense(d) {
   if (!d) return;
   if ($('licMachineHash')) $('licMachineHash').value = d.machine_hash || '';
@@ -7011,12 +7018,9 @@ function renderLicense(d) {
   const badge = $('licBadge');
   const details = $('licActiveDetails');
   const deactBtn = $('licDeactivateBtn');
-  const brandEls = document.querySelectorAll('.sidebar-brand .brand-name, .drawer-head .brand-name, #sidebarBrandName, #drawerBrandName');
 
   if (d.is_valid) {
-    brandEls.forEach(el => {
-      el.innerHTML = 'Hashem <span class="brand-premium-badge"><svg class="bp-gem" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="bp-label">PREMIUM</span></span>';
-    });
+    setBrandTier(true);
     if (badge) {
       badge.textContent = 'PREMIUM (Active)';
       badge.style.background = 'var(--ok-fill)';
@@ -7036,9 +7040,7 @@ function renderLicense(d) {
     }
     if ($('bagherLockedBanner')) $('bagherLockedBanner').classList.add('hidden');
   } else {
-    brandEls.forEach(el => {
-      el.textContent = 'Hashem';
-    });
+    setBrandTier(false);
     if (badge) {
       badge.textContent = 'FREE EDITION';
       badge.style.background = 'rgba(255,255,255,0.1)';

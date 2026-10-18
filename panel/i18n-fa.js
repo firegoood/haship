@@ -1630,6 +1630,7 @@ window.FA_TEXT = {
 "Bagher connection bundle copied to clipboard. Paste into Foreign server panel.": "باندل اتصال باقر کپی شد. آن را در پنل سرور خارج جای‌گذاری کنید.",
 "Failed loading license:": "بارگذاری لایسنس ناموفق بود:",
 "PREMIUM (Active)": "پریمیوم (فعال)",
+"Premium": "پریمیوم",
 "Customer:": "مشتری:",
 "days left)": "روز مانده)",
 "Unlocked Features:": "امکانات بازشده:",
