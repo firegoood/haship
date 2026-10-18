@@ -689,6 +689,8 @@ const I18N = {
     rs_hide_aria: "Hide live activity stream",
     rs_hidden_toast: "Live Activity Stream hidden",
     rs_hidden_sub: "Bring it back from Logs → Live Activity Stream",
+    rs_live: "Live", rs_paused: "Paused", rs_updated: "Updated", rs_no_issues: "No issues",
+    rs_no_issues_sub: "No errors or warnings in the latest events.",
     rs_restore_hint: "Side panel with the latest events. Wide screens (1200px+) only.",
     rs_btn_hide: "Hide",
     rs_btn_show: "Show",
@@ -889,7 +891,7 @@ function faText(s) {
 }
 
 // Values and machine text stay as they are: IPs, ports, keys, logs, code, the terminal.
-const FA_SKIP = 'script,style,code,pre,textarea,kbd,svg,.xterm,.mono,.u-mono,.rs-log-line,.log-line,[data-no-i18n]';
+const FA_SKIP = 'script,style,code,pre,textarea,kbd,svg,.xterm,.mono,.u-mono,.rs-ev-msg,.rs-src,.log-line,[data-no-i18n]';
 const FA_ATTRS = ['placeholder', 'title', 'aria-label'];
 // Hints on value fields (placeholder, aria-label) are UI text even where the content is not.
 const FA_SKIP_ATTR = '.xterm,[data-no-i18n]';
@@ -5074,37 +5076,96 @@ document.addEventListener('visibilitychange', () => {
   // resume: makePoller() re-runs refresh/refreshDash/rs-logs immediately on visibility
 });
 
+// Live Activity Stream: journal lines -> {time, source, level, message},
+// newest first. Redraws only when the lines change and holds still while the
+// pointer is over the list, so reading or selecting text is not interrupted.
+const RS_SRC = [
+  [/^frps/, 'FRPS', 'src-frps'], [/^frpc/, 'FRPC', 'src-frpc'],
+  [/^backhaul/, 'BH', 'src-bh'], [/^gre-tunnel|^ip$/, 'GRE', 'src-gre'],
+  [/^hashem-watchdog|watchdog/, 'WD', 'src-wd'], [/^gre-panel|^hashem/, 'PANEL', ''],
+];
+function rsParse(line) {
+  // journalctl short format: "Oct 18 03:54:17 host unit[pid]: message"
+  const m = line.match(/^[A-Z][a-z]{2}\s+\d{1,2}\s+(\d{2}:\d{2}:\d{2})\s+\S+\s+([^\s:[]+)(?:\[\d+\])?:\s?(.*)$/);
+  let time = '', unit = '', msg = line;
+  if (m) { time = m[1]; unit = m[2]; msg = m[3]; }
+  else { const t = line.match(/\b(\d{2}:\d{2}:\d{2})\b/); if (t) time = t[1]; }
+  // systemd's own lines ("Started frps.service") belong to the unit they name.
+  if (unit === 'systemd') { const u = msg.match(/\b(frps|frpc|backhaul[\w-]*|gre-tunnel|gre-panel|hashem-watchdog)\b/); unit = u ? u[1] : 'systemd'; }
+  let level = '';
+  const lv = msg.match(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)? \[([A-Z])\]/);
+  if (lv) level = lv[1] === 'E' ? 'err' : lv[1] === 'W' ? 'warn' : '';
+  else if (/\blevel=(error|fatal)|\[(ERROR|FATAL|CMD-ERROR)\]|\bpanic:|\b(failed|failure)\b/i.test(msg)) level = 'err';
+  else if (/\blevel=warn|\[(WARN|WARNING)\]|\bwarning\b/i.test(msg)) level = 'warn';
+  // Drop the program's own timestamp, level and source-file prefix.
+  const kv = msg.match(/\bmsg="((?:[^"\\]|\\.)*)"/); // logrus: time=... level=... msg="..."
+  if (kv) msg = kv[1].replace(/\\"/g, '"');
+  msg = msg.replace(/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/, '')
+    .replace(/^\[[A-Z]\]\s*/, '').replace(/^(?:\[[\w./:-]+\]\s*)+/, '').trim();
+  let src = unit ? unit.toUpperCase().slice(0, 8) : 'LOG', cls = '';
+  for (const [re, label, c] of RS_SRC) if (re.test(unit)) { src = label; cls = c; break; }
+  return { time, src, cls, level, msg: msg || line };
+}
+const rsState = { sig: '', hover: false, filter: 'all', events: [] };
+try { if (localStorage.getItem('hashem_rs_filter') === 'issues') rsState.filter = 'issues'; } catch (e) { /* storage blocked */ }
+function rsLive() {
+  const el = $('rsLive'); if (!el) return;
+  const paused = rsState.hover || document.hidden;
+  el.classList.toggle('is-paused', paused);
+  el.querySelector('.rs-live-txt').textContent = paused ? tr('rs_paused', 'Paused') : tr('rs_live', 'Live');
+}
+function rsDraw() {
+  const rs = $('rsLogs'); if (!rs) return;
+  const evs = rsState.events;
+  const issues = evs.filter(e => e.level).length;
+  const cnt = $('rsIssueCount');
+  if (cnt) { cnt.textContent = String(issues); cnt.classList.toggle('hidden', !issues); }
+  document.querySelectorAll('[data-rs-filter]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.rsFilter === rsState.filter)));
+  const shown = rsState.filter === 'issues' ? evs.filter(e => e.level) : evs;
+  if (!shown.length) {
+    rs.innerHTML = rsState.filter === 'issues'
+      ? stateEmpty({ title: tr('rs_no_issues', 'No issues'), msg: tr('rs_no_issues_sub', 'No errors or warnings in the latest events.'), compact: true })
+      : stateEmpty({ title: tr('rs_empty_title', 'No log lines yet'), msg: tr('rs_waiting_sys', 'Waiting for system logs...'), compact: true });
+    return;
+  }
+  rs.innerHTML = shown.map(e =>
+    '<div class="rs-ev' + (e.level ? ' lvl-' + e.level : '') + '">'
+    + '<div class="rs-ev-meta"><span class="rs-src ' + e.cls + '">' + esc(e.src) + '</span>'
+    + (e.time ? '<time class="rs-ev-time">' + esc(e.time) + '</time>' : '') + '</div>'
+    + '<div class="rs-ev-msg" dir="ltr" title="' + esc(e.msg) + '">' + esc(e.msg) + '</div></div>').join('');
+}
 async function refreshRightSidebarLogs() {
-  if (document.hidden || window.innerWidth < 1200 || rsIsHidden()) return true;
+  rsLive();
+  if (document.hidden || window.innerWidth < 1200 || rsIsHidden() || rsState.hover) return true;
   const rs = $('rsLogs');
   try {
-    const s = await api('/api/logs?svc=stream&n=22');
+    const s = await api('/api/logs?svc=stream&n=40');
     if (!rs) return true;
-    const lines = s.lines || (s.logs ? s.logs.trim().split('\n') : []);
-    if (lines.length > 0) {
-      rs.innerHTML = lines.map(l => {
-        let tag = '';
-        if (/frps/i.test(l)) tag = '<span class="badge info log-tag">FRPS</span>';
-        else if (/frpc/i.test(l)) tag = '<span class="badge ok log-tag">FRPC</span>';
-        else if (/watchdog|alert/i.test(l)) tag = '<span class="badge warn log-tag">WD</span>';
-        else if (/gre-panel|panel/i.test(l)) tag = '<span class="badge dim log-tag">PANEL</span>';
-        else if (/gre/i.test(l)) tag = '<span class="badge log-tag">GRE</span>';
-
-        const timeMatch = l.match(/(\d{2}:\d{2}:\d{2})/);
-        const timeTag = timeMatch ? `<span class="rs-log-time">${esc(timeMatch[1])}</span>` : '';
-        const cleanMsg = l.replace(/^.*?\[\d+\]:\s*/, '').replace(/^[A-Za-z]+\s+\d+\s+\d+:\d+:\d+\s+\S+\s+\S+:\s*/, '');
-        return '<div class="rs-log-line rs-log-mono">' + timeTag + tag + esc(cleanMsg || l) + '</div>';
-      }).join('');
-    } else {
-      rs.innerHTML = stateEmpty({ title: tr('rs_empty_title', 'No log lines yet'), msg: tr('rs_waiting_sys', 'Waiting for system logs...'), compact: true });
-    }
+    const lines = (s.lines || (s.logs ? s.logs.trim().split('\n') : [])).filter(l => l && !/^-- /.test(l));
+    const up = $('rsUpdated');
+    if (up) { const d = new Date(); up.textContent = tr('rs_updated', 'Updated') + ' ' + [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, '0')).join(':'); }
+    const sig = lines.join('\n');
+    if (sig === rsState.sig && rs.querySelector('.rs-ev, .ent-empty')) return true;
+    rsState.sig = sig;
+    rsState.events = lines.map(rsParse).reverse();
+    rsDraw();
     return true;
   } catch(e) {
     reportErr('rslogs', e);
-    if (rs && !rs.querySelector('.rs-log-mono')) rs.innerHTML = stateError(e.message, 'rslogs', true);
+    if (rs && !rs.querySelector('.rs-ev')) rs.innerHTML = stateError(e.message, 'rslogs', true);
     return false;
   }
 }
+if ($('rsLogs')) {
+  $('rsLogs').addEventListener('mouseenter', () => { rsState.hover = true; rsLive(); });
+  $('rsLogs').addEventListener('mouseleave', () => { rsState.hover = false; rsLive(); refreshRightSidebarLogs(); });
+}
+document.querySelectorAll('[data-rs-filter]').forEach(b => b.onclick = () => {
+  rsState.filter = b.dataset.rsFilter;
+  try { localStorage.setItem('hashem_rs_filter', rsState.filter); } catch (e) { /* storage blocked */ }
+  rsDraw();
+});
+if ($('rsOpenLogs')) $('rsOpenLogs').onclick = () => goTab('logs');
 makePoller(refreshRightSidebarLogs, 3000);
 setTimeout(refreshRightSidebarLogs, 300);
 

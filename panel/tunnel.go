@@ -69,7 +69,9 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Stream / All activity mode for right sidebar
 	if svc == "" || svc == "stream" || svc == "all" {
-		units := []string{"frps", "frpc", "gre-panel", "hashem-watchdog"}
+		// Every engine the panel runs; journalctl skips units that do not exist.
+		units := []string{"frps", "frpc", "gre-panel", "hashem-watchdog", "gre-tunnel",
+			"backhaul", "backhaul-server", "backhaul-client"}
 		var args []string
 		for _, u := range units {
 			args = append(args, "-u", u)

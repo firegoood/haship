@@ -186,10 +186,6 @@ button, a, input, select, textarea, [role="button"], [role="menuitem"] {
 .u-peer-acts-bar { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--ln); padding-top: 12px; }
 .badge.u-pill-sky, .bench-proto-pill.u-pill-sky { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); border: 1px solid color-mix(in srgb, var(--info) 30%, transparent); }
 .badge.u-pill-violet, .bench-proto-pill.u-pill-violet { background: color-mix(in srgb, var(--sc) 15%, transparent); color: var(--sc); border: 1px solid color-mix(in srgb, var(--sc) 30%, transparent); }
-/* right-sidebar live log line parts */
-.badge.log-tag { font-size: 12px; padding: 1px 4px; margin-inline-end: 4px; }
-.rs-log-line.rs-log-mono { font-family: var(--font-mono); font-size: 12px; line-height: 1.4; padding: 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--tx) 4%, transparent); word-break: break-all; }
-.rs-log-time { color: var(--mu); margin-inline-end: 4px; font-size: 12px; }
 
 /* ---- Touch targets: >=44x44 CSS px for every interactive control on coarse pointers ---- */
 @media (pointer: coarse) {
