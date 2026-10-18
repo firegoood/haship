@@ -136,13 +136,17 @@ func handleAction(w http.ResponseWriter, r *http.Request) {
 		PeerID    int    `json:"peer_id"`
 		Engine    string `json:"engine"`
 		Transport string `json:"transport"`
+		// The Tunnel tab sent these names, which this handler never read:
+		// every live engine switch failed with `invalid engine ""`.
+		TargetEngine    string `json:"target_engine"`
+		TargetTransport string `json:"target_transport"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-ACTION-02", "")
 		return
 	}
 	switch body.Action {
-	case "restart-frps", "restart-frpc", "restart-gre", "ping", "remove-tunnel":
+	case "restart-frps", "restart-frpc", "restart-engine", "restart-gre", "ping", "remove-tunnel":
 		out, err := runAction(body.Action, body.PeerID)
 		if err != nil {
 			writeAPIError(w, r, "E-ACTION-03", err.Error())
@@ -158,12 +162,30 @@ func handleAction(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]string{"status": "ok", "output": out})
 	case "switch-engine", "switch_engine":
-		out, err := switchTunnelEngine(body.Engine, body.Transport)
+		eng, trans := body.Engine, body.Transport
+		if eng == "" {
+			eng, trans = body.TargetEngine, body.TargetTransport
+		}
+		out, err := switchTunnelEngine(eng, trans)
 		if err != nil {
 			writeAPIError(w, r, "E-ACTION-03", err.Error())
 			return
 		}
-		writeJSON(w, map[string]string{"status": "ok", "output": out})
+		// The other server must run the same engine, or the tunnel stays
+		// down: tell the linked worker and say whether it followed.
+		peer := "none"
+		if engineSyncNeeded() {
+			switch told, perr := engineSyncFn(strings.ToLower(strings.TrimSpace(eng)), trans); {
+			case !told:
+			case perr != nil:
+				peer = "failed"
+				out += "\nForeign server did not switch: " + perr.Error()
+			default:
+				peer = "switched"
+				out += "\nForeign server switched too.\n"
+			}
+		}
+		writeJSON(w, map[string]string{"status": "ok", "output": out, "peer": peer})
 	default:
 		writeAPIError(w, r, "E-ACTION-01", "")
 	}
@@ -171,10 +193,14 @@ func handleAction(w http.ResponseWriter, r *http.Request) {
 
 func runAction(action string, peerID int) (string, error) {
 	switch action {
-	case "restart-frps":
-		if localStatus().FrpSvc == "frpc" {
-			out, err := exec.Command("systemctl", "restart", "frpc").CombinedOutput()
-			return string(out), err
+	case "restart-frps", "restart-engine":
+		// The main tunnel restarts whatever engine runs it (frps, frpc or a
+		// Backhaul unit); "frps" on a Backhaul server failed.
+		if peerID <= 0 {
+			if svc := localStatus().FrpSvc; svc != "" {
+				out, err := exec.Command("systemctl", "restart", svc).CombinedOutput()
+				return string(out), err
+			}
 		}
 		svc := peerFrpsSvc(peerID)
 		out, err := exec.Command("systemctl", "restart", svc).CombinedOutput()
@@ -552,6 +578,8 @@ type tunnelStatus struct {
 	ProxyPorts   []int    `json:"proxy_ports"`
 	Ports        []int    `json:"ports,omitempty"`
 	BindPort     int      `json:"bind_port"`
+	// TuneBackup: hashem.sh optimize saved the previous settings, so Restore works.
+	TuneBackup bool `json:"tune_backup"`
 }
 
 // engineBinDirs / backhaulExtraBins are where hashem.sh installs engine
@@ -613,6 +641,7 @@ func localStatus() tunnelStatus {
 // the config files; it runs no commands itself.
 func localStatusFrom(v *hostView) tunnelStatus {
 	var st tunnelStatus
+	st.TuneBackup = fileExists(filepath.Join(configDir, "tune.bak"))
 	// GRE interface
 	if v.tunnelOK {
 		for _, line := range strings.Split(v.tunnelShow, "\n") {
@@ -1185,18 +1214,19 @@ remotePort = %d
 		}
 	}
 
-	// If master with active Peer Link, propagate to worker
-	if isIran {
-		go func() {
-			time.Sleep(1 * time.Second)
-			_ = syncEngineToPeer(targetEngine, targetTransport)
-		}()
-	}
-
 	// Fire-and-forget health test of the new engine; never delays the response.
 	go runTunnelHealthOnce()
 
 	return outMsg.String(), nil
+}
+
+// engineSyncFn is swappable so tests never call a real peer.
+var engineSyncFn = syncEngineToPeer
+
+// engineSyncNeeded: only the Iran side directs the foreign worker.
+func engineSyncNeeded() bool {
+	st := localStatus()
+	return strings.Contains(strings.ToLower(st.Role), "iran") || st.Role == "master"
 }
 
 // engineSwitchServices are the units an engine switch may stop or start.

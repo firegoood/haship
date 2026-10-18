@@ -474,6 +474,13 @@
   .tun-chip:hover { border-color:var(--ac); color:var(--tx); }
   .tun-chip .qs-hint { margin-inline-start:auto; }
   #tunChips { display:grid; gap:6px; margin-top:10px; }
+  .tun-acts { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-top:14px; padding-top:14px; border-top:1px solid var(--ln); }
+  .tun-acts-main { display:flex; flex-wrap:wrap; gap:8px; }
+  .tun-out { margin-top:12px; border:1px solid var(--ln); border-radius:var(--r-sm); overflow:hidden; }
+  .tun-out-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 6px 6px 12px; background:var(--sunk); font-size:var(--fs-small); color:var(--mu); }
+  .tun-out pre { margin:0; max-height:260px; overflow:auto; border:0; border-radius:0; }
+  #tab-tunnel > .tunnel-card + .tunnel-card { margin-top:14px; }
+  .tun-empty-hint { grid-column:1 / -1; font-size:var(--fs-small); color:var(--mu); }
   .drawer-foot { padding:12px; border-top:1px solid var(--ln); display:flex; gap:8px; }
   .drawer-foot .hashem-btn { flex:1; min-width:0; }
   #login { position:fixed; inset:0; z-index:50; display:grid; place-items:center;
@@ -1424,119 +1431,77 @@
           <div class="fleet-topo" id="fleetTopo" aria-hidden="false"></div>
           <div class="fleet-grid" id="fleetGrid"></div>
         </div>
-        <!-- Bagher PRO Tunnel Card in Tunnels Tab -->
-        <div class="tunnel-card hidden u-bg-s1 u-bd-info u-noglow u-r-12 u-p-20 u-mb-16" id="tunnelBagherCard">
-          <div class="tc-header u-mb-12">
-            <div class="u-flex u-ai-c u-gap-12">
-              <span class="u-c-info u-fs-20"><svg class="i" aria-hidden="true"><use href="#i-bolt"/></svg></span>
-              <div>
-                <p class="tc-title u-m-0 u-fs-16 u-fw-700 u-c-tx">Bagher Hybrid Tunnel</p>
-                <div class="qs-hint u-fs-12">High-speed stealth carrier · Forwarding &amp; Multiplexing</div>
-              </div>
-              <span class="badge ok">HYBRID</span>
-            </div>
-            <div class="u-flex u-ai-c u-gap-8">
-              <span class="badge ok" id="tunBagherStatusBadge"><span class="dot"></span><span id="tunBagherStatusText">Active</span></span>
-              <button type="button" class="hashem-btn u-btn-30" onclick="openBagherQuickEdit()">
-                Quick Edit
-              </button>
-              <button type="button" class="hashem-btn u-btn-30 hashem-btn-danger" onclick="cleanBagherTunnelClick()">
-                Clean
-              </button>
-            </div>
-          </div>
-
-          <div class="det-grid u-gtc-fit-180 u-gap-12">
-            <div class="det-card u-p-12x16 u-bg-inset">
-              <div class="det-head u-fs-12 u-c-mu">Latency / Ping</div>
-              <div class="u-fs-16 u-fw-700 u-c-info u-mono u-mt-4" id="tunBagherPing">-- ms</div>
-            </div>
-            <div class="det-card u-p-12x16 u-bg-inset">
-              <div class="det-head u-fs-12 u-c-mu">Foreign Peer IP</div>
-              <div class="u-fs-13 u-fw-700 u-c-ok u-mono u-mt-4" id="tunBagherForeign">--</div>
-            </div>
-            <div class="det-card u-p-12x16 u-bg-inset">
-              <div class="det-head u-fs-12 u-c-mu">Forwarded Ports</div>
-              <div class="u-fs-13 u-fw-700 u-c-tx u-mono u-mt-4" id="tunBagherPorts">--</div>
-            </div>
-            <div class="det-card u-p-12x16 u-bg-inset">
-              <div class="det-head u-fs-12 u-c-mu">Total Throughput</div>
-              <div class="u-fs-13 u-fw-700 u-c-tx2 u-mt-4" id="tunBagherTotal">0 B</div>
-            </div>
-          </div>
-        </div>
-
         <div class="tunnel-card" id="tunnelStatusCard">
-          <div class="tc-header"><p class="tc-title">Tunnel status</p><span class="status-indicator" id="tunnelDot"><span class="dot"></span><span id="tunnelDotTxt">—</span></span></div>
+          <div class="tc-header"><p class="tc-title">Tunnel Status</p><span class="status-indicator" id="tunnelDot"><span class="dot"></span><span id="tunnelDotTxt">—</span></span></div>
           <div id="tunnel"></div>
           <div id="tunChips" aria-label="Per-tunnel health"></div>
-          <div class="ent-sec-label u-mt-6" >Peer tunnels</div>
+          <div class="ent-sec-label u-mt-6 hidden" id="peerCardsLabel">Peer tunnels</div>
           <div id="peerCards" class="det-grid"></div>
-          <div class="u-flex-gap-8 u-mt-4" id="tunnelActs">
-            <button class="hashem-btn hashem-btn-secondary" data-act="ping">Ping Peer</button>
-            <button class="hashem-btn hashem-btn-secondary" data-act="restart-gre">Restart GRE</button>
-            <button class="hashem-btn hashem-btn-secondary" data-act="restart-frps" id="frpRestartBtn">Restart frps</button>
-            <button class="hashem-btn hashem-btn-secondary" id="tunnelCarrierCycleBtn" title="Cycle encapsulation carrier (Direct GRE / WSS)">Carrier: <span id="tunnelCarrierTxt">GRE</span></button>
-            <button class="hashem-btn hashem-btn-secondary" id="optimizeBtn">Optimize Tunnel</button>
-            <button class="hashem-btn hashem-btn-secondary hidden" id="restoreBtn">Restore Pre-optimize</button>
+          <div class="tun-acts hidden" id="tunnelActs">
+            <div class="tun-acts-main">
+              <button class="hashem-btn hashem-btn-secondary hidden" id="tunnelCarrierCycleBtn" title="Switch how GRE packets are carried (Direct GRE or WSS)">Carrier: <span id="tunnelCarrierTxt" data-no-i18n>GRE</span></button>
+              <button class="hashem-btn hashem-btn-secondary" id="optimizeBtn">Optimize Network</button>
+              <button class="hashem-btn hashem-btn-secondary hidden" id="restoreBtn">Restore Previous Settings</button>
+            </div>
             <button class="hashem-btn hashem-btn-danger" id="removeTunnelBtn">Remove Tunnel</button>
           </div>
-          <pre id="actOut" class="logs hidden u-mt-4" ></pre>
-          <div class="qs-hint" id="tuneHint">Optimize: FQ+BBR + 16MB TCP buffers + MTU 1380 + MSS clamp 1340 + keepalive. Backs up current settings first — Restore brings them back.</div>
+          <div class="tun-out hidden" id="actOutWrap">
+            <div class="tun-out-head"><span id="actOutTitle">Output</span><button type="button" class="hashem-btn hashem-btn-ghost u-btn-xs" id="actOutClose">Close</button></div>
+            <pre id="actOut" class="logs"></pre>
+          </div>
+          <div class="qs-hint hidden" id="tuneHint">Optimize Network: FQ + BBR, 16 MB TCP buffers, GRE MTU 1380, MSS clamp 1340 and keepalive. The current settings are saved first, so Restore can bring them back.</div>
         </div>
 
-        <!-- Tunnel Health: per-tunnel PASS / FAIL / UNREACHABLE (service + session + data) -->
         <div class="tunnel-card" id="usageCard">
           <div class="tc-header"><p class="tc-title" data-i18n="usage_title">Traffic usage (kept 7 days)</p>
-            <select class="hashem-input" id="usageRange" aria-label="Range" style="max-width:9rem">
+            <select class="hashem-input u-max-w-180" id="usageRange" aria-label="Range">
               <option value="1h">1 h</option><option value="6h">6 h</option><option value="24h">24 h</option><option value="7d" selected>7 days</option>
             </select></div>
           <p class="qs-hint" data-i18n="usage_hint">Saved on disk every minute, so it survives restarts, updates and reboots. Per foreign server, plus the hub total.</p>
           <div id="usageBody"><p class="qs-hint">…</p></div>
         </div>
+        <!-- Tunnel Health: per-tunnel PASS / FAIL / UNREACHABLE (service + session + data) -->
         <div class="tunnel-card" id="tunnelHealthCard">
           <div class="tc-header">
             <p class="tc-title">Tunnel Health</p>
             <span class="qs-hint" id="thMeta">not tested yet</span>
           </div>
-          <div id="thBox"><div class="qs-hint">Click &quot;Test all tunnels&quot; to check the service, control session and a data probe of every tunnel.</div></div>
+          <div id="thBox" class="doc-tunnels"><div class="qs-hint">Test All Tunnels checks every tunnel's service, its control session and a real data probe through one of its ports.</div></div>
           <div class="u-flex-gap-8 u-mt-4">
             <button class="hashem-btn hashem-btn-secondary" id="thRunBtn">Test All Tunnels</button>
           </div>
         </div>
 
         <!-- Live Tunnel Engine Switcher -->
-        <div class="tunnel-card u-mt-4 u-bd-info u-bg-s1" id="liveEngineCard">
+        <div class="tunnel-card u-mt-4 hidden" id="liveEngineCard">
           <div class="tc-header">
-            <p class="tc-title">Live Tunnel Engine Switcher</p>
-            <span class="badge info" id="activeEngineBadge">FRP</span>
+            <p class="tc-title">Tunnel Engine</p>
+            <span class="badge info" id="activeEngineBadge" data-no-i18n>—</span>
           </div>
-          <div class="u-fs-12 u-c-mu u-mb-12">
-            Switch tunneling engine live on the fly without losing server tokens or port mappings. Both servers will re-link seamlessly.
-          </div>
+          <p class="qs-hint u-mb-12" id="liveEngineNote">Changes the engine that carries the tunnel. Token and forwarded ports are kept. The tunnel drops for a few seconds while both sides restart.</p>
           <div class="u-grid u-gtc-fit-200 u-gap-12 u-mb-12">
             <div>
               <label for="liveEngineSelect" class="u-fs-12 u-upper u-c-mu u-block u-mb-4">Target Engine</label>
               <select class="hashem-input u-w-full" id="liveEngineSelect">
-                <option value="frp">GRE + FRP Reverse Tunnel</option>
-                <option value="backhaul">Standalone Backhaul (Multiplexed)</option>
-                <option value="gre-backhaul">GRE + Backhaul Dual-Layer</option>
+                <option value="frp">GRE + FRP</option>
+                <option value="backhaul">Backhaul (no GRE)</option>
+                <option value="gre-backhaul">GRE + Backhaul</option>
               </select>
             </div>
             <div id="liveTransportWrap">
               <label for="liveTransportSelect" class="u-fs-12 u-upper u-c-mu u-block u-mb-4">Transport Protocol</label>
               <select class="hashem-input u-w-full" id="liveTransportSelect">
-                <option value="tcpmux" selected>TCPMUX (Multi-stream TCP - Recommended)</option>
-                <option value="wssmux">WSSMUX (WebSocket + TLS Obfuscation)</option>
-                <option value="tcp">TCP (Standard Plain TCP)</option>
-                <option value="ws">WS (Plain WebSocket)</option>
-                <option value="wsmux">WSMUX (Multiplexed WebSocket)</option>
-                <option value="wss">WSS (TLS WebSocket)</option>
+                <option value="tcpmux" selected>TCPMUX (recommended)</option>
+                <option value="wssmux">WSSMUX (TLS, looks like HTTPS)</option>
+                <option value="tcp">TCP</option>
+                <option value="ws">WS</option>
+                <option value="wsmux">WSMUX</option>
+                <option value="wss">WSS (TLS)</option>
               </select>
             </div>
           </div>
           <div class="u-flex u-ai-c u-gap-12 u-wrap">
-            <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn">Switch Tunnel Engine Now</button>
+            <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn">Switch Engine</button>
             <span class="u-hint-12" id="liveEngineStatusTxt"></span>
           </div>
         </div>

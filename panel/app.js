@@ -95,7 +95,17 @@ function stateError(msg, actionKey, compact) {
 const STATE_ACTIONS = {
   benchmark: () => loadBenchmark(), runbench: () => runBenchmarkClick(), logs: () => loadLogs(),
   errors: () => loadErrors(), status: () => refresh(), rslogs: () => refreshRightSidebarLogs(),
+  setup: () => goTab('setup'),
 };
+// Command output of a tunnel action, in a closable panel under the actions.
+function showActOut(title, text) {
+  const w = $('actOutWrap'), o = $('actOut');
+  if (!w || !o) return;
+  o.textContent = text || 'ok';
+  const t = $('actOutTitle');
+  if (t) t.textContent = title || tr('', 'Output');
+  w.classList.remove('hidden');
+}
 document.addEventListener('click', e => {
   const b = e.target.closest && e.target.closest('[data-state-action]');
   if (!b) return;
@@ -982,16 +992,16 @@ function setBtnLoading(btn, isLoading, loadingText) {
 function peerAct(action, peerId) {
   return (async () => {
     const btn = document.querySelector(`[data-peer-act="${action}-${peerId}"]`);
-    const actLabels = { restart: 'Restarting…', stop: 'Stopping…', start: 'Starting…', ping: 'Pinging…' };
-    const label = actLabels[action] || (action + '…');
-    setBtnLoading(btn, true, label);
+    const actLabels = { 'restart-frps': 'Restarting…', 'restart-engine': 'Restarting…', 'restart-gre': 'Restarting…', ping: 'Pinging…' };
+    const actNames = { 'restart-frps': 'Restart', 'restart-engine': 'Restart Service', 'restart-gre': 'Restart GRE', ping: 'Ping' };
+    const name = tr('', actNames[action] || action);
+    setBtnLoading(btn, true, tr('', actLabels[action] || 'Working…'));
     try {
       const r = await api('/api/action', {action, peer_id: peerId});
-      $('actOut').classList.remove('hidden');
-      $('actOut').textContent = r.output || 'ok';
-      toastOk(action + ' ok', r.output ? String(r.output).slice(0, 120) : '');
+      showActOut(name, r.output || 'ok');
+      toastOk(name, r.output ? String(r.output).slice(0, 120) : '');
       refresh();
-    } catch(e) { toastErr(action + ' failed', e.message); refresh(); }
+    } catch(e) { toastErr(name + ' · ' + tr('', 'failed'), e.message); refresh(); }
     finally { setBtnLoading(btn, false); }
   })();
 }
@@ -1034,8 +1044,7 @@ async function showPeerToken(peerId, name) {
     const r = await api('/api/peers?id=' + peerId);
     const show = r.bundle || r.token || '';
     toastOk(`bundle for '${name}'`, show + ' (also in logs)');
-    $('actOut').classList.remove('hidden');
-    $('actOut').textContent = `Bundle for '${name}': ${show}\nForeign side: paste it into the token field (fills everything). Legacy token: ${r.token || '—'}`;
+    showActOut(tr('', 'Bundle'), `Bundle for '${name}': ${show}\nForeign side: paste it into the token field (fills everything). Legacy token: ${r.token || '—'}`);
   } catch(e) { toastErr('token lookup failed', e.message); }
 }
 function renderPeers(peers) {
@@ -1044,8 +1053,12 @@ function renderPeers(peers) {
   tunPeerCache = peers || null;
   try { renderTunChips(window._lastLocal || null); } catch(_){ /* chips are cosmetic; cards still render */ }
   const b = (_sshfwdData || (window._lastDash && window._lastDash.bagher) || window._lastBagher || {});
-  const bagherUp = !!(b.is_active || b.enabled || b.connected);
-  const bagherHasCfg = !!(bagherUp || b.has_config || (b.remote_host && b.remote_host.length) || (Array.isArray(b.ports) && b.ports.length));
+  // Running is the service; linked is the session to the other server. "enabled"
+  // alone used to show a stopped Bagher as active.
+  const bagherRun = !!b.is_active, bagherLinked = bagherRun && !!b.connected;
+  const bagherUp = bagherLinked;
+  const bagherHasCfg = !!(bagherRun || b.has_config || (b.remote_host && b.remote_host.length) || (Array.isArray(b.ports) && b.ports.length));
+  const bagherState = bagherLinked ? ['ok', 'Connected'] : (bagherRun ? ['warn', 'Waiting for the other server'] : ['err', 'Stopped']);
   
   let bagherCardHtml = '';
   if (bagherHasCfg) {
@@ -1055,11 +1068,10 @@ function renderPeers(peers) {
       <div class="tc-header u-flex-wrap-gap8">
         <div class="u-flex-center-gap10">
           <span class="status-indicator ${bagherUp ? 'active' : 'offline'}"><span class="dot"></span></span>
-          <b class="u-fs-16-tx">Bagher Tunnel</b>
-          <span class="qs-hint mono">#stealth</span>
-          <span class="badge ok">Bagher Engine</span>
+          <b class="u-fs-16-tx">Bagher</b>
+          <span class="badge info" data-no-i18n>SSH + FRP</span>
           <span class="badge dim">${esc(roleLabel)}</span>
-          <span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'active' : 'inactive'}</span>
+          <span class="badge ${bagherState[0]}"><span class="dot"></span>${esc(tr('', bagherState[1]))}</span>
         </div>
       </div>
       <div class="det-grid">
@@ -1071,9 +1083,10 @@ function renderPeers(peers) {
         </div>
         <div class="det-card">
           <div class="det-card-head"><span>Link Status</span></div>
-          <div class="det-row"><span class="det-k">Status</span><span class="det-v"><span class="badge ${bagherUp ? 'ok' : 'err'}"><span class="dot"></span>${bagherUp ? 'Running' : 'Stopped'}</span></span></div>
-          <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono u-c-info">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : (bagherUp ? 'Optimal' : '—')}</span></div>
-          <div class="det-row"><span class="det-k">Services</span><span class="det-v mono">${esc(b.active_services || (bagherUp ? 'frps, frpc, ssh-fwd' : 'none'))}</span></div>
+          <div class="det-row"><span class="det-k">Service</span><span class="det-v"><span class="badge ${bagherRun ? 'ok' : 'err'}"><span class="dot"></span>${esc(tr('', bagherRun ? 'Running' : 'Stopped'))}</span></span></div>
+          <div class="det-row"><span class="det-k">Session</span><span class="det-v"><span class="badge ${bagherLinked ? 'ok' : (bagherRun ? 'warn' : 'dim')}"><span class="dot"></span>${esc(tr('', bagherLinked ? 'Connected' : 'Not connected'))}</span></span></div>
+          <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : '—'}</span></div>
+          ${b.last_error && !bagherLinked ? `<div class="det-row"><span class="det-k">Last error</span><span class="det-v det-ports" data-no-i18n>${esc(String(b.last_error).slice(0, 160))}</span></div>` : ''}
         </div>
       </div>
       <div class="tc-acts u-flex-gap-8 u-mt-4">
@@ -1084,15 +1097,25 @@ function renderPeers(peers) {
     </div>`;
   }
 
+  const L = window._lastLocal || {};
+  const hasMain = !!(L.frp_up || L.frp_svc || (L.gre && L.gre.exists) || (L.proxies || []).length);
+  const isForeign = /foreign/i.test(L.role || '') || L.frp_svc === 'frpc' || L.frp_svc === 'backhaul-client';
+  const lbl = $('peerCardsLabel');
+  if (lbl) lbl.classList.toggle('hidden', !(peers && peers.length) && !bagherCardHtml);
   if (!peers || !peers.length) {
     if (bagherCardHtml) {
       box.innerHTML = bagherCardHtml;
+    } else if (!hasMain) {
+      // Nothing on this server yet: one clear next step instead of empty cards.
+      box.innerHTML = '<div class="u-col-full">' + stateEmpty({ title: tr('', 'No tunnel on this server yet'), msg: tr('', 'Set one up from the Setup tab. It takes about a minute on each server.'), actionKey: 'setup', actionLabel: tr('onb_go', 'Open Setup'), icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>' }) + '</div>';
     } else {
-      box.innerHTML = '<div class="u-col-full">' + stateEmpty({ title: tr('empty_peers_title', 'No peer tunnels yet'), msg: tr('empty_peers_msg', 'Add one from Setup → Add another foreign server.'), icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>' }) + '</div>';
+      // A foreign server has exactly one tunnel; only the Iran hub adds more.
+      box.innerHTML = isForeign ? '' : '<p class="tun-empty-hint">' + esc(tr('', 'More foreign servers can be added from Setup → Add another foreign server.')) + '</p>';
     }
     return;
   }
-  const stBadge = (ok, label) => `<span class="badge ${ok ? 'ok' : 'err'}"><span class="dot"></span>${esc(label)}</span>`;
+  // unit / interface names (gre-t2, backhaul-server-2) are names, never translated
+  const stBadge = (ok, label) => `<span class="badge ${ok ? 'ok' : 'err'}"><span class="dot"></span><bdi data-no-i18n>${esc(label)}</bdi></span>`;
   box.innerHTML = bagherCardHtml + peers.map(p => {
     const up = !!(p.gre_up || p.frp_up);
     const nm = p.name || ('peer-' + p.id);
@@ -1128,21 +1151,22 @@ function renderPeers(peers) {
           <div class="det-row"><span class="det-k">Iran IP</span><span class="det-v mono">${esc(p.local_pub || '—')}<button type="button" class="det-copy" data-copy="${esc(p.local_pub || '')}" title="Copy" aria-label="Copy">⧉</button></span></div>
           <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(fwdPorts)}<button type="button" class="det-copy u-ml-5" onclick="editPeerPortsClick(${p.id})" title="Edit Ports" aria-label="Edit ports"><svg class="i" aria-hidden="true"><use href="#i-edit"/></svg></button></span></div>
         </div>
-        <div class="det-card">
+        ${isBh ? '' : `<div class="det-card">
           <div class="det-card-head">${ICO_GRE} <span>GRE Tunnel</span></div>
-          <div class="det-row"><span class="det-k">Interface</span><span class="det-v">${stBadge(isBh ? true : p.gre_up, greIfLabel)}</span></div>
-          <div class="det-row"><span class="det-k">GRE Inner</span><span class="det-v mono">${isBh ? 'N/A' : (esc(p.local_gre || '?') + ' ⇄ ' + esc(p.peer_gre || '?'))}</span></div>
-          <div class="det-row"><span class="det-k">Ping / Latency</span><span class="det-v">${isBh ? '<span class="badge ok">Direct</span>' : pingBadge(p)}</span></div>
-        </div>
+          <div class="det-row"><span class="det-k">Interface</span><span class="det-v">${stBadge(p.gre_up, greIfLabel)}</span></div>
+          <div class="det-row"><span class="det-k">GRE Inner</span><span class="det-v mono">${esc(p.local_gre || '?') + ' ⇄ ' + esc(p.peer_gre || '?')}</span></div>
+          <div class="det-row"><span class="det-k">Ping / Latency</span><span class="det-v">${pingBadge(p)}</span></div>
+        </div>`}
         <div class="det-card">
           <div class="det-card-head">${(isBh || isGreBh) ? '<svg class="i" aria-hidden="true"><use href="#i-bolt"/></svg>' : ICO_FRP} <span>${svcTitle}</span></div>
           <div class="det-row"><span class="det-k">Service</span><span class="det-v">${stBadge(p.frp_up, p.frps_svc || 'service')}</span></div>
           <div class="det-row"><span class="det-k">Control Port</span><span class="det-v mono">${esc(String(p.frp_port || '—'))}<button type="button" class="det-copy" data-copy="${esc(String(p.frp_port || ''))}" title="Copy" aria-label="Copy">⧉</button></span></div>
           <div class="det-row"><span class="det-k">Traffic</span><span class="det-v mono">${esc(traffic)}</span></div>
+          ${isBh ? `<div class="det-row"><span class="det-k">Ping / Latency</span><span class="det-v">${pingBadge(p)}</span></div>` : ''}
         </div>
       </div>
       <div class="peer-acts u-peer-acts-bar">
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="ping-${p.id}" onclick="peerAct('ping', ${p.id})">Ping</button>
+        ${isBh ? '' : `<button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="ping-${p.id}" onclick="peerAct('ping', ${p.id})">Ping</button>`}
         <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editPeerPortsClick(${p.id})">Edit Peer</button>
         <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="showPeerToken(${p.id}, ${jsArg(nm)})">Bundle</button>
         <button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="restart-frps-${p.id}" onclick="peerAct('restart-frps', ${p.id})">Restart</button>
@@ -1194,73 +1218,109 @@ function linkStrip(s) {
     (eng ? sep + '<bdi>' + esc(eng) + '</bdi>' : '') + (ms ? sep + '<bdi>' + esc(ms) + '</bdi>' : '');
   el.title = up ? tr('ls_up', 'Tunnel up') : tr('ls_down', 'Tunnel down');
 }
+// Engine of the base tunnel: recorded, else derived from the running unit.
+function tunEngine(st) {
+  if (!st) return '';
+  const svc = st.frp_svc || '';
+  if (st.engine || st.tunnel_engine) return st.engine || st.tunnel_engine;
+  if (svc.startsWith('backhaul')) return st.gre && st.gre.exists ? 'gre-backhaul' : 'backhaul';
+  return (svc || (st.gre && st.gre.exists)) ? 'frp' : '';
+}
 function renderTunnel(st) {
-  const up = !!(st.gre.exists || st.frp_up);
+  const gre = st.gre || {};
+  const hasMain = !!(gre.exists || st.frp_up || st.frp_svc || (st.proxies || []).length);
+  const up = !!(gre.exists || st.frp_up);
+  const eng = tunEngine(st);
+  const usesGre = eng === 'frp' || eng === 'gre-backhaul' || !!gre.exists;
+  const isIran = /iran/i.test(st.role || '') || st.frp_svc === 'frps' || (st.frp_svc || '').startsWith('backhaul-server');
+  const bhSvc = (st.frp_svc || '').startsWith('backhaul');
   const d = $('tunnelDot');
-  if (d) { d.className = 'status-indicator ' + (up ? 'active' : 'offline'); $('tunnelDotTxt').textContent = up ? 'up' : 'down'; }
-  const badge = (ok, label) => `<span class="badge ${ok ? 'ok' : 'err'}"><span class="dot"></span>${esc(label)}</span>`;
+  if (d) {
+    d.className = 'status-indicator ' + (!hasMain ? '' : (up ? 'active' : 'offline'));
+    $('tunnelDotTxt').textContent = !hasMain ? tr('', 'Not set up') : tr('', up ? 'Up' : 'Down');
+  }
   const svcBadge = st.frp_up
-    ? `<span class="badge ok"><span class="dot"></span>${esc(st.frp_svc || 'frp')}</span>`
-    : `<span class="badge dim"><span class="dot"></span>stopped</span>`;
-  // Main tunnel full card (dashboard-style, distinct gold accent): same
-  // detail rows as a peer card so the base tunnel isn't a plain text list.
-  const hasMain = !!(st.gre.exists || st.frp_up || (st.proxies || []).length);
+    ? `<span class="badge ok"><span class="dot"></span><bdi data-no-i18n>${esc(st.frp_svc || 'frp')}</bdi></span>`
+    : `<span class="badge err"><span class="dot"></span><bdi data-no-i18n>${esc(st.frp_svc || 'service')}</bdi> · ${esc(tr('', 'stopped'))}</span>`;
+  const ports = ((st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || [])).join(', ') || '—';
+  const title = tr('', 'Tunnel') + (st.remote_pub ? ' · ' + st.remote_pub : '');
+  // Main tunnel card: the same detail rows as a peer card. GRE rows only where
+  // the engine uses GRE (a standalone Backhaul server has no gre-tunnel).
   const mainCard = !hasMain ? '' : `
     <div class="tunnel-card peer-card main-card u-peer-card-wide" id="peer-card-main">
       <div class="tc-header u-flex-wrap-gap8">
         <div class="u-flex-center-gap10">
           <span class="status-indicator ${up ? 'active' : 'offline'}"><span class="dot"></span></span>
-          <b class="u-fs-16-tx">${esc(st.remote_pub ? 'Tunnel · ' + st.remote_pub : 'Tunnel')}</b>
-          <span class="badge ${up ? 'ok' : 'err'}"><span class="dot"></span>${up ? 'active' : 'down'}</span>
-          ${(!st.ping_ok && st.frp_up) ? '<span class="badge info"><span class="dot"></span>' + esc(tr('fleet_frp_only', 'FRP only')) + '</span>' : ''}
+          <b class="u-fs-16-tx" data-no-i18n>${esc(title)}</b>
+          ${eng ? '<span class="badge info" data-no-i18n>' + esc(LS_ENGINE[eng] || eng) + '</span>' : ''}
+          <span class="badge ${up ? 'ok' : 'err'}"><span class="dot"></span>${esc(tr('', up ? 'Active' : 'Down'))}</span>
+          ${(usesGre && !st.ping_ok && st.frp_up) ? '<span class="badge info"><span class="dot"></span>' + esc(tr('fleet_frp_only', 'FRP only')) + '</span>' : ''}
         </div>
       </div>
       <div class="det-grid">
         <div class="det-card">
-          <div class="det-card-head">${ICO_SRV} <span>Server</span></div>
-          <div class="det-row"><span class="det-k">GRE Path</span><span class="det-v mono">${esc(st.gre.local || '?')} → ${esc(st.gre.peer_ip || st.gre_peer || '?')}</span></div>
-          <div class="det-row"><span class="det-k">Forwarded</span><span class="det-v mono">${esc(((st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || [])).join(', ') || '—')}<button type="button" class="det-copy u-ml-5" onclick="editMainPortsClick()" title="Edit Ports" aria-label="Edit ports"><svg class="i" aria-hidden="true"><use href="#i-edit"/></svg></button></span></div>
+          <div class="det-card-head">${ICO_SRV} <span>${esc(tr('', 'Server'))}</span></div>
+          <div class="det-row"><span class="det-k">${esc(tr('', 'Role'))}</span><span class="det-v">${esc(tr('', isIran ? 'Iran' : 'Foreign'))}</span></div>
+          <div class="det-row"><span class="det-k">${esc(tr('', 'Other server'))}</span><span class="det-v mono">${esc(st.remote_pub || gre.peer_ip || st.gre_peer || '—')}</span></div>
+          <div class="det-row"><span class="det-k">${esc(tr('', 'Forwarded'))}</span><span class="det-v mono">${esc(ports)}<button type="button" class="det-copy u-ml-5" onclick="editMainPortsClick()" title="Edit Ports" aria-label="Edit ports"><svg class="i" aria-hidden="true"><use href="#i-edit"/></svg></button></span></div>
         </div>
+        ${usesGre ? `<div class="det-card">
+          <div class="det-card-head">${ICO_GRE} <span>${esc(tr('', 'GRE Tunnel'))}</span></div>
+          <div class="det-row"><span class="det-k">${esc(tr('', 'Interface'))}</span><span class="det-v"><span class="badge ${gre.exists ? 'ok' : 'err'}"><span class="dot"></span><bdi data-no-i18n>${esc(gre.name || 'gre-tunnel')}</bdi>${gre.exists ? '' : ' · ' + esc(tr('', 'missing'))}</span></span></div>
+          <div class="det-row"><span class="det-k">${esc(tr('', 'Inner address'))}</span><span class="det-v mono">${esc(gre.inner || '—')}</span></div>
+          <div class="det-row"><span class="det-k">${esc(tr('', 'Ping / Latency'))}</span><span class="det-v">${pingBadge(st)}</span></div>
+        </div>` : ''}
         <div class="det-card">
-          <div class="det-card-head">${ICO_GRE} <span>GRE Tunnel</span></div>
-          <div class="det-row"><span class="det-k">Interface</span><span class="det-v">${badge(st.gre.exists, (st.gre.name || 'gre-tunnel') + ' ' + (st.gre.inner || ''))}</span></div>
-          <div class="det-row"><span class="det-k">Ping / Latency</span><span class="det-v">${pingBadge(st)}</span></div>
-        </div>
-        <div class="det-card">
-          <div class="det-card-head">${ICO_FRP} <span>FRP Service</span></div>
-          <div class="det-row"><span class="det-k">Service</span><span class="det-v">${svcBadge}</span></div>
-          <div class="det-row"><span class="det-k">Port</span><span class="det-v mono">${esc(String(st.frp_port || st.bind_port || '?'))}</span></div>
+          <div class="det-card-head">${bhSvc ? '<svg class="i" aria-hidden="true"><use href="#i-bolt"/></svg>' : ICO_FRP} <span>${esc(tr('', bhSvc ? 'Backhaul Service' : 'FRP Service'))}</span></div>
+          <div class="det-row"><span class="det-k">${esc(tr('', 'Service'))}</span><span class="det-v">${svcBadge}</span></div>
+          <div class="det-row"><span class="det-k">${esc(tr('', 'Control port'))}</span><span class="det-v mono">${esc(String(st.frp_port || st.bind_port || '—'))}</span></div>
+          ${st.transport ? `<div class="det-row"><span class="det-k">${esc(tr('', 'Transport'))}</span><span class="det-v mono">${esc(st.transport)}</span></div>` : ''}
         </div>
       </div>
       <div class="peer-acts u-peer-acts-bar">
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="peerAct('ping', 0)">Ping</button>
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editMainPortsClick()">Edit Tunnel</button>
-        ${st.role === 'iran' ? '<button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyMainIranBundle()">Copy Bundle</button>' : ''}
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="peerAct('restart-gre', 0)">Restart GRE</button>
-        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="peerAct('restart-frps', 0)">Restart FRP</button>
+        ${usesGre ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="ping-0" onclick="peerAct('ping', 0)">${esc(tr('', 'Ping'))}</button>` : ''}
+        <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editMainPortsClick()">${esc(tr('', 'Edit Tunnel'))}</button>
+        ${isIran ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyMainIranBundle()">${esc(tr('', 'Copy Bundle'))}</button>` : ''}
+        ${usesGre ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="restart-gre-0" onclick="peerAct('restart-gre', 0)">${esc(tr('', 'Restart GRE'))}</button>` : ''}
+        ${st.frp_svc ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="restart-engine-0" onclick="peerAct('restart-engine', 0)">${esc(tr('', 'Restart Service'))}</button>` : ''}
       </div>
     </div>`;
   $('tunnel').innerHTML = mainCard;
   window._lastLocal = st;
-  // Sync live engine switcher card
-  const eng = st.engine || st.tunnel_engine || 'frp';
+
+  // Server-wide actions only once a tunnel exists; Carrier only where GRE runs.
+  const acts = $('tunnelActs');
+  if (acts) acts.classList.toggle('hidden', !hasMain);
+  const hint = $('tuneHint');
+  if (hint) hint.classList.toggle('hidden', !hasMain);
+  const cyc = $('tunnelCarrierCycleBtn');
+  if (cyc) cyc.classList.toggle('hidden', !usesGre);
+  const rb = $('restoreBtn');
+  if (rb) rb.classList.toggle('hidden', !st.tune_backup);
+
+  // Engine card: needs a tunnel; on the foreign side it warns that Iran leads.
+  const ec = $('liveEngineCard');
+  if (ec) ec.classList.toggle('hidden', !hasMain);
   const aBadge = $('activeEngineBadge');
   if (aBadge) {
-    aBadge.textContent = eng.toUpperCase();
-    aBadge.className = 'badge ' + (eng === 'frp' ? 'info' : 'ok');
+    aBadge.textContent = (LS_ENGINE[eng] || eng || '—') + (st.transport && eng !== 'frp' ? ' · ' + st.transport : '');
+    aBadge.className = 'badge info';
   }
+  const note = $('liveEngineNote');
+  if (note) note.textContent = isIran
+    ? tr('', 'Changes the engine that carries the tunnel. Token and forwarded ports are kept. The linked foreign server is switched too; the tunnel drops for a few seconds.')
+    : tr('', 'Switch the engine from the Iran server: it switches this server too. Switching here alone breaks the tunnel until the Iran server runs the same engine.');
   const lSel = $('liveEngineSelect');
-  if (lSel && document.activeElement !== lSel) {
-    lSel.value = eng;
-  }
+  if (lSel && document.activeElement !== lSel && !lSel.dataset.touched) lSel.value = eng || 'frp';
   const tSel = $('liveTransportSelect');
-  if (tSel && st.transport && document.activeElement !== tSel) {
-    tSel.value = st.transport;
-  }
-  // role-specific button label: foreign runs frpc, so show the right name.
-  const rb = $('frpRestartBtn');
-  if (rb) rb.textContent = (st.frp_svc === 'frpc' || /foreign/i.test(st.role || '')) ? 'Restart frpc' : 'Restart frps';
+  if (tSel && st.transport && document.activeElement !== tSel && !tSel.dataset.touched) tSel.value = st.transport;
+  liveEngineSync();
   renderTunChips(st);
+}
+// Transport only applies to Backhaul engines.
+function liveEngineSync() {
+  const sel = $('liveEngineSelect'), wrap = $('liveTransportWrap');
+  if (sel && wrap) wrap.classList.toggle('hidden', sel.value === 'frp');
 }
 // shared cache: refresh() fills it from /api/status before renderTunChips runs
 let tunPeerCache = null;
@@ -1275,7 +1335,7 @@ function renderTunChips(st) {
   if (st && (st.gre.exists || st.frp_up || (st.proxies || []).length)) {
     chips.push({
       key: 'base',
-      name: 'main',
+      name: tr('', 'Tunnel'),
       up: !!(st.gre.exists || st.frp_up),
       ping: pingText(st),
       sub: esc(st.frp_svc || 'frp') + ' :' + esc(st.frp_port || st.bind_port || '?'),
@@ -2035,13 +2095,12 @@ async function refreshDash() {
     const b = d.bagher || {};
     const bagherActive = !!(b.is_active || b.enabled);
     const dashBagherCard = $('dashBagherCard');
-    const tunBagherCard = $('tunnelBagherCard');
     if (dashBagherCard) {
       if (bagherActive) {
         dashBagherCard.classList.remove('hidden');
         const roleStr = b.role === 'foreign' ? 'Foreign Server' : 'Iran Server';
         set('dashBagherRoleSub', 'Stealth Hybrid Tunnel · Role: ' + roleStr);
-        set('dashBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal');
+        set('dashBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : '—');
         const tp = b.throughput || {};
         const rx = tp.rx_bytes_sec || b.rx_bytes_sec || 0;
         const tx = tp.tx_bytes_sec || b.tx_bytes_sec || 0;
@@ -2061,31 +2120,6 @@ async function refreshDash() {
         }
       } else {
         dashBagherCard.classList.add('hidden');
-      }
-    }
-    // Bagher Card in Tunnels: ONLY display when Bagher is ACTUALLY ACTIVE
-    if (tunBagherCard) {
-      if (bagherActive) {
-        tunBagherCard.classList.remove('hidden');
-        set('tunBagherPing', (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : 'Optimal');
-        set('tunBagherForeign', b.remote_host || '—');
-        const portsStr = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
-        set('tunBagherPorts', portsStr);
-        const tp = b.throughput || {};
-        const tot = tp.total_bytes || b.total_bytes || 0;
-        set('tunBagherTotal', fmtBytes(tot));
-        const tbBadge = $('tunBagherStatusBadge');
-        if (tbBadge) {
-          if (b.connected) {
-            tbBadge.className = 'badge ok';
-            set('tunBagherStatusText', 'Connected');
-          } else {
-            tbBadge.className = 'badge warn';
-            set('tunBagherStatusText', 'Waiting for Peer');
-          }
-        }
-      } else {
-        tunBagherCard.classList.add('hidden');
       }
     }
     // Chart hover tooltip (read-only; data source untouched).
@@ -2392,7 +2426,7 @@ function linkPing(o) {
   }
   return { ok: false, txt: '', chip: '' };
 }
-function pingText(o) { const p = linkPing(o); return p.ok ? p.txt : 'down'; }
+function pingText(o) { const p = linkPing(o); return p.ok ? p.txt : tr('status_down', 'down'); }
 function reasonsTip(o) { return (o.health_state && o.health_state !== 'healthy' && (o.reasons || []).length) ? esc(o.reasons.join(' \u00b7 ')) : ''; }
 function pingBadge(o) {
   const p = linkPing(o), tip = reasonsTip(o);
@@ -3104,56 +3138,43 @@ $('toggle').addEventListener('click', () => {
 $('logoutBtn').onclick = async () => { try { await api('/api/logout', {}); } catch(e){ /* logout best-effort: always fall through to login screen */ } showLogin(); };
 $('refreshBtn').onclick = refresh;
 $('removeTunnelBtn').onclick = async () => {
-  if (!await entConfirm('Remove Tunnel?', 'Remove the tunnel from THIS server? GRE + FRP will be deleted; the panel stays.', 'Remove Tunnel')) return;
+  if (!await entConfirm(tr('', 'Remove Tunnel?'), tr('', 'The tunnel on this server is deleted: its GRE interface, tunnel service and their configs. The other server keeps its side until you remove it there. The panel stays.'), tr('', 'Remove Tunnel'))) return;
   const b = $('removeTunnelBtn');
   b.disabled = true;
   try {
     const r = await api('/api/action', {action: 'remove-tunnel'});
-    $('actOut').classList.remove('hidden');
-    $('actOut').textContent = r.output || 'tunnel removed';
-    toastOk('tunnel removed');
+    showActOut(tr('', 'Remove Tunnel'), r.output || 'tunnel removed');
+    toastOk(tr('', 'Tunnel removed'));
     refresh();
   } catch(e) { toastErr('tunnel remove failed', e.message); }
   b.disabled = false;
 };
 $('optimizeBtn').onclick = async () => {
-  if (!await entConfirm('Optimize Network?', 'Optimize network for tunnel throughput? (BBR + buffers + MTU/MSS — current settings are backed up first)', 'Optimize')) return;
+  if (!await entConfirm(tr('', 'Optimize Network?'), tr('', 'Applies FQ + BBR, larger TCP buffers, GRE MTU 1380 and MSS clamp 1340. The current settings are saved first, so Restore can bring them back. The tunnel keeps running.'), tr('', 'Optimize'))) return;
   const b = $('optimizeBtn');
   b.disabled = true;
   try {
     const r = await api('/api/action', {action: 'optimize'});
-    $('actOut').classList.remove('hidden');
-    $('actOut').textContent = r.output || 'optimized';
+    showActOut(tr('', 'Optimize Network'), r.output || 'optimized');
     $('restoreBtn').classList.remove('hidden');
-    toastOk('tunnel optimized');
+    toastOk(tr('', 'Network optimized'));
     refresh();
   } catch(e) { toastErr('optimize failed', e.message); }
   b.disabled = false;
 };
 $('restoreBtn').onclick = async () => {
-  if (!await entConfirm('Restore Settings?', 'Restore the settings from before optimization?', 'Restore')) return;
+  if (!await entConfirm(tr('', 'Restore Previous Settings?'), tr('', 'Puts back the network settings saved before Optimize Network ran.'), tr('', 'Restore'))) return;
   const b = $('restoreBtn');
   b.disabled = true;
   try {
     const r = await api('/api/action', {action: 'restore'});
-    $('actOut').classList.remove('hidden');
-    $('actOut').textContent = r.output || 'restored';
-    toastOk('settings restored');
+    showActOut(tr('', 'Restore Previous Settings'), r.output || 'restored');
+    toastOk(tr('', 'Settings restored'));
     refresh();
   } catch(e) { toastErr('restore failed', e.message); }
   b.disabled = false;
 };
-document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
-  b.disabled = true;
-  try {
-    const r = await api('/api/action', {action: b.dataset.act});
-    $('actOut').classList.remove('hidden');
-    $('actOut').textContent = r.output || 'ok';
-    toastOk(b.dataset.act + ' ok');
-    refresh();
-  } catch(e) { toastErr(b.dataset.act + ' failed', e.message); }
-  b.disabled = false;
-});
+if ($('actOutClose')) $('actOutClose').onclick = () => $('actOutWrap').classList.add('hidden');
 let logSvc = 'frps', logTimer = null, logRaw = '', logFindings = [];
 function logLevelMatch(line, lvl) {
   if (!lvl) return true;
@@ -4005,6 +4026,9 @@ if (carrierCycleBtn) {
 const tunnelCarrierCycleBtn = $('tunnelCarrierCycleBtn');
 if (tunnelCarrierCycleBtn) {
   tunnelCarrierCycleBtn.onclick = async () => {
+    const cur = (carrierState.active || carrierState.active_carrier || 'direct');
+    const next = cur.startsWith('wss') ? 'Direct GRE' : 'WSS (TLS)';
+    if (!await entConfirm(tr('', 'Switch Carrier?'), docTpl('GRE packets will be carried over {0}. The tunnel reconnects, which takes a few seconds. The other server switches too when it is linked.', [next]), tr('', 'Switch Carrier'))) return;
     tunnelCarrierCycleBtn.disabled = true;
     try {
       const res = await api('/api/carrier', { action: 'cycle' });
@@ -4052,27 +4076,41 @@ if (carrierSaveModeBtn) {
 }
 
 const liveSwitchEngineBtn = $('liveSwitchEngineBtn');
+['liveEngineSelect', 'liveTransportSelect'].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener('change', () => { el.dataset.touched = '1'; liveEngineSync(); });
+});
 if (liveSwitchEngineBtn) {
   liveSwitchEngineBtn.onclick = async () => {
     const eng = $('liveEngineSelect') ? $('liveEngineSelect').value : 'frp';
-    const trans = $('liveTransportSelect') ? $('liveTransportSelect').value : 'tcpmux';
+    const trans = eng === 'frp' ? '' : ($('liveTransportSelect') ? $('liveTransportSelect').value : 'tcpmux');
+    const label = (LS_ENGINE[eng] || eng) + (trans ? ' · ' + trans : '');
+    const L = window._lastLocal || {};
+    const isIran = /iran/i.test(L.role || '') || L.frp_svc === 'frps' || (L.frp_svc || '').startsWith('backhaul-server');
+    const msg = isIran
+      ? docTpl('The tunnel switches to {0} on this server and on the linked foreign server. It drops for a few seconds while both restart. If something fails, this server goes back to its current engine.', [label])
+      : docTpl('Only this foreign server switches to {0}. The tunnel stays down until the Iran server runs the same engine. Switching from the Iran server does both.', [label]);
+    if (!await entConfirm(tr('', 'Switch Engine?'), msg, tr('', 'Switch Engine'))) return;
     const stTxt = $('liveEngineStatusTxt');
     liveSwitchEngineBtn.disabled = true;
     const oldTxt = liveSwitchEngineBtn.textContent;
-    liveSwitchEngineBtn.innerHTML = '<span class="ent-spinner"></span> Switching Engine…';
-    if (stTxt) stTxt.textContent = 'Stopping previous services & applying new engine...';
+    liveSwitchEngineBtn.innerHTML = '<span class="ent-spinner"></span> ' + esc(tr('', 'Switching…'));
+    if (stTxt) stTxt.textContent = tr('', 'Stopping the old engine and starting the new one…');
     try {
-      const res = await api('/api/action', {
-        action: 'switch-engine',
-        target_engine: eng,
-        target_transport: trans
-      });
-      toastOk('Engine Switched', `Active: ${eng.toUpperCase()} (${trans})`);
-      if (stTxt) stTxt.textContent = '✓ Successfully switched to ' + eng.toUpperCase();
-      setTimeout(() => { refresh(); if (stTxt) stTxt.textContent = ''; }, 2500);
+      const res = await api('/api/action', { action: 'switch-engine', engine: eng, transport: trans });
+      showActOut(tr('', 'Switch Engine'), res.output || 'ok');
+      if (res.peer === 'failed') {
+        toastWarn(tr('', 'Switched here only'), tr('', 'The foreign server did not switch. Switch it there too, or the tunnel stays down.'));
+        if (stTxt) stTxt.textContent = tr('', 'This server switched. The foreign server did not: switch it there too.');
+      } else {
+        toastOk(tr('', 'Engine switched'), label + (res.peer === 'switched' ? ' · ' + tr('', 'both servers') : ''));
+        if (stTxt) stTxt.textContent = '✓ ' + label;
+      }
+      ['liveEngineSelect', 'liveTransportSelect'].forEach(id => { const el = $(id); if (el) delete el.dataset.touched; });
+      setTimeout(() => { refresh(); loadTunnelHealth(); }, 2500);
     } catch(e) {
-      toastErr('Engine Switch Failed', e.message);
-      if (stTxt) stTxt.textContent = '' + e.message;
+      toastErr(tr('', 'Engine switch failed'), e.message);
+      if (stTxt) stTxt.textContent = e.message;
     } finally {
       liveSwitchEngineBtn.disabled = false;
       liveSwitchEngineBtn.textContent = oldTxt;
@@ -4976,28 +5014,25 @@ async function revFix(peerId, apply) {
 }
 
 // ---- Tunnel Health: cached result on open, POST on demand ----
-function thBadge(v) {
-  if (v === 'PASS') return '<span class="badge ok"><span class="dot"></span>PASS</span>';
-  if (v === 'FAIL') return '<span class="badge err"><span class="dot"></span>FAIL</span>';
-  return '<span class="badge warn"><span class="dot"></span>' + esc(v || 'UNREACHABLE') + '</span>';
-}
 function renderTunnelHealth(res) {
   const box = $('thBox'), meta = $('thMeta');
   if (!box) return;
   const rows = (res && res.tunnels) || [];
+  if (meta) meta.textContent = res && res.checked ? tr('', 'Checked') + ' ' + docAgo(res.checked) : tr('', 'Not tested yet');
   if (!rows.length) {
-    if (meta) meta.textContent = res && res.checked ? 'no tunnels found' : 'not tested yet';
+    if (res && res.checked) box.innerHTML = '<div class="qs-hint">' + esc(tr('', 'No tunnels found on this server.')) + '</div>';
     return;
   }
-  if (meta) meta.textContent = 'checked: ' + (res.checked || '?');
+  const layer = (name, v) => '<span class="doc-layer ' + (v === 'ok' ? 'ok' : (v === 'fail' ? 'fail' : '')) + '">' + esc(tr('', name)) + '</span>';
+  const verdict = v => v === 'PASS' ? '<span class="badge ok">' + esc(tr('', 'Working')) + '</span>'
+    : (v === 'FAIL' ? '<span class="badge err">' + esc(tr('', 'Failing')) + '</span>' : '<span class="badge warn">' + esc(tr('', 'Unreachable')) + '</span>');
   box.innerHTML = rows.map(t => {
     const l = t.layers || {};
-    const lat = t.latency_ms >= 0 ? t.latency_ms + ' ms' + (t.latency_kind ? ' (' + esc(t.latency_kind) + ')' : '') : '—';
-    return '<div class="det-card u-col-full"><div class="det-head"><span>' + esc(t.name || ('tunnel-' + t.id))
-      + ' · ' + esc(t.engine) + '</span>' + thBadge(t.verdict) + '</div>'
-      + '<div class="qs-hint">' + esc(t.reason || '') + '</div>'
-      + '<div class="qs-hint">service: ' + esc(l.service || '?') + ' · session: ' + esc(l.session || '?')
-      + ' · data: ' + esc(l.data || '?') + ' · latency: ' + lat + '</div></div>';
+    const lat = t.latency_ms >= 0 ? '<span class="doc-tun-lat">' + t.latency_ms + ' ms' + (t.latency_kind ? ' · ' + esc(t.latency_kind) : '') + '</span>' : '';
+    return '<div class="doc-tun"><div class="doc-tun-name"><span data-no-i18n>' + esc(t.name || ('tunnel-' + t.id)) + '</span> <span class="doc-tun-eng">' +
+      esc(LS_ENGINE[t.engine] || t.engine || '') + '</span></div>' + verdict(t.verdict) +
+      '<div class="doc-layers">' + layer('Service', l.service) + layer('Session', l.session) + layer('Data', l.data) + lat + '</div>' +
+      (t.reason && t.verdict !== 'PASS' ? '<div class="doc-tun-reason" data-no-i18n>' + esc(t.reason) + '</div>' : '') + '</div>';
   }).join('');
 }
 async function loadTunnelHealth() {
@@ -5006,10 +5041,10 @@ async function loadTunnelHealth() {
 }
 async function runTunnelHealthClick() {
   const btn = $('thRunBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+  if (btn) { btn.disabled = true; btn.textContent = tr('', 'Testing…'); }
   try { renderTunnelHealth(await api('/api/tunnel-health/run', {})); }
-  catch (e) { toastErr('Tunnel health test failed', e.message || e); reportErr('tunnel-health', e); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = 'Test All Tunnels'; } }
+  catch (e) { toastErr(tr('', 'Tunnel health test failed'), e.message || e); reportErr('tunnel-health', e); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = tr('', 'Test All Tunnels'); } }
 }
 (function initTunnelHealthEvents() {
   const b = $('thRunBtn');
@@ -6682,7 +6717,7 @@ function renderSSHFwd() {
   }
   if ($('bagherLivePing')) {
     if (active) {
-      $('bagherLivePing').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : 'Optimal';
+      $('bagherLivePing').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : '—';
     } else {
       $('bagherLivePing').textContent = 'Standby';
     }

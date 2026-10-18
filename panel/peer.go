@@ -572,6 +572,12 @@ func peerTLSConfig(c *PeerConfig) *tls.Config {
 // Path 1: Internal tunnel IP (e.g. http://10.10.10.1:8080/api/peer/...)
 // Path 2: Public URL (e.g. http://5.6.7.8:8080/api/peer/...)
 func sendToPeer(path string, method string, payload any) ([]byte, error) {
+	return sendToPeerTimeout(path, method, payload, 4*time.Second)
+}
+
+// sendToPeerTimeout is sendToPeer for calls the peer needs longer to answer
+// (an engine switch restarts services before it replies).
+func sendToPeerTimeout(path string, method string, payload any, timeout time.Duration) ([]byte, error) {
 	c := loadPeerConfig()
 	var bodyBytes []byte
 	var err error
@@ -592,7 +598,7 @@ func sendToPeer(path string, method string, payload any) ([]byte, error) {
 	}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{
-		Timeout:   4 * time.Second,
+		Timeout:   timeout,
 		Transport: tr,
 		// A wrong path hits the catch-all redirect to the login page; following
 		// it turned that into a 200 "success", so never follow redirects.
@@ -747,16 +753,18 @@ func syncCarrierToPeer(carrier string) error {
 	return err
 }
 
-// syncEngineToPeer tells the remote worker to apply the specified tunnel engine.
-func syncEngineToPeer(engine, transport string) error {
+// syncEngineToPeer tells the remote worker to apply the specified tunnel
+// engine and waits for its answer. ok is false when there is no linked worker
+// to tell (this server is not the master, or no peer secret).
+func syncEngineToPeer(engine, transport string) (ok bool, err error) {
 	c := loadPeerConfig()
-	if c.Role != "master" {
-		return nil
+	if c.Role != "master" || c.PeerSecret == "" {
+		return false, nil
 	}
 
 	log.Printf("[PeerSync] Commanding peer worker to apply engine: %s (%s)", engine, transport)
-	_, err := sendToPeer("/api/peer/apply-engine", "POST", PeerApplyEngineRequest{Engine: engine, Transport: transport})
-	return err
+	_, err = sendToPeerTimeout("/api/peer/apply-engine", "POST", PeerApplyEngineRequest{Engine: engine, Transport: transport}, 40*time.Second)
+	return true, err
 }
 
 var peerSyncOnce sync.Once
