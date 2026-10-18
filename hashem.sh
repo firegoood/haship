@@ -1578,6 +1578,7 @@ dial_env_write() { # $1=mode $2=kind $3=gre_ip $4=public_ip
     mkdir -p "$CONFIG_DIR"
     printf 'DIAL_MODE=%s\nDIAL_KIND=%s\nDIAL_GRE=%s\nDIAL_PUBLIC=%s\n' "$1" "$2" "$3" "$4" > "$(dial_env_file)"
     chmod 600 "$(dial_env_file)" 2>/dev/null || true
+    rm -f "${CONFIG_DIR}/dial.streak" "${CONFIG_DIR}/dial.hold"
 }
 
 dial_env_get() { # $1=KEY
@@ -1668,6 +1669,12 @@ dial_reselect() {
     mode="${1:-$(dial_env_get DIAL_MODE)}"; mode="${mode:-auto}"
     port=$(dial_current_port "$kind"); cur=$(dial_current_addr "$kind")
     [[ -n "$kind" && -n "$port" && -n "$cur" ]] || return 1
+    # an explicit choice clears the hold; a service restart (no argument) keeps it
+    if [[ -n "${1:-}" ]]; then
+        rm -f "$(dial_hold_file)"
+    elif [[ "$mode" == "auto" && "$cur" == "$pub" ]] && dial_hold_active; then
+        echo "same:$cur"; return 0
+    fi
     want=$(dial_pick "$mode" "$gre" "$pub" "$port")
     [[ -n "$want" ]] || return 1
     if [[ "$want" == "$cur" ]]; then
@@ -1678,25 +1685,87 @@ dial_reselect() {
     fi
 }
 
-# True when the client already holds an established TCP session to its server.
+# True when the client already holds an established session to its server
+# (TCP, or a connected UDP socket for the udp / kcp / quic transports).
 dial_connected() { # $1=addr $2=port
-    ss -Htn state established 2>/dev/null | awk -v a="$1:$2" '$4==a {f=1} END {exit !f}'
+    { ss -Htn state established; ss -Hun state established; } 2>/dev/null | awk -v a="$1:$2" '$4==a {f=1} END {exit !f}'
 }
 
-# Watchdog hook (auto mode only): GRE died and the client is not connected -> go public.
+# The client's transport rides UDP (Backhaul udp, FRP kcp / quic).
+dial_transport_udp() { # $1=kind
+    local f; f="$(dial_conf_file "$1")"
+    grep -Eq '^[[:space:]]*(transport|transport\.protocol)[[:space:]]*=[[:space:]]*"(udp|kcp|quic)"' "$f" 2>/dev/null
+}
+
+# GRE can carry the client again. TCP transports need the control port to accept
+# over GRE: ping alone is not enough, some paths pass ICMP and drop TCP.
+dial_gre_back_ok() { # $1=kind $2=gre_ip $3=port
+    if dial_transport_udp "$1"; then
+        ping -c 3 -W 2 "$2" >/dev/null 2>&1
+    else
+        timeout 3 bash -c "exec 3<>/dev/tcp/$2/$3" >/dev/null 2>&1
+    fi
+}
+
+# Ticks in a row GRE must answer before the client moves back to it (1 tick = 1 min).
+DIAL_BACK_TICKS="${DIAL_BACK_TICKS:-5}"
+DIAL_BACK_WAIT="${DIAL_BACK_WAIT:-20}"
+# After a failed move back to GRE the client stays on the public IP this long (s).
+DIAL_HOLD_SECS="${DIAL_HOLD_SECS:-1800}"
+dial_streak_file() { echo "${CONFIG_DIR}/dial.streak"; }
+dial_hold_file() { echo "${CONFIG_DIR}/dial.hold"; }
+dial_hold_active() {
+    local t; t=$(cat "$(dial_hold_file)" 2>/dev/null)
+    [[ "$t" =~ ^[0-9]+$ ]] && (( $(date +%s) - t < DIAL_HOLD_SECS ))
+}
+
+# Watchdog hook (auto mode only).
+#  On GRE: GRE died and the client is not connected -> go public.
+#  On the public IP: GRE answered DIAL_BACK_TICKS ticks in a row -> go back to GRE,
+#  and return to the public IP if the client cannot connect over GRE.
 dial_watch_tick() {
     [[ -f "$(dial_env_file)" ]] || return 0
     [[ "$(dial_env_get DIAL_MODE)" == "auto" ]] || return 0
-    local kind gre pub port cur svc
+    local kind gre pub port cur svc n i
     kind=$(dial_env_get DIAL_KIND); gre=$(dial_env_get DIAL_GRE); pub=$(dial_env_get DIAL_PUBLIC)
     port=$(dial_current_port "$kind"); cur=$(dial_current_addr "$kind")
-    [[ -n "$port" && "$cur" == "$gre" ]] || return 0
-    dial_connected "$cur" "$port" && return 0
-    dial_gre_usable "$gre" "$port" && return 0
-    dial_apply_addr "$kind" "$pub" "$port" || return 0
+    [[ -n "$port" && -n "$gre" && -n "$pub" && "$gre" != "$pub" ]] || return 0
     svc=$(dial_service "$kind")
+    if [[ "$cur" == "$gre" ]]; then
+        rm -f "$(dial_streak_file)"
+        dial_connected "$cur" "$port" && return 0
+        dial_gre_usable "$gre" "$port" && return 0
+        dial_apply_addr "$kind" "$pub" "$port" || return 0
+        systemctl restart "$svc" >/dev/null 2>&1 || true
+        log_msg "tunnel" "WARN" "GRE path to ${gre} dead; ${svc} now dials Iran public ${pub}:${port}" 2>/dev/null || true
+        return 0
+    fi
+    [[ "$cur" == "$pub" ]] || return 0
+    dial_hold_active && return 0
+    n=0
+    if dial_gre_back_ok "$kind" "$gre" "$port"; then
+        n=$(cat "$(dial_streak_file)" 2>/dev/null); [[ "$n" =~ ^[0-9]+$ ]] || n=0
+        n=$((n + 1))
+    fi
+    if (( n < DIAL_BACK_TICKS )); then
+        echo "$n" > "$(dial_streak_file)" 2>/dev/null || true
+        return 0
+    fi
+    rm -f "$(dial_streak_file)"
+    dial_apply_addr "$kind" "$gre" "$port" || return 0
     systemctl restart "$svc" >/dev/null 2>&1 || true
-    log_msg "tunnel" "WARN" "GRE path to ${gre} dead; ${svc} now dials Iran public ${pub}:${port}" 2>/dev/null || true
+    for ((i = 0; i < DIAL_BACK_WAIT; i++)); do
+        dial_connected "$gre" "$port" && break
+        sleep 1
+    done
+    if dial_connected "$gre" "$port"; then
+        log_msg "tunnel" "INFO" "GRE path to ${gre} answers again; ${svc} is back on GRE" 2>/dev/null || true
+        return 0
+    fi
+    date +%s > "$(dial_hold_file)" 2>/dev/null || true
+    dial_apply_addr "$kind" "$pub" "$port" || return 0
+    systemctl restart "$svc" >/dev/null 2>&1 || true
+    log_msg "tunnel" "WARN" "GRE to ${gre} answered but ${svc} could not connect over it; staying on public ${pub}:${port}" 2>/dev/null || true
 }
 
 cli_dial() {
@@ -1721,6 +1790,27 @@ cli_dial() {
             echo -e "${GREEN}[✔️] Dial route: ${sub} (${r#*:})${NC}"
             ;;
         *) echo "Usage: hashem dial [status|auto|gre|public]"; return 1 ;;
+    esac
+}
+
+menu_dial_route() {
+    if ! dial_env_ensure; then
+        echo -e "${YELLOW}[!] No route to choose: this is not a foreign server with GRE (GRE + FRP or Backhaul with GRE).${NC}"
+        return 0
+    fi
+    local kind cur gre pub mode __in
+    kind=$(dial_env_get DIAL_KIND); gre=$(dial_env_get DIAL_GRE); pub=$(dial_env_get DIAL_PUBLIC)
+    mode=$(dial_env_get DIAL_MODE); cur=$(dial_current_addr "$kind")
+    echo -e "Route now: ${CYAN}${mode:-auto}${NC}, dialling ${cur} (GRE ${gre}, public ${pub})"
+    echo "  1) Auto: GRE when it works, the public IP when it does not (recommended)"
+    echo "  2) GRE only"
+    echo "  3) Public IP only"
+    echo "  0) Keep"
+    read -p "Select [0-3]: " __in
+    case "$__in" in
+        1) cli_dial auto ;;
+        2) cli_dial gre ;;
+        3) cli_dial public ;;
     esac
 }
 
@@ -2239,6 +2329,9 @@ engine_retire_others() {
         ip link del "$TUNNEL_NAME" >/dev/null 2>&1 || true
         echo -e "${CYAN}[*] Removed the previous GRE interface ${TUNNEL_NAME}: Backhaul without GRE does not use it.${NC}"
     fi
+    # without GRE there is no route to pick: a dial.env left by an earlier GRE
+    # setup would send the watchdog after a dead GRE address
+    [[ "$nogre" == "nogre" ]] && rm -f "${CONFIG_DIR}/dial.env" "${CONFIG_DIR}/dial.streak" "${CONFIG_DIR}/dial.hold"
     systemctl daemon-reload >/dev/null 2>&1 || true
     return 0
 }
@@ -8125,12 +8218,12 @@ menu_backhaul() {
         echo -e "${CYAN}=== BACKHAUL TUNNEL ===${NC}"
         backhaul_status
         echo ""
-        echo "  1) Setup Iran server: Backhaul (no GRE)"
-        echo "  2) Setup Iran server: GRE + Backhaul"
-        echo "  3) Setup foreign server from a bundle (bh1_ / gh1_)"
-        echo "  4) Show the bundle for the foreign server"
-        echo "  5) Show Backhaul logs"
-        echo "  6) Restart Backhaul services"
+        echo "  1) Setup Iran server (asks whether to use GRE)"
+        echo "  2) Setup foreign server from a bundle (bh1_ / gh1_)"
+        echo "  3) Show the bundle for the foreign server"
+        echo "  4) Show Backhaul logs"
+        echo "  5) Restart Backhaul services"
+        echo "  6) Route to Iran (foreign side): GRE / public IP / auto"
         [[ -n "$(backhaul_legacy_units)" ]] && echo "  7) Move old Modified Backhaul tunnels into Hashem"
         echo "  0) Back"
         echo ""
@@ -8138,21 +8231,21 @@ menu_backhaul() {
         read -p "Select an option: " B_OPT
         case "$B_OPT" in
             1) setup_backhaul_iran_interactive; pause_prompt ;;
-            2) setup_gre_backhaul_iran_interactive; pause_prompt ;;
-            3)
+            2)
                 read -p "Paste the bundle from the Iran server: " BUNDLE_IN
                 [[ -n "$BUNDLE_IN" ]] && cli_setup_foreign --bundle "$BUNDLE_IN"
                 pause_prompt
                 ;;
-            4) backhaul_show_bundle; pause_prompt ;;
-            5) journalctl -u 'backhaul-*' -n 60 --no-pager -o cat 2>/dev/null | sed -E 's/(invalid security token received: ).*/\1[hidden]/'; pause_prompt ;;
-            6)
+            3) backhaul_show_bundle; pause_prompt ;;
+            4) journalctl -u 'backhaul-*' -n 60 --no-pager -o cat 2>/dev/null | sed -E 's/(invalid security token received: ).*/\1[hidden]/'; pause_prompt ;;
+            5)
                 local u
                 for u in /etc/systemd/system/backhaul-server.service /etc/systemd/system/backhaul-server-[0-9]*.service /etc/systemd/system/backhaul-client.service; do
                     [[ -f "$u" ]] && systemctl restart "$(basename "$u")" && echo -e "${GREEN}[✔️] Restarted $(basename "$u" .service)${NC}"
                 done
                 pause_prompt
                 ;;
+            6) menu_dial_route; pause_prompt ;;
             7) cli_backhaul_migrate; pause_prompt ;;
             0|q) return 0 ;;
             *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
@@ -8160,9 +8253,25 @@ menu_backhaul() {
     done
 }
 
+# One Backhaul setup for the Iran server. GRE underneath is a question, not a
+# separate engine: with GRE the foreign side dials the GRE address and falls
+# back to the public IP when GRE is blocked (and returns once it works again);
+# without GRE it dials the public IP and no GRE interface is made.
+# $1 = yes / no skips the question.
 setup_backhaul_iran_interactive() {
-    echo -e "\n${YELLOW}=== Setup Backhaul Iran Server (No-GRE) ===${NC}"
-    local MYIP REMOTE_PUB PORT TOKEN TRANSPORT PORTS
+    local use_gre="${1:-}" MYIP REMOTE_PUB PORT TOKEN TRANSPORT PORTS __in
+    if [[ -z "$use_gre" ]]; then
+        echo "Run Backhaul over a GRE tunnel?"
+        echo "  Yes: the foreign server uses GRE when it works and the public IP when GRE is blocked."
+        echo "  No:  no GRE at all, for servers where GRE (protocol 47) is blocked for good."
+        read -p "Use GRE? [Y/n]: " __in
+        [[ "$__in" =~ ^[Nn] ]] && use_gre=no || use_gre=yes
+    fi
+    if [[ "$use_gre" == "yes" ]]; then
+        echo -e "\n${YELLOW}=== Setup Backhaul Iran Server (with GRE) ===${NC}"
+    else
+        echo -e "\n${YELLOW}=== Setup Backhaul Iran Server (no GRE) ===${NC}"
+    fi
     MYIP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
     [[ -z "$MYIP" ]] && MYIP=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     prompt_ip LOCAL_PUB "Enter IRAN Server Public IP" "$MYIP"
@@ -8174,25 +8283,14 @@ setup_backhaul_iran_interactive() {
     prompt_backhaul_transport TRANSPORT
     prompt_backhaul_udp "$TRANSPORT"
     prompt_backhaul_ports PORTS
-    setup_backhaul_iran_server_noninteractive "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$TOKEN" "$TRANSPORT" "$PORTS"
+    if [[ "$use_gre" == "yes" ]]; then
+        setup_gre_backhaul_iran_server_noninteractive "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$TOKEN" "$IRAN_GRE_IP" "$FOREIGN_GRE_IP" "$TRANSPORT" "$PORTS"
+    else
+        setup_backhaul_iran_server_noninteractive "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$TOKEN" "$TRANSPORT" "$PORTS"
+    fi
 }
 
-setup_gre_backhaul_iran_interactive() {
-    echo -e "\n${YELLOW}=== Setup GRE + Backhaul Iran Server ===${NC}"
-    local MYIP REMOTE_PUB PORT TOKEN TRANSPORT PORTS
-    MYIP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    [[ -z "$MYIP" ]] && MYIP=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
-    prompt_ip LOCAL_PUB "Enter IRAN Server Public IP" "$MYIP"
-    prompt_ip REMOTE_PUB "Enter FOREIGN Server Public IP" ""
-    prompt_port PORT "Enter Backhaul Server Port" "$(gen_random_port)"
-    PORT=$(ensure_port_available "$PORT" "Backhaul Server Port" 0) || return 1
-    AUTO_TOKEN=$(gen_token32)
-    prompt_token TOKEN "Enter Secret Auth Token" "$AUTO_TOKEN"
-    prompt_backhaul_transport TRANSPORT
-    prompt_backhaul_udp "$TRANSPORT"
-    prompt_backhaul_ports PORTS
-    setup_gre_backhaul_iran_server_noninteractive "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$TOKEN" "$IRAN_GRE_IP" "$FOREIGN_GRE_IP" "$TRANSPORT" "$PORTS"
-}
+setup_gre_backhaul_iran_interactive() { setup_backhaul_iran_interactive yes; }
 
 show_banner() {
     echo -e "${CYAN}"
@@ -8252,17 +8350,17 @@ menu_tunnel() {
         read -p "Select an option [0-10]: " T_OPT
         case "$T_OPT" in
             1)
-                echo "Select tunnel protocol for Iran:"
-                echo "  1) GRE + FRP Server (Recommended standard)"
-                echo "  2) Backhaul Server (No-GRE / TCPMux)"
-                echo "  3) GRE + Backhaul Server"
+                echo "Select the tunnel engine for Iran:"
+                echo "  1) GRE + FRP (recommended)"
+                echo "  2) Backhaul (with or without GRE)"
+                echo "  3) Bagher [PRO]"
                 echo "  4) Backhaul menu (status, logs, bundle, old tunnels)"
                 echo "  0) Cancel"
                 read -p "Select [0-4]: " IR_PROTO
                 case "$IR_PROTO" in
                     1) setup_iran_server ;;
                     2) setup_backhaul_iran_interactive ;;
-                    3) setup_gre_backhaul_iran_interactive ;;
+                    3) menu_bagher ;;
                     4) menu_backhaul ;;
                     *) ;;
                 esac

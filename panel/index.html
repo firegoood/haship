@@ -150,6 +150,8 @@
     padding:9px 10px; font-size:var(--fs-body); font-weight:600; cursor:pointer;
     transition:background .18s ease, color .18s ease, box-shadow .18s ease; }
   .qs-seg button:hover { color:var(--tx2); }
+  .eng-pro { font-size:12px; font-weight:700; padding:1px 6px; border-radius:6px; margin-inline-start:4px;
+    color:var(--wr); border:1px solid color-mix(in srgb, var(--wr) 45%, transparent); }
   .qs-seg button[aria-pressed="true"] { background:var(--ac-fill); color:var(--ac-on);
     box-shadow:0 2px 10px color-mix(in srgb, var(--ac) 40%, transparent); }
   .qs-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
@@ -1341,7 +1343,6 @@
       <button role="tab" aria-selected="true" aria-controls="tab-dashboard" tabindex="0" class="nav-item on" data-tab="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span data-i18n="nav_dashboard">Dashboard</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_tunnel">Tunnel</div>
       <button role="tab" aria-selected="false" aria-controls="tab-tunnel" tabindex="-1" class="nav-item" data-tab="tunnel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg><span data-i18n="nav_tunnel">Tunnel</span><span class="nav-badge hidden u-ml-auto" aria-hidden="false"></span></button>
-      <button role="tab" aria-selected="false" aria-controls="tab-sshfwd" tabindex="-1" class="nav-item" data-tab="sshfwd" id="sshfwdNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span data-i18n="nav_bagher">Bagher</span><span class="nav-badge bagher-lock-badge hidden u-ml-auto u-fs-12 u-p-2x4 u-r-4 u-tint-wr u-c-wr u-bd-wr" id="bagherNavLock">PRO</span></button>
       <button role="tab" aria-selected="false" class="nav-item" id="sentinelNav" onclick="openSentinelModal()" title="Sentinel VLESS &amp; Node Health Monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Sentinel</span><span class="nav-badge hidden u-ml-auto u-fs-12 u-p-2x4 u-r-4 u-tint-info u-c-info u-bd-info" id="sentinelNavBadge">LIVE ↗</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-cluster" tabindex="-1" class="nav-item" data-tab="cluster" id="clusterNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span data-i18n="nav_cluster">Cluster</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-setup" tabindex="-1" class="nav-item" data-tab="setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span data-i18n="nav_setup">Setup</span></button>
@@ -1417,7 +1418,7 @@
               <button type="button" class="hashem-btn u-btn-30 hashem-btn-danger" onclick="cleanBagherTunnelClick()">
                 Clean Tunnel
               </button>
-              <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="goTab('sshfwd')">
+              <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="goTab('tunnel')">
                 Manage Bagher
               </button>
             </div>
@@ -1647,8 +1648,8 @@
               <label for="liveEngineSelect" class="u-fs-12 u-upper u-c-mu u-block u-mb-4">Target Engine</label>
               <select class="hashem-input u-w-full" id="liveEngineSelect">
                 <option value="frp">GRE + FRP</option>
+                <option value="gre-backhaul">Backhaul (with GRE)</option>
                 <option value="backhaul">Backhaul (no GRE)</option>
-                <option value="gre-backhaul">GRE + Backhaul</option>
               </select>
             </div>
             <div id="liveTransportWrap">
@@ -1667,238 +1668,6 @@
           <div class="u-flex u-ai-c u-gap-12 u-wrap">
             <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn">Switch Engine</button>
             <span class="u-hint-12" id="liveEngineStatusTxt"></span>
-          </div>
-        </div>
-      </section>
-      <section id="tab-sshfwd" role="tabpanel" hidden>
-        <input type="hidden" id="sshfwdMode" value="bagher" />
-        <!-- Locked Banner (shown when un-licensed and modal is closed) -->
-        <div id="bagherLockedBanner" class="hidden u-text-center u-p-48x20 u-bg-s1 u-bd-info u-r-12 u-mb-20">
-          <div class="u-fs-42 u-mb-16"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></div>
-          <h3 class="u-fs-18 u-fw-700 u-c-info u-mb-8">Bagher Engine Requires a Premium License</h3>
-          <p class="u-fs-13 u-c-mu u-maxw-500 u-m-0xautox20xauto u-lh-16">
-            Stealth obfuscation and multiplexed SSH key pool tunneling is exclusively provided in the Premium edition. Enter your license key to unlock.
-          </p>
-          <button class="hashem-btn hashem-btn-primary" id="bagherOpenLicModalBtn" onclick="openBagherLicModal()">
-            Activate Bagher License
-          </button>
-        </div>
-
-        <div id="bagherCardContainer" class="tunnel-card u-bd-info u-bg-s1 u-noglow u-r-12">
-          <div class="tc-header u-bb-info u-pb-16 u-mb-20">
-            <div>
-              <div class="u-flex-center-gap10 u-flex u-ai-c u-wrap u-gap-12">
-                <span class="tc-title u-fs-20 u-fw-700 u-flex u-ai-c u-gap-12 u-c-tx u-ls-n02 u-nowrap">
-                  <span class="u-iflex u-ai-c u-jc-c u-w-36 u-h-36 u-r-8 u-bg-info-fill u-c-white">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg>
-                  </span>
-                  Bagher Stealth Tunnel
-                </span>
-                <span class="badge ok u-nowrap">TUNNEL ENGINE</span>
-                <span class="badge dim u-nowrap" id="sshfwdStatusBadge">Checking...</span>
-              </div>
-              <div class="qs-hint u-mt-4 u-c-mu u-fs-12" id="sshfwdSubTxt">High-speed stealth carrier · Forwarding &amp; Multiplexing directly to Foreign server inbound ports</div>
-            </div>
-            <div class="qs-actions">
-              <span class="badge info" id="bagherActiveRoleBadge">Role: Iran Server</span>
-            </div>
-          </div>
-
-          <!-- Live Cyberpunk Telemetry Gauges -->
-          <div class="u-grid u-gtc-fit-140 u-gap-12 u-bg-inset u-bd-info u-r-10 u-p-12x20 u-mb-20">
-            <div>
-              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">RTT Latency</div>
-              <div class="u-fs-18 u-fw-700 u-c-info u-mono u-mt-2" id="bagherLivePing">-- ms</div>
-            </div>
-            <div>
-              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Live Speed</div>
-              <div class="u-fs-13 u-fw-700 u-c-tx u-mt-4" id="bagherLiveSpeed">↓ 0 B/s · ↑ 0 B/s</div>
-            </div>
-            <div>
-              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Total Transfer</div>
-              <div class="u-fs-13 u-fw-700 u-c-ok u-mono u-mt-4" id="bagherLiveTotal">0 B</div>
-            </div>
-            <div>
-              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Tunnel Sockets</div>
-              <div class="u-fs-13 u-fw-700 u-c-tx2 u-mono u-mt-4" id="bagherLiveSockets">25 Active</div>
-            </div>
-          </div>
-
-          <!-- Role Selector (Identical to gre-frp Quick Setup) -->
-          <div class="tc-box u-bg-sunk u-bd-info u-p-16 u-r-10 u-mb-16">
-            <label class="qs-label u-fs-14 u-fw-700 u-c-tx2 u-mb-12 u-block">
-              Step 1: Select Server Role
-            </label>
-            <div class="qs-seg" role="group" aria-label="Bagher Server Role">
-              <button type="button" id="bagherRoleIran" onclick="setBagherRole('iran')" aria-pressed="true" class="u-fw-700 u-p-12x20 u-fs-13">
-                Iran Server (Receives User Traffic)
-              </button>
-              <button type="button" id="bagherRoleForeign" onclick="setBagherRole('foreign')" aria-pressed="false" class="u-fw-700 u-p-12x20 u-fs-13">
-                Foreign Server (Exit & Service Host)
-              </button>
-            </div>
-            <input type="hidden" id="bagherRoleInput" value="iran">
-            <div class="qs-hint u-mt-8 u-lh-15" id="bagherRoleHint">
-              Iran server receives user traffic, listens on forwarded ports, and routes via stealth tunnel to foreign server.
-            </div>
-          </div>
-
-          <!-- ==================== IRAN ROLE WRAPPER ==================== -->
-          <div id="bagherIranWrap">
-            <div class="tc-box u-bg-sunk u-bd-info u-p-16 u-r-10 u-mb-16">
-              <h4 class="u-fs-14 u-fw-700 u-c-info u-mb-12 u-flex u-ai-c u-gap-8">
-                Step 2: Foreign Server Details & Forwarded Ports (Iran Setup)
-              </h4>
-              <div class="u-grid u-gtc-fit-260 u-gap-16 u-mb-16">
-                <div>
-                  <label for="sshfwdRemoteHost" class="u-lbl-dim">Foreign Server Public IP <span class="u-c-er">*</span></label>
-                  <input type="text" id="sshfwdRemoteHost" class="hashem-input u-w-full" placeholder="e.g. 198.51.100.73">
-                  <div class="u-hint-11">Foreign server public IP where your proxy core and panel reside.</div>
-                </div>
-                <div>
-                  <label for="sshfwdPorts" class="u-lbl-dim">Forwarded Ports <span class="u-c-er">*</span></label>
-                  <input type="text" id="sshfwdPorts" class="hashem-input u-w-full" placeholder="e.g. 443, 8443, 2083">
-                  <div class="u-flex u-wrap u-gap-8 u-mt-8">
-                    <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443, 8443';">Web (443, 8443)</button>
-                    <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443, 8443, 2053, 2083, 2087';">CDN/V2Ray (443, 8443, 2053, 2083, 2087)</button>
-                    <button type="button" class="hashem-btn hashem-btn-sm u-btn-30" onclick="document.getElementById('sshfwdPorts').value='443';">Single (443)</button>
-                  </div>
-                  <div class="u-hint-11">Ports opened on Iran server that route client traffic to the foreign server.</div>
-                </div>
-              </div>
-
-              <!-- Advanced Iran Settings -->
-              <details class="u-mb-16 u-bg-inset u-bd-ln u-r-8 u-p-8x12">
-                <summary class="u-cursor-pointer u-fs-12 u-fw-600 u-c-mu u-select-none">
-                  Advanced Settings (SSH Port, Pool Sockets, FRP)
-                </summary>
-                <div class="u-grid u-gtc-fit-180 u-gap-12 u-mt-12">
-                  <div>
-                    <label for="sshfwdRemotePort" class="u-lbl-dim">Foreign SSH Port</label>
-                    <input type="number" id="sshfwdRemotePort" class="hashem-input u-w-full" value="22" placeholder="22">
-                  </div>
-                  <div>
-                    <label for="sshfwdRemoteUser" class="u-lbl-dim">Foreign SSH Username</label>
-                    <input type="text" id="sshfwdRemoteUser" class="hashem-input u-w-full" value="root">
-                  </div>
-                  <div>
-                    <label for="sshfwdFRPPort" class="u-lbl-dim">FRP Internal Port</label>
-                    <input type="number" id="sshfwdFRPPort" class="hashem-input u-w-full" value="55400">
-                  </div>
-                  <div>
-                    <label for="sshfwdPoolCount" class="u-lbl-dim">Connection Pool Size</label>
-                    <input type="number" id="sshfwdPoolCount" class="hashem-input u-w-full" value="25">
-                  </div>
-                </div>
-              </details>
-
-              <div class="u-flex u-gap-12 u-ai-c u-wrap">
-                <button type="button" class="hashem-btn hashem-btn-primary" id="bagherIranApplyBtn">
-                  Initialize Iran Server &amp; Issue Bundle
-                </button>
-                <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherIranStopBtn">
-                  Stop Iran Tunnel
-                </button>
-                <button type="button" class="hashem-btn hashem-btn-danger" id="bagherIranCleanBtn">
-                  Clean Tunnel
-                </button>
-                <button type="button" class="hashem-btn u-btn-30" id="sshfwdClearDnatBtn">
-                  Clear DNAT Conflicts
-                </button>
-              </div>
-            </div>
-
-            <!-- Iran Bundle Output Card -->
-            <div class="tc-box u-tint-info u-bd-info u-p-16 u-r-10 u-mb-16" id="bagherIranBundleCard">
-              <div class="u-flex u-jc-sb u-ai-c u-mb-12 u-wrap u-gap-8">
-                <span class="u-fw-700 u-fs-16 u-c-info u-flex u-ai-c u-gap-8">
-                  Step 3: Generated Connection Bundle (Copy &amp; Paste into Foreign Server)
-                </span>
-                <button type="button" class="hashem-btn" id="bagherCopyBundleBtn">
-                  Copy Bundle
-                </button>
-              </div>
-              <div class="u-hint-12 u-mb-8 u-lh-15">
-                <b>Connection Guide:</b> This bundle contains security keys and tunnel parameters. Copy and paste it on the Foreign Server web panel under Foreign Server role.
-              </div>
-              <textarea id="bagherBundleText" aria-label="Connection bundle" class="hashem-input u-w-full u-minh-95 u-mono u-fs-12 u-lh-145 u-bg-inset u-resize-y u-c-info u-break u-p-12 u-r-8" rows="4" readonly placeholder="Fill in the fields above and click 'Initialize Iran Server &amp; Issue Bundle' to generate the connection bundle here..."></textarea>
-            </div>
-          </div>
-
-          <!-- ==================== FOREIGN ROLE WRAPPER ==================== -->
-          <div id="bagherForeignWrap" hidden>
-            <div class="tc-box u-bg-s1 u-bd-ok u-p-20 u-r-10 u-mb-16">
-              <div class="u-flex u-jc-sb u-ai-c u-mb-12 u-wrap u-gap-8">
-                <span class="u-fw-700 u-fs-16 u-c-ok u-flex u-ai-c u-gap-8">
-                  Step 2: Paste Iran Connection Bundle & Start Tunnel
-                </span>
-                <span class="badge ok">1-Click Auto Connection</span>
-              </div>
-              <div class="u-hint-12 u-mb-12 u-lh-15">
-                Paste the connection code from Iran server (starts with <code class="u-c-info">BAGHER:</code>) below and click Connect:
-              </div>
-              <div class="u-flex u-col u-gap-12">
-                <textarea id="bagherPasteBundleInput" aria-label="Connection bundle from the Iran server" class="hashem-input u-w-full u-minh-90 u-mono u-fs-12 u-bg-inset u-resize-y u-p-12 u-r-8 u-c-ok u-break" rows="4" placeholder="BAGHER:eyJ2Ij...NDNd..."></textarea>
-                <div class="u-flex u-jc-sb u-ai-c u-wrap u-gap-12">
-                  <button type="button" class="hashem-btn hashem-btn-primary" id="bagherForeignConnectBtn">
-                    Connect to Iran &amp; Start Foreign Tunnel
-                  </button>
-                  <div class="u-flex u-ai-c u-gap-8">
-                    <button type="button" class="hashem-btn hashem-btn-danger hidden" id="bagherForeignStopBtn">
-                      Stop Foreign Tunnel
-                    </button>
-                    <button type="button" class="hashem-btn hashem-btn-danger" id="bagherForeignCleanBtn">
-                      Clean Tunnel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Manual Terminal Fallback Details -->
-            <details class="u-mb-16 u-bg-inset u-bd-ln u-r-8 u-p-12x16">
-              <summary class="u-cursor-pointer u-fs-13 u-fw-600 u-c-mu u-select-none">
-                Manual Terminal Command (For Headless Remote Servers)
-              </summary>
-              <div class="u-mt-12">
-                <div class="u-hint-12 u-mb-8">One-line Bash command to execute on headless Foreign server:</div>
-                <div class="u-rel u-mb-12">
-                  <textarea id="sshfwdForeignCmd" aria-label="Install command for the foreign server" class="hashem-input u-w-full u-mono u-fs-12 u-bg-inset" rows="3" readonly></textarea>
-                  <button type="button" class="hashem-btn u-btn-30 u-abs" id="sshfwdCopyForeignBtn" style="top:8px; left:8px;">Copy</button>
-                </div>
-                <div class="u-hint-12 u-mb-8">Foreign server authorized_keys configuration line:</div>
-                <div class="u-rel">
-                  <textarea id="sshfwdAuthLine" aria-label="authorized_keys line for the foreign server" class="hashem-input u-w-full u-mono u-fs-12 u-bg-inset" rows="2" readonly></textarea>
-                  <button type="button" class="hashem-btn u-btn-30 u-abs" id="sshfwdCopyAuthBtn" style="top:8px; left:8px;">Copy</button>
-                </div>
-              </div>
-            </details>
-          </div>
-
-          <!-- Live Health & Traffic Monitoring (Common for both roles) -->
-          <div class="u-grid u-gtc-fit-180 u-gap-12 u-mt-8">
-            <div class="tc-box u-bg-sunk u-bd-info u-p-12x16 u-r-8">
-              <div class="u-fs-12 u-upper u-c-mu u-mb-8 u-fw-600">Tunnel Status</div>
-              <div class="u-flex u-ai-c u-gap-8">
-                <span class="badge" id="bagherConnBadge">Checking...</span>
-              </div>
-              <div id="bagherRoleTxt" class="u-fs-12 u-c-mu u-mt-4">Role: Iran Server</div>
-            </div>
-            <div class="tc-box u-bg-sunk u-bd-info u-p-12x16 u-r-8">
-              <div class="u-fs-12 u-upper u-c-mu u-mb-4 u-fw-600">Round-Trip Latency (RTT)</div>
-              <div class="u-fs-18 u-fw-700 u-c-info" id="bagherLatencyVal">—</div>
-              <div class="u-fs-12 u-c-mu u-mt-2">Real-time stealth session ping</div>
-            </div>
-            <div class="tc-box u-bg-sunk u-bd-info u-p-12x16 u-r-8">
-              <div class="u-fs-12 u-upper u-c-mu u-mb-4 u-fw-600">Data Usage</div>
-              <div class="u-fs-18 u-fw-700 u-c-ok" id="bagherTrafficTotal">0 B</div>
-              <div class="u-fs-12 u-c-mu u-mt-2" id="bagherTrafficUpDown">↓ 0 B  ↑ 0 B</div>
-            </div>
-            <div class="tc-box u-bg-sunk u-bd-info u-p-12x16 u-r-8">
-              <div class="u-fs-12 u-upper u-c-mu u-mb-4 u-fw-600">Active Sockets (Pool)</div>
-              <div class="u-fs-18 u-fw-700 u-c-wr" id="bagherConnsVal">0</div>
-              <div class="u-fs-12 u-c-mu u-mt-2">Synchronized multiplexed tunnels</div>
-            </div>
           </div>
         </div>
       </section>
@@ -1998,7 +1767,7 @@
         <div class="qs" id="setupCard">
           <div class="qs-head">
             <span class="qs-bolt"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg></span>
-            <div class="qs-titles"><b data-i18n="setup_title">Quick setup — GRE + FRP tunnel</b><span data-i18n="setup_sub">Two servers, one tunnel. Answer on this machine; the Iran side gives you a token to paste on the Foreign side.</span></div>
+            <div class="qs-titles"><b data-i18n="setup_title">Quick setup: one tunnel, two servers</b><span data-i18n="setup_sub">Two servers, one tunnel. Answer on this machine; the Iran side gives you a token to paste on the Foreign side.</span></div>
           </div>
           <div class="qs-diagram" aria-hidden="true">
             <span class="qs-node-box">Users</span><span>→</span>
@@ -2020,21 +1789,29 @@
               <label class="qs-label" data-i18n="setup_step2_engine">Tunnel Engine</label>
               <div class="qs-seg" role="group" aria-label="Tunnel Engine" id="iranEngineSeg">
                 <button type="button" id="engGreFrp" aria-pressed="true" data-i18n="setup_eng_frp">GRE + FRP</button>
-                <button type="button" id="engGreBh" aria-pressed="false" data-i18n="setup_eng_grebh">GRE + Backhaul</button>
-                <button type="button" id="engBh" aria-pressed="false" data-i18n="setup_eng_bh">Backhaul (No-GRE)</button>
+                <button type="button" id="engBh" aria-pressed="false" data-i18n="setup_eng_bh">Backhaul</button>
+                <button type="button" id="engBagher" aria-pressed="false"><span data-i18n="setup_eng_bagher">Bagher</span> <span class="eng-pro hidden" id="engBagherPro" data-no-i18n>PRO</span></button>
               </div>
               <input type="hidden" id="sEngine" value="frp">
               <div class="qs-hint" id="engHint">High-stability Linux GRE kernel tunnel paired with FRP reverse proxy.</div>
+              <div class="u-mt-8 hidden" id="bhGreWrap">
+                <div class="qs-label" id="bhGreLbl" data-i18n="setup_bh_gre">Run Backhaul over GRE?</div>
+                <div class="qs-seg" role="group" aria-labelledby="bhGreLbl" id="bhGreSeg">
+                  <button type="button" id="bhGreOn" aria-pressed="true" data-i18n="setup_bh_gre_on">With GRE</button>
+                  <button type="button" id="bhGreOff" aria-pressed="false" data-i18n="setup_bh_gre_off">Without GRE</button>
+                </div>
+                <div class="qs-hint" id="bhGreHint"></div>
+              </div>
             </div></div>
             <div class="qs-step"><span class="qs-num">3</span><div class="qs-body">
               <label class="qs-label" data-i18n="setup_step3_params">Connection Parameters</label>
               <fieldset id="iranFields">
                 <div class="qs-row">
-                  <div class="fg"><label for="sLocalPub" data-i18n="setup_local_pub">Iran public IP (auto, editable)</label><input class="hashem-input" id="sLocalPub" inputmode="decimal"></div>
+                  <div class="fg" id="wrapLocalPub"><label for="sLocalPub" data-i18n="setup_local_pub">Iran public IP (auto, editable)</label><input class="hashem-input" id="sLocalPub" inputmode="decimal"></div>
                   <div class="fg"><label for="sRemotePub" data-i18n="setup_remote_pub">Remote public IP (the other server)</label><input class="hashem-input" id="sRemotePub" inputmode="decimal" placeholder="e.g. 203.0.113.10"></div>
                   <div class="fg" id="wrapLocalGre"><label for="sLocalGre" data-i18n="setup_local_gre">Local GRE IP</label><input class="hashem-input" id="sLocalGre" inputmode="decimal"></div>
                   <div class="fg" id="wrapPeerGre"><label for="sPeerGre" data-i18n="setup_peer_gre">Peer GRE IP</label><input class="hashem-input" id="sPeerGre" inputmode="decimal"></div>
-                  <div class="fg"><label for="sFrpPort" id="lblControlPort" data-i18n="setup_ctrl_port">Control / Bind port</label><input class="hashem-input" id="sFrpPort" inputmode="numeric"></div>
+                  <div class="fg" id="wrapCtrlPort"><label for="sFrpPort" id="lblControlPort" data-i18n="setup_ctrl_port">Control / Bind port</label><input class="hashem-input" id="sFrpPort" inputmode="numeric"></div>
                   <div class="fg" id="wrapTransport">
                     <label for="sTransport" data-i18n="setup_transport">Transport Protocol</label>
                     <select class="hashem-input" id="sTransport">
@@ -2057,14 +1834,42 @@
                   </div>
                 </div>
               </fieldset>
+              <div id="bagherFields" hidden>
+                <div id="bagherLicWarn" class="warnbox hidden">
+                  <span data-i18n="setup_bagher_lic">Bagher needs a Hashem Pro license on both servers.</span>
+                  <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="bagherLicOpenBtn" data-i18n="setup_bagher_lic_btn">Activate License</button>
+                </div>
+                <div class="qs-row">
+                  <div class="fg"><label for="sshfwdRemoteHost" data-i18n="setup_bagher_host">Foreign server public IP</label><input class="hashem-input" id="sshfwdRemoteHost" inputmode="decimal" placeholder="e.g. 198.51.100.73"></div>
+                  <div class="fg"><label for="sshfwdPorts" data-i18n="setup_forward_ports">Forwarded Ports (single, ranges, mappings)</label><input class="hashem-input" id="sshfwdPorts" placeholder="e.g. 443, 8443, 2083"></div>
+                </div>
+                <details class="qs-adv u-mt-8">
+                  <summary data-i18n="setup_bagher_adv">SSH port, pool size and internal FRP port</summary>
+                  <div class="qs-row">
+                    <div class="fg"><label for="sshfwdRemotePort" data-i18n="setup_bagher_sshport">Foreign SSH port</label><input type="number" class="hashem-input" id="sshfwdRemotePort" placeholder="22"></div>
+                    <div class="fg"><label for="sshfwdRemoteUser" data-i18n="setup_bagher_sshuser">Foreign SSH user</label><input class="hashem-input" id="sshfwdRemoteUser" placeholder="root"></div>
+                    <div class="fg"><label for="sshfwdFRPPort" data-i18n="setup_bagher_frpport">Internal FRP port</label><input type="number" class="hashem-input" id="sshfwdFRPPort" placeholder="55400"></div>
+                    <div class="fg"><label for="sshfwdPoolCount" data-i18n="setup_bagher_pool">Connection pool size</label><input type="number" class="hashem-input" id="sshfwdPoolCount" placeholder="25"></div>
+                  </div>
+                </details>
+              </div>
             </div></div>
             <div class="qs-step"><span class="qs-num">4</span><div class="qs-body">
               <label class="qs-label" data-i18n="setup_step4_token">Token &amp; apply</label>
-              <div id="iranBox"><div class="qs-hint">Token is auto-generated. After setup, copy the bundle below to the Foreign side — one paste fills everything there.</div></div>
+              <div id="iranBox"><div class="qs-hint" id="iranBoxHint">Token is auto-generated. After setup, copy the bundle below to the Foreign side — one paste fills everything there.</div></div>
               <div id="setupLockWarn" class="warnbox hidden"></div>
               <div id="setupWarn" class="warnbox hidden"></div>
               <div id="setupToken" class="tokenbox hidden"></div>
               <div id="setupBundle" class="tokenbox hidden"></div>
+              <details class="qs-adv u-mt-8 hidden" id="bagherManual">
+                <summary data-i18n="setup_bagher_manual">Foreign server without a panel: manual commands</summary>
+                <div class="fg u-mt-8"><label for="sshfwdForeignCmd" data-i18n="setup_bagher_cmd">Run on the foreign server</label>
+                  <textarea id="sshfwdForeignCmd" class="hashem-input u-w-full u-mono u-fs-12" rows="3" readonly></textarea>
+                  <div class="u-mt-4"><button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="sshfwdCopyForeignBtn">Copy</button></div></div>
+                <div class="fg u-mt-8"><label for="sshfwdAuthLine" data-i18n="setup_bagher_auth">authorized_keys line for the foreign server</label>
+                  <textarea id="sshfwdAuthLine" class="hashem-input u-w-full u-mono u-fs-12" rows="2" readonly></textarea>
+                  <div class="u-mt-4"><button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="sshfwdCopyAuthBtn">Copy</button></div></div>
+              </details>
               <div class="qs-actions">
                 <button class="hashem-btn hashem-btn-primary" id="setupBtn" data-i18n="setup_apply_btn">Apply Setup</button>
                 <button class="hashem-btn hashem-btn-secondary hidden" id="setupUnlockBtn" data-i18n="setup_unlock_btn">Unlock to Replace</button>
@@ -2078,8 +1883,8 @@
             <div class="qs-step"><span class="qs-num">2</span><div class="qs-body">
               <label class="qs-label" data-i18n="setup_foreign_step2">Connect this server to Iran</label>
               <div class="u-grid-gap-10">
-                <div class="fg"><label for="jToken" data-i18n="setup_bundle_paste_lbl">Setup bundle or token (from Iran side)</label><input class="hashem-input" id="jToken" autocomplete="off" data-i18n-ph="setup_bundle_paste_ph" placeholder="paste hsh1_..., bh1_..., or gh1_... bundle"></div>
-                <div class="fg"><label for="jPorts">Reverse ports (ranges &amp; mappings allowed)</label><input class="hashem-input" id="jPorts" placeholder="auto-filled from bundle, or 443, 10000-10050"></div>
+                <div class="fg"><label for="jToken" data-i18n="setup_bundle_paste_lbl">Setup bundle or token (from Iran side)</label><input class="hashem-input" id="jToken" autocomplete="off" data-i18n-ph="setup_bundle_paste_ph" placeholder="paste hsh1_..., bh1_..., gh1_... or BAGHER:... bundle"></div>
+                <div class="fg" id="jPortsWrap"><label for="jPorts">Reverse ports (ranges &amp; mappings allowed)</label><input class="hashem-input" id="jPorts" placeholder="auto-filled from bundle, or 443, 10000-10050"></div>
                 <div id="joinFrpOpts" class="u-grid-gap-10">
                 <div class="fg u-mt-2">
                   <label class="u-label-up" for="jFRPTransport" data-i18n="setup_transport">FRP Transport Protocol</label>
@@ -2106,7 +1911,15 @@
                   </label>
                 </div>
                 </div>
-                <div class="qs-hint" id="joinBundleHint">Paste any bundle (hsh1_, bh1_, gh1_) → all fields auto-fill. A legacy token works too.</div>
+                <div class="fg hidden" id="joinDialWrap">
+                  <label for="jDial" data-i18n="setup_dial">Route to the Iran server</label>
+                  <select class="hashem-input" id="jDial">
+                    <option value="auto" selected data-i18n="setup_dial_auto">Auto: GRE, or the public IP while GRE is blocked (recommended)</option>
+                    <option value="gre" data-i18n="setup_dial_gre">GRE only</option>
+                    <option value="public" data-i18n="setup_dial_public">Public IP only</option>
+                  </select>
+                </div>
+                <div class="qs-hint" id="joinBundleHint">Paste any bundle (hsh1_, bh1_, gh1_, BAGHER:) → all fields auto-fill. A legacy token works too.</div>
                 <div class="qs-hint u-hint-accent" id="joinBundleInfo" aria-live="polite" hidden></div>
                 <div id="joinWarn" class="warnbox hidden"></div>
                 <div class="qs-actions">
@@ -2142,8 +1955,8 @@
                     <label for="pEngine">Tunnel Engine</label>
                     <select class="hashem-input" id="pEngine">
                       <option value="frp" selected>GRE + FRP</option>
-                      <option value="gre-backhaul">GRE + Backhaul</option>
-                      <option value="backhaul">Backhaul Standalone (No-GRE)</option>
+                      <option value="gre-backhaul">Backhaul (with GRE)</option>
+                      <option value="backhaul">Backhaul (no GRE)</option>
                     </select>
                   </div>
                   <div class="fg u-col-span-2" id="wrapPeerTransport">
@@ -3398,8 +3211,8 @@
           <label class="u-label-up" for="editPeerEngine">Tunnel Engine</label>
           <select class="hashem-input u-mt-6" id="editPeerEngine">
             <option value="frp">GRE + FRP</option>
-            <option value="gre-backhaul">GRE + Backhaul</option>
-            <option value="backhaul">Backhaul (No-GRE)</option>
+            <option value="gre-backhaul">Backhaul (with GRE)</option>
+            <option value="backhaul">Backhaul (no GRE)</option>
           </select>
         </div>
         <div class="fg" id="wrapEditTransport">

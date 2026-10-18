@@ -96,14 +96,17 @@ HASHEM_SHA256=<sha256> bash install.sh
 
 ## کدام موتور را انتخاب کنم؟
 
-| | GRE + FRP | GRE + Backhaul | Backhaul مستقل |
+| | GRE + FRP | Backhaul با GRE | Backhaul بدون GRE |
 | --- | --- | --- | --- |
 | پیشوند bundle | `hsh1_` | `gh1_` | `bh1_` |
 | اینترفیس GRE | دارد | دارد | **ندارد** |
 | رله | frp | Backhaul | Backhaul |
-| وقتی انتخابش کنید | بیشترین امکانات و تنظیمات (Auto Pool، رمزنگاری، فشرده‌سازی، PROXY v2) | رله‌ی Backhaul روی یک لینک خصوصی لایه ۳ | GRE بسته است یا ممکن نیست و فقط رله می‌خواهید |
+| وقتی GRE قطع است با IP عمومی وصل می‌شود و وقتی برگشت به GRE برمی‌گردد | بله | بله | — |
+| وقتی انتخابش کنید | بیشترین امکانات و تنظیمات (Auto Pool، رمزنگاری، فشرده‌سازی، PROXY v2) | Backhaul می‌خواهید و هر وقت مسیر اجازه داد GRE | GRE (پروتکل ۴۷) بین دو سرور همیشه بسته است |
 
-با **GRE + FRP** و حامل **Direct GRE** شروع کنید. اگر پروتکل ۴۷ بین دو سرور مسدود است، حامل **WSS** و بعد Backhaul مستقل را امتحان کنید. تب Benchmark حامل‌ها را برایتان می‌سنجد. جزئیات: [docs/ENGINES.md](docs/ENGINES.md) و [راهنمای ترنسپورت‌های FRP](docs/FRP_TUNNELS_GUIDE.md).
+Backhaul در Setup و در `hashem backhaul` یک موتور است و «با GRE» یا «بدون GRE» فقط یک سؤال داخل آن است. **باقر** [PRO] (استخری از اتصال‌های SSH که FRP را حمل می‌کند) هم از همان تب Setup ساخته می‌شود و مثل بقیه‌ی تونل‌ها از تب Tunnel اداره می‌شود.
+
+با **GRE + FRP** و حامل **Direct GRE** شروع کنید. اگر پروتکل ۴۷ بین دو سرور مسدود است، حامل **WSS** و بعد Backhaul بدون GRE را امتحان کنید. تب Benchmark حامل‌ها را برایتان می‌سنجد. جزئیات: [docs/ENGINES.md](docs/ENGINES.md) و [راهنمای ترنسپورت‌های FRP](docs/FRP_TUNNELS_GUIDE.md).
 
 ---
 

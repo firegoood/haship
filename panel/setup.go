@@ -445,6 +445,7 @@ type setupRequest struct {
 	FRPTransport   string `json:"frp_transport,omitempty"`   // "tcp" | "kcp" | "quic" | "websocket" | "wss"
 	UseEncryption  bool   `json:"use_encryption,omitempty"`  // transport.useEncryption
 	UseCompression bool   `json:"use_compression,omitempty"` // transport.useCompression
+	Dial           string `json:"dial,omitempty"`            // foreign over GRE: "auto" (default) | "gre" | "public"
 	// OrigBundle holds the raw hsh1_... string when setup-foreign is invoked
 	// via a bundle paste. applyBundle() fills every explicit field AND stores
 	// the bundle here so runInstaller can pass --bundle to hashem.sh (which
@@ -668,6 +669,74 @@ func runInstaller(b setupRequest, ports []int, rawPorts []string) (string, strin
 	// an old version (lacking the "add-peer" CLI verb or "--bundle"), auto-sync the
 	// script before shelling out so the user does not hit E-INSTALL-02.
 	ensureFreshScript(script)
+	args, token := installerArgs(&b, ports, rawPorts)
+	// token is used verbatim as an argv element (no shell), safe from injection.
+	// The installer downloads FRP/Backhaul (45s per mirror, several mirrors and
+	// a fallback version) and waits for services; on slow links 60s killed it
+	// half-way and left a half-installed server. POST requests carry no server
+	// write deadline (see isLongRunning), so the reply still arrives.
+	ctx, cancel := context.WithTimeout(context.Background(), installerTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", append([]string{script}, args...)...)
+	cmd.Env = append(os.Environ(), "GRE_SKIP_PANEL=1", "TERM=dumb", "GRE_PANEL_DIR="+configDir)
+	out, runErr := cmd.CombinedOutput()
+	steps := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			steps = append(steps, line)
+		}
+	}
+	if b.Role == "iran" || b.Role == "add-peer" {
+		steps = append([]string{"token generated (copy to Foreign side)"}, steps...)
+	}
+
+	var bundleStr string
+	if b.Role == "iran" || b.Role == "add-peer" {
+		switch b.Engine {
+		case "backhaul":
+			bundleStr = MakeBackhaulBundle(b.LocalPub, b.FrpPort, b.Transport, token, rawPorts)
+		case "gre-backhaul":
+			bundleStr = MakeGreBackhaulBundle(b.LocalPub, b.FrpPort, b.LocalGre, b.PeerGre, b.Transport, token, rawPorts)
+		default:
+			trans := b.FRPTransport
+			if trans == "" && b.Transport != "" && b.Transport != "tcpmux" {
+				trans = b.Transport
+			}
+			bundleStr = MakeBundle(b.LocalPub, b.FrpPort, b.LocalGre, b.PeerGre, token, ports, trans)
+		}
+	}
+
+	if runErr != nil {
+		errText := runErr.Error()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			errText = fmt.Sprintf("timed out after %s (slow download?); the server may be half-installed, re-run setup", installerTimeout)
+		}
+		if len(steps) > 0 {
+			var failDetails []string
+			for _, s := range steps {
+				if strings.Contains(s, "[FAILED]") || (strings.Contains(s, "FAILED") && !strings.Contains(s, "Overall Installation Status")) {
+					failDetails = append(failDetails, s)
+				}
+			}
+			if len(failDetails) > 0 {
+				errText += " — " + strings.Join(failDetails, " | ")
+			} else if tail := strings.Join(steps[max(0, len(steps)-3):], " | "); tail != "" {
+				errText += " — " + tail
+			}
+		}
+		if b.Role == "add-peer" && strings.Contains(strings.Join(steps, "\n"), "Unknown command") {
+			errText += " — panel hashem.sh is an old version: run Update to latest, or re-run install.sh on this host"
+		}
+		return token, bundleStr, steps, fmt.Errorf("hashem.sh %s failed: %s", args[0], errText)
+	}
+
+	return token, bundleStr, steps, nil
+}
+
+// installerArgs builds the hashem.sh command line for a setup request. It fills
+// b.Transport with the engine default, which the bundle uses afterwards.
+func installerArgs(b *setupRequest, ports []int, rawPorts []string) ([]string, string) {
 	token := ""
 	var args []string
 
@@ -836,71 +905,14 @@ func runInstaller(b setupRequest, ports []int, rawPorts []string) (string, strin
 	if b.AcceptUDP && (b.Engine == "backhaul" || b.Engine == "gre-backhaul") && b.Role != "foreign" {
 		args = append(args, "--udp")
 	}
+	// Route to Iran for a foreign side with GRE (FRP, Backhaul with GRE).
+	if b.Role == "foreign" && b.Engine != "backhaul" && validDialMode(b.Dial) && b.Dial != "auto" {
+		args = append(args, "--dial", b.Dial)
+	}
 	if b.Force {
 		args = append(args, "--force")
 	}
-	// token is used verbatim as an argv element (no shell), safe from injection.
-	// The installer downloads FRP/Backhaul (45s per mirror, several mirrors and
-	// a fallback version) and waits for services; on slow links 60s killed it
-	// half-way and left a half-installed server. POST requests carry no server
-	// write deadline (see isLongRunning), so the reply still arrives.
-	ctx, cancel := context.WithTimeout(context.Background(), installerTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", append([]string{script}, args...)...)
-	cmd.Env = append(os.Environ(), "GRE_SKIP_PANEL=1", "TERM=dumb", "GRE_PANEL_DIR="+configDir)
-	out, runErr := cmd.CombinedOutput()
-	steps := []string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			steps = append(steps, line)
-		}
-	}
-	if b.Role == "iran" || b.Role == "add-peer" {
-		steps = append([]string{"token generated (copy to Foreign side)"}, steps...)
-	}
-
-	var bundleStr string
-	if b.Role == "iran" || b.Role == "add-peer" {
-		switch b.Engine {
-		case "backhaul":
-			bundleStr = MakeBackhaulBundle(b.LocalPub, b.FrpPort, b.Transport, token, rawPorts)
-		case "gre-backhaul":
-			bundleStr = MakeGreBackhaulBundle(b.LocalPub, b.FrpPort, b.LocalGre, b.PeerGre, b.Transport, token, rawPorts)
-		default:
-			trans := b.FRPTransport
-			if trans == "" && b.Transport != "" && b.Transport != "tcpmux" {
-				trans = b.Transport
-			}
-			bundleStr = MakeBundle(b.LocalPub, b.FrpPort, b.LocalGre, b.PeerGre, token, ports, trans)
-		}
-	}
-
-	if runErr != nil {
-		errText := runErr.Error()
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			errText = fmt.Sprintf("timed out after %s (slow download?); the server may be half-installed, re-run setup", installerTimeout)
-		}
-		if len(steps) > 0 {
-			var failDetails []string
-			for _, s := range steps {
-				if strings.Contains(s, "[FAILED]") || (strings.Contains(s, "FAILED") && !strings.Contains(s, "Overall Installation Status")) {
-					failDetails = append(failDetails, s)
-				}
-			}
-			if len(failDetails) > 0 {
-				errText += " — " + strings.Join(failDetails, " | ")
-			} else if tail := strings.Join(steps[max(0, len(steps)-3):], " | "); tail != "" {
-				errText += " — " + tail
-			}
-		}
-		if b.Role == "add-peer" && strings.Contains(strings.Join(steps, "\n"), "Unknown command") {
-			errText += " — panel hashem.sh is an old version: run Update to latest, or re-run install.sh on this host"
-		}
-		return token, bundleStr, steps, fmt.Errorf("hashem.sh %s failed: %s", args[0], errText)
-	}
-
-	return token, bundleStr, steps, nil
+	return args, token
 }
 
 // ---- peers API: list tunnels + token lookup ----

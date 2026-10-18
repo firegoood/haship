@@ -7,21 +7,32 @@ Hashem has two independent choices:
 
 ## Engines
 
-| | GRE + FRP (`frp`) | GRE + Backhaul (`gre-backhaul`) | Backhaul standalone (`backhaul`) |
+| | GRE + FRP (`frp`) | Backhaul with GRE (`gre-backhaul`) | Backhaul without GRE (`backhaul`) |
 | --- | --- | --- | --- |
 | Setup bundle | `hsh1_…` | `gh1_…` | `bh1_…` |
 | GRE interface (`gre-tunnel`) | yes | yes | no |
 | Relay binary | `frps` / `frpc` | `backhaul` | `backhaul` |
 | Relay runs over | GRE inner IPs (10.10.10.x by default) | GRE inner IPs | the public IP |
-| Fallback to the hub's public IP when GRE is dead | yes (`hashem dial`) | yes | not needed |
+| Fallback to the hub's public IP while GRE is dead, back to GRE when it returns | yes (`hashem dial`) | yes | not needed |
 | Transports | `tcp`, `kcp`, `quic`, `websocket`, `wss` | Backhaul transports | Backhaul transports |
 | Tuning in the panel | Auto Pool, encryption, compression, PROXY Protocol v2, tcpMux | Backhaul settings | Backhaul settings |
 
 **GRE + FRP** is the default and the most complete: every Performance-tab option applies to it, and the FRP transports cover the common Iranian network conditions (see the matrix in [FRP_TUNNELS_GUIDE.md](FRP_TUNNELS_GUIDE.md)).
 
-**GRE + Backhaul** keeps the private L3 link but uses Backhaul as the relay. Choose it if you already prefer Backhaul's behaviour and want the GRE inner addresses (for example to reach services by their inner IP).
+Backhaul is **one engine** in the panel's Setup tab and in `hashem backhaul`: "with GRE" or "without GRE" is a question inside it, not a separate engine.
 
-**Backhaul standalone** has no GRE at all. It is the simplest option when IP protocol 47 cannot cross between your two servers and you do not need a Layer-3 link. Its setup bundles are the `bh1_` strings.
+**Backhaul with GRE** keeps the private L3 link and uses Backhaul as the relay. The foreign side dials the GRE inner address while GRE works and the hub's public IP while it does not (see *Route to the Iran hub* below), so it also works on paths that block GRE some of the time.
+
+**Backhaul without GRE** makes no GRE interface at all. Use it when IP protocol 47 is blocked for good between your two servers: no GRE unit, no GRE warnings in the panel, no watchdog repairs of a GRE that cannot work. Its setup bundles are the `bh1_` strings.
+
+**Bagher** [PRO] is an SSH connection pool from Iran to the foreign server that carries FRP. It is set up from the same Setup tab (Engine: Bagher; the foreign side pastes the `BAGHER:` bundle into the same bundle box) and runs from the Tunnel tab's Bagher card (start, stop, copy bundle, quick edit, remove). It runs next to the main tunnel, so the Setup lock does not apply to it.
+
+### Route to the Iran hub (foreign side)
+
+With GRE underneath (GRE + FRP, Backhaul with GRE) the foreign client can reach the hub over the GRE inner address or the hub's public IP (the hub listens on every address). `hashem dial auto|gre|public`, the Tunnel tab's route card and the foreign side of Setup choose it:
+
+- **auto** (default): GRE when it answers, the public IP otherwise. The watchdog (every minute) moves the client to the public IP when GRE is dead and the client is not connected, and back to GRE after GRE has carried the control port for 5 checks in a row. If the client cannot connect over GRE after the move, it returns to the public IP and does not try again for 30 minutes.
+- **gre** / **public**: fixed; the watchdog leaves the route alone.
 
 ### Backhaul transports and ports
 
@@ -48,7 +59,7 @@ The GRE interface MTU is set to 1380 (1360 for WSS) so tunnelled TCP does not fr
 
 1. Try **GRE + FRP** with **Direct GRE**. Check the Dashboard: *Healthy* means done.
 2. If the badge says **FRP only** or GRE never comes up, protocol 47 is probably filtered. Switch the carrier to **WSS** (`hashem carrier`).
-3. If GRE is still unusable, or you do not need it, use **Backhaul standalone**.
+3. If GRE is still unusable, or you do not need it, use **Backhaul without GRE**.
 4. Run the **Benchmark** tab to compare carriers on your real path before you commit.
 
 ## Transports for FRP

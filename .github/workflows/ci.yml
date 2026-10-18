@@ -49,7 +49,7 @@ jobs:
           # the netns lab tests run in the separate `lab` job below.
           fail=0
           for t in tests/test_*.sh; do
-            case "$t" in *test_backhaul_e2e.sh|*test_gre_backhaul_lab.sh|*test_revpath_lab.sh|*test_bagher_lab.sh) continue;; esac
+            case "$t" in *test_backhaul_e2e.sh|*test_gre_backhaul_lab.sh|*test_revpath_lab.sh|*test_bagher_lab.sh|*test_tunnel_combos_lab.sh) continue;; esac
             echo "== $t"
             bash "$t" || fail=1
           done
@@ -86,6 +86,8 @@ jobs:
           tar xzf frp.tgz
           mkdir -p /tmp/frp-rel && cp frp_0.71.0_linux_amd64/frps frp_0.71.0_linux_amd64/frpc /tmp/frp-rel/
           command -v sshd || sudo apt-get install -y -qq openssh-server
+      - name: Tunnel combinations lab (Backhaul x 7 transports with/without GRE, GRE <-> public route for Backhaul and FRP)
+        run: sudo env "PATH=$PATH" bash tests/test_tunnel_combos_lab.sh
       - name: Bagher lab (ssh -R + frp, key lock-down, crash and outage recovery)
         run: |
           (cd panel && go test -c -o /tmp/bagherlab.test .)

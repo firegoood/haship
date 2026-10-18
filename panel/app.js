@@ -243,17 +243,8 @@ function goTab(name) {
   if (name === 'terminal' && !$('termNav').classList.contains('hidden') && $('tab-terminal').hidden && !termState.ready) { /* allowed: overlay shows connect */ }
   if (name === 'terminal' && $('termNav').classList.contains('hidden')) return; // flag off: tab doesn't exist
   if (name === 'add-peer') { goTab('setup'); const c = $('setupAddPeerStep'); if (c && c.scrollIntoView) c.scrollIntoView({behavior: 'smooth', block: 'start'}); return; }
-  if (name === 'sshfwd' && !isBagherLicensed()) {
-    if (_licenseData === null) {
-      loadLicense().then(() => {
-        if (isBagherLicensed()) goTab('sshfwd');
-        else openBagherLicModal();
-      });
-      return;
-    }
-    openBagherLicModal();
-    return;
-  }
+  // Bagher lives in Setup (create) and Tunnel (run) like every other tunnel.
+  if (name === 'sshfwd' || name === 'bagher') { openBagherSetup(); return; }
   if (name === 'cluster' && !isBagherLicensed()) {
     if (_licenseData === null) {
       loadLicense().then(() => {
@@ -265,7 +256,7 @@ function goTab(name) {
     openBagherLicModal();
     return;
   }
-  ['dashboard','tunnel','sshfwd','cluster','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  ['dashboard','tunnel','cluster','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -275,9 +266,7 @@ function goTab(name) {
   document.querySelectorAll('.sidebar-nav [data-tab]').forEach(markTab);
   const dr = $('drawerNav');
   if (dr) dr.querySelectorAll('[data-tab]').forEach(markTab);
-  if (name === 'sshfwd') {
-    loadSSHFwd();
-  }
+  if (name === 'setup' || name === 'tunnel') loadSSHFwd();
   if (name === 'cluster') {
     loadClusterStatus();
   }
@@ -289,7 +278,7 @@ function goTab(name) {
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
   if (name === 'terminal') termOnShow();
-  if (name === 'settings' || name === 'sshfwd') loadLicense();
+  if (name === 'settings' || name === 'setup') loadLicense();
   if (name === 'dashboard') {
     // tab was hidden: the rAF loop stopped itself; resume it without replaying
     // the draw-in animation (refreshDash() also redraws within 5s anyway).
@@ -396,8 +385,6 @@ const I18N = {
   en: {
     nav_dashboard: "Dashboard",
     nav_tunnel: "Tunnel",
-    nav_sshfwd: "Bagher",
-    nav_bagher: "Bagher",
     nav_cluster: "Cluster",
     nav_setup: "Setup",
     nav_logs: "Logs",
@@ -502,15 +489,33 @@ const I18N = {
     tun_view_bundle_btn: "View Setup Bundle",
 
     // Setup Tab
-    setup_title: "Quick setup — GRE + FRP tunnel",
+    setup_title: "Quick setup: one tunnel, two servers",
     setup_sub: "Two servers, one tunnel. Answer on this machine; the Iran side gives you a token to paste on the Foreign side.",
     setup_step1: "1. Which server am I on right now?",
     setup_role_iran: "Iran — users connect here",
     setup_role_foreign: "Foreign — service runs here",
     setup_step2_engine: "2. Tunnel Engine",
     setup_eng_frp: "GRE + FRP",
-    setup_eng_grebh: "GRE + Backhaul",
-    setup_eng_bh: "Backhaul (No-GRE)",
+    setup_eng_bh: "Backhaul",
+    setup_eng_bagher: "Bagher",
+    setup_bh_gre: "Run Backhaul over GRE?",
+    setup_bh_gre_on: "With GRE",
+    setup_bh_gre_off: "Without GRE",
+    setup_bagher_lic: "Bagher needs a Hashem Pro license on both servers.",
+    setup_bagher_lic_btn: "Activate License",
+    setup_bagher_host: "Foreign server public IP",
+    setup_bagher_adv: "SSH port, pool size and internal FRP port",
+    setup_bagher_sshport: "Foreign SSH port",
+    setup_bagher_sshuser: "Foreign SSH user",
+    setup_bagher_frpport: "Internal FRP port",
+    setup_bagher_pool: "Connection pool size",
+    setup_bagher_manual: "Foreign server without a panel: manual commands",
+    setup_bagher_cmd: "Run on the foreign server",
+    setup_bagher_auth: "authorized_keys line for the foreign server",
+    setup_dial: "Route to the Iran server",
+    setup_dial_auto: "Auto: GRE, or the public IP while GRE is blocked (recommended)",
+    setup_dial_gre: "GRE only",
+    setup_dial_public: "Public IP only",
     setup_step3_params: "3. Connection Parameters",
     setup_local_pub: "Iran public IP (auto, editable)",
     setup_remote_pub: "Remote public IP (the other server)",
@@ -1124,10 +1129,14 @@ function renderPeers(peers) {
           ${b.last_error && !bagherLinked ? `<div class="det-row"><span class="det-k">Last error</span><span class="det-v det-ports" data-no-i18n>${esc(String(b.last_error).slice(0, 160))}</span></div>` : ''}
         </div>
       </div>
-      <div class="tc-acts u-flex-gap-8 u-mt-4">
-        <button class="hashem-btn hashem-btn-secondary" onclick="openBagherQuickEdit()">Quick Edit</button>
-        <button class="hashem-btn hashem-btn-secondary" onclick="goTab('sshfwd')">Manage</button>
-        <button class="hashem-btn hashem-btn-danger" onclick="cleanBagherTunnelClick()">Clean</button>
+      <div class="tc-acts u-flex u-wrap u-gap-8 u-mt-4">
+        ${b.role === 'foreign' ? '' : `<button class="hashem-btn hashem-btn-secondary" onclick="openBagherQuickEdit()">${esc(tr('', 'Quick Edit'))}</button>
+        <button class="hashem-btn hashem-btn-secondary" onclick="bagherCopyBundleClick()">${esc(tr('', 'Copy Bundle'))}</button>`}
+        ${bagherRun ? `<button class="hashem-btn hashem-btn-secondary" onclick="bagherStopTunnelClick()">${esc(tr('', 'Stop'))}</button>`
+          : (b.role === 'foreign' ? '' : `<button class="hashem-btn hashem-btn-primary" onclick="bagherStartClick()">${esc(tr('', 'Start'))}</button>`)}
+        ${b.dnat_conflict ? `<button class="hashem-btn hashem-btn-secondary" onclick="sshfwdClearDnatClick()">${esc(tr('', 'Clear DNAT Conflicts'))}</button>` : ''}
+        <button class="hashem-btn hashem-btn-ghost" onclick="openBagherSetup()">${esc(tr('', 'Open in Setup'))}</button>
+        <button class="hashem-btn hashem-btn-danger" onclick="cleanBagherTunnelClick()">${esc(tr('', 'Remove Bagher'))}</button>
       </div>
     </div>`;
   }
@@ -1228,7 +1237,7 @@ function peerRemoveClick(peerId, name) {
 }
 // Signature: the topbar names the link itself: this server ⇄ the other side · engine ·
 // latency, with one live dot. Values sit in <bdi> so they keep their order in Persian.
-const LS_ENGINE = { frp: 'GRE + FRP', backhaul: 'Backhaul', 'gre-backhaul': 'GRE + Backhaul', bagher: 'Bagher' };
+const LS_ENGINE = { frp: 'GRE + FRP', backhaul: 'Backhaul (no GRE)', 'gre-backhaul': 'Backhaul (with GRE)', bagher: 'Bagher' };
 function linkStrip(s) {
   const el = $('roleLine');
   if (!el || !s) return;
@@ -2504,7 +2513,8 @@ $('roleForeign').onclick = () => setRole('foreign');
 // (no modal confirm, no second Overwrite button doing the same thing).
 function renderSetupLock() {
   const iran = $('sRole').value !== 'foreign';
-  const locked = iran && setupExists && !setupUnlocked;
+  const bagher = $('sEngine') && $('sEngine').value === 'bagher';
+  const locked = iran && !bagher && setupExists && !setupUnlocked;
   const fs = $('iranFields');
   if (fs) fs.disabled = locked;
   const lw = $('setupLockWarn');
@@ -2516,6 +2526,11 @@ function renderSetupLock() {
   }
   const show = (id, on) => { const el = $(id); if (el) el.classList.toggle('hidden', !on); };
   if (!iran) { show('setupBtn', false); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', false); return; }
+  if (bagher) {
+    $('setupBtn').textContent = bagherActive() ? tr('', 'Update Bagher and Remake the Bundle') : tr('', 'Start Bagher and Make the Bundle');
+    show('setupBtn', true); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', false);
+    return;
+  }
   if (!setupExists) {
     $('setupBtn').textContent = tr('', 'Apply Setup');
     show('setupBtn', true); show('setupUnlockBtn', false); show('setupAddBtn', false); show('setupRelockBtn', false);
@@ -2610,6 +2625,7 @@ async function loadSetupDefaults() {
 // the form must be unlocked first (the lock IS the replace consent).
 async function doSetup() {
   if ($('sRole').value === 'foreign') return;
+  if ($('sEngine') && $('sEngine').value === 'bagher') { await bagherIranApplyClick(); return; }
   if (setupExists && !setupUnlocked) { toastWarn(tr('', 'The form is locked'), tr('', 'Unlock it to replace the tunnel.')); return; }
   const btn = $('setupBtn');
   btn.disabled = true;
@@ -2682,7 +2698,10 @@ $('setupBtn').onclick = () => doSetup();
 function updateTransportSelect(selId, eng) {
   const el = $(selId);
   if (!el) return;
-  const cur = el.value;
+  // a new engine family starts from its own default transport
+  const fam = eng === 'frp' ? 'frp' : 'backhaul';
+  const had = [...el.options].some(o => o.value === 'tcpmux') ? 'backhaul' : 'frp';
+  const cur = had === fam ? el.value : '';
   if (eng === 'frp') {
     el.innerHTML = `
       <option value="tcp">TCP (Default)</option>
@@ -2708,40 +2727,93 @@ function updateTransportSelect(selId, eng) {
   }
 }
 
+// Setup engines: GRE + FRP, Backhaul (GRE underneath is a yes/no, not an engine
+// of its own) and Bagher. sEngine keeps the API value: frp | gre-backhaul |
+// backhaul | bagher.
+let _bhGre = true;
 function setIranEngine(eng) {
-  const isBh = eng === 'backhaul';
-  const isGreBh = eng === 'gre-backhaul';
-  if ($('sEngine')) $('sEngine').value = eng;
+  if (eng === 'gre-backhaul') { _bhGre = true; eng = 'backhaul'; }
+  const isBh = eng === 'backhaul', isBagher = eng === 'bagher';
+  const api_eng = isBh ? (_bhGre ? 'gre-backhaul' : 'backhaul') : eng;
+  if ($('sEngine')) $('sEngine').value = api_eng;
   if ($('engGreFrp')) $('engGreFrp').setAttribute('aria-pressed', eng === 'frp');
-  if ($('engGreBh')) $('engGreBh').setAttribute('aria-pressed', isGreBh);
   if ($('engBh')) $('engBh').setAttribute('aria-pressed', isBh);
-  if ($('wrapLocalGre')) $('wrapLocalGre').classList.toggle('hidden', isBh);
-  if ($('wrapPeerGre')) $('wrapPeerGre').classList.toggle('hidden', isBh);
+  if ($('engBagher')) $('engBagher').setAttribute('aria-pressed', isBagher);
+  if ($('bhGreOn')) $('bhGreOn').setAttribute('aria-pressed', _bhGre);
+  if ($('bhGreOff')) $('bhGreOff').setAttribute('aria-pressed', !_bhGre);
+  if ($('bhGreWrap')) $('bhGreWrap').classList.toggle('hidden', !isBh);
+  if ($('bhGreHint')) $('bhGreHint').textContent = _bhGre
+    ? tr('', 'The foreign server uses GRE when it works and the public IP while GRE is blocked, then goes back to GRE by itself.')
+    : tr('', 'No GRE interface at all: for servers where GRE (protocol 47) is blocked for good.');
+  const noGre = api_eng === 'backhaul';
+  if ($('iranFields')) $('iranFields').hidden = isBagher;
+  if ($('bagherFields')) $('bagherFields').hidden = !isBagher;
+  if ($('wrapLocalGre')) $('wrapLocalGre').classList.toggle('hidden', noGre);
+  if ($('wrapPeerGre')) $('wrapPeerGre').classList.toggle('hidden', noGre);
   if ($('wrapTransport')) $('wrapTransport').classList.remove('hidden');
-  updateTransportSelect('sTransport', eng);
+  if (!isBagher) updateTransportSelect('sTransport', eng);
   if ($('wrapIranPorts')) $('wrapIranPorts').classList.toggle('hidden', eng === 'frp');
   syncIranUdp();
-  if ($('qsLinkTxt')) $('qsLinkTxt').textContent = eng === 'frp' ? 'GRE ⇄ FRP' : isGreBh ? 'GRE ⇄ Backhaul' : 'Backhaul';
+  if ($('qsLinkTxt')) $('qsLinkTxt').textContent = eng === 'frp' ? 'GRE ⇄ FRP' : isBagher ? 'SSH ⇄ Bagher' : (_bhGre ? 'GRE ⇄ Backhaul' : 'Backhaul');
   if ($('engHint')) {
     if (eng === 'frp') {
       $('engHint').textContent = tr('', 'High-stability Linux GRE kernel tunnel paired with FRP reverse proxy.');
-    } else if (isGreBh) {
-      $('engHint').textContent = tr('', 'Linux GRE tunnel carries multiplexed Backhaul connections for ultra-low overhead and maximum throughput.');
+    } else if (isBh) {
+      $('engHint').textContent = tr('', 'Multiplexed Backhaul tunnel: one engine, with or without GRE under it.');
     } else {
-      $('engHint').textContent = tr('', 'Pure user-space multiplexed reverse tunnel over public IP. No GRE interfaces required.');
+      $('engHint').textContent = tr('', 'Stealth tunnel over an SSH connection pool. Needs a Hashem Pro license.');
     }
   }
+  if ($('iranBoxHint')) $('iranBoxHint').textContent = isBagher
+    ? tr('', 'The bundle carries the SSH key, the ports and the pool. Paste it in the foreign server\'s Setup.')
+    : tr('', 'Token is auto-generated. After setup, copy the bundle below to the Foreign side — one paste fills everything there.');
+  if (isBagher) bagherSetupSync();
+  else if ($('bagherManual')) $('bagherManual').classList.add('hidden');
+  renderSetupLock();
 }
 // Backhaul forwards UDP only on the tcp transport (accept_udp).
 function syncIranUdp() {
   const eng = $('sEngine') ? $('sEngine').value : 'frp';
-  const on = eng !== 'frp' && $('sTransport') && $('sTransport').value === 'tcp';
+  const on = eng !== 'frp' && eng !== 'bagher' && $('sTransport') && $('sTransport').value === 'tcp';
   if ($('wrapIranUdp')) $('wrapIranUdp').classList.toggle('hidden', !on);
 }
 if ($('sTransport')) $('sTransport').addEventListener('change', syncIranUdp);
 if ($('engGreFrp')) $('engGreFrp').onclick = () => setIranEngine('frp');
-if ($('engGreBh')) $('engGreBh').onclick = () => setIranEngine('gre-backhaul');
 if ($('engBh')) $('engBh').onclick = () => setIranEngine('backhaul');
+if ($('engBagher')) $('engBagher').onclick = () => setIranEngine('bagher');
+if ($('bhGreOn')) $('bhGreOn').onclick = () => { _bhGre = true; setIranEngine('backhaul'); };
+if ($('bhGreOff')) $('bhGreOff').onclick = () => { _bhGre = false; setIranEngine('backhaul'); };
+if ($('bagherLicOpenBtn')) $('bagherLicOpenBtn').onclick = () => openBagherLicModal();
+
+// Bagher in Setup: license note, saved values, headless-foreign commands.
+function bagherSetupSync() {
+  const d = _sshfwdData || {};
+  const lic = isBagherLicensed();
+  if ($('engBagherPro')) $('engBagherPro').classList.toggle('hidden', lic);
+  if ($('bagherLicWarn')) $('bagherLicWarn').classList.toggle('hidden', lic);
+  const fill = (id, v) => { const el = $(id); if (el && !el.value && v) el.value = v; };
+  fill('sshfwdRemoteHost', d.remote_host);
+  fill('sshfwdPorts', Array.isArray(d.ports) ? d.ports.join(', ') : '');
+  fill('sshfwdRemotePort', d.remote_ssh_port > 0 ? d.remote_ssh_port : '');
+  fill('sshfwdRemoteUser', d.remote_user);
+  fill('sshfwdFRPPort', d.frp_bind_port > 0 ? d.frp_bind_port : '');
+  fill('sshfwdPoolCount', d.pool_count > 0 ? d.pool_count : '');
+  if ($('sshfwdForeignCmd')) $('sshfwdForeignCmd').value = d.foreign_setup_cmd || '';
+  if ($('sshfwdAuthLine')) $('sshfwdAuthLine').value = d.auth_line || '';
+  const iranBagher = $('sEngine') && $('sEngine').value === 'bagher' && $('sRole').value !== 'foreign';
+  if ($('bagherManual')) $('bagherManual').classList.toggle('hidden', !(iranBagher && bagherActive() && (d.foreign_setup_cmd || d.auth_line)));
+}
+function bagherActive() {
+  const d = _sshfwdData || {};
+  return !!(d.is_active || d.enabled);
+}
+// Old links and the Benchmark tab land here: Setup with Bagher picked.
+function openBagherSetup(host) {
+  goTab('setup');
+  setRole('iran');
+  setIranEngine('bagher');
+  if (host && $('sshfwdRemoteHost')) $('sshfwdRemoteHost').value = host;
+}
 
 if ($('pEngine')) {
   $('pEngine').addEventListener('change', () => {
@@ -2816,7 +2888,8 @@ function parseBundleClient(s) {
 // Pasting a bundle auto-fills ports + advanced fields. The bundle decides the
 // engine and the FRP transport (the server applies them over the form), so the
 // form shows them and hides options the engine does not use.
-const JOIN_ENGINE = { frp: 'GRE + FRP', 'gre-backhaul': 'GRE + Backhaul', backhaul: 'Backhaul' };
+const JOIN_ENGINE = LS_ENGINE;
+const isBagherBundle = s => /^BAGHER:/i.test(s || '');
 function joinBundleSync() {
   const w = $('joinWarn'), info = $('joinBundleInfo'), sel = $('jFRPTransport');
   const raw = $('jToken').value.trim();
@@ -2825,6 +2898,17 @@ function joinBundleSync() {
   info.hidden = true;
   sel.disabled = false;
   $('joinFrpOpts').hidden = false;
+  $('jPortsWrap').hidden = false;
+  $('joinDialWrap').classList.add('hidden');
+  if (isBagherBundle(raw)) {
+    // the Bagher bundle carries the ports, keys and pool: nothing to fill in
+    $('joinFrpOpts').hidden = true;
+    $('jPortsWrap').hidden = true;
+    info.textContent = tr('', 'Bagher bundle: it carries the ports and keys. Connect starts the foreign side of the tunnel.') +
+      (isBagherLicensed() ? '' : ' ' + tr('', 'This server needs a Hashem Pro license for Bagher.'));
+    info.hidden = false;
+    return;
+  }
   if (!isBundle) return;
   const b = parseBundleClient(raw);
   if (!b || b.error) {
@@ -2842,6 +2926,7 @@ function joinBundleSync() {
     sel.disabled = true;
   }
   $('joinFrpOpts').hidden = b.engine !== 'frp';
+  $('joinDialWrap').classList.toggle('hidden', b.engine === 'backhaul');
   let msg = docTpl('{0} bundle: Iran server {1}, port {2}, transport {3}.', [JOIN_ENGINE[b.engine] || b.engine, b.iranPub, b.port, b.transport]);
   if (!b.ports.length) msg += ' ' + tr('', 'It has no ports: enter the reverse ports above.');
   info.textContent = msg;
@@ -2854,6 +2939,13 @@ $('joinBtn').onclick = async () => {
   b.disabled = true;
   const oldTxt = b.textContent;
   $('joinWarn').classList.add('hidden');
+  if (isBagherBundle($('jToken').value.trim())) {
+    b.innerHTML = '<span class="ent-spinner"></span> ' + esc(tr('', 'Connecting…'));
+    await bagherForeignConnectClick($('jToken').value.trim());
+    b.disabled = false;
+    b.textContent = oldTxt;
+    return;
+  }
   // A join replaces whatever tunnel this server has: ask first.
   if (setupExists && !await entConfirm(tr('', 'Replace This Tunnel?'), tr('', 'This server already has a tunnel. Connecting replaces it, and anything it carries now stops.'), tr('', 'Replace and Connect'))) {
     b.disabled = false;
@@ -2906,6 +2998,7 @@ $('joinBtn').onclick = async () => {
       peer_gre: bundle.iranGre || '',
       frp_port: bundle.port,
       token: rawToken,
+      dial: bundle.engine === 'backhaul' ? '' : ($('jDial') ? $('jDial').value : 'auto'),
       ports, force: true,
     } : {
       role: 'foreign',
@@ -5015,7 +5108,7 @@ function docBadge(el, text, cls) {
 function docSet(id, text) { const el = $(id); if (el) el.textContent = text; }
 const DOC_SEV = { critical: ['Critical', 'err'], warning: ['Warning', 'warn'], minor: ['Minor', 'dim'] };
 const DOC_RATING = { excellent: ['Excellent', 'ok'], good: ['Good', 'info'], warning: ['Needs attention', 'warn'], critical: ['Critical', 'err'], unset: ['Not set up', 'dim'] };
-const DOC_ENGINE = { frp: 'FRP', gre: 'GRE', backhaul: 'Backhaul', 'gre-backhaul': 'GRE + Backhaul', 'gre-frp': 'GRE + FRP' };
+const DOC_ENGINE = { frp: 'FRP', gre: 'GRE', backhaul: 'Backhaul (no GRE)', 'gre-backhaul': 'Backhaul (with GRE)', 'gre-frp': 'GRE + FRP' };
 
 function renderDoctor(rep) {
   if (!rep) return;
@@ -5745,7 +5838,7 @@ function fleetRender(d) {
   $('fleetTopo').innerHTML = fleetTopo(nodes, d.hub);
   $('fleetGrid').innerHTML = nodes.map(n => {
     const st = n.stats || {}, ms = fleetMs(n) >= 0 ? Math.round(fleetMs(n)) : null;
-    const eng = n.engine === 'backhaul' ? 'Backhaul' : n.engine === 'gre-backhaul' ? 'GRE+Backhaul' : 'FRP';
+    const eng = n.engine === 'backhaul' ? 'Backhaul (no GRE)' : n.engine === 'gre-backhaul' ? 'Backhaul (with GRE)' : 'FRP';
     const cls = n.health === 'healthy' ? 'ok' : n.health === 'degraded' ? 'warn' : 'err';
     return '<article class="fl-card fl-' + n.health + '" aria-label="' + esc(n.name) + '"' + (reasonsTip(n) ? ' title="' + reasonsTip(n) + '"' : '') + '>'
       + '<header class="fl-head"><span class="fl-name" title="' + esc(n.name) + '">' + esc(n.name) + '</span><span class="badge ' + cls + '"><span class="dot"></span>' + esc(tr('fleet_' + n.health, n.health)) + '</span></header>'
@@ -6685,12 +6778,8 @@ async function smartApplyOrSetupCarrier(carrierId, carrierName) {
 
   // If Bagher (SSH forward) selected
   if (carrierId.startsWith('bagher') || carrierId === 'sshfwd') {
-    if (typeof goTab === 'function') goTab('sshfwd');
-    if (targetHost) {
-      if ($('sshfwdRemoteHost')) $('sshfwdRemoteHost').value = targetHost;
-      if ($('bagherQuickRemoteHost')) $('bagherQuickRemoteHost').value = targetHost;
-    }
-    toast('Bagher Setup', 'Fill server credentials in Bagher tab and apply.');
+    openBagherSetup(targetHost);
+    toast(tr('', 'Bagher Setup'), tr('', 'Fill in the ports and apply.'));
     return;
   }
 
@@ -6704,8 +6793,8 @@ async function smartApplyOrSetupCarrier(carrierId, carrierName) {
 
   // Set appropriate engine & transport
   if (carrierId.startsWith('backhaul')) {
-    const bhBtn = $('engBh');
-    if (bhBtn) bhBtn.click();
+    _bhGre = false;
+    setIranEngine('backhaul');
   } else if (carrierId === 'direct') {
     const greBtn = $('engGreFrp');
     if (greBtn) greBtn.click();
@@ -6867,10 +6956,9 @@ window.openPeerConfig = openPeerConfig;
 window.closePeerConfig = closePeerConfig;
 window.savePeerConfigClick = savePeerConfigClick;
 
-// ---------- SSH Forward Carrier (tab-sshfwd) ----------
+// ---------- Bagher (SSH pool carrier): created in Setup, run from the Tunnel tab ----------
 _sshfwdData = null;
 
-let lastBagherBytesRx = 0, lastBagherBytesTx = 0, lastBagherTime = 0;
 function formatSpeedRate(bytesPerSec) {
   if (!bytesPerSec || bytesPerSec <= 0) return '0 B/s';
   const k = 1024;
@@ -6888,200 +6976,11 @@ async function loadSSHFwd() {
   }
 }
 
-let _bagherUserPickedRole = null;
-
-function setBagherRole(role) {
-  _bagherUserPickedRole = role;
-  const iran = role === 'iran';
-  if ($('bagherRoleIran')) $('bagherRoleIran').setAttribute('aria-pressed', iran ? 'true' : 'false');
-  if ($('bagherRoleForeign')) $('bagherRoleForeign').setAttribute('aria-pressed', !iran ? 'true' : 'false');
-  if ($('bagherRoleInput')) $('bagherRoleInput').value = role;
-  if ($('bagherIranWrap')) $('bagherIranWrap').hidden = !iran;
-  if ($('bagherForeignWrap')) $('bagherForeignWrap').hidden = iran;
-  if ($('bagherActiveRoleBadge')) {
-    $('bagherActiveRoleBadge').textContent = 'Role: ' + (iran ? 'Iran Server' : 'Foreign Server');
-  }
-  if ($('bagherRoleHint')) {
-    $('bagherRoleHint').textContent = iran
-      ? 'Iran server receives inbound user traffic, listens on forwarded ports, and securely multiplexes to the Foreign server.'
-      : 'Foreign server runs outbound proxy/services, terminates stealth multiplexed tunnels, and processes traffic.';
-  }
-}
-
 function renderSSHFwd() {
-  const d = _sshfwdData || {};
-  const active = !!(d.is_active || d.enabled);
-  const badge = $('sshfwdStatusBadge');
-  const toggleBtn = $('sshfwdToggleBtn');
-
-  if (badge) {
-    badge.className = 'badge ' + (active ? 'ok' : 'info');
-    badge.textContent = active ? (d.connected ? 'Active' : 'Standby / Ready') : 'Inactive';
-  }
-  if (toggleBtn) {
-    toggleBtn.textContent = active ? 'Disable' : 'Enable';
-    toggleBtn.className = 'hashem-btn ' + (active ? 'hashem-btn-danger' : 'hashem-btn-primary');
-  }
-
-  // Server role rendering
-  const serverRole = d.role === 'foreign' ? 'foreign' : 'iran';
-  if (!_bagherUserPickedRole) {
-    setBagherRole(serverRole);
-  } else {
-    setBagherRole(_bagherUserPickedRole);
-  }
-
-  const iranApplyBtn = $('bagherIranApplyBtn');
-  const iranStopBtn = $('bagherIranStopBtn');
-  const foreignConnectBtn = $('bagherForeignConnectBtn');
-  const foreignStopBtn = $('bagherForeignStopBtn');
-
-  if (active) {
-    if (iranApplyBtn) iranApplyBtn.textContent = 'Update Iran Server & Re-issue Bundle';
-    if (iranStopBtn) iranStopBtn.classList.remove('hidden');
-    if (foreignConnectBtn) foreignConnectBtn.textContent = 'Update Foreign Connection';
-    if (foreignStopBtn) foreignStopBtn.classList.remove('hidden');
-  } else {
-    if (iranApplyBtn) iranApplyBtn.textContent = 'Initialize Iran Server & Issue Bundle';
-    if (iranStopBtn) iranStopBtn.classList.add('hidden');
-    if (foreignConnectBtn) foreignConnectBtn.textContent = 'Connect to Iran & Start Foreign Tunnel';
-    if (foreignStopBtn) foreignStopBtn.classList.add('hidden');
-  }
-
-  // Live health & metrics
-  const connBadge = $('bagherConnBadge');
-  if (connBadge) {
-    if (d.connected) {
-      connBadge.className = 'badge ok';
-      connBadge.textContent = 'Connected (Online)';
-      connBadge.style.background = 'var(--ok-fill)';
-      connBadge.style.color = '#fff';
-    } else if (active) {
-      connBadge.className = 'badge warn';
-      connBadge.textContent = d.role === 'foreign' ? 'Connecting to Iran...' : 'Ready (Waiting for Peer)';
-      connBadge.style.background = 'var(--wr-fill)';
-      connBadge.style.color = '#fff';
-    } else {
-      connBadge.className = 'badge info';
-      connBadge.textContent = 'Inactive (Offline)';
-      connBadge.style.background = 'rgba(255,255,255,0.1)';
-      connBadge.style.color = '';
-    }
-  }
-  if ($('bagherRoleTxt')) {
-    $('bagherRoleTxt').textContent = 'Role: ' + (d.role === 'foreign' ? 'Foreign Server' : 'Iran Server');
-  }
-  if ($('bagherLatencyVal')) {
-    $('bagherLatencyVal').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : '—';
-  }
-  if ($('bagherLivePing')) {
-    if (active) {
-      $('bagherLivePing').textContent = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? (d.latency_ms.toFixed(1) + ' ms') : '—';
-    } else {
-      $('bagherLivePing').textContent = 'Standby';
-    }
-  }
-  if ($('bagherTrafficTotal')) {
-    $('bagherTrafficTotal').textContent = d.total_formatted || '0 B';
-  }
-  if ($('bagherTrafficUpDown')) {
-    $('bagherTrafficUpDown').textContent = `↓ ${d.rx_formatted || '0 B'}  ↑ ${d.tx_formatted || '0 B'}`;
-  }
-  const now = Date.now();
-  let rxSpeedStr = '0 B/s', txSpeedStr = '0 B/s';
-  const curRx = typeof d.rx_bytes === 'number' ? d.rx_bytes : 0;
-  const curTx = typeof d.tx_bytes === 'number' ? d.tx_bytes : 0;
-  if (lastBagherTime && now > lastBagherTime) {
-    const deltaSec = (now - lastBagherTime) / 1000;
-    if (deltaSec >= 0.5) {
-      if (curRx >= lastBagherBytesRx) rxSpeedStr = formatSpeedRate((curRx - lastBagherBytesRx) / deltaSec);
-      if (curTx >= lastBagherBytesTx) txSpeedStr = formatSpeedRate((curTx - lastBagherBytesTx) / deltaSec);
-    }
-  }
-  lastBagherBytesRx = curRx;
-  lastBagherBytesTx = curTx;
-  lastBagherTime = now;
-
-  if ($('bagherLiveSpeed')) {
-    $('bagherLiveSpeed').textContent = `↓ ${rxSpeedStr}  ↑ ${txSpeedStr}`;
-  }
-  if ($('bagherLiveTotal')) {
-    $('bagherLiveTotal').textContent = d.total_formatted || '0 B';
-  }
-  if ($('bagherLiveSockets')) {
-    if (active) {
-      $('bagherLiveSockets').textContent = (d.pool_count || 25) + ' Active';
-    } else {
-      $('bagherLiveSockets').textContent = `0 Active (Pool: ${d.pool_count || 25})`;
-    }
-  }
-  if ($('bagherConnsVal')) {
-    $('bagherConnsVal').textContent = String(d.cur_conns || 0);
-  }
-  if ($('bagherBundleText')) {
-    $('bagherBundleText').value = d.bundle || '';
-  }
-
-  // Inputs: do not force default values; keep empty placeholders unless saved
-  if ($('sshfwdRemoteHost') && !$('sshfwdRemoteHost').value && d.remote_host) $('sshfwdRemoteHost').value = d.remote_host;
-  if ($('sshfwdRemoteUser') && !$('sshfwdRemoteUser').value && d.remote_user) $('sshfwdRemoteUser').value = d.remote_user;
-  if ($('sshfwdRemotePort') && !$('sshfwdRemotePort').value && d.remote_ssh_port > 0) $('sshfwdRemotePort').value = d.remote_ssh_port;
-  if ($('sshfwdPorts') && !$('sshfwdPorts').value && Array.isArray(d.ports) && d.ports.length > 0) $('sshfwdPorts').value = d.ports.join(', ');
-
-  const modeEl = $('sshfwdMode');
-  if (modeEl) modeEl.value = 'bagher';
-  if ($('sshfwdPoolCount') && !$('sshfwdPoolCount').value && d.pool_count > 0) $('sshfwdPoolCount').value = d.pool_count;
-  if ($('sshfwdFRPPort') && !$('sshfwdFRPPort').value && d.frp_bind_port > 0) $('sshfwdFRPPort').value = d.frp_bind_port;
-
-  const foreignCmd = $('sshfwdForeignCmd');
-  if (foreignCmd) foreignCmd.value = d.foreign_setup_cmd || '';
-
-  const authLine = $('sshfwdAuthLine');
-  if (authLine) authLine.value = d.auth_line || '';
-
-  const isLicensed = isBagherLicensed();
-  const bagherContainer = $('bagherCardContainer');
-  const bagherLockedBanner = $('bagherLockedBanner');
-  const bagherModal = $('bagherLicModal');
-  const bagherMachineHash = $('bagherLicMachineHash');
-
-  if (bagherMachineHash && (d.machine_hash || (_licenseData && _licenseData.machine_hash))) {
-    bagherMachineHash.value = d.machine_hash || _licenseData.machine_hash;
-  }
-
-  if (!isLicensed) {
-    if (bagherContainer) {
-      bagherContainer.style.filter = 'blur(10px)';
-      bagherContainer.style.pointerEvents = 'none';
-      bagherContainer.style.opacity = '0.2';
-      bagherContainer.style.userSelect = 'none';
-    }
-    if (bagherLockedBanner) {
-      bagherLockedBanner.classList.remove('hidden');
-    }
-    const navLock = $('bagherNavLock');
-    if (navLock) navLock.classList.remove('hidden');
-    const curTab = (typeof state !== 'undefined' && state && state.tab) ? state.tab : '';
-    if (curTab === 'sshfwd' && bagherModal && bagherModal.hidden && !_bagherModalDismissed) {
-      modalShow(bagherModal, closeBagherLicModal);
-    }
-  } else {
-    _bagherModalDismissed = true;
-    const navLock = $('bagherNavLock');
-    if (navLock) navLock.classList.add('hidden');
-    if (bagherContainer) {
-      bagherContainer.style.filter = '';
-      bagherContainer.style.pointerEvents = '';
-      bagherContainer.style.opacity = '';
-      bagherContainer.style.userSelect = '';
-    }
-    if (bagherLockedBanner) {
-      bagherLockedBanner.classList.add('hidden');
-    }
-    if (bagherModal) {
-      modalHide(bagherModal);
-    }
-  }
+  bagherSetupSync();
+  if ($('sEngine') && $('sEngine').value === 'bagher') renderSetupLock();
+  // the Tunnel tab's Bagher card reads _sshfwdData
+  if (window._lastLocal) { try { renderPeers(tunPeerCache); } catch (_) { /* cosmetic */ } }
 }
 
 // Universal Clipboard Copy with legacy execCommand and prompt fallbacks
@@ -7161,7 +7060,6 @@ function closeBagherLicModal() {
 
 function cancelBagherLicModal() {
   closeBagherLicModal();
-  goTab('dashboard');
 }
 
 function openBagherLicenseSettings() {
@@ -7191,7 +7089,6 @@ async function activateBagherLicenseClick() {
     closeBagherLicModal();
     await loadLicense();
     await loadSSHFwd();
-    goTab('sshfwd');
   } catch (err) {
     toastErr('Activation Failed', err.message || String(err));
   }
@@ -7204,108 +7101,71 @@ function bagherLicCopyMachineClick() {
   }
 }
 
-async function sshfwdToggleClick() {
-  const d = _sshfwdData || {};
-  const active = !!(d.is_active || d.enabled);
-  if (!active) {
-    const isLicensed = isBagherLicensed();
-    if (!isLicensed) {
-      openBagherLicModal();
-      toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
-      return;
-    }
-  }
+// Start a stopped Iran-side Bagher with its saved settings.
+async function bagherStartClick() {
+  if (!isBagherLicensed()) { openBagherLicModal(); return; }
   try {
-    if (active) {
-      await api('/api/sshfwd', { action: 'disable' });
-      toastOk('Bagher Tunnel', 'Service stopped.');
-    } else {
-      const isLicensed = isBagherLicensed();
-      if (!isLicensed) {
-        openBagherLicModal();
-        toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
-        return;
-      }
-      const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
-      const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() || 'root' : 'root';
-      const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '', 10) || 22;
-      const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
-      const mode = 'bagher';
-      const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
-      const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
-      if (!remote_host) {
-        toastErr('Foreign IP Required', 'Please enter the Foreign server IP address.');
-        return;
-      }
-      if (!ports) {
-        toastErr('Forwarded Ports Required', 'Please specify at least one port to forward (e.g. 443, 8443).');
-        return;
-      }
-      await api('/api/sshfwd', { action: 'enable', mode, remote_host, remote_user, ssh_port, ports, pool_count, frp_bind_port });
-      toastOk('Bagher Tunnel', 'Bagher Tunnel started successfully.');
-    }
+    toast(tr('', 'Starting Bagher'), '');
+    const res = await api('/api/sshfwd', { action: 'enable', mode: 'bagher', role: 'iran' });
+    toastOk(tr('', 'Bagher started'), (res && res.message) || '');
     await loadSSHFwd();
   } catch (err) {
-    toastErr('Operation Failed', err.message || err);
+    toastErr(tr('', 'Bagher did not start'), err.message || String(err));
   }
 }
 
 async function bagherIranApplyClick() {
-  const d = _sshfwdData || {};
-  const isLicensed = isBagherLicensed();
-  if (!isLicensed) {
+  if (!isBagherLicensed()) {
     openBagherLicModal();
-    toastErr('License Required', 'Bagher Tunnel requires an active Hashem Pro license.');
+    toastErr(tr('', 'License Required'), tr('', 'Bagher needs a Hashem Pro license.'));
     return;
   }
-  const remote_host = $('sshfwdRemoteHost') ? $('sshfwdRemoteHost').value.trim() : '';
-  const ports = $('sshfwdPorts') ? $('sshfwdPorts').value.trim() : '';
-  if (!remote_host) {
-    toastErr('Foreign IP Required', 'Please enter the Foreign server IP address.');
-    if ($('sshfwdRemoteHost')) $('sshfwdRemoteHost').focus();
+  const val = id => ($(id) ? $(id).value.trim() : '');
+  const remote_host = val('sshfwdRemoteHost');
+  const ports = val('sshfwdPorts');
+  const w = $('setupWarn');
+  w.classList.add('hidden');
+  if (!remote_host || !ports) {
+    w.textContent = !remote_host ? tr('', 'Enter the foreign server public IP.') : tr('', 'Enter at least one port to forward, for example 443, 8443.');
+    w.classList.remove('hidden');
+    $(!remote_host ? 'sshfwdRemoteHost' : 'sshfwdPorts').focus();
     return;
   }
-  if (!ports) {
-    toastErr('Forwarded Ports Required', 'Please specify at least one port to forward (e.g. 443, 8443).');
-    if ($('sshfwdPorts')) $('sshfwdPorts').focus();
-    return;
-  }
-  const remote_user = $('sshfwdRemoteUser') ? $('sshfwdRemoteUser').value.trim() || 'root' : 'root';
-  const ssh_port = parseInt($('sshfwdRemotePort') ? $('sshfwdRemotePort').value : '', 10) || 22;
-  const pool_count = parseInt($('sshfwdPoolCount') ? $('sshfwdPoolCount').value : '', 10) || 25;
-  const frp_bind_port = parseInt($('sshfwdFRPPort') ? $('sshfwdFRPPort').value : '', 10) || 55400;
-
+  const btn = $('setupBtn');
+  const oldTxt = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="ent-spinner"></span> ' + esc(tr('', 'Applying…'));
   try {
-    toastOk('Initializing...', 'Configuring Iran service and generating connection bundle...');
     const res = await api('/api/sshfwd', {
       action: 'enable',
       mode: 'bagher',
       role: 'iran',
       remote_host,
-      remote_user,
-      ssh_port,
+      remote_user: val('sshfwdRemoteUser') || 'root',
+      ssh_port: parseInt(val('sshfwdRemotePort'), 10) || 22,
       ports,
-      pool_count,
-      frp_bind_port
+      pool_count: parseInt(val('sshfwdPoolCount'), 10) || 25,
+      frp_bind_port: parseInt(val('sshfwdFRPPort'), 10) || 55400
     });
-    if (res && res.bundle && $('bagherBundleText')) {
-      $('bagherBundleText').value = res.bundle;
-    }
-    toastOk('Iran Server Ready', 'Iran service active. Connection bundle generated in Step 3.');
+    if (res && res.bundle) renderBundleBox($('setupBundle'), res.bundle);
+    toastOk(tr('', 'Bagher is running'), tr('', 'Copy the bundle to the foreign server.'));
     await loadSSHFwd();
-    if ($('bagherIranBundleCard')) {
-      $('bagherIranBundleCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
   } catch (err) {
-    toastErr('Iran Setup Failed', err.message || err);
+    w.textContent = err.message || String(err);
+    w.classList.remove('hidden');
+    toastErr(tr('', 'Setup failed'), err.message || String(err));
   }
+  btn.disabled = false;
+  btn.textContent = oldTxt;
+  renderSetupLock();
 }
 
-async function bagherForeignConnectClick() {
+// Foreign side: the BAGHER: bundle pasted into Setup's bundle box.
+async function bagherForeignConnectClick(bundle) {
   const d = _sshfwdData || {};
   let savedLic = '';
   try { savedLic = (localStorage.getItem('hashem_bagher_license') || '').trim(); } catch (e) {}
-  let isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || (_licenseData && _licenseData.is_valid) || savedLic);
+  let isLicensed = !!(d.licensed_bagher || d.licensed_frp_ssh || isBagherLicensed());
   if (!isLicensed && savedLic) {
     try {
       await api('/api/license', { key: savedLic });
@@ -7314,24 +7174,21 @@ async function bagherForeignConnectClick() {
   }
   if (!isLicensed) {
     openBagherLicModal();
-    toastErr('License Required', 'Bagher Engine requires an active premium license.');
+    toastErr(tr('', 'License Required'), tr('', 'Bagher needs a Hashem Pro license.'));
     return;
   }
-  const input = $('bagherPasteBundleInput');
-  const bundle = input ? input.value.trim() : '';
-  if (!bundle) {
-    toastErr('Empty Bundle', 'Please paste the connection bundle received from the Iran server.');
-    if (input) input.focus();
-    return;
-  }
+  const w = $('joinWarn'), out = $('joinOut');
+  w.classList.add('hidden');
   try {
-    toastOk('Connecting...', 'Applying configuration and connecting Foreign server to Iran...');
     const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle });
-    toastOk('Foreign Connected', res.message || 'Foreign server connected to Iran successfully!');
-    if (input) input.value = '';
+    out.classList.remove('hidden');
+    out.textContent = (res && res.message) || tr('', 'Connected to the Iran server');
+    toastOk(tr('', 'Connected to the Iran server'));
     await loadSSHFwd();
+    refresh();
   } catch (err) {
-    toastErr('Connection Failed', err.message || String(err));
+    w.textContent = err.message || String(err);
+    w.classList.remove('hidden');
   }
 }
 
@@ -7354,8 +7211,7 @@ async function cleanBagherTunnelClick() {
     const res = await api('/api/sshfwd', { action: 'clean' });
     if (res && res.status === 'ok') {
       toastOk('Tunnel Cleaned', 'Bagher tunnel has been completely reset.');
-      const bText = $('bagherBundleText'); if (bText) bText.value = '';
-      const bPast = $('bagherPasteBundleInput'); if (bPast) bPast.value = '';
+      if ($('sEngine') && $('sEngine').value === 'bagher') $('setupBundle').classList.add('hidden');
       await loadSSHFwd();
       if (typeof refreshDash === 'function') await refreshDash();
       if (typeof refreshTunnel === 'function') await refreshTunnel();
@@ -7388,58 +7244,30 @@ async function sshfwdClearDnatClick() {
 }
 
 function bagherCopyBundleClick() {
-  const t = $('bagherBundleText');
-  const val = t ? t.value.trim() : '';
+  const val = ((_sshfwdData || {}).bundle || '').trim();
   if (!val) {
-    toastErr('No Bundle', 'Please fill in Step 2 and click "Initialize Iran Server" first.');
+    toastErr(tr('', 'No bundle yet'), tr('', 'Start Bagher in Setup first.'));
     return;
   }
-  copyTextSafe(val, 'Bundle Copied', 'Bagher connection bundle copied to clipboard. Paste into Foreign server panel.');
-}
-
-async function sshfwdApplyClick() {
-  await bagherIranApplyClick();
-}
-
-async function bagherApplyBundleClick() {
-  await bagherForeignConnectClick();
+  copyTextSafe(val, tr('', 'Bundle copied'), tr('', 'Paste it on the foreign server.'));
 }
 
 (function initSSHFwdEvents() {
   function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
-  on('bagherRoleIran', 'click', () => setBagherRole('iran'));
-  on('bagherRoleForeign', 'click', () => setBagherRole('foreign'));
-  on('bagherIranApplyBtn', 'click', bagherIranApplyClick);
-  on('bagherIranStopBtn', 'click', bagherStopTunnelClick);
-  on('bagherIranCleanBtn', 'click', cleanBagherTunnelClick);
-  on('bagherForeignConnectBtn', 'click', bagherForeignConnectClick);
-  on('bagherForeignStopBtn', 'click', bagherStopTunnelClick);
-  on('bagherForeignCleanBtn', 'click', cleanBagherTunnelClick);
-  on('sshfwdClearDnatBtn', 'click', sshfwdClearDnatClick);
   on('sshfwdCopyAuthBtn', 'click', sshfwdCopyAuthClick);
   on('sshfwdCopyForeignBtn', 'click', sshfwdCopyForeignClick);
-  on('bagherCopyBundleBtn', 'click', bagherCopyBundleClick);
 
   // License Modal events
   on('bagherLicModalClose', 'click', closeBagherLicModal);
   on('bagherLicCancelBtn', 'click', cancelBagherLicModal);
   on('bagherLicSubmitBtn', 'click', activateBagherLicenseClick);
   on('bagherLicCopyMachineBtn', 'click', bagherLicCopyMachineClick);
-  on('bagherOpenLicModalBtn', 'click', openBagherLicModal);
 
   // Auto-select text on click
-  ['bagherBundleText', 'sshfwdForeignCmd', 'sshfwdAuthLine', 'bagherLicMachineHash'].forEach(id => {
+  ['sshfwdForeignCmd', 'sshfwdAuthLine', 'bagherLicMachineHash'].forEach(id => {
     const el = $(id);
     if (el) el.addEventListener('click', () => { el.select(); });
   });
-
-  // Periodic poll when on sshfwd tab
-  setInterval(() => {
-    const tab = $('tab-sshfwd');
-    if (tab && !tab.hidden && document.visibilityState === 'visible') {
-      loadSSHFwd();
-    }
-  }, 3500);
 })();
 
 /* --- License & Premium Feature Management --- */
@@ -7501,7 +7329,6 @@ function renderLicense(d) {
     if ($('licFeaturesRow')) {
       $('licFeaturesRow').textContent = 'Unlocked Features: ' + (d.features && d.features.length ? d.features.join(', ') : 'All');
     }
-    if ($('bagherLockedBanner')) $('bagherLockedBanner').classList.add('hidden');
   } else {
     setBrandTier(false);
     if (badge) {
@@ -7511,10 +7338,8 @@ function renderLicense(d) {
     }
     if (details) details.classList.add('hidden');
     if (deactBtn) deactBtn.classList.add('hidden');
-    if ($('bagherLockedBanner') && $('sshfwdMode') && ($('sshfwdMode').value === 'bagher' || $('sshfwdMode').value === 'frp_ssh')) {
-      $('bagherLockedBanner').classList.remove('hidden');
-    }
   }
+  bagherSetupSync();
 }
 
 async function activateLicenseClick() {
@@ -7604,9 +7429,6 @@ async function saveBagherQuickEdit() {
       pool_count,
       frp_bind_port
     });
-    if (res && res.bundle && $('bagherBundleText')) {
-      $('bagherBundleText').value = res.bundle;
-    }
     toastOk('Bagher Updated', 'Tunnel settings updated and applied successfully!');
     closeBagherQuickEdit();
     if (typeof loadSSHFwd === 'function') await loadSSHFwd();
@@ -7624,14 +7446,14 @@ window.openBagherLicenseSettings = openBagherLicenseSettings;
 window.activateBagherLicenseClick = activateBagherLicenseClick;
 window.bagherLicCopyMachineClick = bagherLicCopyMachineClick;
 window.bagherIranApplyClick = bagherIranApplyClick;
-window.bagherForeignConnectClick = bagherForeignConnectClick;
+window.bagherStartClick = bagherStartClick;
+window.openBagherSetup = openBagherSetup;
 window.bagherStopTunnelClick = bagherStopTunnelClick;
 window.bagherCopyBundleClick = bagherCopyBundleClick;
 window.cleanBagherTunnelClick = cleanBagherTunnelClick;
 window.openBagherQuickEdit = openBagherQuickEdit;
 window.closeBagherQuickEdit = closeBagherQuickEdit;
 window.saveBagherQuickEdit = saveBagherQuickEdit;
-window.setBagherRole = setBagherRole;
 window.sshfwdClearDnatClick = sshfwdClearDnatClick;
 window.sshfwdCopyForeignClick = sshfwdCopyForeignClick;
 window.sshfwdCopyAuthClick = sshfwdCopyAuthClick;

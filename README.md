@@ -208,16 +208,18 @@ The panel binary comes from the active [update channel](#updates-downgrade-and-c
 
 ## Choosing an engine
 
-| | GRE + FRP | GRE + Backhaul | Backhaul standalone |
+| | GRE + FRP | Backhaul with GRE | Backhaul without GRE |
 | --- | --- | --- | --- |
 | Setup bundle | `hsh1_` | `gh1_` | `bh1_` |
 | GRE interface | yes | yes | **no** |
 | Relay | frp | Backhaul | Backhaul |
 | Transports | tcp, kcp, quic, websocket, wss | Backhaul transports | Backhaul transports |
-| Dials the hub's public IP when GRE is dead | yes | yes | n/a |
-| Pick it when | you want the most features and tuning (Auto Pool, encryption, compression, PROXY v2) | you want Backhaul's relay on a private L3 link | GRE is blocked or unavailable and you only need a relay |
+| Dials the hub's public IP while GRE is dead, back to GRE when it returns | yes | yes | n/a |
+| Pick it when | you want the most features and tuning (Auto Pool, encryption, compression, PROXY v2) | you want Backhaul and GRE when the path allows it | GRE (protocol 47) is blocked for good between your servers |
 
-Start with **GRE + FRP** and the **Direct GRE** carrier. If IP protocol 47 is dropped between your servers, try the **WSS** carrier, then Backhaul standalone. The Benchmark tab probes carriers for you. More detail: [docs/ENGINES.md](docs/ENGINES.md) and the [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md).
+Backhaul is one engine in Setup and in `hashem backhaul`; "with GRE" or "without GRE" is a question inside it. **Bagher** [PRO] (an SSH connection pool carrying FRP) is set up from the same Setup tab and runs from the Tunnel tab like the other tunnels.
+
+Start with **GRE + FRP** and the **Direct GRE** carrier. If IP protocol 47 is dropped between your servers, try the **WSS** carrier, then Backhaul without GRE. The Benchmark tab probes carriers for you. More detail: [docs/ENGINES.md](docs/ENGINES.md) and the [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md).
 
 ---
 
@@ -226,10 +228,10 @@ Start with **GRE + FRP** and the **Direct GRE** carrier. If IP protocol 47 is dr
 The panel is one page with these tabs:
 
 - **Dashboard** — a banner with one big word (Healthy / Degraded / Down) and one line per tunnel; KPIs; the Fleet Health card with hub latency, the topology graph and per-server cards.
-- **Tunnel** — the main tunnel and the foreign-server peer cards: add, edit ports, restart, remove, per-tunnel PASS/FAIL checks, the dial-route card.
+- **Tunnel** — every tunnel on this server: the main tunnel, the foreign-server peer cards and the Bagher card (start, stop, copy bundle, quick edit, remove); per-tunnel PASS/FAIL checks, the dial-route card.
 - **Performance** — Auto Pool, encryption / compression, and TCP multiplexing.
 - **Diagnostics** — latency, jitter, MTU and speed tests; the same engine as `hashem doctor`.
-- **Setup** — pairing, bundles and peers.
+- **Setup** — create any tunnel: GRE + FRP, Backhaul (with or without GRE) or Bagher; bundles and peers.
 - **Watchdog** — monitoring, backups and alerts.
 - **Benchmark** — carrier probing and the optional auto-pilot.
 - **Update** — channels, install any tag, rollback state.
@@ -242,8 +244,9 @@ The panel is one page with these tabs:
 ## Tunnel types
 
 - **GRE+FRP** (`frp`) — a GRE Layer-3 link between the two servers with FRP running over it. FRP transports: `tcp`, `kcp`, `quic`, `websocket`, `wss`. `wss` needs a TLS front: a `frps-wss*.service` unit running `gre-panel tls-proxy` on `control_port+2`. Guide: [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md).
-- **GRE+Backhaul** (`gre-backhaul`) — the same GRE link, with Backhaul as the relay. Bundle prefix `gh1_`.
-- **Backhaul standalone** (`backhaul`) — Backhaul only, no GRE interface at all. Bundle prefix `bh1_`.
+- **Backhaul with GRE** (`gre-backhaul`) — the same GRE link, with Backhaul as the relay. Bundle prefix `gh1_`.
+- **Backhaul without GRE** (`backhaul`) — Backhaul only, no GRE interface at all. Bundle prefix `bh1_`.
+- **Bagher** [PRO] — an SSH connection pool from Iran to the foreign server carrying FRP. Bundle prefix `BAGHER:`.
 - **Carriers for the GRE layer** — **Direct GRE** (IP protocol 47) and **WSS** (TLS WebSocket, default `:8443`). The FOU carrier was removed.
 
 ---
@@ -268,7 +271,7 @@ The dashboard's overall status uses the same function. The main tunnel counts as
 ## Automation
 
 - **Watchdog** — a systemd timer (`hashem-watchdog.timer`) runs `hashem watchdog tick` every minute. Control it with `hashem watchdog on|off|status|test|tick`. Telegram alerts are configured in the watchdog settings; `hashem tgsend "msg"` sends a manual message. `auto_restart` defaults to **off** (alert only).
-- **Dial route** — on foreign servers, `hashem dial [status|auto|gre|public]` chooses whether `frpc` / `backhaul-client` dials the hub over the GRE inner IP or the hub public IP. `auto` uses GRE if it answers (ping or TCP to the control port), otherwise public. The watchdog switches to public automatically when GRE is dead and the client is not connected. Foreign servers show a "Route to the Iran hub" card.
+- **Dial route** — on foreign servers, `hashem dial [status|auto|gre|public]` chooses whether `frpc` / `backhaul-client` dials the hub over the GRE inner IP or the hub public IP. `auto` uses GRE if it answers (ping or TCP to the control port), otherwise public. The watchdog switches to public automatically when GRE is dead and the client is not connected, and back to GRE once GRE has carried the control port for 5 checks in a row (5 minutes). If the client cannot connect over GRE after that move, it goes back to the public IP and waits 30 minutes before trying again. The foreign side of Setup asks for the route when the bundle uses GRE. Foreign servers show a "Route to the Iran hub" card.
 - **Carrier failover** — `hashem carrier` manages and cycles carriers. Switching is manual; the advisor only suggests.
 - **Backups** — `hashem backup now|restore|schedule|status` (encrypted archives in `/var/backups/hashem`).
 - **Adaptive capacity** — multiplexing capacity adjusts to load and available RAM.
