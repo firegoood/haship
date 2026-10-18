@@ -217,6 +217,7 @@ var (
 	trafficStateMu   sync.Mutex
 	lastRawUp        uint64
 	lastRawDown      uint64
+	lastRawIf        map[string][2]uint64 // per interface: received, transmitted
 	lifetimeUp       uint64
 	lifetimeDown     uint64
 	trafficStateInit bool
@@ -373,8 +374,18 @@ func greTraffic() map[string]any {
 }
 
 func greTrafficFrom(devData string) map[string]any {
-	var rawUp, rawDown uint64
-	var haveTunnel bool
+	// Raw counters per interface: [0] received (down), [1] transmitted (up).
+	cur := map[string][2]uint64{}
+	parse := func(line, ifname string) ([2]uint64, bool) {
+		f := strings.Fields(strings.TrimPrefix(line, ifname+":"))
+		if len(f) < 9 {
+			return [2]uint64{}, false
+		}
+		var r, t uint64
+		_, _ = fmt.Sscanf(f[0], "%d", &r)
+		_, _ = fmt.Sscanf(f[8], "%d", &t)
+		return [2]uint64{r, t}, true
+	}
 
 	if devData != "" {
 		for _, line := range strings.Split(devData, "\n") {
@@ -386,22 +397,13 @@ func greTrafficFrom(devData string) map[string]any {
 			if !isTunnelInterface(ifname) {
 				continue
 			}
-			f := strings.Fields(strings.TrimPrefix(line, ifname+":"))
-			if len(f) < 9 {
-				continue
+			if c, ok := parse(line, ifname); ok {
+				cur[ifname] = c
 			}
-			var r, t uint64
-			if _, err := fmt.Sscanf(f[0], "%d", &r); err == nil {
-				rawDown += r
-			}
-			if _, err := fmt.Sscanf(f[8], "%d", &t); err == nil {
-				rawUp += t
-			}
-			haveTunnel = true
 		}
 	}
 
-	if !haveTunnel && devData != "" {
+	if len(cur) == 0 && devData != "" {
 		primIf := primaryInterface()
 		for _, line := range strings.Split(devData, "\n") {
 			line = strings.TrimSpace(line)
@@ -418,18 +420,8 @@ func greTrafficFrom(devData string) map[string]any {
 					continue
 				}
 			}
-			f := strings.Fields(strings.TrimPrefix(line, ifname+":"))
-			if len(f) < 9 {
-				continue
-			}
-			var r, t uint64
-			if _, err := fmt.Sscanf(f[0], "%d", &r); err == nil {
-				rawDown = r
-			}
-			if _, err := fmt.Sscanf(f[8], "%d", &t); err == nil {
-				rawUp = t
-			}
-			if rawDown > 0 || rawUp > 0 {
+			if c, ok := parse(line, ifname); ok && (c[0] > 0 || c[1] > 0) {
+				cur[ifname] = c
 				break
 			}
 		}
@@ -440,26 +432,37 @@ func greTrafficFrom(devData string) map[string]any {
 
 	now := time.Now()
 
-	if !trafficStateInit {
+	first := !trafficStateInit
+	if first {
 		loadTrafficStateLocked()
-		lastRawUp = rawUp
-		lastRawDown = rawDown
 		lastSampleTime = now
 	}
 
-	dU := uint64(0)
-	if rawUp >= lastRawUp {
-		dU = rawUp - lastRawUp
-	} else {
-		dU = rawUp
+	// Deltas are taken per interface. Comparing one summed counter made the
+	// chart spike: when the tunnel interface went away the source switched to
+	// the main NIC (hundreds of GB), and when one of several tunnels dropped
+	// the smaller sum was taken for a counter reset and counted again.
+	// An interface seen for the first time is only a baseline.
+	var dU, dD, rawUp, rawDown uint64
+	for name, c := range cur {
+		rawDown += c[0]
+		rawUp += c[1]
+		prev, seen := lastRawIf[name]
+		if first || !seen {
+			continue
+		}
+		if c[0] >= prev[0] {
+			dD += c[0] - prev[0]
+		} else {
+			dD += c[0] // counter reset: the interface was recreated
+		}
+		if c[1] >= prev[1] {
+			dU += c[1] - prev[1]
+		} else {
+			dU += c[1]
+		}
 	}
-
-	dD := uint64(0)
-	if rawDown >= lastRawDown {
-		dD = rawDown - lastRawDown
-	} else {
-		dD = rawDown
-	}
+	lastRawIf = cur
 
 	lifetimeUp += dU
 	lifetimeDown += dD

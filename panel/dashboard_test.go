@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -192,6 +193,7 @@ func TestGreTrafficFromSmartFallback(t *testing.T) {
 	lifetimeDown = 0
 	lastRawUp = 0
 	lastRawDown = 0
+	lastRawIf = nil
 	trafficStateMu.Unlock()
 
 	devData1 := "Inter-|   Receive                                                |  Transmit\n" +
@@ -224,5 +226,63 @@ func TestGreTrafficFromSmartFallback(t *testing.T) {
 	}
 	if _, ok := t2["speed_down"].(float64); !ok {
 		t.Errorf("expected float64 speed_down, got %T", t2["speed_down"])
+	}
+}
+
+// devLines builds /proc/net/dev text: name -> {received, transmitted}.
+func devLines(ifs map[string][2]uint64) string {
+	s := "Inter-|   Receive |  Transmit\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets\n"
+	for name, c := range ifs {
+		s += fmt.Sprintf("  %s: %d 1 0 0 0 0 0 0 %d 1 0 0 0 0 0 0\n", name, c[0], c[1])
+	}
+	return s
+}
+
+func resetTrafficState(t *testing.T) {
+	t.Helper()
+	old := configDir
+	configDir = t.TempDir()
+	histMu.Lock()
+	histLoaded, histCached = true, nil
+	histMu.Unlock()
+	trafficStateMu.Lock()
+	trafficStateInit, lifetimeUp, lifetimeDown, lastRawUp, lastRawDown, lastRawIf = false, 0, 0, 0, 0, nil
+	trafficStateMu.Unlock()
+	t.Cleanup(func() { configDir = old })
+}
+
+// The throughput chart spiked to tens of GB/s whenever the tunnel interface
+// went away (the source switched to the main NIC) or one of several tunnels
+// dropped (the smaller sum counted as a counter reset). Only real bytes count.
+func TestGreTrafficNoSpikeOnSourceChange(t *testing.T) {
+	resetTrafficState(t)
+	const gb = 1 << 30
+	down := func(m map[string]any) uint64 { return m["down"].(uint64) }
+
+	greTrafficFrom(devLines(map[string][2]uint64{"gre-a": {2 * gb, gb}, "gre-b": {gb, gb}}))
+	m := greTrafficFrom(devLines(map[string][2]uint64{"gre-a": {2*gb + 100, gb}, "gre-b": {gb + 50, gb}}))
+	if got := down(m); got != 150 {
+		t.Fatalf("two tunnels: down = %d, want 150", got)
+	}
+	// gre-b drops: the smaller sum is not a counter reset.
+	m = greTrafficFrom(devLines(map[string][2]uint64{"gre-a": {2*gb + 200, gb}}))
+	if got := down(m); got != 250 {
+		t.Fatalf("one tunnel dropped: down = %d, want 250", got)
+	}
+	// No tunnel interface: the panel falls back to the main NIC; its counter is only a baseline.
+	m = greTrafficFrom(devLines(map[string][2]uint64{"lo": {5, 5}, "ens5": {500 * gb, 400 * gb}}))
+	if got := down(m); got != 250 {
+		t.Fatalf("switch to main NIC: down = %d, want 250", got)
+	}
+	// The tunnel comes back recreated (counter from zero).
+	greTrafficFrom(devLines(map[string][2]uint64{"gre-a": {10, 0}}))
+	m = greTrafficFrom(devLines(map[string][2]uint64{"gre-a": {30, 0}}))
+	if got := down(m); got != 270 {
+		t.Fatalf("tunnel back: down = %d, want 270", got)
+	}
+	// Same interface recreated between two samples: the new counter is real traffic.
+	m = greTrafficFrom(devLines(map[string][2]uint64{"gre-a": {7, 0}}))
+	if got := down(m); got != 277 {
+		t.Fatalf("counter reset: down = %d, want 277", got)
 	}
 }

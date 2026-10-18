@@ -1528,6 +1528,10 @@ function drawChart(hist, isDown) {
     let bTot = b.total != null ? b.total : (bDown + bUp);
     let dtot = (bTot - aTot) / dt;
     if (dtot < 0) dtot = dd + du;
+    // Above 100 Gbit/s is a counter glitch, not traffic: older panels added the
+    // whole main-NIC counter when the tunnel interface went away.
+    const GLITCH = 12.5e9;
+    if (dd > GLITCH || du > GLITCH || dtot > 2 * GLITCH) continue;
     series.push({t: b.t, down: dd, up: du, total: dtot, conns: b.conns || 0});
   }
   cv._series = series;
