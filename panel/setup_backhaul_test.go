@@ -145,6 +145,9 @@ func TestBackhaulPortParsingAndValidation(t *testing.T) {
 		"2083=8443",
 		"8080=80",
 		"1-65535",
+		"10000-10050=443",
+		"443=1.1.1.1:5201",
+		"127.0.0.2:443=1.1.1.1:5201",
 	}
 	for _, c := range validCases {
 		if !isValidPortOrRangeOrMapping(c) {
@@ -164,6 +167,9 @@ func TestBackhaulPortParsingAndValidation(t *testing.T) {
 		"=80",
 		"80=",
 		"80=90000",
+		"1.2.3:443",
+		"443=1.1.1:80",
+		"10000-10050:443", // the core rejects it; parseRawPorts rewrites it first
 	}
 	for _, c := range invalidCases {
 		if isValidPortOrRangeOrMapping(c) {
@@ -337,5 +343,32 @@ func TestBackhaulPeersPatchWithRangesAndMappings(t *testing.T) {
 	}
 	if len(parsedBundle.RawPorts) != 3 {
 		t.Errorf("expected 3 raw ports in bundle, got %d", len(parsedBundle.RawPorts))
+	}
+}
+
+func TestParseRawPortsBackhaulForms(t *testing.T) {
+	got := parseRawPorts("10000-10050:443 127.0.0.2:443=1.1.1.1:5201,8080")
+	want := []string{"10000-10050=443", "127.0.0.2:443=1.1.1.1:5201", "8080"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("parseRawPorts = %v, want %v", got, want)
+	}
+	if nums := extractNumericPorts(got); len(nums) != 3 || nums[0] != 10000 || nums[1] != 443 || nums[2] != 8080 {
+		t.Fatalf("extractNumericPorts = %v", nums)
+	}
+}
+
+func TestBackhaulTransportOK(t *testing.T) {
+	for _, ok := range []string{"tcp", "tcpmux", "ws", "wss", "wsmux", "wssmux", "udp"} {
+		if !backhaulTransportOK(ok) {
+			t.Errorf("%q refused", ok)
+		}
+	}
+	for _, bad := range []string{"", "anytls", "xtcpmux", "tun", "kcp"} {
+		if backhaulTransportOK(bad) {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if _, err := switchTunnelEngine("backhaul", "anytls"); err == nil || !strings.Contains(err.Error(), "invalid Backhaul transport") {
+		t.Fatalf("switchTunnelEngine(anytls) err = %v", err)
 	}
 }

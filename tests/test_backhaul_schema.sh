@@ -7,6 +7,7 @@ mkdir -p "$T/bin"
 BACKHAUL_CONFIG_DIR="$T/etc"; INSTALL_DIR="$T/bin"
 fail=0
 ext() { awk -v n="$1" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "$ROOT/hashem.sh"; }
+eval "$(grep -E '^backhaul_udp_wanted' "$ROOT/hashem.sh")"
 for f in backhaul_is_v2 backhaul_write_server_conf_v1 backhaul_write_client_conf_v1 backhaul_write_server_conf_v2 backhaul_write_client_conf_v2 backhaul_write_server_conf backhaul_write_client_conf; do
   b="$(ext $f)"; [[ -n "$b" ]] || { echo "FAIL: $f missing"; exit 1; }; eval "$b"
 done

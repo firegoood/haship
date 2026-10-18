@@ -31,9 +31,22 @@ var backhaulCoreVersion = func() string {
 	return ""
 }
 
-// backhaulIsV2 mirrors backhaul_is_v2 in hashem.sh: the "Modified v2.x" core
-// shipped by hashem uses a sectioned TOML schema ([listener]/[dialer]/...)
-// and rejects the flat v0.x [server]/[client] one.
+// backhaulTransports mirrors BACKHAUL_TRANSPORTS in hashem.sh: what the
+// installed core accepts. All carry TCP except udp, which carries UDP only.
+var backhaulTransports = []string{"tcp", "tcpmux", "ws", "wss", "wsmux", "wssmux", "udp"}
+
+func backhaulTransportOK(t string) bool {
+	for _, v := range backhaulTransports {
+		if t == v {
+			return true
+		}
+	}
+	return false
+}
+
+// backhaulIsV2 mirrors backhaul_is_v2 in hashem.sh. hashem installs upstream
+// v0.7.2 (flat [server]/[client]); a v2.x core an operator put in its place
+// uses a sectioned TOML schema ([listener]/[dialer]/...) and rejects the flat one.
 func backhaulIsV2() bool {
 	v := strings.TrimPrefix(backhaulCoreVersion(), "v")
 	return strings.HasPrefix(v, "2.")

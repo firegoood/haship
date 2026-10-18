@@ -1934,10 +1934,7 @@ install_backhaul_binaries() {
 
     rm -rf "$TMP_DIR"
     if [[ -x "${INSTALL_DIR}/backhaul" ]]; then
-        mkdir -p "/root/backhaul-core" 2>/dev/null || true
-        cp -f "${INSTALL_DIR}/backhaul" "/root/backhaul-core/backhaul_premium" 2>/dev/null || ln -sf "${INSTALL_DIR}/backhaul" "/root/backhaul-core/backhaul_premium"
-        chmod +x "/root/backhaul-core/backhaul_premium" 2>/dev/null || true
-        echo -e "${GREEN}[✔️] Backhaul (Modified v2.0.0-hotfix8) installed to ${INSTALL_DIR}/backhaul.${NC}"
+        echo -e "${GREEN}[✔️] Backhaul ${BH_VER} installed to ${INSTALL_DIR}/backhaul.${NC}"
         return 0
     else
         echo -e "${RED}[!] Backhaul binary extraction failed.${NC}"
@@ -1983,6 +1980,9 @@ web_port = 0
 sniffer_log = ""
 log_level = "info"
 EOF
+    if backhaul_udp_wanted "$TRANSPORT"; then
+        echo "accept_udp = true" >> "$CONF_FILE"
+    fi
 
     if [[ "$TRANSPORT" == "wss" || "$TRANSPORT" == "wssmux" ]]; then
         cat <<EOF >> "$CONF_FILE"
@@ -1993,7 +1993,7 @@ EOF
 
     echo "ports = [" >> "$CONF_FILE"
     local FIRST=1
-    IFS=',' read -ra ADDR <<< "$PORTS_LIST"
+    IFS=', ' read -ra ADDR <<< "$PORTS_LIST"
     for p in "${ADDR[@]}"; do
         p=$(echo "$p" | xargs)
         [[ -z "$p" ]] && continue
@@ -2030,17 +2030,66 @@ log_level = "info"
 EOF
 }
 
-# B-03: the Backhaul core shipped by hashem is the "Modified v2.x" build, whose
-# TOML schema differs from upstream v0.x ([listener]/[dialer]/[transport]/
-# [security]/[ports] instead of flat [server]/[client]). Writing the v0.x
-# schema for a v2 core makes it exit with "neither server nor client
-# configuration is properly set". Pick the schema from the installed core.
+# B-03: hashem installs upstream Backhaul (DEFAULT_BACKHAUL_VERSION), which reads
+# the flat [server]/[client] schema. A v2.x core placed at INSTALL_DIR/backhaul
+# by the operator reads the sectioned one ([listener]/[dialer]/[transport]/
+# [security]/[ports]) and exits with "neither server nor client configuration
+# is properly set" on the other. Pick the schema from the installed core.
 backhaul_is_v2() {
     local bin="${INSTALL_DIR:-/usr/local/bin}/backhaul" v
     [[ -x "$bin" ]] || bin="$(command -v backhaul 2>/dev/null)"
     [[ -n "$bin" ]] || return 1
     v="$("$bin" -v 2>/dev/null | head -n1)"
     [[ "$v" =~ ^v?2\. ]]
+}
+
+# Transports the installed core accepts. Checked against the real v0.7.2 core:
+# every one carries TCP except udp, which carries UDP only.
+BACKHAUL_TRANSPORTS="tcp tcpmux ws wss wsmux wssmux udp"
+backhaul_transport_ok() { [[ -n "$1" && " $BACKHAUL_TRANSPORTS " == *" $1 "* ]]; }
+
+# UDP forwarding (BH_ACCEPT_UDP=1, set by --udp or the menu) works only on the
+# tcp transport: the core ignores accept_udp on tcpmux and the ws family.
+backhaul_udp_wanted() { [[ "${BH_ACCEPT_UDP:-0}" == "1" && "$1" == "tcp" ]]; }
+
+# backhaul_ports_normalize "443 2083, 10000-10050:443" prints the entries the
+# core accepts, comma-separated: PORT, A-B, P=Q, A-B=Q, with an optional IP:
+# on either side. "A-B:Q" (in Backhaul's README, rejected by the core) becomes
+# "A-B=Q". Returns 1 and prints the first bad entry on stderr.
+backhaul_ports_normalize() {
+    local out="" e ip='([0-9]{1,3}[.]){3}[0-9]{1,3}:' p='[0-9]{1,5}'
+    local re="^(${ip})?${p}(-${p})?(=(${ip})?${p})?$" rng="^(${p}-${p}):(${p})$"
+    for e in $(echo "$1" | tr ',' ' '); do
+        [[ "$e" =~ $rng ]] && e="${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+        if [[ ! "$e" =~ $re ]]; then
+            echo "$e" >&2
+            return 1
+        fi
+        out="${out:+$out,}$e"
+    done
+    [[ -n "$out" ]] || return 1
+    echo "$out"
+}
+
+# backhaul_setup_guard TRANSPORT [PORTS]: refuses a setup the core would reject
+# and leaves the normalized port list in BH_PORTS_NORM ("" when none given).
+backhaul_setup_guard() {
+    local bad
+    BH_PORTS_NORM=""
+    if ! backhaul_transport_ok "$1"; then
+        echo -e "${RED}[!] Backhaul transport '$1' is not supported. Use one of: ${BACKHAUL_TRANSPORTS}${NC}"
+        return 1
+    fi
+    if [[ "${BH_ACCEPT_UDP:-0}" == "1" && "$1" != "tcp" ]]; then
+        echo -e "${YELLOW}[!] UDP forwarding needs transport tcp; '$1' carries $([[ "$1" == udp ]] && echo "UDP only" || echo "TCP only").${NC}"
+    fi
+    if [[ -n "$(echo "${2:-}" | tr -d ' ,')" ]]; then
+        BH_PORTS_NORM=$(backhaul_ports_normalize "$2" 2>/dev/null) || {
+            bad=$(backhaul_ports_normalize "$2" 2>&1 >/dev/null)
+            echo -e "${RED}[!] Invalid Backhaul port entry '${bad}'. Use 443, 10000-10050, 2083=8443 or 10000-10050=443.${NC}"
+            return 1
+        }
+    fi
 }
 
 backhaul_write_server_conf_v2() {
@@ -2051,8 +2100,9 @@ backhaul_write_server_conf_v2() {
     fi
     {
         printf '[listener]\nbind_addr = "%s"\n\n' "$BIND_ADDR"
-        printf '[transport]\ntype = "%s"\nnodelay = true\nkeepalive_period = 75\n\n' "$TRANSPORT"
-        printf '[security]\ntoken = "%s"\n\n' "$TOKEN"
+        printf '[transport]\ntype = "%s"\nnodelay = true\nkeepalive_period = 75\n' "$TRANSPORT"
+        backhaul_udp_wanted "$TRANSPORT" && printf 'accept_udp = true\n'
+        printf '\n[security]\ntoken = "%s"\n\n' "$TOKEN"
         if [[ "$TRANSPORT" == *mux ]]; then
             printf '[mux]\nmux_version = 1\n\n'
         fi
@@ -2061,7 +2111,7 @@ backhaul_write_server_conf_v2() {
         fi
         printf '[logging]\nlog_level = "info"\n\n[ports]\nmapping = [\n'
         local p
-        IFS=',' read -ra _ADDR <<< "$PORTS_LIST"
+        IFS=', ' read -ra _ADDR <<< "$PORTS_LIST"
         for p in "${_ADDR[@]}"; do
             p="$(echo "$p" | xargs)"
             [[ -z "$p" ]] && continue
@@ -3138,7 +3188,9 @@ EOF
 
 setup_backhaul_iran_server_noninteractive() {
     local IP_IRAN=$1 IP_FOREIGN=$2 BIND_PORT=$3 TOKEN=$4 TRANSPORT=${5:-tcpmux} PORTS=${6:-}
-    
+    backhaul_setup_guard "$TRANSPORT" "$PORTS" || return 1
+    PORTS=$BH_PORTS_NORM
+
     log_msg "tunnel" "INFO" "Starting Standalone Backhaul IRAN server setup: port ${BIND_PORT}, transport ${TRANSPORT}"
     backup_configs "pre_setup_backhaul_iran"
     ensure_dependencies_smart
@@ -3172,7 +3224,7 @@ setup_backhaul_iran_server_noninteractive() {
     fi
 
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-        ufw allow "${BIND_PORT}/tcp" >/dev/null 2>&1 || true
+        ufw allow "${BIND_PORT}/$([[ "$TRANSPORT" == udp ]] && echo udp || echo tcp)" >/dev/null 2>&1 || true
     fi
 
     tune_apply >/dev/null 2>&1 || true
@@ -3227,7 +3279,8 @@ setup_backhaul_iran_server_noninteractive() {
 
 setup_backhaul_foreign_server_noninteractive() {
     local IP_FOREIGN=$1 IP_IRAN=$2 SERVER_PORT=$3 TOKEN=$4 TRANSPORT=${5:-tcpmux}
-    
+    backhaul_setup_guard "$TRANSPORT" || return 1
+
     log_msg "tunnel" "INFO" "Starting Standalone Backhaul FOREIGN setup: remote ${IP_IRAN}:${SERVER_PORT}, transport ${TRANSPORT}"
     backup_configs "pre_setup_backhaul_foreign"
     ensure_dependencies_smart
@@ -3306,7 +3359,9 @@ setup_gre_backhaul_iran_server_noninteractive() {
     local IP_IRAN=$1 IP_FOREIGN=$2 BIND_PORT=$3 TOKEN=$4
     local LOCAL_GRE=${5:-$IRAN_GRE_IP} PEER_GRE=${6:-$FOREIGN_GRE_IP}
     local TRANSPORT=${7:-tcpmux} PORTS=${8:-}
-    
+    backhaul_setup_guard "$TRANSPORT" "$PORTS" || return 1
+    PORTS=$BH_PORTS_NORM
+
     log_msg "tunnel" "INFO" "Starting GRE+Backhaul IRAN setup: GRE ${IP_IRAN} <-> ${IP_FOREIGN}, port: ${BIND_PORT}, transport: ${TRANSPORT}"
     backup_configs "pre_setup_gre_backhaul_iran"
     ensure_dependencies_smart
@@ -3352,7 +3407,7 @@ setup_gre_backhaul_iran_server_noninteractive() {
     fi
 
     if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-        ufw allow "${BIND_PORT}/tcp" >/dev/null 2>&1 || true
+        ufw allow "${BIND_PORT}/$([[ "$TRANSPORT" == udp ]] && echo udp || echo tcp)" >/dev/null 2>&1 || true
     fi
 
     tune_apply >/dev/null 2>&1 || true
@@ -3418,7 +3473,8 @@ setup_gre_backhaul_foreign_server_noninteractive() {
     local IP_FOREIGN=$1 IP_IRAN=$2 SERVER_PORT=$3 TOKEN=$4
     local LOCAL_GRE=${5:-$FOREIGN_GRE_IP} PEER_GRE=${6:-$IRAN_GRE_IP}
     local TRANSPORT=${7:-tcpmux}
-    
+    backhaul_setup_guard "$TRANSPORT" || return 1
+
     log_msg "tunnel" "INFO" "Starting GRE+Backhaul FOREIGN setup: GRE ${IP_FOREIGN} <-> ${IP_IRAN}, port: ${SERVER_PORT}, transport: ${TRANSPORT}"
     backup_configs "pre_setup_gre_backhaul_foreign"
     ensure_dependencies_smart
@@ -3862,7 +3918,7 @@ cli_remove_peer() {
 }
 
 cli_add_backhaul_peer() {
-    local NAME="" LOCAL_PUB="" REMOTE_PUB="" PORT="" TOKEN="" LOCAL_GRE="" PEER_GRE="" PORTS="" TRANSPORT="tcpmux" NO_GRE=0 FORCE=0 BUNDLE=""
+    local NAME="" LOCAL_PUB="" REMOTE_PUB="" PORT="" TOKEN="" LOCAL_GRE="" PEER_GRE="" PORTS="" TRANSPORT="" NO_GRE=0 FORCE=0 BUNDLE=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --name) NAME="$2"; shift 2 ;;
@@ -3876,8 +3932,9 @@ cli_add_backhaul_peer() {
             --ports) PORTS="$2"; shift 2 ;;
             --no-gre) NO_GRE=1; shift ;;
             --bundle) BUNDLE="$2"; shift 2 ;;
+            --udp) BH_ACCEPT_UDP=1; shift ;;
             --force) FORCE=1; shift ;;
-            -h|--help) echo 'Usage: hashem.sh add-backhaul-peer --remote-pub IP --port P --transport T --token K --ports "443, 10000-10050" [--no-gre]'; return 0 ;;
+            -h|--help) echo 'Usage: hashem.sh add-backhaul-peer --remote-pub IP --port P --transport T --token K --ports "443, 10000-10050" [--no-gre] [--udp]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
         esac
     done
@@ -3895,6 +3952,9 @@ cli_add_backhaul_peer() {
             [[ -z "$PEER_GRE" ]] && PEER_GRE=$B_FOREIGN_GRE
         fi
     fi
+    TRANSPORT=${TRANSPORT:-tcpmux}
+    backhaul_setup_guard "$TRANSPORT" "$PORTS" || return 1
+    PORTS=$BH_PORTS_NORM
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
     [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     PORT=${PORT:-$(gen_random_port)}
@@ -4962,6 +5022,7 @@ uninstall_all_force() {
         pkill -9 -f "${INSTALL_DIR}/frps" >/dev/null 2>&1 || true
         pkill -9 -f "${INSTALL_DIR}/frpc" >/dev/null 2>&1 || true
         pkill -9 -f "${INSTALL_DIR}/backhaul" >/dev/null 2>&1 || true
+        pkill -9 -f "backhaul-core/backhaul_premium" >/dev/null 2>&1 || true
         pkill -9 -f "${INSTALL_DIR}/gre-panel" >/dev/null 2>&1 || true
 
         # 3. Remove all systemd files
@@ -4996,7 +5057,8 @@ uninstall_all_force() {
         rm -f /usr/local/bin/gre-panel /usr/local/bin/grepanel
 
         # 8. Remove configs, data, registries, logs, cron
-        rm -rf "$CONFIG_DIR" "$BACKHAUL_CONFIG_DIR"
+        rm -rf "$CONFIG_DIR" "$BACKHAUL_CONFIG_DIR" "$BACKHAUL_LEGACY_DIR"
+        rm -f /usr/local/bin/hashem-backhaul.sh
         rm -rf /etc/gre-panel /usr/local/gre-panel
         rm -f /etc/sysctl.d/99-hashem-reserved-ports.conf
         sysctl -w net.ipv4.ip_local_reserved_ports="" >/dev/null 2>&1 || true
@@ -5036,6 +5098,7 @@ remove_tunnel_force() {
         pkill -9 -f "${INSTALL_DIR}/frps" >/dev/null 2>&1 || true
         pkill -9 -f "${INSTALL_DIR}/frpc" >/dev/null 2>&1 || true
         pkill -9 -f "${INSTALL_DIR}/backhaul" >/dev/null 2>&1 || true
+        pkill -9 -f "backhaul-core/backhaul_premium" >/dev/null 2>&1 || true
 
         # Remove systemd files
         rm -f /etc/systemd/system/frps*.service /etc/systemd/system/frpc.service \
@@ -5057,7 +5120,8 @@ remove_tunnel_force() {
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"
 
         # Remove configs
-        rm -rf "$CONFIG_DIR" "$BACKHAUL_CONFIG_DIR"
+        rm -rf "$CONFIG_DIR" "$BACKHAUL_CONFIG_DIR" "$BACKHAUL_LEGACY_DIR"
+        rm -f /usr/local/bin/hashem-backhaul.sh
         rm -f "$PEERS_FILE"
 
         echo -e "${GREEN}[✔️] Tunnel removed — GRE interface, FRP/Backhaul services, binaries and configs gone. Panel still running.${NC}"
@@ -7760,6 +7824,237 @@ pause_prompt() {
     read -p "Press Enter to return to menu..." _dummy
 }
 
+prompt_backhaul_transport() { # $1=varname
+    local __var=$1 __in __i=1 __t __list=()
+    echo "Backhaul transport:"
+    for __t in tcpmux tcp wssmux wsmux wss ws udp; do
+        backhaul_transport_ok "$__t" || continue
+        __list+=("$__t")
+        case "$__t" in
+            tcpmux) echo "  $__i) tcpmux  (recommended, TCP)" ;;
+            tcp) echo "  $__i) tcp     (TCP, can also forward UDP)" ;;
+            wssmux) echo "  $__i) wssmux  (TLS, looks like HTTPS, TCP)" ;;
+            udp) echo "  $__i) udp     (UDP only)" ;;
+            *) echo "  $__i) $__t" ;;
+        esac
+        __i=$((__i + 1))
+    done
+    while true; do
+        read -p "Select [1-${#__list[@]}] (default 1 = tcpmux): " __in
+        __in=${__in:-1}
+        if [[ "$__in" =~ ^[0-9]+$ ]] && (( __in >= 1 && __in <= ${#__list[@]} )); then
+            printf -v "$__var" '%s' "${__list[$((__in - 1))]}"; return 0
+        fi
+        backhaul_transport_ok "$__in" && { printf -v "$__var" '%s' "$__in"; return 0; }
+        echo -e "${RED}[!] Pick a number from the list.${NC}"
+    done
+}
+
+prompt_backhaul_udp() { # $1=transport; sets BH_ACCEPT_UDP
+    BH_ACCEPT_UDP=0
+    [[ "$1" == "tcp" ]] || return 0
+    local __in
+    read -p "Also forward UDP on these ports? (y/N): " __in
+    [[ "$__in" =~ ^[Yy]$ ]] && BH_ACCEPT_UDP=1
+    return 0
+}
+
+prompt_backhaul_ports() { # $1=varname
+    local __var=$1 __in __out
+    echo "Ports to forward. Formats: 443 | 10000-10050 | 2083=8443 | 10000-10050=443"
+    while true; do
+        read -p "Ports (comma-separated): " __in
+        if __out=$(backhaul_ports_normalize "$__in" 2>/dev/null); then
+            printf -v "$__var" '%s' "$__out"; return 0
+        fi
+        echo -e "${RED}[!] '$(backhaul_ports_normalize "$__in" 2>&1 >/dev/null)' is not a valid entry.${NC}"
+    done
+}
+
+# Tunnels made by the old separate Modified Backhaul script: configs in
+# /root/backhaul-core, units backhaul-iranN / backhaul-kharejN.
+BACKHAUL_LEGACY_DIR="/root/backhaul-core"
+
+backhaul_legacy_units() {
+    local u
+    for u in "${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"/backhaul-iran[0-9]*.service "${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"/backhaul-kharej[0-9]*.service; do
+        [[ -f "$u" ]] && echo "$u"
+    done
+}
+
+# bh_legacy_get FILE SECTION KEY: a value from the sectioned (v2) toml.
+bh_legacy_get() {
+    awk -v s="[$2]" -v k="$3" '
+        /^[[:space:]]*\[/ { sec = $0; gsub(/[[:space:]]/, "", sec); next }
+        sec == s {
+            line = $0; sub(/^[[:space:]]+/, "", line)
+            key = line; sub(/[[:space:]]*=.*/, "", key)
+            if (key == k) { sub(/^[^=]*=[[:space:]]*/, "", line); gsub(/^"|"[[:space:]]*$/, "", line); print line; exit }
+        }' "$1" 2>/dev/null
+}
+
+# bh_legacy_ports FILE: the [ports] mapping entries, comma-separated.
+bh_legacy_ports() {
+    awk '
+        /^[[:space:]]*\[/ { sec = $0; gsub(/[[:space:]]/, "", sec); m = 0; next }
+        sec == "[ports]" && /^[[:space:]]*mapping/ { m = 1 }
+        m { s = $0; while (match(s, /"[^"]*"/)) { print substr(s, RSTART + 1, RLENGTH - 2); s = substr(s, RSTART + RLENGTH) } }
+        m && /\]/ { m = 0 }' "$1" 2>/dev/null | paste -sd, -
+}
+
+# cli_backhaul_migrate moves tunnels made by the old Modified Backhaul script
+# into Hashem's own Backhaul (backhaul-server / backhaul-client, /etc/backhaul),
+# so the panel, watchdog, backup and uninstall see them. Their sectioned
+# configs never ran on the core hashem installs, so the old units are retired.
+# A unit whose core really is v2.x is left alone.
+cli_backhaul_migrate() {
+    local units u name kind conf bin ver tr tok addr ports port moved=0 kept=0
+    units=$(backhaul_legacy_units)
+    if [[ -z "$units" ]]; then
+        echo -e "${GREEN}[✔️] No old Modified Backhaul tunnels found.${NC}"
+        rm -f /usr/local/bin/hashem-backhaul.sh 2>/dev/null
+        return 0
+    fi
+    local LEGACY_BAK="${BACKHAUL_CONFIG_DIR}/legacy"
+    mkdir -p "$LEGACY_BAK"; chmod 700 "$LEGACY_BAK" 2>/dev/null || true
+    for u in $units; do
+        name=$(basename "$u" .service); kind=${name#backhaul-}; kind=${kind%%[0-9]*}
+        conf=$(awk -F' -c ' '/^ExecStart=/{print $2; exit}' "$u" | awk '{print $1}')
+        [[ -n "$conf" ]] || conf="${BACKHAUL_LEGACY_DIR}/${name#backhaul-}.toml"
+        bin=$(awk '/^ExecStart=/{sub(/^ExecStart=/, ""); print $1; exit}' "$u")
+        ver=$("$bin" -v 2>/dev/null | head -n1)
+        if [[ "$ver" =~ ^v?2\. ]]; then
+            echo -e "${YELLOW}[!] ${name} runs a ${ver} core; left as it is.${NC}"
+            kept=$((kept + 1)); continue
+        fi
+        tr=$(bh_legacy_get "$conf" transport type)
+        tok=$(bh_legacy_get "$conf" security token)
+        ports=$(bh_legacy_ports "$conf")
+        if [[ "$kind" == "iran" ]]; then addr=$(bh_legacy_get "$conf" listener bind_addr); else addr=$(bh_legacy_get "$conf" dialer remote_addr); fi
+        port=${addr##*:}
+        systemctl disable --now "${name}.service" >/dev/null 2>&1 || true
+        rm -f "$u"
+        [[ -f "$conf" ]] && mv -f "$conf" "$LEGACY_BAK/" 2>/dev/null
+        echo -e "${CYAN}[*] Retired ${name} (old script, ${tr:-unknown} transport). Config kept in ${LEGACY_BAK}.${NC}"
+        if ! backhaul_transport_ok "$tr" || [[ -z "$tok" ]] || ! is_valid_port "$port"; then
+            echo -e "${YELLOW}    It used '${tr:-?}', which Hashem's Backhaul core does not have. Set it up again from: hashem backhaul${NC}"
+            continue
+        fi
+        [[ -n "$ports" ]] && { ports=$(backhaul_ports_normalize "$ports" 2>/dev/null) || ports=""; }
+        install_backhaul_binaries >/dev/null 2>&1 || { echo -e "${RED}[!] Backhaul core missing; run: hashem backhaul${NC}"; continue; }
+        if [[ "$kind" == "iran" ]]; then
+            if [[ -f "${BACKHAUL_CONFIG_DIR}/config.toml" ]]; then
+                echo -e "${YELLOW}    This server already has a Hashem Backhaul server. Add the old one as a peer:${NC}"
+                echo "    hashem add-backhaul-peer --no-gre --remote-pub <FOREIGN_IP> --port ${port} --transport ${tr} --token ${tok} --ports \"${ports}\""
+                continue
+            fi
+            backhaul_write_server_conf "${BACKHAUL_CONFIG_DIR}/config.toml" "0.0.0.0:${port}" "$tr" "$tok" "$ports"
+            setup_backhaul_server_systemd "backhaul-server" "${BACKHAUL_CONFIG_DIR}/config.toml"
+        else
+            if [[ -f "${BACKHAUL_CONFIG_DIR}/client.toml" ]]; then
+                echo -e "${YELLOW}    This server already has a Hashem Backhaul client; the old one was not moved.${NC}"
+                continue
+            fi
+            backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "$addr" "$tr" "$tok"
+            setup_backhaul_client_systemd "backhaul-client" "${BACKHAUL_CONFIG_DIR}/client.toml"
+        fi
+        echo -e "${GREEN}[✔️] Moved into Hashem as backhaul-$([[ "$kind" == iran ]] && echo server || echo client) (port ${port}, ${tr}).${NC}"
+        moved=$((moved + 1))
+    done
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    if (( kept == 0 )); then
+        if [[ -d "$BACKHAUL_LEGACY_DIR" ]]; then
+            rm -f "${BACKHAUL_LEGACY_DIR}/backhaul_premium"
+            mv -f "$BACKHAUL_LEGACY_DIR" "$LEGACY_BAK/backhaul-core.$(date +%s)" 2>/dev/null || true
+        fi
+        rm -f /usr/local/bin/hashem-backhaul.sh 2>/dev/null
+    fi
+    log_msg "tunnel" "INFO" "Old Modified Backhaul tunnels: ${moved} moved into Hashem, ${kept} left on a v2 core" 2>/dev/null || true
+    return 0
+}
+
+backhaul_status() {
+    local u name any=0 ver
+    ver=$("${INSTALL_DIR}/backhaul" -v 2>/dev/null | head -n1)
+    echo -e "Core:    ${ver:-not installed} (${INSTALL_DIR}/backhaul)"
+    for u in /etc/systemd/system/backhaul-server.service /etc/systemd/system/backhaul-server-[0-9]*.service /etc/systemd/system/backhaul-client.service; do
+        [[ -f "$u" ]] || continue
+        any=1; name=$(basename "$u" .service)
+        if ! systemctl is-active --quiet "$name"; then
+            echo -e "${name}: ${RED}stopped${NC}"
+        elif backhaul_session_ok "$name"; then
+            echo -e "${name}: ${GREEN}running${NC}"
+        else
+            echo -e "${name}: ${YELLOW}running, but the link to the other server is down${NC} (journalctl -u ${name})"
+        fi
+    done
+    (( any )) || echo "No Backhaul tunnel on this server yet."
+    [[ -n "$(backhaul_legacy_units)" ]] && echo -e "${YELLOW}Old Modified Backhaul tunnels found: pick 'Move old tunnels into Hashem'.${NC}"
+    return 0
+}
+
+backhaul_show_bundle() {
+    local conf="${BACKHAUL_CONFIG_DIR}/config.toml" pub port tr tok ports inner peer
+    [[ -f "$conf" ]] || { echo -e "${YELLOW}[!] No Backhaul server on this server (bundles come from the Iran side).${NC}"; return 1; }
+    port=$(awk -F'"' '/^bind_addr/{print $2; exit}' "$conf"); port=${port##*:}
+    tr=$(awk -F'"' '/^transport/{print $2; exit}' "$conf")
+    tok=$(awk -F'"' '/^token/{print $2; exit}' "$conf")
+    ports=$(awk '/^ports/{p=1} p{print} p&&/\]/{exit}' "$conf" | grep -o '"[^"]*"' | tr -d '"' | paste -sd, -)
+    pub=$(grep -o '"local_public": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
+    [[ -z "$pub" ]] && pub=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
+    inner=$(ip -4 addr show dev "$TUNNEL_NAME" 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+    echo -e "\n${GREEN}=== Bundle for the foreign server ===${NC}"
+    if [[ -n "$inner" ]]; then
+        peer=$(watchdog_get_peer_gre)
+        echo -e "${CYAN}$(bundle_make_gre_backhaul "$pub" "$port" "$inner" "$peer" "$tr" "$tok" "$ports")${NC}"
+    else
+        echo -e "${CYAN}$(bundle_make_backhaul "$pub" "$port" "$tr" "$tok" "$ports")${NC}"
+    fi
+    echo "On the foreign server: hashem setup-foreign --bundle <this bundle>"
+}
+
+menu_backhaul() {
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}=== BACKHAUL TUNNEL ===${NC}"
+        backhaul_status
+        echo ""
+        echo "  1) Setup Iran server: Backhaul (no GRE)"
+        echo "  2) Setup Iran server: GRE + Backhaul"
+        echo "  3) Setup foreign server from a bundle (bh1_ / gh1_)"
+        echo "  4) Show the bundle for the foreign server"
+        echo "  5) Show Backhaul logs"
+        echo "  6) Restart Backhaul services"
+        [[ -n "$(backhaul_legacy_units)" ]] && echo "  7) Move old Modified Backhaul tunnels into Hashem"
+        echo "  0) Back"
+        echo ""
+        local B_OPT BUNDLE_IN
+        read -p "Select an option: " B_OPT
+        case "$B_OPT" in
+            1) setup_backhaul_iran_interactive; pause_prompt ;;
+            2) setup_gre_backhaul_iran_interactive; pause_prompt ;;
+            3)
+                read -p "Paste the bundle from the Iran server: " BUNDLE_IN
+                [[ -n "$BUNDLE_IN" ]] && cli_setup_foreign --bundle "$BUNDLE_IN"
+                pause_prompt
+                ;;
+            4) backhaul_show_bundle; pause_prompt ;;
+            5) journalctl -u 'backhaul-*' -n 60 --no-pager -o cat 2>/dev/null | sed -E 's/(invalid security token received: ).*/\1[hidden]/'; pause_prompt ;;
+            6)
+                local u
+                for u in /etc/systemd/system/backhaul-server.service /etc/systemd/system/backhaul-server-[0-9]*.service /etc/systemd/system/backhaul-client.service; do
+                    [[ -f "$u" ]] && systemctl restart "$(basename "$u")" && echo -e "${GREEN}[✔️] Restarted $(basename "$u" .service)${NC}"
+                done
+                pause_prompt
+                ;;
+            7) cli_backhaul_migrate; pause_prompt ;;
+            0|q) return 0 ;;
+            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
 setup_backhaul_iran_interactive() {
     echo -e "\n${YELLOW}=== Setup Backhaul Iran Server (No-GRE) ===${NC}"
     local MYIP REMOTE_PUB PORT TOKEN TRANSPORT PORTS
@@ -7771,9 +8066,9 @@ setup_backhaul_iran_interactive() {
     PORT=$(ensure_port_available "$PORT" "Backhaul Server Port" 0) || return 1
     AUTO_TOKEN=$(gen_token32)
     prompt_token TOKEN "Enter Secret Auth Token" "$AUTO_TOKEN"
-    read -p "Transport [tcpmux/ws/wss] (default tcpmux): " TRANSPORT
-    TRANSPORT=${TRANSPORT:-tcpmux}
-    prompt_ports PORTS "Enter Ports to Reverse-Tunnel (e.g. 443, 2083)"
+    prompt_backhaul_transport TRANSPORT
+    prompt_backhaul_udp "$TRANSPORT"
+    prompt_backhaul_ports PORTS
     setup_backhaul_iran_server_noninteractive "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$TOKEN" "$TRANSPORT" "$PORTS"
 }
 
@@ -7788,9 +8083,9 @@ setup_gre_backhaul_iran_interactive() {
     PORT=$(ensure_port_available "$PORT" "Backhaul Server Port" 0) || return 1
     AUTO_TOKEN=$(gen_token32)
     prompt_token TOKEN "Enter Secret Auth Token" "$AUTO_TOKEN"
-    read -p "Transport [tcpmux/ws/wss] (default tcpmux): " TRANSPORT
-    TRANSPORT=${TRANSPORT:-tcpmux}
-    prompt_ports PORTS "Enter Ports to Reverse-Tunnel (e.g. 443, 2083)"
+    prompt_backhaul_transport TRANSPORT
+    prompt_backhaul_udp "$TRANSPORT"
+    prompt_backhaul_ports PORTS
     setup_gre_backhaul_iran_server_noninteractive "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$TOKEN" "$IRAN_GRE_IP" "$FOREIGN_GRE_IP" "$TRANSPORT" "$PORTS"
 }
 
@@ -7856,14 +8151,14 @@ menu_tunnel() {
                 echo "  1) GRE + FRP Server (Recommended standard)"
                 echo "  2) Backhaul Server (No-GRE / TCPMux)"
                 echo "  3) GRE + Backhaul Server"
-                echo "  4) Modified Backhaul (IPX / ICMP / anytls / xtcpmux / TUN)"
+                echo "  4) Backhaul menu (status, logs, bundle, old tunnels)"
                 echo "  0) Cancel"
                 read -p "Select [0-4]: " IR_PROTO
                 case "$IR_PROTO" in
                     1) setup_iran_server ;;
                     2) setup_backhaul_iran_interactive ;;
                     3) setup_gre_backhaul_iran_interactive ;;
-                    4) menu_modified_backhaul ;;
+                    4) menu_backhaul ;;
                     *) ;;
                 esac
                 pause_prompt
@@ -8196,38 +8491,6 @@ menu_uninstall() {
     done
 }
 
-ensure_modified_backhaul_core() {
-    mkdir -p "/root/backhaul-core" 2>/dev/null || true
-    install_backhaul_binaries
-    if [[ -x "${INSTALL_DIR}/backhaul" ]]; then
-        cp -f "${INSTALL_DIR}/backhaul" "/root/backhaul-core/backhaul_premium" 2>/dev/null || ln -sf "${INSTALL_DIR}/backhaul" "/root/backhaul-core/backhaul_premium"
-        chmod +x "/root/backhaul-core/backhaul_premium" 2>/dev/null || true
-    fi
-}
-
-menu_modified_backhaul() {
-    ensure_modified_backhaul_core
-    local SCRIPT_TARGET="/usr/local/bin/hashem-backhaul.sh"
-    if [[ ! -f "$SCRIPT_TARGET" ]]; then
-        local SCRIPT_DIR
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-        if [[ -f "${SCRIPT_DIR}/hashem-backhaul.sh" ]]; then
-            cp -f "${SCRIPT_DIR}/hashem-backhaul.sh" "$SCRIPT_TARGET"
-        else
-            local DL_URL="https://raw.githubusercontent.com/pdnczone/hashem-panel/main/hashem-backhaul.sh"
-            download_with_fallback "$SCRIPT_TARGET" "$DL_URL" 30 || true
-        fi
-        chmod +x "$SCRIPT_TARGET" 2>/dev/null || true
-    fi
-
-    if [[ -x "$SCRIPT_TARGET" ]]; then
-        bash "$SCRIPT_TARGET" "$@"
-    else
-        echo -e "${RED}[!] Could not locate or download hashem-backhaul.sh.${NC}"
-        pause_prompt
-    fi
-}
-
 menu_quick_setup() {
     while true; do
         clear
@@ -8236,14 +8499,14 @@ menu_quick_setup() {
         echo ""
         echo "  1) Setup Iran Server (Create Key & Bundle)"
         echo "  2) Setup Foreign Server via Bundle"
-        echo "  3) Setup Backhaul Tunnel (TCPMux, ICMP, TUN)"
+        echo "  3) Backhaul Tunnel (setup, status, logs)"
         echo "  0) Back to Main Menu"
         echo ""
         read -p "Select an option [0-3]: " QS_OPT
         case "$QS_OPT" in
             1) setup_iran_server; pause_prompt ;;
             2) setup_foreign_server; pause_prompt ;;
-            3) menu_modified_backhaul ;;
+            3) menu_backhaul ;;
             0|q) return 0 ;;
             *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
         esac
@@ -8438,7 +8701,8 @@ Usage:
   hashem update | update-all                   # update script + panel to the latest release of the update channel
   hashem update-channel [stable|dev]           # show / set update channel (default stable; dev = test builds)
   hashem download-cores                        # download & pre-cache FRP and Backhaul core binaries
-  hashem modified-backhaul                     # interactive Modified Backhaul manager (IPX, ICMP, TUN, anytls)
+  hashem backhaul                              # Backhaul menu: setup, status, logs, bundle
+  hashem backhaul-migrate                      # move tunnels from the old Modified Backhaul script into Hashem
   hashem free-ram                              # cap journald + drop cache + 1GB swap
 
 Setup bundles:
@@ -8593,8 +8857,9 @@ cli_setup_backhaul_iran() {
             --transport) TRANSPORT="$2"; shift 2 ;;
             --token) TOKEN="$2"; shift 2 ;;
             --ports) PORTS="$2"; shift 2 ;;
+            --udp) BH_ACCEPT_UDP=1; shift ;;
             --force) FORCE=1; shift ;;
-            -h|--help) echo 'Usage: hashem setup-backhaul-iran [--local-pub IP] [--remote-pub IP] --port P [--transport T] [--token K] [--ports "..."]'; return 0 ;;
+            -h|--help) echo 'Usage: hashem setup-backhaul-iran [--local-pub IP] [--remote-pub IP] --port P [--transport T] [--token K] [--ports "..."] [--udp]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
         esac
     done
@@ -8661,8 +8926,9 @@ cli_setup_gre_backhaul_iran() {
             --transport) TRANSPORT="$2"; shift 2 ;;
             --token) TOKEN="$2"; shift 2 ;;
             --ports) PORTS="$2"; shift 2 ;;
+            --udp) BH_ACCEPT_UDP=1; shift ;;
             --force) FORCE=1; shift ;;
-            -h|--help) echo 'Usage: hashem setup-gre-backhaul-iran --remote-pub IP [--port P] [--transport T] [--local-gre IP] [--peer-gre IP]'; return 0 ;;
+            -h|--help) echo 'Usage: hashem setup-gre-backhaul-iran --remote-pub IP [--port P] [--transport T] [--local-gre IP] [--peer-gre IP] [--ports "..."] [--udp]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
         esac
     done
@@ -9543,10 +9809,9 @@ if [[ $# -gt 0 ]]; then
             install_backhaul_binaries || { echo -e "${RED}[!] Failed to install Backhaul binary.${NC}"; exit 1; }
             echo -e "${GREEN}[✔️] All core binaries (frps, frpc, backhaul) are cached in ${INSTALL_DIR}.${NC}"
             ;;
-        modified-backhaul|backhaul-premium|mbh)
-            shift
-            menu_modified_backhaul "$@"
-            ;;
+        backhaul|bh|modified-backhaul|backhaul-premium|mbh)
+            menu_backhaul ;;
+        backhaul-migrate) cli_backhaul_migrate ;;
         remove-tunnel)
             if [[ "${2:-}" == "--force" ]]; then remove_tunnel_force; else remove_tunnel; fi ;;
         uninstall)

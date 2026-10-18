@@ -15,7 +15,7 @@ The layout, conventions and rules are in [docs/dev/DEVELOPMENT.md](docs/dev/DEVE
 ## Before you open a PR
 
 ```bash
-bash -n hashem.sh hashem-backhaul.sh install.sh
+bash -n hashem.sh install.sh
 cd panel
 gofmt -l .                     # must print nothing
 go vet ./... && go build ./...

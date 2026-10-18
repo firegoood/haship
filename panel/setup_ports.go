@@ -163,34 +163,64 @@ func parsePorts(s string) []int {
 	return out
 }
 
+// isValidPortOrRangeOrMapping accepts the port entries the Backhaul core
+// takes: PORT, A-B, P=Q and A-B=Q, with an optional IPv4: before either side
+// (checked against the real v0.7.2 core).
 func isValidPortOrRangeOrMapping(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	left, right, mapped := strings.Cut(strings.TrimSpace(s), "=")
+	if mapped {
+		target, ok := stripIPv4Prefix(right)
+		if !ok {
+			return false
+		}
+		if _, ok := portNum(target); !ok {
+			return false
+		}
+	}
+	left, ok := stripIPv4Prefix(left)
+	if !ok {
 		return false
 	}
-	// Case 1: single port "443"
-	if p, err := strconv.Atoi(s); err == nil {
-		return p >= 1 && p <= 65535
+	lo, hi, isRange := strings.Cut(left, "-")
+	p1, ok := portNum(lo)
+	if !ok {
+		return false
 	}
-	// Case 2: range "10000-10050"
-	if strings.Contains(s, "-") {
-		parts := strings.Split(s, "-")
-		if len(parts) == 2 {
-			p1, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-			p2, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-			return err1 == nil && err2 == nil && p1 >= 1 && p2 <= 65535 && p1 < p2
-		}
+	if !isRange {
+		return true
 	}
-	// Case 3: mapping "2083=8443"
+	p2, ok := portNum(hi)
+	return ok && p1 < p2
+}
+
+func portNum(s string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	return n, err == nil && n >= 1 && n <= 65535
+}
+
+// stripIPv4Prefix drops a leading "IPv4:" from a port entry side.
+func stripIPv4Prefix(s string) (string, bool) {
+	i := strings.LastIndex(s, ":")
+	if i < 0 {
+		return s, true
+	}
+	if !isV4(strings.TrimSpace(s[:i])) {
+		return "", false
+	}
+	return s[i+1:], true
+}
+
+// normalizeBackhaulPort turns "A-B:Q" (in Backhaul's README, rejected by the
+// core with "invalid end port in range") into the accepted "A-B=Q".
+func normalizeBackhaulPort(s string) string {
 	if strings.Contains(s, "=") {
-		parts := strings.Split(s, "=")
-		if len(parts) == 2 {
-			p1, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-			p2, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-			return err1 == nil && err2 == nil && p1 >= 1 && p1 <= 65535 && p2 >= 1 && p2 <= 65535
-		}
+		return s
 	}
-	return false
+	rng, target, ok := strings.Cut(s, ":")
+	if !ok || !strings.Contains(rng, "-") || strings.Contains(target, ":") {
+		return s
+	}
+	return rng + "=" + target
 }
 
 func parseRawPorts(s string) []string {
@@ -199,7 +229,7 @@ func parseRawPorts(s string) []string {
 	for _, p := range strings.FieldsFunc(s, func(r rune) bool {
 		return r == ',' || r == ' ' || r == '\t' || r == '\n'
 	}) {
-		p = strings.TrimSpace(p)
+		p = normalizeBackhaulPort(strings.TrimSpace(p))
 		if p == "" || seen[p] {
 			continue
 		}
@@ -211,31 +241,20 @@ func parseRawPorts(s string) []string {
 	return out
 }
 
+// extractNumericPorts returns the first listening port of each entry.
 func extractNumericPorts(rawPorts []string) []int {
 	var out []int
 	seen := map[int]bool{}
 	for _, rp := range rawPorts {
-		if p, err := strconv.Atoi(rp); err == nil && p >= 1 && p <= 65535 {
-			if !seen[p] {
-				seen[p] = true
-				out = append(out, p)
-			}
-		} else if strings.Contains(rp, "=") {
-			parts := strings.Split(rp, "=")
-			if p, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil && p >= 1 && p <= 65535 {
-				if !seen[p] {
-					seen[p] = true
-					out = append(out, p)
-				}
-			}
-		} else if strings.Contains(rp, "-") {
-			parts := strings.Split(rp, "-")
-			if p, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil && p >= 1 && p <= 65535 {
-				if !seen[p] {
-					seen[p] = true
-					out = append(out, p)
-				}
-			}
+		left, _, _ := strings.Cut(rp, "=")
+		left, ok := stripIPv4Prefix(left)
+		if !ok {
+			continue
+		}
+		lo, _, _ := strings.Cut(left, "-")
+		if p, ok := portNum(lo); ok && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
 		}
 	}
 	return out

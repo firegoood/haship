@@ -926,6 +926,9 @@ func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 	if targetTransport == "" {
 		targetTransport = "tcpmux"
 	}
+	if targetEngine != "frp" && !backhaulTransportOK(targetTransport) {
+		return "", fmt.Errorf("invalid Backhaul transport %q: must be one of %s", targetTransport, strings.Join(backhaulTransports, ", "))
+	}
 
 	st := localStatus()
 	isIran := strings.Contains(strings.ToLower(st.Role), "iran") || st.Role == "master"

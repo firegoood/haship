@@ -427,10 +427,11 @@ func lookupExternalPublicIP() string {
 // ---- POST /api/setup ----
 
 type setupRequest struct {
-	Role           string `json:"role"`                // "iran" | "foreign" | "add-peer"
-	Engine         string `json:"engine,omitempty"`    // "" | "frp" | "backhaul" | "gre-backhaul"
-	Transport      string `json:"transport,omitempty"` // "tcpmux" (default), "tcp", "ws", "wss", "wsmux", "wssmux"
-	Name           string `json:"name"`                // add-peer label
+	Role           string `json:"role"`                 // "iran" | "foreign" | "add-peer"
+	Engine         string `json:"engine,omitempty"`     // "" | "frp" | "backhaul" | "gre-backhaul"
+	Transport      string `json:"transport,omitempty"`  // "tcpmux" (default), "tcp", "ws", "wss", "wsmux", "wssmux", "udp"
+	AcceptUDP      bool   `json:"accept_udp,omitempty"` // Backhaul server: also forward UDP (tcp transport only)
+	Name           string `json:"name"`                 // add-peer label
 	LocalPub       string `json:"local_public"`
 	RemotePub      string `json:"remote_public"`
 	LocalGre       string `json:"local_gre"`
@@ -831,6 +832,9 @@ func runInstaller(b setupRequest, ports []int, rawPorts []string) (string, strin
 				args = append(args, "--bundle", b.Token)
 			}
 		}
+	}
+	if b.AcceptUDP && (b.Engine == "backhaul" || b.Engine == "gre-backhaul") && b.Role != "foreign" {
+		args = append(args, "--udp")
 	}
 	if b.Force {
 		args = append(args, "--force")

@@ -3,6 +3,16 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
+## Unreleased
+
+### Backhaul
+- **One Backhaul, inside Hashem.** The separate `hashem-backhaul.sh` ("Modified Backhaul v2.0.0-hotfix8") is gone. It wrote the sectioned v2 config, but Hashem installs upstream Backhaul v0.7.2, which stops with `neither server nor client configuration is properly set`; none of its tunnels could start. Its IPX, ICMP, TUN, anytls and xtcpmux transports need the paid Backhaul Premium core, which Hashem never shipped. `hashem backhaul` (also from the Tunnel and Quick Setup menus, and the old `hashem modified-backhaul`) now opens Hashem's own Backhaul menu: set up Iran with or without GRE, join a foreign server from a bundle, status with the real link state, logs (tokens hidden), restart, and the bundle for the foreign server.
+- **Old tunnels move in by themselves.** `hashem backhaul-migrate`, which the panel also runs once at start, turns each `backhaul-iranN` / `backhaul-kharejN` from the old script into Hashem's `backhaul-server` / `backhaul-client` with the same port, transport, token and ports, so the panel, watchdog, backup and uninstall see it. A tunnel on a transport the core lacks is retired with a notice; its config is kept in `/etc/backhaul/legacy`. A tunnel whose core really is v2.x is left alone.
+- **More than one port from the menu works.** The menu wrote `"443 2083"` as one entry, and the core refused to start. Ports may now be separated by commas or spaces everywhere.
+- **The port forms the core accepts:** `443`, `10000-10050`, `2083=8443`, `10000-10050=443`, with an optional `IP:` on either side, in the menu, CLI and panel. `10000-10050:443` (from Backhaul's README, rejected by the core) is rewritten to `10000-10050=443`.
+- **UDP.** New `udp` transport (UDP only), and "Also forward UDP on these ports" (`--udp`) for the `tcp` transport in the menu, CLI and Setup tab. Checked on the real core: `accept_udp` works only with `tcp`.
+- An unknown transport is refused before anything changes (it used to produce a server that never started), the menu offers a numbered list instead of free text, and `add-backhaul-peer --bundle` uses the bundle's transport instead of always `tcpmux`.
+
 ## v2.3.6 — 2026-10-18
 
 Audit fixes, a Persian UI, a redesigned dashboard, and working Bagher, Diagnostics and engine switch. Update both servers.

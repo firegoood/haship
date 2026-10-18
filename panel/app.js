@@ -519,6 +519,7 @@ const I18N = {
     setup_ctrl_port: "Control / Bind port",
     setup_transport: "Transport Protocol",
     setup_forward_ports: "Forwarded Ports (single, ranges, mappings)",
+    setup_bh_udp: "Also forward UDP on these ports",
     setup_step4_token: "4. Token & apply",
     setup_apply_btn: "Apply Setup",
     setup_unlock_btn: "Unlock to Replace",
@@ -2630,6 +2631,7 @@ async function doSetup() {
       frp_port: parseInt($('sFrpPort').value, 10),
       token: '',
       ports: ($('sIranPorts') && !$('wrapIranPorts').classList.contains('hidden')) ? $('sIranPorts').value.trim() : '',
+      accept_udp: !!($('sAcceptUdp') && $('sAcceptUdp').checked && !$('wrapIranUdp').classList.contains('hidden')),
       force: setupExists,
     };
     let r;
@@ -2695,12 +2697,13 @@ function updateTransportSelect(selId, eng) {
     el.innerHTML = `
       <option value="tcpmux">TCPMUX (Multi-stream TCP - Recommended)</option>
       <option value="wssmux">WSSMUX (WebSocket + TLS Obfuscation)</option>
-      <option value="tcp">TCP (Standard Plain TCP)</option>
+      <option value="tcp">TCP (Plain TCP, can also forward UDP)</option>
       <option value="ws">WS (Plain WebSocket)</option>
       <option value="wsmux">WSMUX (Multiplexed WebSocket)</option>
       <option value="wss">WSS (TLS WebSocket)</option>
+      <option value="udp">UDP (forwards UDP only)</option>
     `;
-    if (['tcpmux', 'wssmux', 'tcp', 'ws', 'wsmux', 'wss'].includes(cur)) el.value = cur;
+    if (['tcpmux', 'wssmux', 'tcp', 'ws', 'wsmux', 'wss', 'udp'].includes(cur)) el.value = cur;
     else el.value = 'tcpmux';
   }
 }
@@ -2717,6 +2720,7 @@ function setIranEngine(eng) {
   if ($('wrapTransport')) $('wrapTransport').classList.remove('hidden');
   updateTransportSelect('sTransport', eng);
   if ($('wrapIranPorts')) $('wrapIranPorts').classList.toggle('hidden', eng === 'frp');
+  syncIranUdp();
   if ($('qsLinkTxt')) $('qsLinkTxt').textContent = eng === 'frp' ? 'GRE ⇄ FRP' : isGreBh ? 'GRE ⇄ Backhaul' : 'Backhaul';
   if ($('engHint')) {
     if (eng === 'frp') {
@@ -2728,6 +2732,13 @@ function setIranEngine(eng) {
     }
   }
 }
+// Backhaul forwards UDP only on the tcp transport (accept_udp).
+function syncIranUdp() {
+  const eng = $('sEngine') ? $('sEngine').value : 'frp';
+  const on = eng !== 'frp' && $('sTransport') && $('sTransport').value === 'tcp';
+  if ($('wrapIranUdp')) $('wrapIranUdp').classList.toggle('hidden', !on);
+}
+if ($('sTransport')) $('sTransport').addEventListener('change', syncIranUdp);
 if ($('engGreFrp')) $('engGreFrp').onclick = () => setIranEngine('frp');
 if ($('engGreBh')) $('engGreBh').onclick = () => setIranEngine('gre-backhaul');
 if ($('engBh')) $('engBh').onclick = () => setIranEngine('backhaul');

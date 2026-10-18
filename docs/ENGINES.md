@@ -23,6 +23,14 @@ Hashem has two independent choices:
 
 **Backhaul standalone** has no GRE at all. It is the simplest option when IP protocol 47 cannot cross between your two servers and you do not need a Layer-3 link. Its setup bundles are the `bh1_` strings.
 
+### Backhaul transports and ports
+
+Hashem installs upstream Backhaul v0.7.2. Its transports are `tcpmux` (default), `tcp`, `ws`, `wss`, `wsmux`, `wssmux` and `udp`. All of them carry TCP except `udp`, which carries UDP only. To forward TCP **and** UDP on the same ports, use `tcp` with "Also forward UDP" (`--udp`, the core's `accept_udp`); the core ignores that option on the other transports.
+
+Port entries: `443`, `10000-10050`, `2083=8443`, `10000-10050=443`, with an optional `IP:` on either side. The `10000-10050:443` form from Backhaul's README is rejected by the core, so Hashem rewrites it to `10000-10050=443`.
+
+Everything Backhaul lives in Hashem: `hashem backhaul` (menu), the panel's Setup tab, `/etc/backhaul`, and the `backhaul-server[-N]` / `backhaul-client` units. Tunnels made by the old separate Modified Backhaul script (`backhaul-iranN` / `backhaul-kharejN`) are moved into Hashem by `hashem backhaul-migrate`, which the panel also runs once when it starts. Their IPX, ICMP, TUN, anytls and xtcpmux transports need the paid Backhaul Premium core, which Hashem does not ship; those tunnels never started on the installed core and have to be set up again with a transport from the list above.
+
 You can switch the engine of an existing tunnel from the panel; the switch checks that the binary and unit exist before it stops anything, and reports the real error if a step fails.
 
 ## Carriers (GRE layer)

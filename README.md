@@ -53,7 +53,7 @@
 
 Hashem is a tunnel manager made of two parts:
 
-- **The installer / CLI** — `hashem.sh` (installed as `hashem`), plus `hashem-backhaul.sh`. It sets up GRE, FRP and Backhaul services with systemd.
+- **The installer / CLI** — `hashem.sh` (installed as `hashem`). It sets up GRE, FRP and Backhaul services with systemd.
 - **The panel** — a Go backend with a single-page web UI (`gre-panel`). It runs on every server and shows the tunnel, peers, health, latency, logs, diagnostics and updates.
 
 The model is a **hub and spokes**:

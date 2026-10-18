@@ -771,6 +771,7 @@ func main() {
 	clearUpdatePending()
 	reportRollback()
 	go pathMTUKeeper()
+	go migrateLegacyBackhaul()
 	// systemd stop sends SIGTERM: flush history, then stop serving.
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)

@@ -1660,6 +1660,7 @@
                 <option value="ws">WS</option>
                 <option value="wsmux">WSMUX</option>
                 <option value="wss">WSS (TLS)</option>
+                <option value="udp">UDP (UDP only)</option>
               </select>
             </div>
           </div>
@@ -2047,6 +2048,12 @@
                   <div class="fg hidden" id="wrapIranPorts">
                     <label for="sIranPorts" data-i18n="setup_forward_ports">Forwarded Ports (single, ranges, mappings)</label>
                     <input class="hashem-input" id="sIranPorts" placeholder="e.g. 443, 10000-10050, 2083=8443">
+                  </div>
+                  <div class="fg hidden" id="wrapIranUdp">
+                    <label class="u-check-row">
+                      <input type="checkbox" id="sAcceptUdp">
+                      <span data-i18n="setup_bh_udp">Also forward UDP on these ports</span>
+                    </label>
                   </div>
                 </div>
               </fieldset>
@@ -3404,6 +3411,7 @@
             <option value="ws">WS</option>
             <option value="wsmux">WSMUX</option>
             <option value="wss">WSS</option>
+            <option value="udp">UDP</option>
           </select>
         </div>
       </div>
