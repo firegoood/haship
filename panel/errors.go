@@ -245,21 +245,42 @@ func recordError(code, endpoint, detail string) {
 	}
 }
 
+// tunnelErrFamilies are the error families about the tunnel itself. The
+// dashboard's Diagnostics cell showed the newest error of any kind, so a
+// mistyped login password (E-AUTH-01) marked the tunnel red indefinitely.
+var tunnelErrFamilies = map[string]bool{
+	"GRE": true, "FRP": true, "BH": true, "PEER": true, "ACTION": true,
+	"RESCUE": true, "CARRIER": true, "ENGINE": true, "SSHFWD": true,
+}
+
+// lastErrorEvent returns the newest tunnel error from the last 24 hours.
 func lastErrorEvent() *errEvent {
+	return lastTunnelErrorAt(time.Now())
+}
+
+func lastTunnelErrorAt(now time.Time) *errEvent {
 	errMu.Lock()
-	defer errMu.Unlock()
-	if len(errEvents) > 0 {
-		e := errEvents[len(errEvents)-1]
-		return &e
-	}
-	// Try reading last line from error log file if in-memory buffer is fresh
-	if data, err := os.ReadFile(errorLogPath()); err == nil {
-		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		if len(lines) > 0 && lines[len(lines)-1] != "" {
-			var e errEvent
-			if json.Unmarshal([]byte(lines[len(lines)-1]), &e) == nil {
-				return &e
+	evs := append([]errEvent(nil), errEvents...)
+	errMu.Unlock()
+	if len(evs) == 0 {
+		// After a restart the in-memory ring is empty; fall back to the log file.
+		if data, err := os.ReadFile(errorLogPath()); err == nil {
+			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				var e errEvent
+				if json.Unmarshal([]byte(line), &e) == nil {
+					evs = append(evs, e)
+				}
 			}
+		}
+	}
+	for i := len(evs) - 1; i >= 0; i-- {
+		e := evs[i]
+		t, err := time.ParseInLocation("2006-01-02 15:04:05", e.Time, time.Local)
+		if err != nil || now.Sub(t) > 24*time.Hour {
+			return nil // events are in time order: everything older is stale too
+		}
+		if parts := strings.SplitN(e.Code, "-", 3); len(parts) == 3 && tunnelErrFamilies[parts[1]] {
+			return &e
 		}
 	}
 	return nil

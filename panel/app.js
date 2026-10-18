@@ -2250,7 +2250,7 @@ async function refreshDash() {
       detCard(ICO_SRV, tr('card_server_title', 'Server & Role'), detRow(tr('lbl_public_ip', 'Public IP'), dmono(d.local_pub)) + detRow(tr('lbl_role', 'Role'), roleBadge) + detRow(tr('lbl_forwarded_ports', 'Forwarded'), dval(proxyList)))
       + detCard(ICO_GRE, tr('card_gre_title', 'GRE Tunnel'), detRow(tr('lbl_gre_local', 'Local'), dmono(g.local)) + detRow(tr('lbl_gre_peer', 'Peer'), dmono(g.peer)) + detRow(tr('lbl_gre_interface', 'Inner'), dmono(g.inner)))
       + detCard(ICO_FRP, tr('card_frp_title', 'Tunnel Engine'), detRow(tr('lbl_frp_status', 'Status'), frpBadge) + detRow(tr('x007', "Engine"), dval(activeEng)) + detRow(portLabel, portCell)
-        + (proxyPorts.length ? detRow(tr('lbl_tunnel_ports', 'Tunnel Ports'), `<span class="det-v">${proxyPorts.map(p => `<span class="det-v mono u-mr-4">${esc(String(p))}</span>`).join('')}</span>`) : '')
+        + (proxyPorts.length ? detRow(tr('lbl_tunnel_ports', 'Tunnel Ports'), `<span class="det-v det-ports">${proxyPorts.map(p => `<span class="det-v mono">${esc(String(p))}</span>`).join('')}</span>`) : '')
         + (u.frp_since ? detRow(tr('lbl_uptime_since', 'Since'), dval(u.frp_since)) : ''))
       + detCard(ICO_BOLT, tr('x008', "Carrier & Failover"), detRow(tr('x009', "Active Carrier"), dmono(activeCarr)) + detRow(tr('x010', "Failover Policy"), failoverBadge) + detRow(tr('x011', "Diagnostics"), diagBadge))
       + dashPeersCard(d.peers || []));

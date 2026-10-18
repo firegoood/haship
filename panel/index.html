@@ -394,14 +394,20 @@
   .det-ico { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; flex:none;
     background:var(--ac-soft); border:1px solid var(--ac-b22); color:var(--ac); }
   .det-ico svg { width:14px; height:14px; }
-  .det-rows { display:grid; gap:8px; }
-  .det-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-  .det-k { font-size:12px; color:var(--dim); font-weight:500; }
+  /* minmax(0,1fr): a long value (nine port pills) wraps inside the card
+     instead of widening the column and pushing every value out of it. */
+  .det-rows { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; }
+  /* A value that does not fit beside its label moves under it, aligned to the end. */
+  .det-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 10px; min-width:0; }
+  .det-row > :last-child { margin-inline-start:auto; max-width:100%; }
+  .det-k { font-size:12px; color:var(--dim); font-weight:500; flex:0 1 auto; }
+  .det-v.det-ports { flex:1 1 100%; } /* a port list gets its own line */
   .det-v { font-size:13px; color:var(--tx); font-weight:600; font-variant-numeric:tabular-nums;
-    display:flex; align-items:center; gap:6px; min-width:0; }
+    display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:6px; min-width:0;
+    text-align:end; overflow-wrap:anywhere; }
   .det-v.mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size:12.5px; background:var(--s2); border:1px solid var(--ln);
-    padding:3px 9px; border-radius:8px; letter-spacing:-.01em; }
+    padding:3px 9px; border-radius:8px; letter-spacing:-.01em; white-space:nowrap; }
   /* peer cards: bottom action row + inline remove confirm */
   .peer-card .peer-acts .armed {
     border-color:var(--er)!important; color:#fff!important;
