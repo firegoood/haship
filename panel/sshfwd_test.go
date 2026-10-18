@@ -26,11 +26,28 @@ func TestSSHFwdFormatAuthorizedKeyLine(t *testing.T) {
 	if !strings.Contains(lineBagher, "restrict,port-forwarding") {
 		t.Fatalf("expected restrict,port-forwarding, got: %s", lineBagher)
 	}
+	// restrict alone still runs commands, and port-forwarding alone allows -L
+	// anywhere (both proven in tests/test_bagher_lab.sh).
+	if !strings.HasPrefix(lineBagher, `command="/bin/false",`) || !strings.Contains(lineBagher, `permitopen="127.0.0.1:55400"`) {
+		t.Fatalf("bagher key must be locked to its tunnel port, got: %s", lineBagher)
+	}
 
 	// Direct mode
 	lineDirect := formatAuthorizedKeyLine(pub, "direct", 55400, []int{443, 8443})
 	if !strings.Contains(lineDirect, "permitopen=\"127.0.0.1:443\"") || !strings.Contains(lineDirect, "permitopen=\"127.0.0.1:8443\"") {
 		t.Fatalf("expected permitopen list, got: %s", lineDirect)
+	}
+	if !strings.HasPrefix(lineDirect, `command="/bin/false",`) {
+		t.Fatalf("direct key must not run commands, got: %s", lineDirect)
+	}
+}
+
+// frpc 0.71 rejects unknown fields; transport.tcpKeepalive is frps-only and
+// kept the Foreign frpc from starting, so Bagher carried no data at all.
+func TestBagherFRPCConfigHasOnlyClientFields(t *testing.T) {
+	c := buildFRPCConfig(55400, 5, []int{443})
+	if strings.Contains(c, "tcpKeepalive") {
+		t.Fatalf("frpc config uses the frps-only field tcpKeepalive:\n%s", c)
 	}
 }
 
@@ -426,7 +443,34 @@ func TestInstallRestrictedKeyValidation(t *testing.T) {
 	if len(lines) != 2 || lines[0] != admin {
 		t.Fatalf("unexpected authorized_keys:\n%s", data)
 	}
-	if !strings.HasPrefix(lines[1], `restrict,port-forwarding,permitlisten="127.0.0.1:55401" ssh-ed25519 `) {
+	if !strings.HasPrefix(lines[1], `command="/bin/false",restrict,port-forwarding,permitlisten="127.0.0.1:55401",permitopen="127.0.0.1:55401" ssh-ed25519 `) {
 		t.Fatalf("peer key not restricted: %s", lines[1])
+	}
+}
+
+// Keys written by older panels are upgraded in place; other keys stay as they are.
+func TestUpgradeBagherKeyLocks(t *testing.T) {
+	old := authorizedKeysPath
+	authorizedKeysPath = filepath.Join(t.TempDir(), "authorized_keys")
+	t.Cleanup(func() { authorizedKeysPath = old })
+	bagher := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOKlYNIwJmKAWfCv6ik2l9WhPl3ESB5oTPSJ41vr1bFN"
+	admin := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBfz1IUl3T0hKUFvTGxbuF+R2pbdlVxSNMhhD7m0NZ8i admin@laptop"
+	custom := `restrict,port-forwarding,permitlisten="127.0.0.1:9000",permitopen="10.0.0.1:22" ` + admin
+	in := `restrict,port-forwarding,permitlisten="127.0.0.1:55401" ` + bagher + "\n" + admin + "\n" + custom + "\n"
+	if err := os.WriteFile(authorizedKeysPath, []byte(in), 0600); err != nil {
+		t.Fatal(err)
+	}
+	n, err := upgradeBagherKeyLocks()
+	if err != nil || n != 1 {
+		t.Fatalf("upgraded %d keys (err %v), want 1", n, err)
+	}
+	got, _ := os.ReadFile(authorizedKeysPath)
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	want := `command="/bin/false",restrict,port-forwarding,permitlisten="127.0.0.1:55401",permitopen="127.0.0.1:55401" ` + bagher
+	if len(lines) != 3 || lines[0] != want || lines[1] != admin || lines[2] != custom {
+		t.Fatalf("unexpected authorized_keys:\n%s", got)
+	}
+	if n, _ := upgradeBagherKeyLocks(); n != 0 {
+		t.Fatalf("second run upgraded %d keys, want 0", n)
 	}
 }

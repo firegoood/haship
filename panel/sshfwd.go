@@ -145,20 +145,28 @@ func ensureSSHFwdKey(keyPath string) (pubKey string, err error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
+// bagherKeyLock confines the Iran server's key on the Foreign server. restrict
+// alone still lets a key run commands (as root here), and port-forwarding
+// without permitopen allows -L to any service. command="/bin/false" stops
+// command execution (Bagher's ssh -N opens no session, so it is unaffected);
+// "none" is not valid for permitopen in authorized_keys, so -L is limited to
+// the tunnel port itself, which only leads back to Iran's own frps.
+const bagherKeyLock = `command="/bin/false",restrict,port-forwarding`
+
 // formatAuthorizedKeyLine constructs an authorized_keys entry with restrict & permitopen/permitlisten.
 func formatAuthorizedKeyLine(pubKey string, mode string, frpPort int, ports []int) string {
 	if mode == "bagher" || mode == "frp_ssh" {
 		if frpPort <= 0 {
 			frpPort = 55400
 		}
-		return fmt.Sprintf("restrict,port-forwarding,permitlisten=\"127.0.0.1:%d\" %s", frpPort, strings.TrimSpace(pubKey))
+		return fmt.Sprintf("%s,permitlisten=\"127.0.0.1:%d\",permitopen=\"127.0.0.1:%d\" %s", bagherKeyLock, frpPort, frpPort, strings.TrimSpace(pubKey))
 	}
 	permitOpenOpts := make([]string, 0, len(ports))
 	for _, p := range ports {
 		permitOpenOpts = append(permitOpenOpts, fmt.Sprintf("permitopen=\"127.0.0.1:%d\"", p))
 	}
 	permitStr := strings.Join(permitOpenOpts, ",")
-	return fmt.Sprintf("restrict,port-forwarding,%s %s", permitStr, strings.TrimSpace(pubKey))
+	return fmt.Sprintf("%s,%s %s", bagherKeyLock, permitStr, strings.TrimSpace(pubKey))
 }
 
 // authorizedKeysPath is root's authorized_keys; tests point it elsewhere.
@@ -207,6 +215,44 @@ func installRestrictedKey(pubKey, mode string, frpPort int, ports []int) error {
 		return fmt.Errorf("failed writing authorized_keys: %w", err)
 	}
 	return nil
+}
+
+// upgradeBagherKeyLocks rewrites Bagher key entries written by older panels
+// (restrict,port-forwarding,permitlisten="127.0.0.1:N" only), which let the
+// Iran server's key run commands as root and open -L forwards on this server.
+// Only lines in exactly that old form change; every other key is untouched.
+func upgradeBagherKeyLocks() (int, error) {
+	data, err := os.ReadFile(authorizedKeysPath)
+	if err != nil {
+		return 0, nil // no authorized_keys: nothing to upgrade
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	changed := 0
+	for i, line := range lines {
+		pk, _, opts, _, perr := ssh.ParseAuthorizedKey([]byte(strings.TrimSpace(line)))
+		if perr != nil || len(opts) != 3 || opts[0] != "restrict" || opts[1] != "port-forwarding" ||
+			!strings.HasPrefix(opts[2], `permitlisten="127.0.0.1:`) {
+			continue
+		}
+		port, cerr := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(opts[2], `permitlisten="127.0.0.1:`), `"`))
+		if cerr != nil || port <= 0 || port > 65535 {
+			continue
+		}
+		lines[i] = formatAuthorizedKeyLine(strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pk))), "bagher", port, nil)
+		changed++
+	}
+	if changed == 0 {
+		return 0, nil
+	}
+	tmp := authorizedKeysPath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tmp, authorizedKeysPath); err != nil {
+		_ = os.Remove(tmp)
+		return 0, err
+	}
+	return changed, nil
 }
 
 // buildSSHFwdService generates the systemd service file content for Bagher Engine.
@@ -312,7 +358,7 @@ transport.tcpMux = false
 transport.poolCount = %d
 transport.heartbeatInterval = 15
 transport.heartbeatTimeout = 45
-transport.tcpKeepalive = 15
+transport.dialServerKeepalive = 15
 loginFailExit = false
 
 webServer.addr = "127.0.0.1"

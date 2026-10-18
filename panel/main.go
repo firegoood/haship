@@ -557,6 +557,11 @@ func main() {
 	validateConfigDirs()
 	loadOrInit()
 	ensureFreeHTTPPort()
+	if n, err := upgradeBagherKeyLocks(); err != nil {
+		log.Printf("bagher: upgrading key restrictions in %s: %v", authorizedKeysPath, err)
+	} else if n > 0 {
+		log.Printf("bagher: locked down %d Bagher key(s) in %s (no commands, no -L forwards)", n, authorizedKeysPath)
+	}
 	if _, err := rand.Read(nonce[:]); err != nil {
 		log.Fatal(err)
 	}
