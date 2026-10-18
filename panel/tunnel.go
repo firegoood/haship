@@ -160,6 +160,11 @@ func handleAction(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-ACTION-03", out+": "+err.Error())
 			return
 		}
+		if body.Action != "tune-status" { // an older hashem.sh puts MTU 1380 back
+			if fixed := enforcePathMTU(); len(fixed) > 0 {
+				out += "\n" + strings.Join(fixed, "\n")
+			}
+		}
 		writeJSON(w, map[string]string{"status": "ok", "output": out})
 	case "switch-engine", "switch_engine":
 		eng, trans := body.Engine, body.Transport

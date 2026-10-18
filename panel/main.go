@@ -770,6 +770,7 @@ func main() {
 	// Listening: an update that brought this binary in worked.
 	clearUpdatePending()
 	reportRollback()
+	go pathMTUKeeper()
 	// systemd stop sends SIGTERM: flush history, then stop serving.
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)

@@ -475,9 +475,9 @@ func evaluateDoctor(in doctorInputs) *doctorReport {
 	// 5. MTU through the tunnel
 	if m := in.mtu; m.Tested {
 		if m.MaxPacket > 0 && m.MaxPacket < m.Interface {
-			add(newFinding("warning", "mtu", 15, false,
+			add(newFinding("warning", "mtu", 15, true,
 				"Packets of {0} bytes do not cross the tunnel; the largest that does is {1}",
-				"Lower the GRE MTU to {2} and TCP MSS to {3}. Until then, large downloads and TLS handshakes can stall",
+				"Quick Repair sets the GRE MTU to {2} and TCP MSS to {3} and keeps them after restarts. Run Diagnostics on the other server too. Until then, large downloads and TLS handshakes can stall",
 				strconv.Itoa(m.Interface), strconv.Itoa(m.MaxPacket), strconv.Itoa(m.Optimal), strconv.Itoa(m.MSS)))
 		} else if m.MaxPacket == 0 {
 			rep.Notes = append(rep.Notes, "MTU not measured: large pings got no reply")
@@ -928,16 +928,11 @@ func applyDoctorFixes() map[string]any {
 		fixes = append(fixes, "Applied TCP BBR & sysctl optimization: "+out)
 	}
 
-	// 2. MSS clamp, the same rule hashem.sh optimize adds (a fixed 1340 is
-	// more predictable on tunnel links than --clamp-mss-to-pmtu). Only when
-	// no TCPMSS rule exists at all: never stack a second, different clamp.
-	out, err := runCmdTimeoutOut(3*time.Second, "iptables-save", "-t", "mangle")
-	if err == nil && mssRuleFrom(string(out)) == "" {
-		if _, err := runCmdTimeout(3*time.Second, "iptables", "-t", "mangle", "-A", "POSTROUTING", "-p", "tcp",
-			"--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1340"); err == nil {
-			fixes = append(fixes, "Added TCP MSS clamp 1340")
-		}
-	}
+	// 2. GRE MTU and MSS clamp. When the last Diagnostics found that 1380
+	// does not cross the path, the measured size is saved and applied (and
+	// kept after restarts); otherwise only a missing clamp (1340) is added.
+	// Runs after optimize, which sets 1380 / 1340 on an older hashem.sh.
+	fixes = append(fixes, pathMTUFixes()...)
 
 	// 3. Ensure IP Forwarding & socket sysctls
 	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()

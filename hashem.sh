@@ -1111,6 +1111,48 @@ carrier_init_kernel() {
     ip fou add port 19998 ipproto 47 >/dev/null 2>&1 || true
 }
 
+# Path MTU. When Diagnostics finds that 1380-byte packets do not cross the
+# tunnel, the panel saves the largest size that does in $PANEL_CONFIG_DIR/gre_mtu.
+# Everything that sets the GRE MTU or the MSS clamp goes through these, so a
+# restart, a carrier switch or Optimize does not put 1380 back.
+gre_path_mtu() {
+    local v=""
+    [[ -r "$PANEL_CONFIG_DIR/gre_mtu" ]] && v=$(tr -dc '0-9' < "$PANEL_CONFIG_DIR/gre_mtu" 2>/dev/null)
+    if [[ -n "$v" ]] && (( v >= 1200 && v < 1380 )); then echo "$v"; fi
+}
+
+# gre_mtu_for DEFAULT: the MTU an interface gets, never above the path MTU.
+gre_mtu_for() {
+    local p; p=$(gre_path_mtu)
+    if [[ -n "$p" ]] && (( p < $1 )); then echo "$p"; else echo "$1"; fi
+}
+
+gre_mss() {
+    local p; p=$(gre_path_mtu)
+    if [[ -n "$p" ]]; then echo $(( p - 40 )); else echo 1340; fi
+}
+
+# mss_clamp_set CHAIN [match...]: one fixed clamp at gre_mss. The 1340 rule
+# from before a path MTU was saved goes, since the larger clamp would win.
+mss_clamp_set() {
+    local chain="$1"; shift
+    local mss; mss=$(gre_mss)
+    if [[ "$mss" != "1340" ]]; then
+        while iptables -t mangle -D "$chain" -p tcp --tcp-flags SYN,RST SYN "$@" -j TCPMSS --set-mss 1340 >/dev/null 2>&1; do :; done
+    fi
+    iptables -t mangle -C "$chain" -p tcp --tcp-flags SYN,RST SYN "$@" -j TCPMSS --set-mss "$mss" >/dev/null 2>&1 || \
+        iptables -t mangle -A "$chain" -p tcp --tcp-flags SYN,RST SYN "$@" -j TCPMSS --set-mss "$mss" >/dev/null 2>&1 || true
+}
+
+# mss_clamp_drop CHAIN [match...]: remove our fixed clamp, whichever size.
+mss_clamp_drop() {
+    local chain="$1"; shift
+    local m
+    for m in 1340 $(gre_mss); do
+        iptables -t mangle -D "$chain" -p tcp --tcp-flags SYN,RST SYN "$@" -j TCPMSS --set-mss "$m" >/dev/null 2>&1 || true
+    done
+}
+
 carrier_apply() {
     local TARGET="$1"
     local SPECIFIC_IF="${2:-}"
@@ -1149,6 +1191,7 @@ carrier_apply() {
 
             local TARGET_MTU=1380
             [[ "$TARGET" == wss* ]] && TARGET_MTU=1360
+            TARGET_MTU=$(gre_mtu_for "$TARGET_MTU")
 
             local CHANGED=0
             if [[ "$TARGET" == "direct" ]]; then
@@ -1232,8 +1275,7 @@ carrier_apply() {
                     ip addr add "$DEV_IP" dev "$dev" >/dev/null 2>&1 || true
                 fi
             fi
-            iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || \
-                iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || true
+            mss_clamp_set POSTROUTING
         fi
     done
 
@@ -2249,10 +2291,9 @@ EOF
     # Enable packet forwarding & MSS clamping to avoid fragmentation
     sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
     iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
-    iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || \
-        iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340
+    mss_clamp_set POSTROUTING
 
-    echo -e "${GREEN}[✔️] GRE Tunnel service active with IP ${CLEAN_GRE_IP} (MTU 1380, MSS 1340).${NC}"
+    echo -e "${GREEN}[✔️] GRE Tunnel service active with IP ${CLEAN_GRE_IP} (MTU $(gre_mtu_for 1380), MSS $(gre_mss)).${NC}"
 }
 
 # Retire features removed from this release (chaff pinger, DPI shield). Older installs may still
@@ -4939,10 +4980,11 @@ uninstall_all_force() {
         # 5. Clean iptables / firewall rules
         if command -v iptables >/dev/null 2>&1; then
             iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
-            iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 2>/dev/null || true
+            mss_clamp_drop POSTROUTING
             iptables -t nat -D OUTPUT -p udp --dport 19999 -j DNAT --to-destination 127.0.0.1:19999 2>/dev/null || true
             iptables -D INPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
         fi
+        rm -f "$PANEL_CONFIG_DIR/gre_mtu"
 
         # 6. Revert network tuning
         tune_restore >/dev/null 2>&1 || true
@@ -5005,13 +5047,14 @@ remove_tunnel_force() {
         # Remove our GRE interfaces and FOU ports
         remove_hashem_tunnel_ifaces
 
-        # Clean firewall rules
+        # Clean firewall rules. The saved path MTU belonged to this peer.
         if command -v iptables >/dev/null 2>&1; then
             iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
-            iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 2>/dev/null || true
+            mss_clamp_drop POSTROUTING
             iptables -t nat -D OUTPUT -p udp --dport 19999 -j DNAT --to-destination 127.0.0.1:19999 2>/dev/null || true
             iptables -D INPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
         fi
+        rm -f "$PANEL_CONFIG_DIR/gre_mtu"
 
         # Remove configs
         rm -rf "$CONFIG_DIR" "$BACKHAUL_CONFIG_DIR"
@@ -5049,7 +5092,7 @@ tune_backup_once() {
     if lsmod 2>/dev/null | grep -q "^tcp_bbr"; then echo "tcp_bbr=loaded" >> "$TUNE_BACKUP";
     else echo "tcp_bbr=absent" >> "$TUNE_BACKUP"; fi
     echo "gre_mtu=$(ip link show "$TUNNEL_NAME" 2>/dev/null | grep -o 'mtu [0-9]*' | awk '{print $2}')" >> "$TUNE_BACKUP"
-    if iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || \
+    if iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$(gre_mss)" >/dev/null 2>&1 || \
        iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1; then
         echo "mss_clamp=present" >> "$TUNE_BACKUP"
     else
@@ -5199,13 +5242,14 @@ root hard nofile 1048576
 * hard nproc 512000
 EOF
 
-    # 5. GRE MTU 1380 for tunnel interface and any peer interfaces
-    local iface
+    # 5. GRE MTU 1380 (or the smaller path MTU) for tunnel interface and any peer interfaces
+    local iface GMTU
+    GMTU=$(gre_mtu_for 1380)
     for iface in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -E '^gre-t'); do
-        ip link set dev "$iface" mtu 1380 >/dev/null 2>&1 || true
+        ip link set dev "$iface" mtu "$GMTU" >/dev/null 2>&1 || true
     done
     if ip link show "$TUNNEL_NAME" >/dev/null 2>&1; then
-        ip link set dev "$TUNNEL_NAME" mtu 1380 >/dev/null 2>&1 && echo -e "${GREEN}[✔️] ${TUNNEL_NAME} MTU → 1380${NC}" || echo -e "${YELLOW}[!] Could not set GRE MTU.${NC}"
+        ip link set dev "$TUNNEL_NAME" mtu "$GMTU" >/dev/null 2>&1 && echo -e "${GREEN}[✔️] ${TUNNEL_NAME} MTU → ${GMTU}${NC}" || echo -e "${YELLOW}[!] Could not set GRE MTU.${NC}"
     else
         echo -e "${YELLOW}[*] No ${TUNNEL_NAME} interface yet — MTU will apply on next setup.${NC}"
     fi
@@ -5213,15 +5257,13 @@ EOF
     # 6. MSS clamp: POSTROUTING (general) + per GRE interface (precise)
     # --clamp-mss-to-pmtu is less predictable than a fixed value for tunnel links
     iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
-    iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || \
-        iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340
+    mss_clamp_set POSTROUTING
     # Per-interface MSS clamp on all GRE ifaces (covers FORWARD path too)
     local gre_iface
     for gre_iface in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -E '^(gre-t|gre-tunnel)'); do
-        iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -o "$gre_iface" -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || \
-            iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -o "$gre_iface" -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || true
+        mss_clamp_set FORWARD -o "$gre_iface"
     done
-    echo -e "${GREEN}[✔️] TCP MSS clamp → 1340 (POSTROUTING + FORWARD per GRE iface)${NC}"
+    echo -e "${GREEN}[✔️] TCP MSS clamp → $(gre_mss) (POSTROUTING + FORWARD per GRE iface)${NC}"
 
     # 7. Persist across reboots
     mkdir -p /etc/sysctl.d
@@ -5275,16 +5317,17 @@ tune_restore() {
             net.*) [[ -n "$v" ]] && sysctl -w "$k=$v" >/dev/null 2>&1 && echo -e "${GREEN}[✔️] $k → $v${NC}" ;;
             gre_mtu)
                 if [[ -n "$v" ]] && ip link show "$TUNNEL_NAME" >/dev/null 2>&1; then
+                    v=$(gre_mtu_for "$v")
                     ip link set dev "$TUNNEL_NAME" mtu "$v" >/dev/null 2>&1 && echo -e "${GREEN}[✔️] ${TUNNEL_NAME} MTU → $v${NC}"
                 fi ;;
             mss_clamp)
                 if [[ "$v" == "absent" ]]; then
-                    iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || true
+                    mss_clamp_drop POSTROUTING
                     iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
                     # Also remove per-GRE-iface FORWARD clamp rules added by tune_apply
                     local gri
                     for gri in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -E '^(gre-t|gre-tunnel)'); do
-                        iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -o "$gri" -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || true
+                        mss_clamp_drop FORWARD -o "$gri"
                     done
                     echo -e "${GREEN}[✔️] MSS clamp removed (POSTROUTING + FORWARD)${NC}"
                 fi ;;
@@ -5307,9 +5350,10 @@ tune_status() {
     echo "backlog:   $(sysctl -n net.core.netdev_max_backlog 2>/dev/null || echo ?)"
     echo "forward:   $(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo ?)"
     echo "GRE MTU:   $(ip link show "$TUNNEL_NAME" 2>/dev/null | grep -o 'mtu [0-9]*' | awk '{print $2}' || echo 'no interface')"
-    if iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1340 >/dev/null 2>&1 || \
+    [[ -n "$(gre_path_mtu)" ]] && echo "Path MTU:  $(gre_path_mtu) (measured by Diagnostics; 1380 does not cross)"
+    if iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$(gre_mss)" >/dev/null 2>&1 || \
        iptables -t mangle -C POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1; then
-        echo "MSS clamp: on (1340)"
+        echo "MSS clamp: on ($(gre_mss))"
     else
         echo "MSS clamp: off"
     fi

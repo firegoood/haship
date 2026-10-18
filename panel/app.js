@@ -3922,8 +3922,10 @@ function netStackRows(n) {
     rows.push([tr('', 'Connection tracking'), '—', '', tr('', 'Module not loaded')]);
   }
   if (n.gre_mtu > 0) {
+    const held = n.path_mtu > 0 && n.gre_mtu <= n.path_mtu;
     rows.push([tr('', 'GRE MTU'), String(n.gre_mtu), n.gre_mtu <= 1420 ? 'ok' : 'warn',
-      n.gre_mtu <= 1420 ? tr('', 'Leaves room for the outer headers') : tr('', 'Large packets may fragment')]);
+      held ? docTpl('Held at {0}: larger packets did not cross the path', [n.path_mtu])
+        : n.gre_mtu <= 1420 ? tr('', 'Leaves room for the outer headers') : tr('', 'Large packets may fragment')]);
   } else {
     rows.push([tr('', 'GRE MTU'), '—', '', tr('', 'No GRE interface')]);
   }

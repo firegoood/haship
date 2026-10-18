@@ -5,6 +5,9 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
 ## Unreleased — Dashboard and Performance redesign
 
+### Diagnostics
+- **Quick Repair fixes the MTU it finds.** Diagnostics reported "Packets of 1380 bytes do not cross the tunnel" but left the fix to the user, and even a manual fix did not last: `hashem.sh` set MTU 1380 and MSS 1340 again on every tunnel restart, carrier switch and Optimize. Quick Repair now saves the measured size in `/etc/gre-panel/gre_mtu`, lowers the GRE interfaces to it and replaces the larger MSS clamps with MTU − 40. `hashem.sh` honours that file wherever it sets the MTU or the clamp, the panel re-checks it every minute (for an older `hashem.sh`), and the Network Stack card shows the held value. Removing the tunnel clears it.
+
 ### Update tab
 - **Automatic rollback that actually happens.** The old binary was kept as `.bak`, but nothing put it back if the new version did not start, so the panel stayed down (the confirm dialog promised a rollback). Now a short-lived systemd unit outside the panel's own service waits 60 s after an update; if the new binary has not started listening by then, it restores the previous one and restarts the panel. The tab then says which version failed and that it went back, and the error log records it (`E-UPDATE-09`).
 - **Check Now works.** On an up-to-date panel the Check button was disabled, so it could never be pressed. It now asks GitHub again instead of answering from the 10-minute cache (at most every 30 s), and a failed check no longer retries every 5 s forever.

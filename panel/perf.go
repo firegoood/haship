@@ -74,7 +74,8 @@ type netStackStatus struct {
 	Conntrack    int    `json:"conntrack"`
 	ConntrackMax int    `json:"conntrack_max"`
 	GREMTU       int    `json:"gre_mtu"`
-	MSSRule      string `json:"mss_rule"` // "1340", "pmtu" or ""
+	PathMTU      int    `json:"path_mtu,omitempty"` // saved by Quick Repair when 1380 does not cross
+	MSSRule      string `json:"mss_rule"`           // "1340", "pmtu" or ""
 	Persisted    bool   `json:"persisted"`
 	Backup       bool   `json:"backup"`
 }
@@ -451,6 +452,7 @@ func readNetStack() netStackStatus {
 		RmemMax:   procInt("/proc/sys/net/core/rmem_max"),
 		WmemMax:   procInt("/proc/sys/net/core/wmem_max"),
 		GREMTU:    interfaceMTU("gre-tunnel"),
+		PathMTU:   savedPathMTU(),
 		Persisted: fileExists("/etc/sysctl.d/99-gre-tune.conf"),
 		Backup:    fileExists(filepath.Join(configDir, "tune.bak")),
 	}
