@@ -1617,19 +1617,24 @@ function drawChart(hist, isDown) {
 
   // per-interval bytes/sec for up & down
   const series = [];
+  const hi = {down: pts[0].down || 0, up: pts[0].up || 0};
+  // Bytes moved from a to b. A drop is a reset and counts nothing; climbing
+  // back from a dip to the value before it is measured from that value. Older
+  // panels stored a 0 point when they read no interface, and the way back up
+  // drew the whole lifetime total as one interval: a spike of hundreds of MB/s
+  // that grew with the total.
+  const moved = (a, b, k) => {
+    const av = a[k] != null ? a[k] : hi[k], bv = b[k] != null ? b[k] : av;
+    let d = Math.max(0, bv - av);
+    if (av < hi[k] && bv >= hi[k]) d = bv - hi[k];
+    if (bv >= hi[k] || bv > av) hi[k] = bv; // growth below it: a real reset, new baseline
+    return d;
+  };
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i-1], b = pts[i];
     const dt = (b.t - a.t) || 1;
-    const aDown = a.down != null ? a.down : 0;
-    const bDown = b.down != null ? b.down : 0;
-    const aUp = a.up != null ? a.up : 0;
-    const bUp = b.up != null ? b.up : 0;
-    let dd = (bDown - aDown) / dt, du = (bUp - aUp) / dt;
-    if (dd < 0 || du < 0) { dd = Math.max(0, dd); du = Math.max(0, du); }
-    let aTot = a.total != null ? a.total : (aDown + aUp);
-    let bTot = b.total != null ? b.total : (bDown + bUp);
-    let dtot = (bTot - aTot) / dt;
-    if (dtot < 0) dtot = dd + du;
+    const dd = moved(a, b, 'down') / dt, du = moved(a, b, 'up') / dt;
+    const dtot = dd + du;
     // Above 100 Gbit/s is a counter glitch, not traffic: older panels added the
     // whole main-NIC counter when the tunnel interface went away.
     const GLITCH = 12.5e9;
