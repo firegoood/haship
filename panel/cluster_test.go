@@ -245,7 +245,7 @@ func TestClusterMultiForeignConfig(t *testing.T) {
 	cfg.ForeignNodes["foreign-de"] = ForeignNode{
 		ID:         "foreign-de",
 		Name:       "Frankfurt Exit",
-		PublicIP:   "91.107.174.173",
+		PublicIP:   "198.51.100.73",
 		TunnelPort: 55354,
 		Protocol:   "wss",
 		IsActive:   true,
@@ -268,7 +268,7 @@ func TestClusterMultiForeignConfig(t *testing.T) {
 		t.Fatalf("expected active_foreign 'foreign-de', got '%s'", reloaded.ActiveForeign)
 	}
 	fn := reloaded.ForeignNodes["foreign-de"]
-	if fn.PublicIP != "91.107.174.173" || fn.TunnelPort != 55354 || fn.Protocol != "wss" {
+	if fn.PublicIP != "198.51.100.73" || fn.TunnelPort != 55354 || fn.Protocol != "wss" {
 		t.Errorf("unexpected foreign node fields: %+v", fn)
 	}
 }

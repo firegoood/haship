@@ -489,7 +489,7 @@ window.FA_TEXT = {
 "On Iran server, enter foreign server address to probe all 7 protocols outwards.": "روی سرور ایران، آدرس سرور خارج را وارد کنید تا هر ۷ پروتکل به سمت بیرون سنجیده شوند.",
 "Foreign Server Public IP or Domain (Destination)": "IP عمومی یا دامنه‌ی سرور خارج (مقصد)",
 "Auto Detect": "تشخیص خودکار",
-"e.g. 195.201.55.10 or foreign.mydomain.com": "مثلاً 195.201.55.10 یا foreign.mydomain.com",
+"e.g. 198.51.100.10 or foreign.mydomain.com": "مثلاً 198.51.100.10 یا foreign.mydomain.com",
 "Enter destination host to benchmark and discover the best protocol for lowest packet loss.": "میزبان مقصد را وارد کنید تا بنچمارک شود و بهترین پروتکل با کمترین افت بسته پیدا شود.",
 "Custom Benchmark Ports (Optional)": "پورت‌های دلخواه بنچمارک (اختیاری)",
 "▼ Expand": "▼ باز کردن",

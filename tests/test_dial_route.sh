@@ -20,17 +20,17 @@ cat > "$CONFIG_DIR/frpc.toml" <<EOT
 serverAddr = "10.14.0.1"
 serverPort = 7091
 EOT
-dial_env_write auto frp 10.14.0.1 77.237.90.217
+dial_env_write auto frp 10.14.0.1 203.0.113.217
 
 # auto + dead GRE => public
-[[ "$(dial_pick auto 10.14.0.1 77.237.90.217 7091)" == 77.237.90.217 ]] || { echo "FAIL auto dead GRE must pick public"; fail=1; }
-[[ "$(dial_pick gre 10.14.0.1 77.237.90.217 7091)" == 10.14.0.1 ]] || { echo "FAIL gre mode"; fail=1; }
-[[ "$(dial_pick public 10.14.0.1 77.237.90.217 7091)" == 77.237.90.217 ]] || { echo "FAIL public mode"; fail=1; }
+[[ "$(dial_pick auto 10.14.0.1 203.0.113.217 7091)" == 203.0.113.217 ]] || { echo "FAIL auto dead GRE must pick public"; fail=1; }
+[[ "$(dial_pick gre 10.14.0.1 203.0.113.217 7091)" == 10.14.0.1 ]] || { echo "FAIL gre mode"; fail=1; }
+[[ "$(dial_pick public 10.14.0.1 203.0.113.217 7091)" == 203.0.113.217 ]] || { echo "FAIL public mode"; fail=1; }
 
-r="$(dial_reselect)"; [[ "$r" == "changed:77.237.90.217" ]] || { echo "FAIL reselect: $r"; fail=1; }
-grep -q 'serverAddr = "77.237.90.217"' "$CONFIG_DIR/frpc.toml" || { echo "FAIL frpc.toml not rewritten"; fail=1; }
+r="$(dial_reselect)"; [[ "$r" == "changed:203.0.113.217" ]] || { echo "FAIL reselect: $r"; fail=1; }
+grep -q 'serverAddr = "203.0.113.217"' "$CONFIG_DIR/frpc.toml" || { echo "FAIL frpc.toml not rewritten"; fail=1; }
 grep -q 'serverPort = 7091' "$CONFIG_DIR/frpc.toml" || { echo "FAIL port changed"; fail=1; }
-r="$(dial_reselect)"; [[ "$r" == "same:77.237.90.217" ]] || { echo "FAIL idempotent: $r"; fail=1; }
+r="$(dial_reselect)"; [[ "$r" == "same:203.0.113.217" ]] || { echo "FAIL idempotent: $r"; fail=1; }
 
 # forced gre flips it back
 r="$(dial_reselect gre)"; [[ "$r" == "changed:10.14.0.1" ]] || { echo "FAIL force gre: $r"; fail=1; }
@@ -41,13 +41,13 @@ cat > "$BACKHAUL_CONFIG_DIR/client.toml" <<EOT
 remote_addr = "10.14.0.1:8443"
 transport = "wssmux"
 EOT
-rm -f "$CONFIG_DIR/frpc.toml"; dial_env_write auto backhaul 10.14.0.1 77.237.90.217
-r="$(dial_reselect)"; [[ "$r" == "changed:77.237.90.217" ]] || { echo "FAIL backhaul reselect: $r"; fail=1; }
-grep -q 'remote_addr = "77.237.90.217:8443"' "$BACKHAUL_CONFIG_DIR/client.toml" || { echo "FAIL backhaul toml"; fail=1; }
+rm -f "$CONFIG_DIR/frpc.toml"; dial_env_write auto backhaul 10.14.0.1 203.0.113.217
+r="$(dial_reselect)"; [[ "$r" == "changed:203.0.113.217" ]] || { echo "FAIL backhaul reselect: $r"; fail=1; }
+grep -q 'remote_addr = "203.0.113.217:8443"' "$BACKHAUL_CONFIG_DIR/client.toml" || { echo "FAIL backhaul toml"; fail=1; }
 
 # GRE alive => stays on GRE
 printf '#!/bin/sh\nexit 0\n' > "$T/bin/ping"
-[[ "$(dial_pick auto 10.14.0.1 77.237.90.217 8443)" == 10.14.0.1 ]] || { echo "FAIL live GRE must stay on GRE"; fail=1; }
+[[ "$(dial_pick auto 10.14.0.1 203.0.113.217 8443)" == 10.14.0.1 ]] || { echo "FAIL live GRE must stay on GRE"; fail=1; }
 
 [[ $fail -eq 0 ]] && echo "dial route: all OK"
 exit $fail

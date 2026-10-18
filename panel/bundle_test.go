@@ -66,15 +66,15 @@ func TestBundleMakeAndParse(t *testing.T) {
 	}
 
 	// Regression: exact bundle from user report (no ports, has fou)
-	userBundle := "hsh1_85.198.48.162_56261_10.10.10.2_10.10.10.1_sHwurcbG926fk4tLcexTF0MXzcNxoHkW__fou443-55555"
+	userBundle := "hsh1_203.0.113.162_56261_10.10.10.2_10.10.10.1_ExampleToken0123456789abcdefABCD__fou443-55555"
 	bUser, err := ParseBundle(userBundle)
 	if err != nil {
 		t.Fatalf("ParseBundle(userBundle) failed: %v", err)
 	}
-	if bUser.IranPub != "85.198.48.162" || bUser.FrpPort != 56261 {
+	if bUser.IranPub != "203.0.113.162" || bUser.FrpPort != 56261 {
 		t.Fatalf("unexpected user bundle fields: %+v", bUser)
 	}
-	if bUser.Token != "sHwurcbG926fk4tLcexTF0MXzcNxoHkW" {
+	if bUser.Token != "ExampleToken0123456789abcdefABCD" {
 		t.Fatalf("wrong token in user bundle: %q", bUser.Token)
 	}
 	if len(bUser.Ports) != 0 {
@@ -111,7 +111,7 @@ func TestBundleMakeAndParse(t *testing.T) {
 // applyBundle does not override any ports the user already typed.
 func TestApplyBundlePreservesUserPorts(t *testing.T) {
 	// Bundle with no ports segment
-	bundleNoPorts := "hsh1_85.198.48.162_56261_10.10.10.2_10.10.10.1_sHwurcbG926fk4tLcexTF0MXzcNxoHkW__fou443-55555"
+	bundleNoPorts := "hsh1_203.0.113.162_56261_10.10.10.2_10.10.10.1_ExampleToken0123456789abcdefABCD__fou443-55555"
 	b, err := ParseBundle(bundleNoPorts)
 	if err != nil {
 		t.Fatalf("ParseBundle failed: %v", err)
@@ -131,7 +131,7 @@ func TestApplyBundlePreservesUserPorts(t *testing.T) {
 		t.Fatalf("applyBundle wiped user ports: got %q, want %q", body.Ports, "443, 2083")
 	}
 	// Token must now be the inner token
-	if body.Token != "sHwurcbG926fk4tLcexTF0MXzcNxoHkW" {
+	if body.Token != "ExampleToken0123456789abcdefABCD" {
 		t.Fatalf("wrong inner token after applyBundle: %q", body.Token)
 	}
 	// OrigBundle must be preserved
@@ -139,7 +139,7 @@ func TestApplyBundlePreservesUserPorts(t *testing.T) {
 		t.Fatalf("OrigBundle was changed: %q", body.OrigBundle)
 	}
 	// GRE addresses must be filled from bundle
-	if body.RemotePub != "85.198.48.162" {
+	if body.RemotePub != "203.0.113.162" {
 		t.Fatalf("RemotePub not filled from bundle: %q", body.RemotePub)
 	}
 }

@@ -10,8 +10,8 @@ import (
 )
 
 func TestLinkedFromSS(t *testing.T) {
-	ss := "0 0 10.10.10.1:7091 10.10.10.2:51000\n0 0 5.75.195.15:7093 1.2.3.4:40000\n0 0 [::ffff:77.1.1.1]:22 9.9.9.9:5\n"
-	if !linkedFromSS(ss, []int{7091, 7093, 7089}, "5.75.195.15", "10.10.10.2") {
+	ss := "0 0 10.10.10.1:7091 10.10.10.2:51000\n0 0 198.51.100.15:7093 1.2.3.4:40000\n0 0 [::ffff:77.1.1.1]:22 9.9.9.9:5\n"
+	if !linkedFromSS(ss, []int{7091, 7093, 7089}, "198.51.100.15", "10.10.10.2") {
 		t.Fatal("GRE-inner session must count")
 	}
 	if linkedFromSS(ss, []int{7091}, "8.8.8.8", "10.99.0.2") {
@@ -47,9 +47,9 @@ func TestDashboardRollupMatchesFleet(t *testing.T) {
 }
 
 const ssSample = "0      0      10.10.10.1:7091   10.10.10.2:51000\n\t bbr wscale:9,9 rto:275 rtt:74.102/0.085 ato:40 mss:1328\n" +
-	"0      0      5.75.195.15:7093   1.2.3.4:40000\n\t cubic rto:201 rtt:0.564/0.087 mss:1\n" +
-	"0      0      5.75.195.15:22   9.9.9.9:5\n\t rtt:1/1\n" +
-	"0      0      5.75.195.15:7091   10.10.10.2:51001\n"
+	"0      0      198.51.100.15:7093   1.2.3.4:40000\n\t cubic rto:201 rtt:0.564/0.087 mss:1\n" +
+	"0      0      198.51.100.15:22   9.9.9.9:5\n\t rtt:1/1\n" +
+	"0      0      198.51.100.15:7091   10.10.10.2:51001\n"
 
 func TestParseSSRTT(t *testing.T) {
 	all := parseSS(ssSample)

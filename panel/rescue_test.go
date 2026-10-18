@@ -47,7 +47,7 @@ func TestParsePortList(t *testing.T) {
 }
 
 func TestValidRemoteIP(t *testing.T) {
-	for _, in := range []string{"194.107.116.102", " 5.75.197.22 "} {
+	for _, in := range []string{"203.0.113.102", " 198.51.100.22 "} {
 		if _, err := validRemoteIP(in); err != nil {
 			t.Fatalf("%q should pass: %v", in, err)
 		}
@@ -95,25 +95,25 @@ func TestClassifyDial(t *testing.T) {
 func goodCode(t *testing.T) (rescueState, string) {
 	t.Helper()
 	st := rescueState{CtrlPort: 31000, Token: randHex(24), Secret: randHex(16), Ports: []int{1020, 1030, 1040}}
-	return st, rescueEncode(st, "5.75.197.22")
+	return st, rescueEncode(st, "198.51.100.22")
 }
 
 func TestRescueCodeRoundTripAndHostile(t *testing.T) {
 	st, code := goodCode(t)
 	c, err := rescueDecode(code)
-	if err != nil || c.IP != "5.75.197.22" || c.CPort != 31000 || c.Token != st.Token || len(c.Ports) != 3 {
+	if err != nil || c.IP != "198.51.100.22" || c.CPort != 31000 || c.Token != st.Token || len(c.Ports) != 3 {
 		t.Fatalf("round trip failed: %+v %v", c, err)
 	}
 	bad := []string{
 		"", "hrc1_", "hrc1_!!!", "nope", strings.Repeat("A", 5000),
-		rescueEncode(rescueState{CtrlPort: 0, Token: st.Token, Secret: st.Secret, Ports: []int{1}}, "5.75.197.22"),
-		rescueEncode(rescueState{CtrlPort: 99999, Token: st.Token, Secret: st.Secret, Ports: []int{1}}, "5.75.197.22"),
-		rescueEncode(rescueState{CtrlPort: 5, Token: "short", Secret: st.Secret, Ports: []int{1}}, "5.75.197.22"),
+		rescueEncode(rescueState{CtrlPort: 0, Token: st.Token, Secret: st.Secret, Ports: []int{1}}, "198.51.100.22"),
+		rescueEncode(rescueState{CtrlPort: 99999, Token: st.Token, Secret: st.Secret, Ports: []int{1}}, "198.51.100.22"),
+		rescueEncode(rescueState{CtrlPort: 5, Token: "short", Secret: st.Secret, Ports: []int{1}}, "198.51.100.22"),
 		rescueEncode(rescueState{CtrlPort: 5, Token: st.Token, Secret: st.Secret, Ports: []int{1}}, "127.0.0.1"),
-		rescueEncode(rescueState{CtrlPort: 5, Token: st.Token, Secret: st.Secret, Ports: []int{70000}}, "5.75.197.22"),
-		rescueEncode(rescueState{CtrlPort: 5, Token: st.Token, Secret: st.Secret, Ports: nil}, "5.75.197.22"),
+		rescueEncode(rescueState{CtrlPort: 5, Token: st.Token, Secret: st.Secret, Ports: []int{70000}}, "198.51.100.22"),
+		rescueEncode(rescueState{CtrlPort: 5, Token: st.Token, Secret: st.Secret, Ports: nil}, "198.51.100.22"),
 		// config injection through the token must never reach a TOML file
-		rescueEncode(rescueState{CtrlPort: 5, Token: "aa\"\nbindPort = 22\n#xx", Secret: st.Secret, Ports: []int{1}}, "5.75.197.22"),
+		rescueEncode(rescueState{CtrlPort: 5, Token: "aa\"\nbindPort = 22\n#xx", Secret: st.Secret, Ports: []int{1}}, "198.51.100.22"),
 	}
 	for i, b := range bad {
 		if _, err := rescueDecode(b); err == nil {
@@ -133,16 +133,16 @@ func TestRenderedFilesAreWellFormed(t *testing.T) {
 	if strings.Count(o, "[[proxies]]") != 4 || !strings.Contains(o, `type = "sudp"`) || !strings.Contains(o, `localIP = "127.0.0.1"`) {
 		t.Fatalf("origin frpc wrong:\n%s", o)
 	}
-	e := rescueEntryFrpcToml("5.75.197.22", 31000, "tok", "sec", []int{1020})
-	if strings.Count(e, "[[visitors]]") != 2 || !strings.Contains(e, `serverAddr = "5.75.197.22"`) || !strings.Contains(e, "bindPort = 1020") {
+	e := rescueEntryFrpcToml("198.51.100.22", 31000, "tok", "sec", []int{1020})
+	if strings.Count(e, "[[visitors]]") != 2 || !strings.Contains(e, `serverAddr = "198.51.100.22"`) || !strings.Contains(e, "bindPort = 1020") {
 		t.Fatalf("entry frpc wrong:\n%s", e)
 	}
-	fw := rescueFwNft(31000, "194.107.116.102")
-	if !strings.Contains(fw, "tcp dport 31000 ip saddr != 194.107.116.102") || !strings.Contains(fw, `iifname "lo" accept`) {
+	fw := rescueFwNft(31000, "203.0.113.102")
+	if !strings.Contains(fw, "tcp dport 31000 ip saddr != 203.0.113.102") || !strings.Contains(fw, `iifname "lo" accept`) {
 		t.Fatalf("firewall wrong:\n%s", fw)
 	}
-	dn := rescueDnatNft("5.75.197.22", []int{1020, 1030})
-	if !strings.Contains(dn, "fib daddr type local meta l4proto { tcp, udp } th dport { 1020, 1030 } dnat ip to 5.75.197.22") || !strings.Contains(dn, "ip daddr 5.75.197.22 meta l4proto { tcp, udp } th dport { 1020, 1030 } masquerade") {
+	dn := rescueDnatNft("198.51.100.22", []int{1020, 1030})
+	if !strings.Contains(dn, "fib daddr type local meta l4proto { tcp, udp } th dport { 1020, 1030 } dnat ip to 198.51.100.22") || !strings.Contains(dn, "ip daddr 198.51.100.22 meta l4proto { tcp, udp } th dport { 1020, 1030 } masquerade") {
 		t.Fatalf("dnat wrong:\n%s", dn)
 	}
 }
@@ -187,7 +187,7 @@ func fakeSystem(t *testing.T) (*[]string, string) {
 
 func TestEnableOriginThenDisableLeavesNothing(t *testing.T) {
 	calls, dir := fakeSystem(t)
-	st, err := rescueEnableOrigin("194.107.116.102", []int{1020, 1030, 1040})
+	st, err := rescueEnableOrigin("203.0.113.102", []int{1020, 1030, 1040})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestEnableOriginThenDisableLeavesNothing(t *testing.T) {
 			t.Fatalf("expected systemctl call %q in:\n%s", w, joined)
 		}
 	}
-	if _, err := rescueEnableOrigin("194.107.116.102", []int{1020}); err == nil {
+	if _, err := rescueEnableOrigin("203.0.113.102", []int{1020}); err == nil {
 		t.Fatal("enabling twice must fail")
 	}
 	rescueDisable()
@@ -237,14 +237,14 @@ func TestEnableOriginThenDisableLeavesNothing(t *testing.T) {
 func TestEnableRejectsReservedAndBadInput(t *testing.T) {
 	fakeSystem(t)
 	for _, p := range [][]int{{22}, {7777}, {7443}, {1020, 22}} {
-		if _, err := rescueEnableOrigin("194.107.116.102", p); err == nil {
+		if _, err := rescueEnableOrigin("203.0.113.102", p); err == nil {
 			t.Fatalf("ports %v must be rejected (reserved)", p)
 		}
 	}
 	if _, err := rescueEnableOrigin("not-an-ip", []int{1020}); err == nil {
 		t.Fatal("bad ip must be rejected")
 	}
-	if _, err := rescueEnableOrigin("194.107.116.102", nil); err == nil {
+	if _, err := rescueEnableOrigin("203.0.113.102", nil); err == nil {
 		t.Fatal("no ports must be rejected")
 	}
 	if _, err := os.Stat(filepath.Join(configDir, "rescue")); !os.IsNotExist(err) {
@@ -261,7 +261,7 @@ func TestEnableRollsBackOnSystemctlFailure(t *testing.T) {
 		}
 		return "", nil
 	}
-	if _, err := rescueEnableOrigin("194.107.116.102", []int{1020}); err == nil {
+	if _, err := rescueEnableOrigin("203.0.113.102", []int{1020}); err == nil {
 		t.Fatal("must fail when a service cannot start")
 	}
 	if _, err := os.Stat(rescueStatePath()); !os.IsNotExist(err) {
@@ -283,7 +283,7 @@ func TestApplyCodeSkipsBusyPortsAndWritesEntry(t *testing.T) {
 	busyPort := busy.Addr().(*net.TCPAddr).Port
 	free := pickFreePort(41000)
 	st := rescueState{CtrlPort: 31000, Token: randHex(24), Secret: randHex(16), Ports: []int{free, busyPort, 22}}
-	got, err := rescueApplyCode(rescueEncode(st, "5.75.197.22"))
+	got, err := rescueApplyCode(rescueEncode(st, "198.51.100.22"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,13 +291,13 @@ func TestApplyCodeSkipsBusyPortsAndWritesEntry(t *testing.T) {
 		t.Fatalf("unexpected: %+v", got)
 	}
 	b, _ := os.ReadFile(filepath.Join(configDir, "rescue", "frpc.toml"))
-	if !strings.Contains(string(b), `serverAddr = "5.75.197.22"`) || strings.Contains(string(b), "bindPort = 22\n") {
+	if !strings.Contains(string(b), `serverAddr = "198.51.100.22"`) || strings.Contains(string(b), "bindPort = 22\n") {
 		t.Fatalf("entry config wrong:\n%s", b)
 	}
 	if !strings.Contains(strings.Join(*calls, "\n"), "enable --now hashem-rescue-frpc.service") {
 		t.Fatal("frpc must be started")
 	}
-	if _, err := rescueApplyCode(rescueEncode(st, "5.75.197.22")); err == nil {
+	if _, err := rescueApplyCode(rescueEncode(st, "198.51.100.22")); err == nil {
 		t.Fatal("second apply while active must fail")
 	}
 }
@@ -337,7 +337,7 @@ func TestObserveNeedsConsecutiveStrikes(t *testing.T) {
 
 func TestObserveDetectsLiftedBlockWhileRescued(t *testing.T) {
 	fakeSystem(t)
-	if _, err := rescueEnableOrigin("194.107.116.102", []int{1020}); err != nil {
+	if _, err := rescueEnableOrigin("203.0.113.102", []int{1020}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(1_800_000_000, 0)
@@ -352,7 +352,7 @@ func TestObserveDetectsLiftedBlockWhileRescued(t *testing.T) {
 func TestRescueAutoEnableAndAutoJoin(t *testing.T) {
 	fakeSystem(t)
 	now := time.Unix(1_800_000_000, 0)
-	blocked := rescueProbeResult{Host: "194.107.116.102", Verdict: "one_way_block"}
+	blocked := rescueProbeResult{Host: "203.0.113.102", Verdict: "one_way_block"}
 
 	// 0. H6: by default a detected block only raises the banner.
 	var st rescueState
@@ -379,14 +379,14 @@ func TestRescueAutoEnableAndAutoJoin(t *testing.T) {
 	if !st.AutoTriggered {
 		t.Fatal("expected AutoTriggered to be true")
 	}
-	if st.RemoteIP != "194.107.116.102" {
-		t.Fatalf("expected remote IP 194.107.116.102, got %q", st.RemoteIP)
+	if st.RemoteIP != "203.0.113.102" {
+		t.Fatalf("expected remote IP 203.0.113.102, got %q", st.RemoteIP)
 	}
 
 	// 2. Test auto-offer generation
 	pub := rescuePublicIP()
 	if pub == "" {
-		pub = "5.75.197.22"
+		pub = "198.51.100.22"
 	}
 	code := rescueEncode(st, pub)
 	if !strings.HasPrefix(code, rescueCodePrefix) {
@@ -417,7 +417,7 @@ func TestApplyCodeUsesKernelDNATForDirectlyReachablePorts(t *testing.T) {
 		return nil, os.ErrDeadlineExceeded
 	}
 	st := rescueState{CtrlPort: 31000, Token: randHex(24), Secret: randHex(16), Ports: []int{p1, p2}}
-	got, err := rescueApplyCode(rescueEncode(st, "5.75.197.22"))
+	got, err := rescueApplyCode(rescueEncode(st, "198.51.100.22"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestApplyCodeUsesKernelDNATForDirectlyReachablePorts(t *testing.T) {
 		t.Fatalf("split wrong: direct=%v relay=%v", got.Direct, got.Relay)
 	}
 	dn, err := os.ReadFile(filepath.Join(configDir, "rescue", "dnat.nft"))
-	if err != nil || !strings.Contains(string(dn), fmt.Sprintf("th dport { %d } dnat ip to 5.75.197.22", p1)) {
+	if err != nil || !strings.Contains(string(dn), fmt.Sprintf("th dport { %d } dnat ip to 198.51.100.22", p1)) {
 		t.Fatalf("dnat rules wrong: %v\n%s", err, dn)
 	}
 	fc, _ := os.ReadFile(filepath.Join(configDir, "rescue", "frpc.toml"))

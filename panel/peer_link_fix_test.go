@@ -169,7 +169,7 @@ func TestPublicIPSkipsPrivateAddresses(t *testing.T) {
 			t.Errorf("%s should be private", ip)
 		}
 	}
-	for _, ip := range []string{"100.128.0.1", "5.75.197.22"} {
+	for _, ip := range []string{"100.128.0.1", "198.51.100.22"} {
 		if isPrivateIP(ip) {
 			t.Errorf("%s should be public", ip)
 		}
@@ -182,8 +182,8 @@ func TestPublicIPSkipsPrivateAddresses(t *testing.T) {
 	if v := savedPublicIP(); v != "" {
 		t.Fatalf("private setup.json address accepted: %q", v)
 	}
-	_ = os.WriteFile(filepath.Join(configDir, "setup.json"), []byte(`{"local_public":"5.75.197.22"}`), 0600)
-	if v := savedPublicIP(); v != "5.75.197.22" {
+	_ = os.WriteFile(filepath.Join(configDir, "setup.json"), []byte(`{"local_public":"198.51.100.22"}`), 0600)
+	if v := savedPublicIP(); v != "198.51.100.22" {
 		t.Fatalf("savedPublicIP = %q", v)
 	}
 

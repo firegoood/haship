@@ -98,7 +98,7 @@ func TestFleetRecordTrimsPrunesAndPersists(t *testing.T) {
 func TestFleetEndpointNoSecrets(t *testing.T) {
 	resetFleet()
 	fleetLoad = syncOnceReset()
-	recs := []peerRecord{{ID: 1, Name: "Germany", RemotePub: "5.75.195.15", Token: "SUPERSECRETTOKEN", Engine: "frp", Ports: []int{7091}}}
+	recs := []peerRecord{{ID: 1, Name: "Germany", RemotePub: "198.51.100.15", Token: "SUPERSECRETTOKEN", Engine: "frp", Ports: []int{7091}}}
 	live := map[int]peerLive{1: {peerRecord: recs[0], GreUp: true, FrpUp: true, PingOK: true, PingMs: "42ms"}}
 	fleetRecord([]peerLive{live[1]}, time.Now())
 	nodes := fleetSnapshot(recs, live)

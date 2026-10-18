@@ -273,7 +273,7 @@ func TestBagherAPIEndpoints(t *testing.T) {
 	}
 
 	// Test get_bundle with valid remote_host and ports
-	body := `{"action":"get_bundle","remote_host":"91.107.174.173","ports":"443,8443"}`
+	body := `{"action":"get_bundle","remote_host":"198.51.100.73","ports":"443,8443"}`
 	req := httptest.NewRequest("POST", "/api/sshfwd", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	handleSSHFwdPost(rec, req)
