@@ -3,32 +3,49 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
-## Unreleased — design review (Apple HIG) and Persian UI
+## v2.3.6 — 2026-10-18
+
+Audit fixes, a Persian UI, and working Bagher, Diagnostics and engine switch. Update both servers.
+
+### Upgrade notes (this release)
+- **Bagher:** after updating, re-apply the bundle from the Bagher tab on the foreign server once. Its frpc config is only rewritten then (the old one made frpc exit at start). The Iran key line in `authorized_keys` is tightened automatically when the panel starts; other keys are not touched.
+- **iPerf3** (Diagnostics) now listens on the GRE address only, not on every address.
+- **Switch Engine** from the Iran server switches the linked foreign server too and says whether it did.
+
+### Bagher, Diagnostics and Tunnel tab
+- Bagher carried no data: the generated frpc config had an frps-only field, so frpc exited on start. Tested end to end in a three-namespace lab (`tests/test_bagher_lab.sh`, now in CI).
+- Security: the Iran key could run commands as root on the foreign server and open forwards to any local service there. It is now limited to its one reverse forward.
+- Live engine switch always failed with `invalid engine ""` (request field name mismatch). The foreign side is now told and waited for (40 s), and the result is shown.
+- Diagnostics: no more false "MTU fragmented" on every GRE server (it probed 1420/1400 on a 1380 interface); ping now runs inside the tunnel and, separately, to the peer's public IP; Backhaul and Bagher servers are judged by their own engine instead of scoring 20/100; issues and their fixes no longer drift apart; Quick Repair adds the installer's MSS rule and restarts a stopped engine.
+- Tunnel tab: Restart on Backhaul servers restarted a non-existent frps; Copy Bundle never showed; GRE cards on GRE-less servers; Bagher shown as active when only enabled; carrier and engine switches now ask first; Restore shows whenever a backup exists.
+- Dashboard: throughput chart spikes when the traffic source changed; Details values overflowing their cards; Diagnostics showing login errors as tunnel errors. Live Activity Stream is a structured event feed. Browser tab icon and a premium tier mark.
+
+### Design review (Apple HIG) and Persian UI
 
 Review of the panel UI against Apple's Human Interface Guidelines, then fixes in seven phases.
 
-### Upgrade notes
+#### Upgrade notes
 - **FA mode is now Persian.** It used to switch the layout to right-to-left but keep English text. Switching language reloads the page.
 - **Theme follows the system** until you pick one with the theme button.
 - Before a tunnel is set up the dashboard and Diagnostics show a neutral "Not set up" state instead of red errors.
 
-### Fixed
+#### Fixed
 - Contrast: white text on the default blue was 3.6:1, light-theme status colors 2.3–3.7:1, several badges and the login button below 4.5:1. Every tab now passes 4.5:1 in both themes.
 - A Bagher button referenced a function that did not exist; the error stopped `app.js` during load, so Sentinel, Cluster, license and later handlers never initialised. Two more missing handlers defined.
 - Six dialogs ignored Escape and did not keep keyboard focus; all nine now do.
 - Performance, Settings and Benchmark scrolled sideways on phones; the light-theme chart tooltip was unreadable; the login page stayed dark in the light theme; undefined CSS variables rendered square corners and missing borders; the Diagnostics repair button could not be hidden.
 - Benchmark recommended a carrier that never answered (0/100, 100% loss); it now says no carrier answered and what to check.
 
-### Changed
+#### Changed
 - Design tokens for every color (about 500 hard-coded colors replaced), 12px text floor, tabular figures, quieter depth (no glows or hover lifts), one primary button per card, Title Case buttons.
 - Emoji replaced by an SVG icon set; 470 inline styles moved to utility classes; 26 fields gained accessible labels.
 - Topbar link strip: this server ⇄ the other side · engine · latency, with one live dot.
 
-## Unreleased — audit fixes (docs/audit/BUG_REPORT_2026-10-17.md)
+### Audit fixes (docs/audit/BUG_REPORT_2026-10-17.md)
 
 Fixes for the 61 findings of the 2026-10-17 code audit, plus the Sentinel addon. IDs (C1, H4, …) refer to the report.
 
-### Upgrade notes (behaviour changes)
+#### Upgrade notes (behaviour changes)
 - **Reverse proxy on the same server (nginx/Caddy):** loopback is no longer trusted for `X-Forwarded-For` by default. Add `Environment=TRUSTED_PROXY_IPS=127.0.0.1` to `gre-panel` (`systemctl edit gre-panel`), or every visitor is seen as 127.0.0.1. The generated proxy configs say so.
 - **Peer Link** works best with both servers updated: the peer API is now also served at the fixed prefix `/_hp` (peer secret only; bare 404 otherwise). An old peer is still reached when its full panel URL (with its base path) is entered as Peer URL.
 - **Updates and installs fail closed** when `checksums.txt` cannot be fetched from github.com itself; set `GRE_PANEL_ALLOW_UNVERIFIED_UPDATE=1` to accept the risk.
@@ -38,7 +55,7 @@ Fixes for the 61 findings of the 2026-10-17 code audit, plus the Sentinel addon.
 - The benchmark reports KCP/QUIC as "Not measured" and never recommends them; Apply refuses Backhaul/Bagher (use Switch Engine / the Bagher page).
 - The peer limit is 10 everywhere (`GRE_MAX_PEERS` overrides it in the panel and in `hashem.sh`).
 
-### Security
+#### Security
 - 2FA, terminal and TLS settings were wiped from `panel.json` on every restart of a licensed panel (C1).
 - The stored password hash was accepted as the password (C2).
 - Peer-supplied SSH keys could add an unrestricted root key or delete all root keys (C4, L18).
@@ -47,7 +64,7 @@ Fixes for the 61 findings of the 2026-10-17 code audit, plus the Sentinel addon.
 - WSS carrier refuses to run without a token (M12); revpath firewall fix limited to the peer IP (M10); token files are 0600 (M15); inline handlers can no longer be broken out of (L10, L11).
 - Backup encryption key can be exported (`hashem backup key`, panel with password re-check) (M6).
 
-### Fixed
+#### Fixed
 - Panel crash `concurrent map iteration and map write` in the cluster code (C3).
 - Peer Link reported "Connected" while every call landed on the login page (H1); status writes no longer clobber settings (M13).
 - frpc restarted every minute by two competing Auto-Pool controllers (H2); editing Iran peer ports broke frps (H3).
