@@ -109,6 +109,7 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-BH-01` | — | backhaul authentication failed (token mismatch) | The client token differs from the server token. Re-copy it from the Iran side; the token shown in logs is masked. |
 | `E-BH-02` | — | backhaul control channel failed (EOF) | Usually a wrong token or a transport mismatch (e.g. tcp vs tcpmux/ws) between hub and spoke. Make both ends use the same transport and token. |
 | `E-BH-03` | — | backhaul rejected the config file | The binary does not understand this config dialect (sectioned premium schema vs flat server/client). Re-run the Backhaul setup in `hashem`. |
+| `E-BH-04` | — | backhaul transport mismatch: the link is up but carries no data | The two servers use different Backhaul transports of the same family (tcp vs tcpmux, ws vs wsmux): the control channel connects, every connection fails. Set the same transport on both, or set the foreign side up again from the Iran bundle. |
 
 ## E-SYS-xx — Host tooling and load
 
@@ -249,4 +250,4 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
 | `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
 
-Total: 133 codes.
+Total: 134 codes.

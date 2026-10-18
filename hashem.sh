@@ -2208,6 +2208,74 @@ EOF
     systemctl restart "${SVC_NAME}.service"
 }
 
+# engine_retire_others KEEP [nogre]: a setup replaces this server's main tunnel,
+# so the other main relay (frps / frpc / backhaul-server / backhaul-client) must
+# not keep running next to the new one: it holds the same ports, the panel goes
+# on reporting the old engine, and perf_apply would restart it from its toml.
+# Units and configs go (backup_configs saved them first). With "nogre" (Backhaul
+# without GRE) the main GRE interface goes too. Extra peers (frps-N,
+# backhaul-server-N, gre-tN) are separate tunnels and stay.
+engine_retire_others() {
+    local keep=$1 nogre=${2:-} u conf d="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"
+    for u in frps frpc backhaul-server backhaul-client; do
+        [[ "$u" == "$keep" ]] && continue
+        case "$u" in
+            frps) conf="${CONFIG_DIR}/frps.toml" ;;
+            frpc) conf="${CONFIG_DIR}/frpc.toml" ;;
+            backhaul-server) conf="${BACKHAUL_CONFIG_DIR}/config.toml" ;;
+            backhaul-client) conf="${BACKHAUL_CONFIG_DIR}/client.toml" ;;
+        esac
+        if [[ -f "$d/$u.service" ]]; then
+            systemctl disable --now "$u.service" >/dev/null 2>&1 || true
+            rm -f "$d/$u.service"
+            echo -e "${CYAN}[*] Stopped the previous ${u}: ${keep} replaces it.${NC}"
+        fi
+        rm -f "$conf"
+        [[ "$u" == frps ]] && { frps_wss_front_remove "" >/dev/null 2>&1 || true; }
+    done
+    if [[ "$nogre" == "nogre" && -f "$d/${TUNNEL_NAME}.service" ]]; then
+        systemctl disable --now "${TUNNEL_NAME}.service" >/dev/null 2>&1 || true
+        rm -f "$d/${TUNNEL_NAME}.service" "$PANEL_CONFIG_DIR/gre_mtu"
+        ip link del "$TUNNEL_NAME" >/dev/null 2>&1 || true
+        echo -e "${CYAN}[*] Removed the previous GRE interface ${TUNNEL_NAME}: Backhaul without GRE does not use it.${NC}"
+    fi
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    return 0
+}
+
+# backhaul_wait_link UNIT SINCE [SECS]: waits for the control channel the unit
+# opened after SINCE ("YYYY-mm-dd HH:MM:SS"). 0 = linked; 1 = the core reported
+# a failure (BH_LINK_ERR says which); 2 = no outcome in time (BH_LINK_ERR set
+# when the server kept closing the connection). An active unit alone proves
+# nothing: Backhaul restarts itself inside the process on every failure.
+backhaul_wait_link() {
+    local unit=$1 since=$2 secs=${3:-15} line i eof up mismatch
+    BH_LINK_ERR=""
+    for ((i = 0; i < secs; i++)); do
+        eof=0 up=0 mismatch=0
+        while IFS= read -r line; do
+            case "${line,,}" in
+                *"control channel established successfully"*|*"control channel successfully established"*) up=1 ;;
+                *"neither server nor client configuration"*) BH_LINK_ERR="the Backhaul core rejected ${unit}'s config"; return 1 ;;
+                # seen in a GRE lab when the transports differ (tcp vs tcpmux)
+                *"unexpected response from channel"*|*"failed to resolve remote port: invalid port format"*) mismatch=1 ;;
+                *"failed to receive control channel response"*|*"control channel dialer: unexpected eof"*) eof=$((eof + 1)) ;;
+            esac
+        done < <(journalctl -u "$unit" --since "$since" --no-pager -o cat 2>/dev/null)
+        if (( mismatch )); then
+            BH_LINK_ERR="the transport differs from the Iran side (e.g. tcp vs tcpmux): set it up again from the Iran bundle"
+            return 1
+        fi
+        if (( eof >= 3 )); then
+            BH_LINK_ERR="the Iran server closes the connection: the token or the transport differs from the Iran side"
+            return 1
+        fi
+        (( up )) && return 0
+        sleep 1
+    done
+    return 2
+}
+
 setup_gre_systemd() {
     setup_gre_iface "$TUNNEL_NAME" "$1" "$2" "$3" "$4"
 }
@@ -2797,6 +2865,7 @@ setup_iran_server_noninteractive() {
     
     log_msg "tunnel" "INFO" "Starting IRAN server setup: GRE ${IP_IRAN} <-> ${IP_FOREIGN}, FRP port: ${BIND_PORT}"
     backup_configs "pre_setup_iran"
+    engine_retire_others frps
     ensure_dependencies_smart
 
     local STATUS_GRE="OK"
@@ -2977,6 +3046,7 @@ _setup_foreign_full() {
     
     log_msg "tunnel" "INFO" "Starting FOREIGN server setup: GRE ${IP_FOREIGN} <-> ${IP_IRAN}, serverPort: ${SERVER_PORT}, reverse ports: ${PORTS_CLEANED}"
     backup_configs "pre_setup_foreign"
+    engine_retire_others frpc
     ensure_dependencies_smart
 
     local STATUS_GRE="OK"
@@ -3193,6 +3263,7 @@ setup_backhaul_iran_server_noninteractive() {
 
     log_msg "tunnel" "INFO" "Starting Standalone Backhaul IRAN server setup: port ${BIND_PORT}, transport ${TRANSPORT}"
     backup_configs "pre_setup_backhaul_iran"
+    engine_retire_others backhaul-server nogre
     ensure_dependencies_smart
 
     local STATUS_BH="OK"
@@ -3283,11 +3354,13 @@ setup_backhaul_foreign_server_noninteractive() {
 
     log_msg "tunnel" "INFO" "Starting Standalone Backhaul FOREIGN setup: remote ${IP_IRAN}:${SERVER_PORT}, transport ${TRANSPORT}"
     backup_configs "pre_setup_backhaul_foreign"
+    engine_retire_others backhaul-client nogre
     ensure_dependencies_smart
 
     local STATUS_BH="OK"
+    local STATUS_LINK="OK"
     local STATUS_PANEL="OK"
-    local BH_ERR="" PANEL_ERR=""
+    local BH_ERR="" PANEL_ERR="" _bh_since=""
 
     install_backhaul_binaries || { STATUS_BH="FAILED"; BH_ERR="Failed to install backhaul binary"; }
     backhaul_ensure_tls "$TRANSPORT"
@@ -3295,6 +3368,7 @@ setup_backhaul_foreign_server_noninteractive() {
     if [[ "$STATUS_BH" == "OK" ]]; then
         mkdir -p "${BACKHAUL_CONFIG_DIR}"
         backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "${IP_IRAN}:${SERVER_PORT}" "$TRANSPORT" "$TOKEN"
+        _bh_since=$(date '+%Y-%m-%d %H:%M:%S')
         setup_backhaul_client_systemd "backhaul-client" "${BACKHAUL_CONFIG_DIR}/client.toml"
 
         local _bh_ok=0
@@ -3310,6 +3384,14 @@ setup_backhaul_foreign_server_noninteractive() {
             STATUS_BH="FAILED"
             BH_ERR="backhaul-client service failed to start — check: journalctl -u backhaul-client"
             log_msg "tunnel" "ERROR" "backhaul-client service failed to start"
+        else
+            echo -e "${CYAN}[*] Waiting for the Backhaul link to Iran (${IP_IRAN}:${SERVER_PORT})...${NC}"
+            backhaul_wait_link backhaul-client "$_bh_since" 15
+            case $? in
+                0) ;;
+                1) STATUS_LINK="FAILED"; log_msg "tunnel" "ERROR" "backhaul-client link failed: ${BH_LINK_ERR}" ;;
+                *) STATUS_LINK="WARN"; BH_LINK_ERR="no answer from ${IP_IRAN}:${SERVER_PORT} yet: check that the Iran server is set up and the port is open" ;;
+            esac
         fi
     fi
 
@@ -3329,10 +3411,14 @@ setup_backhaul_foreign_server_noninteractive() {
     echo -e "\n=============================================================="
     echo "                   INSTALLATION SUMMARY"
     echo "=============================================================="
-    if [[ "$STATUS_BH" == "OK" ]]; then
-        echo -e "[${GREEN}OK${NC}]     Backhaul Client Service (connected to ${IP_IRAN}:${SERVER_PORT}, transport: ${TRANSPORT})"
-    else
+    if [[ "$STATUS_BH" != "OK" ]]; then
         echo -e "[${RED}FAILED${NC}] Backhaul Client Service (${BH_ERR})"
+    elif [[ "$STATUS_LINK" == "OK" ]]; then
+        echo -e "[${GREEN}OK${NC}]     Backhaul Link (${IP_IRAN}:${SERVER_PORT}, transport: ${TRANSPORT})"
+    elif [[ "$STATUS_LINK" == "WARN" ]]; then
+        echo -e "[${YELLOW}WARN${NC}]   Backhaul Link (${BH_LINK_ERR})"
+    else
+        echo -e "[${RED}FAILED${NC}] Backhaul Link (${BH_LINK_ERR})"
     fi
 
     if [[ "${GRE_SKIP_PANEL:-0}" != "1" ]]; then
@@ -3344,7 +3430,7 @@ setup_backhaul_foreign_server_noninteractive() {
     fi
     echo "=============================================================="
 
-    if [[ "$STATUS_BH" == "OK" ]]; then
+    if [[ "$STATUS_BH" == "OK" && "$STATUS_LINK" != "FAILED" ]]; then
         echo -e "Overall Installation Status: ${GREEN}SUCCESS${NC}\n"
         log_msg "tunnel" "INFO" "FOREIGN Backhaul client setup completed successfully"
         return 0
@@ -3364,6 +3450,7 @@ setup_gre_backhaul_iran_server_noninteractive() {
 
     log_msg "tunnel" "INFO" "Starting GRE+Backhaul IRAN setup: GRE ${IP_IRAN} <-> ${IP_FOREIGN}, port: ${BIND_PORT}, transport: ${TRANSPORT}"
     backup_configs "pre_setup_gre_backhaul_iran"
+    engine_retire_others backhaul-server
     ensure_dependencies_smart
 
     local STATUS_GRE="OK"
@@ -3477,13 +3564,15 @@ setup_gre_backhaul_foreign_server_noninteractive() {
 
     log_msg "tunnel" "INFO" "Starting GRE+Backhaul FOREIGN setup: GRE ${IP_FOREIGN} <-> ${IP_IRAN}, port: ${SERVER_PORT}, transport: ${TRANSPORT}"
     backup_configs "pre_setup_gre_backhaul_foreign"
+    engine_retire_others backhaul-client
     ensure_dependencies_smart
 
     local STATUS_GRE="OK"
     local STATUS_PING="OK"
     local STATUS_BH="OK"
+    local STATUS_LINK="OK"
     local STATUS_PANEL="OK"
-    local GRE_ERR="" PING_ERR="" BH_ERR="" PANEL_ERR=""
+    local GRE_ERR="" PING_ERR="" BH_ERR="" PANEL_ERR="" BH_DIAL="$PEER_GRE" _bh_since=""
 
     carrier_init_kernel 2>/dev/null || true
     if ! setup_gre_systemd "$IP_FOREIGN" "$IP_IRAN" "$LOCAL_GRE" "$PEER_GRE"; then
@@ -3508,10 +3597,10 @@ setup_gre_backhaul_foreign_server_noninteractive() {
     if [[ "$STATUS_BH" == "OK" ]]; then
         mkdir -p "${BACKHAUL_CONFIG_DIR}"
         # In GRE+Backhaul, foreign client dials Iran via the GRE internal IP (PEER_GRE)
-        local BH_DIAL
         BH_DIAL=$(dial_pick "${FRP_DIAL:-auto}" "$PEER_GRE" "$IP_IRAN" "$SERVER_PORT")
         dial_env_write "${FRP_DIAL:-auto}" backhaul "$PEER_GRE" "$IP_IRAN"
         backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "${BH_DIAL}:${SERVER_PORT}" "$TRANSPORT" "$TOKEN"
+        _bh_since=$(date '+%Y-%m-%d %H:%M:%S')
         setup_backhaul_client_systemd "backhaul-client" "${BACKHAUL_CONFIG_DIR}/client.toml"
         sed -i "s/After=network.target/After=network.target ${TUNNEL_NAME}.service/" /etc/systemd/system/backhaul-client.service 2>/dev/null || true
         systemctl daemon-reload
@@ -3530,6 +3619,14 @@ setup_gre_backhaul_foreign_server_noninteractive() {
             STATUS_BH="FAILED"
             BH_ERR="backhaul-client service failed to start — check: journalctl -u backhaul-client"
             log_msg "tunnel" "ERROR" "backhaul-client service failed to start"
+        else
+            echo -e "${CYAN}[*] Waiting for the Backhaul link to Iran (${BH_DIAL}:${SERVER_PORT})...${NC}"
+            backhaul_wait_link backhaul-client "$_bh_since" 15
+            case $? in
+                0) ;;
+                1) STATUS_LINK="FAILED"; log_msg "tunnel" "ERROR" "backhaul-client link failed: ${BH_LINK_ERR}" ;;
+                *) STATUS_LINK="WARN"; BH_LINK_ERR="no answer from ${BH_DIAL}:${SERVER_PORT} yet: check that the Iran server is set up and the port is open" ;;
+            esac
         fi
     fi
 
@@ -3561,10 +3658,16 @@ setup_gre_backhaul_foreign_server_noninteractive() {
         echo -e "[${YELLOW}WARN${NC}]   GRE Ping Connectivity (${PING_ERR})"
     fi
 
-    if [[ "$STATUS_BH" == "OK" ]]; then
-        echo -e "[${GREEN}OK${NC}]     Backhaul Client Service (connected to ${PEER_GRE}:${SERVER_PORT}, transport: ${TRANSPORT})"
-    else
+    local _via="GRE"
+    [[ "$BH_DIAL" != "$PEER_GRE" ]] && _via="the public IP, GRE did not answer"
+    if [[ "$STATUS_BH" != "OK" ]]; then
         echo -e "[${RED}FAILED${NC}] Backhaul Client Service (${BH_ERR})"
+    elif [[ "$STATUS_LINK" == "OK" ]]; then
+        echo -e "[${GREEN}OK${NC}]     Backhaul Link (${BH_DIAL}:${SERVER_PORT} via ${_via}, transport: ${TRANSPORT})"
+    elif [[ "$STATUS_LINK" == "WARN" ]]; then
+        echo -e "[${YELLOW}WARN${NC}]   Backhaul Link (${BH_LINK_ERR})"
+    else
+        echo -e "[${RED}FAILED${NC}] Backhaul Link (${BH_LINK_ERR})"
     fi
 
     if [[ "${GRE_SKIP_PANEL:-0}" != "1" ]]; then
@@ -3581,13 +3684,13 @@ setup_gre_backhaul_foreign_server_noninteractive() {
         _ping_blocking=1
     fi
 
-    if [[ "$STATUS_GRE" == "OK" && "$STATUS_BH" == "OK" && "$_ping_blocking" -eq 0 ]]; then
+    if [[ "$STATUS_GRE" == "OK" && "$STATUS_BH" == "OK" && "$STATUS_LINK" != "FAILED" && "$_ping_blocking" -eq 0 ]]; then
         echo -e "Overall Installation Status: ${GREEN}SUCCESS${NC}\n"
         log_msg "tunnel" "INFO" "FOREIGN GRE+Backhaul setup completed successfully"
         return 0
     else
         echo -e "Overall Installation Status: ${RED}PARTIALLY FAILED${NC}"
-        log_msg "tunnel" "ERROR" "FOREIGN GRE+Backhaul setup partially failed: GRE=${STATUS_GRE}, BH=${STATUS_BH}"
+        log_msg "tunnel" "ERROR" "FOREIGN GRE+Backhaul setup partially failed: GRE=${STATUS_GRE}, BH=${STATUS_BH}, LINK=${STATUS_LINK}"
         return 1
     fi
 }
@@ -6470,6 +6573,8 @@ backhaul_session_ok() {
         case "${line,,}" in
             *"control channel established successfully"*|*"control channel successfully established"*) return 0 ;;
             *"failed to receive control channel response"*|*"invalid security token"*|*"failed to read from control channel"*|*"neither server nor client configuration"*) return 1 ;;
+            # transport mismatch (tcp vs tcpmux, ws vs wsmux): "established", but no data
+            *"failed to resolve remote port: invalid port format"*|*"unexpected response from channel"*|*"invalid signal received for channel"*|*"control channel dialer: unexpected eof"*) return 1 ;;
         esac
     done < <(journalctl -u "$unit" -n 80 --no-pager 2>/dev/null | tac)
     return 0

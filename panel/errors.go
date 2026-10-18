@@ -118,6 +118,7 @@ var errCatalog = map[string]errInfo{
 	"E-BH-01":      {0, "backhaul authentication failed (token mismatch)", "The client token differs from the server token. Re-copy it from the Iran side; the token shown in logs is masked."},
 	"E-BH-02":      {0, "backhaul control channel failed (EOF)", "Usually a wrong token or a transport mismatch (e.g. tcp vs tcpmux/ws) between hub and spoke. Make both ends use the same transport and token."},
 	"E-BH-03":      {0, "backhaul rejected the config file", "The binary does not understand this config dialect (sectioned premium schema vs flat server/client). Re-run the Backhaul setup in `hashem`."},
+	"E-BH-04":      {0, "backhaul transport mismatch: the link is up but carries no data", "The two servers use different Backhaul transports of the same family (tcp vs tcpmux, ws vs wsmux): the control channel connects, every connection fails. Set the same transport on both, or set the foreign side up again from the Iran bundle."},
 	"E-FRP-10":     {0, "frpc login failed with EOF (likely tcpMux mismatch)", "tcpMux mismatch: hub is likely tcpMux=true, run `hashem perf tcpmux on|off` so both ends match (default OFF)."},
 	"E-SYS-01":     {0, "host tool unavailable", "journalctl/systemctl/ip missing on this host."},
 	"E-SYS-02":     {503, "panel is busy (too many requests in flight)", "Retry in a couple of seconds; /api/selfstats still answers."},
@@ -351,6 +352,10 @@ func matchLogCode(line string) (code, hint string) {
 		return "E-BH-02", errCatalog["E-BH-02"].Hint
 	case has("neither server nor client configuration is properly set"):
 		return "E-BH-03", errCatalog["E-BH-03"].Hint
+	// what the v0.7.2 core logs when the transports differ (seen in a GRE lab)
+	case has("failed to resolve remote port: invalid port format", "unexpected response from channel",
+		"invalid signal received for channel", "control channel dialer: unexpected eof"):
+		return "E-BH-04", errCatalog["E-BH-04"].Hint
 	case has("connect to server error: eof"):
 		return "E-FRP-10", errCatalog["E-FRP-10"].Hint
 	case has("too many open files") || has("emfile", "enfile") || has("socket: too many"):

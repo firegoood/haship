@@ -13,6 +13,12 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 - **UDP.** New `udp` transport (UDP only), and "Also forward UDP on these ports" (`--udp`) for the `tcp` transport in the menu, CLI and Setup tab. Checked on the real core: `accept_udp` works only with `tcp`.
 - An unknown transport is refused before anything changes (it used to produce a server that never started), the menu offers a numbered list instead of free text, and `add-backhaul-peer --bundle` uses the bundle's transport instead of always `tcpmux`.
 
+### GRE + Backhaul setup
+- **Replacing a tunnel stops the old engine.** No setup stopped the other engine's services: after setting up GRE + Backhaul over GRE + FRP (or the other way round), `frps`/`frpc` kept running next to Backhaul on the same ports, the panel went on showing FRP, and Optimize restarted FRP from its old config. Every setup now stops and removes the other main relay (its config was already backed up). Extra peers stay. Backhaul without GRE also removes the old main GRE interface, which made the panel report GRE + Backhaul.
+- **The foreign summary says what really happened.** It reported "connected" as soon as the service started, and always named the GRE address. It now waits up to 15 s for the control channel and shows the address it dialled (GRE, or the public IP when GRE does not answer). A wrong token or transport now fails the setup with the reason, and an Iran side that does not answer yet is a warning. Same for Backhaul without GRE.
+- **New `E-BH-04`: transport mismatch.** With `tcp` on one side and `tcpmux` on the other (or `ws`/`wsmux`), the control channel comes up but no connection works. Diagnostics, the log view and the watchdog now recognise the core's lines for it instead of calling the link healthy.
+- Checked in a GRE lab that now runs in CI (`tests/test_gre_backhaul_lab.sh`: two network namespaces, real GRE with MTU 1380, Backhaul v0.7.2): the foreign side picks the GRE address, 1 MiB arrives byte-exact, it falls back to the public IP when GRE is blocked, and the failures above are reported as described.
+
 ## v2.3.6 — 2026-10-18
 
 Audit fixes, a Persian UI, a redesigned dashboard, and working Bagher, Diagnostics and engine switch. Update both servers.

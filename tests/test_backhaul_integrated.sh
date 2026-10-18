@@ -98,4 +98,46 @@ printf '[Service]\nExecStart=%s/backhaul_premium -c %s/iran4040.toml\n' "$T/lega
 cli_backhaul_migrate >/dev/null 2>&1
 [[ -f "$T/systemd/backhaul-iran4040.service" && -f "$T/legacy/iran4040.toml" ]] || { echo "FAIL v2 tunnel touched"; fail=1; }
 
+# 7. a setup replaces the main tunnel: the other engine's units and configs go
+for f in engine_retire_others backhaul_wait_link; do
+  b="$(ext $f)"; [[ -n "$b" ]] || { echo "FAIL: $f missing"; exit 1; }; eval "$b"
+done
+CONFIG_DIR="$T/frp"; PANEL_CONFIG_DIR="$T/panel"; TUNNEL_NAME="gre-tunnel"; mkdir -p "$CONFIG_DIR" "$PANEL_CONFIG_DIR" "$BACKHAUL_CONFIG_DIR"
+frps_wss_front_remove() { echo "wss-front-removed" >> "$T/calls"; }
+ip() { echo "ip $*" >> "$T/calls"; }
+reset_host() {
+  : > "$T/calls"; rm -f "$T/systemd"/*.service
+  for u in frps frpc backhaul-server backhaul-client frps-2 backhaul-server-3 gre-tunnel gre-t2; do : > "$T/systemd/$u.service"; done
+  : > "$CONFIG_DIR/frps.toml"; : > "$CONFIG_DIR/frpc.toml"; : > "$CONFIG_DIR/frps-2.toml"
+  : > "$BACKHAUL_CONFIG_DIR/config.toml"; : > "$BACKHAUL_CONFIG_DIR/client.toml"; : > "$PANEL_CONFIG_DIR/gre_mtu"
+}
+reset_host
+engine_retire_others backhaul-client >/dev/null
+for u in frps frpc backhaul-server; do [[ -f "$T/systemd/$u.service" ]] && { echo "FAIL $u unit left"; fail=1; }; done
+[[ -f "$T/systemd/backhaul-client.service" && -f "$BACKHAUL_CONFIG_DIR/client.toml" ]] || { echo "FAIL kept engine touched"; fail=1; }
+[[ -f "$CONFIG_DIR/frps.toml" || -f "$CONFIG_DIR/frpc.toml" || -f "$BACKHAUL_CONFIG_DIR/config.toml" ]] && { echo "FAIL old configs left"; fail=1; }
+[[ -f "$T/systemd/frps-2.service" && -f "$CONFIG_DIR/frps-2.toml" && -f "$T/systemd/backhaul-server-3.service" ]] || { echo "FAIL extra peers touched"; fail=1; }
+[[ -f "$T/systemd/gre-tunnel.service" && -f "$PANEL_CONFIG_DIR/gre_mtu" ]] || { echo "FAIL GRE removed for GRE+Backhaul"; fail=1; }
+grep -q "disable --now frps.service" "$T/calls" && grep -q "wss-front-removed" "$T/calls" || { echo "FAIL frps not stopped"; cat "$T/calls"; fail=1; }
+reset_host
+engine_retire_others backhaul-server nogre >/dev/null
+[[ -f "$T/systemd/gre-tunnel.service" || -f "$PANEL_CONFIG_DIR/gre_mtu" ]] && { echo "FAIL main GRE left for Backhaul without GRE"; fail=1; }
+grep -q "ip link del gre-tunnel" "$T/calls" || { echo "FAIL gre-tunnel interface not deleted"; fail=1; }
+[[ -f "$T/systemd/gre-t2.service" ]] || { echo "FAIL peer GRE removed"; fail=1; }
+reset_host
+engine_retire_others frps >/dev/null
+[[ -f "$T/systemd/frps.service" && -f "$CONFIG_DIR/frps.toml" ]] || { echo "FAIL FRP setup removed frps"; fail=1; }
+[[ -f "$T/systemd/backhaul-server.service" || -f "$T/systemd/backhaul-client.service" ]] && { echo "FAIL FRP setup left Backhaul running"; fail=1; }
+
+# 8. backhaul_wait_link reads the core's own log lines (from a GRE lab with v0.7.2)
+sleep() { :; }
+journalctl() { cat "$T/jlog"; }
+wl() { printf '%s\n' "$@" > "$T/jlog"; backhaul_wait_link backhaul-client "x" 3; echo $?; }
+check "link up" "$(wl '[INFO] attempting to establish a new tcpmux control channel connection...' '[INFO] control channel established successfully')" "0"
+check "wrong token" "$(wl '[ERROR] failed to receive control channel response: EOF' '[ERROR] failed to receive control channel response: EOF' '[ERROR] failed to receive control channel response: EOF')" "1"
+check "mismatch beats up" "$(wl '[ERROR] unexpected response from channel: 6.' '[INFO] restarting client...' '[INFO] control channel established successfully')" "1"
+check "rejected config" "$(wl '[FATAL] neither server nor client configuration is properly set.')" "1"
+check "no answer" "$(wl '[INFO] client with remote address 10.10.10.1:3080 started successfully')" "2"
+unset -f sleep journalctl ip
+
 (( fail )) && exit 1; echo "PASS test_backhaul_integrated"

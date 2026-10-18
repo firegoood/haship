@@ -49,7 +49,7 @@ jobs:
           # the netns lab tests run in the separate `lab` job below.
           fail=0
           for t in tests/test_*.sh; do
-            case "$t" in *test_backhaul_e2e.sh|*test_revpath_lab.sh|*test_bagher_lab.sh) continue;; esac
+            case "$t" in *test_backhaul_e2e.sh|*test_gre_backhaul_lab.sh|*test_revpath_lab.sh|*test_bagher_lab.sh) continue;; esac
             echo "== $t"
             bash "$t" || fail=1
           done
@@ -70,6 +70,8 @@ jobs:
           ./backhaul -v
       - name: Backhaul e2e (handshake, data, wrong token, kill -9 recovery)
         run: sudo env "PATH=$PATH" bash tests/test_backhaul_e2e.sh
+      - name: GRE + Backhaul lab (dial over GRE, MTU 1380, token/transport faults, public fallback)
+        run: sudo env "PATH=$PATH" bash tests/test_gre_backhaul_lab.sh
       - name: Reverse-path lab (GRE + rp_filter/firewall faults)
         run: sudo env "PATH=$PATH" bash tests/test_revpath_lab.sh
       - uses: actions/setup-go@v5

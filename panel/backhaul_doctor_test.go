@@ -12,6 +12,11 @@ func TestMatchLogCodeBackhaul(t *testing.T) {
 		"[WARNING] invalid security token received: ***":                                         "E-BH-01",
 		"[ERROR] failed to receive control channel response: failed to read message length: EOF": "E-BH-02",
 		"[FATAL] neither server nor client configuration is properly set.":                       "E-BH-03",
+		// transport mismatch lines from the v0.7.2 core in a GRE lab
+		`[ERROR] failed to resolve remote port: invalid port format: strconv.Atoi: parsing "h\xf0": invalid syntax`: "E-BH-04",
+		"[ERROR] unexpected response from channel: 6.":                                                              "E-BH-04",
+		"[WARNING] invalid signal received for channel, Discarding connection":                                      "E-BH-04",
+		"[ERROR] control channel dialer: unexpected EOF":                                                            "E-BH-04",
 	}
 	for line, want := range cases {
 		code, hint := matchLogCode(line)
@@ -35,6 +40,11 @@ func TestClassifyBackhaulLogNewestWins(t *testing.T) {
 	}
 	if c := classifyBackhaulLog(""); c != "" {
 		t.Errorf("empty log -> %q", c)
+	}
+	// tcpmux hub, tcp spoke: the channel comes up, then every connection fails
+	mismatch := strings.Join([]string{ok, "[ERROR] failed to resolve remote port: invalid port format: x"}, "\n")
+	if c := classifyBackhaulLog(mismatch); c != "E-BH-04" {
+		t.Errorf("mismatch after a good handshake must report E-BH-04, got %q", c)
 	}
 }
 
