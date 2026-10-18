@@ -600,8 +600,8 @@ const I18N = {
     // Diagnostics / Doctor Tab
     doc_title: "Network Doctor & Diagnostic Suite",
     doc_sub: "Automated end-to-end path tests, MTU probe, socket exhaustion check, and routing health",
-    doc_run_btn: "Run Full Diagnostics",
-    doc_fix_btn: "Quick Repair & Optimize",
+    doc_run_btn: "Run Diagnostics",
+    doc_fix_btn: "Quick Repair",
     doc_fix_box_btn: "Auto-Fix Detected Issues",
     doc_issues_title: "Issues & Recommendations",
 
@@ -732,14 +732,14 @@ const I18N = {
     x014: "All diagnostic tests passed with zero bottlenecks. Connection is operating at peak performance.",
     x015: "Recommendation: Run automated repair to resolve bottlenecks and optimize parameters.",
     x016: "Auto-Fix Detected Issues",
-    x017: "Diagnosing… (sweep MTU & ping)",
+    x017: "Diagnosing…",
     x018: "Diagnostics complete",
     x019: "Health score",
     x020: "Diagnostics failed",
     x021: "Run Diagnostics",
     x022: "Apply Automated Optimizations?",
-    x023: "This will enable TCP BBR, configure MSS clamping, ensure IPv4 forwarding, tune FRP concurrency limits, and restore tunnel interface connectivity.",
-    x024: "Repair & Optimize",
+    x023: "Quick Repair enables TCP BBR, adds the MSS clamp if missing, turns on IPv4 forwarding, raises socket limits, restarts a stopped tunnel service and brings a missing GRE interface back. Tunnel settings are not changed.",
+    x024: "Quick Repair",
     x025: "Applying fixes…",
     x026: "Applying…",
     x027: "Optimizations applied",
@@ -4700,136 +4700,239 @@ async function loadDoctor(forceRun = false) {
   }
 }
 
+// A server template ("Tunnel service {0} is not running") in the panel language.
+function docTpl(tpl, args) {
+  let s = currentLang === 'fa' ? faText(tpl || '') : (tpl || '');
+  (args || []).forEach((a, i) => { s = s.split('{' + i + '}').join(a); });
+  return s;
+}
+// docTpl as HTML: each value is isolated (<bdi>) so IPs, names and numbers keep
+// their order inside Persian sentences.
+function docTplHTML(tpl, args) {
+  const t = currentLang === 'fa' ? faText(tpl || '') : (tpl || '');
+  return t.split(/(\{\d+\})/).map(part => {
+    const m = /^\{(\d+)\}$/.exec(part);
+    return m ? '<bdi>' + esc((args || [])[+m[1]] || '') + '</bdi>' : esc(part);
+  }).join('');
+}
+function docAgo(ts) {
+  const t = Date.parse(ts || '');
+  if (!t) return '';
+  const sec = Math.round((t - Date.now()) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(currentLang === 'fa' ? 'fa' : 'en', { numeric: 'auto' });
+  if (Math.abs(sec) < 60) return rtf.format(sec, 'second');
+  if (Math.abs(sec) < 3600) return rtf.format(Math.round(sec / 60), 'minute');
+  if (Math.abs(sec) < 86400) return rtf.format(Math.round(sec / 3600), 'hour');
+  return rtf.format(Math.round(sec / 86400), 'day');
+}
+function docBadge(el, text, cls) {
+  if (!el) return;
+  el.textContent = tr('', text);
+  el.className = 'badge ' + cls;
+}
+function docSet(id, text) { const el = $(id); if (el) el.textContent = text; }
+const DOC_SEV = { critical: ['Critical', 'err'], warning: ['Warning', 'warn'], minor: ['Minor', 'dim'] };
+const DOC_RATING = { excellent: ['Excellent', 'ok'], good: ['Good', 'info'], warning: ['Needs attention', 'warn'], critical: ['Critical', 'err'], unset: ['Not set up', 'dim'] };
+const DOC_ENGINE = { frp: 'FRP', gre: 'GRE', backhaul: 'Backhaul', 'gre-backhaul': 'GRE + Backhaul', 'gre-frp': 'GRE + FRP' };
+
 function renderDoctor(rep) {
   if (!rep) return;
   doctorData = rep;
   // Fresh install: nothing to diagnose yet, so no score, no "issues", no auto-fix.
-  const unset = window._hashemEmpty === true;
+  // The report knows (a Bagher-only server has no dashboard tunnel); older servers fall back to the dashboard flag.
+  const unset = rep.configured === undefined ? window._hashemEmpty === true : !rep.configured;
+  const findings = rep.findings || [];
+  const crit = findings.filter(f => f.severity === 'critical').length;
 
-  // Score & Rating
-  const scoreVal = $('docScoreVal');
-  const scoreCircle = $('docScoreCircle');
-  if (scoreVal) scoreVal.textContent = !unset && rep.score != null ? rep.score : '—';
-  if (scoreCircle) {
-    scoreCircle.className = 'doc-score-circle ' + (unset ? '' : (rep.rating || ''));
-  }
-
-  const ratingBadge = $('docRatingBadge');
-  if (ratingBadge) {
-    ratingBadge.textContent = unset ? 'NOT SET UP' : (rep.rating || 'UNKNOWN').toUpperCase();
-    let bClass = 'dim';
-    if (unset) bClass = 'dim';
-    else if (rep.rating === 'excellent') bClass = 'ok';
-    else if (rep.rating === 'good') bClass = 'info';
-    else if (rep.rating === 'warning') bClass = 'warn';
-    else if (rep.rating === 'critical') bClass = 'err';
-    ratingBadge.className = 'badge ' + bClass;
-  }
-
-  // Meta subtitle
-  const metaSub = $('docMetaSub');
-  if (metaSub) {
-    const roleTxt = rep.role ? rep.role.toUpperCase() : 'NO TUNNEL';
-    metaSub.textContent = `Peer GRE: ${rep.peer_gre_ip || 'None'} · Role: ${roleTxt} · Checked: ${rep.timestamp || 'Never'}`;
-  }
-
-  // Fix button visibility: always keep visible in hero actions
-  const fixBtn = $('docFixBtn');
-  if (fixBtn) fixBtn.classList.toggle('hidden', unset);
-
-  // Ping Card
-  const ping = rep.ping_result || {};
-  if ($('docAvgRttVal')) $('docAvgRttVal').textContent = ping.success ? (ping.avg_rtt.toFixed(1) + ' ms') : 'Unreachable';
-  if ($('docPingSub')) $('docPingSub').textContent = `Loss: ${(ping.packet_loss || 0).toFixed(0)}% · Min: ${(ping.min_rtt || 0).toFixed(1)} ms · Max: ${(ping.max_rtt || 0).toFixed(1)} ms`;
-  if ($('docJitterVal')) $('docJitterVal').textContent = (ping.jitter || 0).toFixed(2) + ' ms';
-  if ($('docPacketsVal')) $('docPacketsVal').textContent = `${ping.received || 0} / ${ping.sent || 0}`;
-  const pingBadge = $('docPingBadge');
-  if (pingBadge) {
-    if (!ping.success) { pingBadge.textContent = 'OFFLINE'; pingBadge.className = 'badge err'; }
-    else if (ping.packet_loss > 10) { pingBadge.textContent = 'HIGH LOSS'; pingBadge.className = 'badge warn'; }
-    else if (ping.avg_rtt > 120) { pingBadge.textContent = 'HIGH RTT'; pingBadge.className = 'badge warn'; }
-    else { pingBadge.textContent = 'OPTIMAL'; pingBadge.className = 'badge ok'; }
-  }
-
-  // MTU Card
-  const mtu = rep.mtu_result || {};
-  if ($('docMtuVal')) $('docMtuVal').textContent = mtu.optimal ? (mtu.optimal + ' bytes') : '—';
-  if ($('docMtu1420Val')) $('docMtu1420Val').innerHTML = mtu.mtu_1420 ? '<span class="badge ok">Pass</span>' : '<span class="badge warn">Fragmented</span>';
-  if ($('docMtu1400Val')) $('docMtu1400Val').innerHTML = mtu.mtu_1400 ? '<span class="badge ok">Pass</span>' : '<span class="badge warn">Fragmented</span>';
-  if ($('docMtu1360Val')) $('docMtu1360Val').innerHTML = mtu.mtu_1360 ? '<span class="badge ok">Pass</span>' : '<span class="badge err">Blocked</span>';
-  const mtuBadge = $('docMtuBadge');
-  if (mtuBadge) {
-    if (mtu.optimal >= 1400) { mtuBadge.textContent = 'OPTIMAL'; mtuBadge.className = 'badge ok'; }
-    else if (mtu.optimal > 0) { mtuBadge.textContent = 'REDUCED'; mtuBadge.className = 'badge warn'; }
-    else { mtuBadge.textContent = 'UNKNOWN'; mtuBadge.className = 'badge dim'; }
-  }
-
-  // Speed Card
-  const speed = rep.speed_result || {};
-  if ($('docSpeedVal')) $('docSpeedVal').textContent = speed.tested ? ((speed.throughput_mbps || 0).toFixed(1) + ' Mbps') : '—';
-  if ($('docSpeedSub')) $('docSpeedSub').textContent = speed.detail || 'Real tunnel bandwidth capacity';
-  if ($('docSpeedMode')) $('docSpeedMode').textContent = speed.mode ? speed.mode.toUpperCase() : 'None';
-  if ($('docIperfStatusVal')) $('docIperfStatusVal').innerHTML = speed.server_active ? '<span class="badge ok">Listening (:5201)</span>' : '<span class="badge dim">Stopped</span>';
-  const speedBadge = $('docSpeedBadge');
-  if (speedBadge) {
-    if (!speed.tested) { speedBadge.textContent = 'NOT TESTED'; speedBadge.className = 'badge dim'; }
-    else if (speed.throughput_mbps > 50) { speedBadge.textContent = 'FAST'; speedBadge.className = 'badge ok'; }
-    else if (speed.throughput_mbps > 15) { speedBadge.textContent = 'MODERATE'; speedBadge.className = 'badge info'; }
-    else { speedBadge.textContent = 'SLOW'; speedBadge.className = 'badge warn'; }
-  }
-  const iperfTxt = $('docIperfTxt');
-  if (iperfTxt) iperfTxt.textContent = speed.server_active ? 'Stop iPerf3 Server' : 'Start iPerf3 Server';
-
-  // Kernel Card
-  const k = rep.kernel_audit || {};
-  if ($('docCongestionVal')) $('docCongestionVal').textContent = k.congestion_alg ? k.congestion_alg.toUpperCase() : '—';
-  if ($('docBbrVal')) $('docBbrVal').innerHTML = k.bbr_enabled ? '<span class="badge ok">Active</span>' : '<span class="badge warn">Disabled (Cubic)</span>';
-  if ($('docMssVal')) $('docMssVal').innerHTML = k.mss_clamping ? '<span class="badge ok">Clamped</span>' : '<span class="badge warn">Inactive</span>';
-  if ($('docIpFwdVal')) $('docIpFwdVal').innerHTML = k.ip_forwarding ? '<span class="badge ok">Enabled</span>' : '<span class="badge err">Disabled</span>';
-  const kBadge = $('docKernelBadge');
-  if (kBadge) {
-    if (k.bbr_enabled && k.mss_clamping && k.ip_forwarding) { kBadge.textContent = 'TUNED'; kBadge.className = 'badge ok'; }
-    else { kBadge.textContent = 'NEEDS TUNE'; kBadge.className = 'badge warn'; }
-  }
-
-  // Issues Box
-  const issuesBox = $('docIssuesBox');
-  const issuesCount = $('docIssuesCount');
-  const issues = rep.issues || [];
-  const recs = rep.recommendations || [];
-  if (issuesCount) issuesCount.textContent = unset ? '' : `${issues.length} issue${issues.length === 1 ? '' : 's'} detected`;
-  if (issuesBox) {
-    if (unset) {
-      issuesBox.innerHTML = '<div class="qs-hint">' + esc(tr('doc_unset', 'No tunnel on this server yet. Diagnostics start once one is set up.')) +
-        '</div><button type="button" class="hashem-btn hashem-btn-primary u-mt-12 u-self-start" onclick="goTab(&quot;setup&quot;)">' + esc(tr('onb_go', 'Open Setup')) + '</button>';
-    } else if (issues.length === 0) {
-      issuesBox.innerHTML = '<div class="qs-hint u-color-ok">✓ ' + (tr('x014', "All diagnostic tests passed with zero bottlenecks. Connection is operating at peak performance.")) + '</div>';
-    } else {
-      let html = '';
-      for (let i = 0; i < issues.length; i++) {
-        const iss = issues[i];
-        const rec = recs[i] || '';
-        html += `<div class="doc-issue-item">
-          <span class="badge warn u-btn-xs u-flex-none">!</span>
-          <div>
-            <b>${esc(iss)}</b>
-            ${rec ? `<div class="qs-hint u-mt-2">${esc(rec)}</div>` : ''}
-          </div>
-        </div>`;
-      }
-      html += `<div class="u-mt-16 u-pt-12 u-bt-ln u-flex u-ai-c u-jc-sb u-gap-12 u-wrap">
-        <span class="qs-hint u-c-mu">${tr('x015', "Recommendation: Run automated repair to resolve bottlenecks and optimize parameters.")}</span>
-        <button class="hashem-btn hashem-btn-primary u-btn-sm u-iflex u-ai-c u-gap-8" id="docBoxFixBtn" onclick="fixDoctor()">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-          <span data-i18n="doc_fix_box_btn">${tr('x016', "Auto-Fix Detected Issues")}</span>
-        </button>
-      </div>`;
-      issuesBox.innerHTML = html;
+  // Hero
+  docSet('docScoreVal', !unset && rep.score != null ? rep.score : '—');
+  const circle = $('docScoreCircle');
+  if (circle) circle.className = 'doc-score-circle ' + (unset ? '' : (rep.rating || ''));
+  const rt = DOC_RATING[unset ? 'unset' : rep.rating] || ['Unknown', 'dim'];
+  docBadge($('docRatingBadge'), rt[0], rt[1]);
+  let summary;
+  if (unset) summary = tr('doc_unset', 'No tunnel on this server yet. Diagnostics start once one is set up.');
+  else if (!findings.length) summary = tr('', 'Everything checks out. The tunnel is healthy.');
+  else if (crit) summary = docTpl(crit === 1 ? '1 critical problem: the tunnel is not working properly. Fix it first.' : '{0} critical problems: the tunnel is not working properly. Fix them first.', [String(crit)]);
+  else summary = docTpl(findings.length === 1 ? 'The tunnel works. 1 thing can be improved.' : 'The tunnel works. {0} things can be improved.', [String(findings.length)]);
+  docSet('docSummaryMsg', summary);
+  const meta = $('docMetaSub');
+  if (meta) {
+    const parts = [];
+    const item = (k, v) => parts.push('<span>' + esc(tr('', k)) + ' <b data-no-i18n>' + esc(v) + '</b></span>');
+    if (!unset) {
+      item('Engine', DOC_ENGINE[rep.engine] || rep.engine || '—');
+      if (rep.role) item('Role', rep.role);
     }
+    if (rep.timestamp) item('Checked', docAgo(rep.timestamp));
+    if (rep.duration_ms) item('Took', new Intl.NumberFormat(currentLang === 'fa' ? 'fa' : 'en', { style: 'unit', unit: 'second', unitDisplay: 'long', maximumFractionDigits: 1 }).format(rep.duration_ms / 1000));
+    meta.innerHTML = parts.join('');
   }
+  const fixBtn = $('docFixBtn');
+  if (fixBtn) fixBtn.classList.toggle('hidden', unset || !rep.fix_available);
+  const copyBtn = $('docCopyBtn');
+  if (copyBtn) copyBtn.classList.toggle('hidden', unset || !rep.timestamp);
+
+  // Findings
+  const box = $('docIssuesBox');
+  docSet('docIssuesCount', unset || !findings.length ? '' : docTpl(findings.length === 1 ? '1 finding' : '{0} findings', [String(findings.length)]));
+  if (box) {
+    let html = '';
+    if (unset) {
+      html = '<div class="qs-hint">' + esc(tr('doc_unset', 'No tunnel on this server yet. Diagnostics start once one is set up.')) +
+        '</div><button type="button" class="hashem-btn hashem-btn-primary u-mt-12 u-self-start" onclick="goTab(&quot;setup&quot;)">' + esc(tr('onb_go', 'Open Setup')) + '</button>';
+    } else if (!findings.length) {
+      html = '<div class="doc-ok-line"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg><span>' +
+        esc(tr('', 'No problems found')) + '</span></div>';
+    } else {
+      html = findings.map(f => {
+        const sev = DOC_SEV[f.severity] || DOC_SEV.minor;
+        return '<div class="doc-find"><span class="badge ' + sev[1] + '">' + esc(tr('', sev[0])) + '</span>' +
+          '<div class="doc-find-title" data-no-i18n>' + docTplHTML(f.title_tpl || f.title, f.args) + '</div>' +
+          (f.fix || f.fix_tpl ? '<div class="doc-find-fix" data-no-i18n>' + docTplHTML(f.fix_tpl || f.fix, f.args) + '</div>' : '') +
+          (f.auto ? '<span class="doc-find-auto">✓ ' + esc(tr('', 'Quick Repair fixes this')) + '</span>' : '') + '</div>';
+      }).join('');
+      if (rep.fix_available) {
+        html += '<div class="doc-box-foot"><span class="qs-hint">' + esc(tr('', 'Quick Repair applies the fixes marked above. It never changes tunnel settings.')) + '</span>' +
+          '<button class="hashem-btn hashem-btn-primary u-btn-sm" id="docBoxFixBtn" onclick="fixDoctor()"><span>' + esc(tr('', 'Quick Repair')) + '</span></button></div>';
+      }
+    }
+    const le = rep.last_error;
+    if (!unset && le && le.code) {
+      html += '<div class="doc-lasterr"><span>' + esc(tr('', 'Last tunnel error')) + '</span><code>' + esc(le.code) + '</code>' +
+        '<span class="mono" data-no-i18n>' + esc(le.time || '') + '</span><span data-no-i18n>' + esc(le.detail || '') + '</span></div>';
+    }
+    const notes = rep.notes || [];
+    if (!unset && notes.length) html += '<div class="doc-notes">' + notes.map(n => '<span>' + esc(tr('', n)) + '</span>').join('') + '</div>';
+    box.innerHTML = html;
+  }
+
+  renderDocTunnels(unset ? [] : (rep.tunnels || []), unset ? null : rep.bagher);
+
+  // Latency & jitter: inside the GRE tunnel; else the peer's public IP
+  const ping = rep.ping_result || {}, ul = rep.underlay || {};
+  const p = ping.tested ? ping : (ul.tested ? ul : null);
+  const ms = v => (v || 0).toFixed(1) + ' ms';
+  const avg = $('docAvgRttVal');
+  if (avg) {
+    avg.textContent = !p ? tr('', 'Not measured') : (p.success ? ms(p.avg_rtt) : tr('', 'No reply'));
+    avg.classList.toggle('is-muted', !p || !p.success);
+  }
+  docSet('docPingSub', !p ? tr('', rep.gre_expected === false && !unset ? 'This server has no GRE tunnel to ping through' : 'Ping through the GRE tunnel')
+    : (p === ping ? docTpl('Inside the tunnel, to {0}', [ping.target || '']) : docTpl('Outside the tunnel, to the peer public IP {0}', [ul.target || ''])));
+  docSet('docLossVal', p ? (p.packet_loss || 0).toFixed(0) + '% (' + (p.received || 0) + '/' + (p.sent || 0) + ')' : '—');
+  docSet('docJitterVal', p && p.success ? (p.jitter || 0).toFixed(2) + ' ms' : '—');
+  docSet('docMinMaxVal', p && p.success ? (p.min_rtt || 0).toFixed(1) + ' / ' + (p.max_rtt || 0).toFixed(1) + ' ms' : '—');
+  docSet('docUnderlayVal', !ul.tested ? '—' : (ul.success ? ms(ul.avg_rtt) + ' · ' + (ul.packet_loss || 0).toFixed(0) + '%' : tr('', 'No reply')));
+  const pb = $('docPingBadge');
+  if (!p) docBadge(pb, 'Not tested', 'dim');
+  else if (!p.success) docBadge(pb, 'No reply', 'err');
+  else if (p.packet_loss > 15) docBadge(pb, 'High loss', 'err');
+  else if (p.packet_loss > 2 || p.jitter > 25) docBadge(pb, 'Unstable', 'warn');
+  else if (p.avg_rtt > 250) docBadge(pb, 'High latency', 'warn');
+  else docBadge(pb, 'Good', 'ok');
+
+  // MTU
+  const mtu = rep.mtu_result || {}, k = rep.kernel_audit || {};
+  const mv = $('docMtuVal');
+  if (mv) {
+    mv.textContent = !mtu.tested ? tr('', 'Not measured') : (mtu.max_packet ? mtu.max_packet + ' B' : tr('', 'No reply'));
+    mv.classList.toggle('is-muted', !mtu.tested || !mtu.max_packet);
+  }
+  docSet('docMtuSub', mtu.tested ? tr('', 'Largest packet that crosses the tunnel unfragmented') : tr('', rep.gre_expected === false && !unset ? 'Measured on GRE tunnels only' : 'Measured when the peer answers through the tunnel'));
+  docSet('docMtuIfVal', mtu.interface ? mtu.interface + ' B' : '—');
+  docSet('docMssRecVal', mtu.mss ? String(mtu.mss) : '—');
+  const mssEl = $('docMssVal');
+  if (mssEl) mssEl.innerHTML = k.mss_rule ? '<span class="badge ok">' + esc(k.mss_rule === 'pmtu' ? 'PMTU' : 'MSS ' + k.mss_rule) + '</span>'
+    : '<span class="badge ' + (rep.gre_expected ? 'warn' : 'dim') + '">' + esc(tr('', rep.gre_expected ? 'Missing' : 'Not needed')) + '</span>';
+  const mb = $('docMtuBadge');
+  if (!mtu.tested) docBadge(mb, 'Not tested', 'dim');
+  else if (!mtu.max_packet) docBadge(mb, 'Unknown', 'dim');
+  else if (mtu.max_packet >= mtu.interface) docBadge(mb, 'Good', 'ok');
+  else docBadge(mb, 'Too large', 'warn');
+
+  // Throughput
+  const speed = rep.speed_result || {};
+  const sv = $('docSpeedVal');
+  if (sv) {
+    sv.textContent = speed.tested ? (speed.throughput_mbps || 0).toFixed(1) + ' Mbps' : tr('', 'Not measured');
+    sv.classList.toggle('is-muted', !speed.tested);
+  }
+  docSet('docSpeedSub', speed.detail ? tr('', speed.detail) : tr('', 'iPerf3 through the GRE tunnel'));
+  const iv = $('docIperfStatusVal');
+  if (iv) iv.innerHTML = speed.server_active ? '<span class="badge ok">' + esc(tr('', 'Listening')) + ' :5201</span>' : '<span class="badge dim">' + esc(tr('', 'Stopped')) + '</span>';
+  const sb = $('docSpeedBadge');
+  if (!speed.tested) docBadge(sb, 'Not tested', 'dim');
+  else if (speed.throughput_mbps > 50) docBadge(sb, 'Fast', 'ok');
+  else if (speed.throughput_mbps > 15) docBadge(sb, 'Moderate', 'info');
+  else docBadge(sb, 'Slow', 'warn');
+  docSet('docIperfTxt', tr('', speed.server_active ? 'Stop iPerf3 Server' : 'Start iPerf3 Server'));
+  const ib = $('docIperfBtn');
+  if (ib) ib.classList.toggle('hidden', rep.gre_expected === false || unset);
+
+  // Kernel
+  docSet('docCongestionVal', k.congestion_alg ? k.congestion_alg.toUpperCase() : '—');
+  const on = (ok, yes, no, noCls) => '<span class="badge ' + (ok ? 'ok' : (noCls || 'warn')) + '">' + esc(tr('', ok ? yes : no)) + '</span>';
+  const bbr = $('docBbrVal'); if (bbr) bbr.innerHTML = on(k.bbr_enabled, 'On', 'Off');
+  const fwd = $('docIpFwdVal');
+  if (fwd) fwd.innerHTML = k.ip_forwarding ? on(true, 'On') : on(false, '', rep.gre_expected ? 'Off' : 'Off (not needed)', rep.gre_expected ? 'err' : 'dim');
+  docSet('docSomaxVal', k.somaxconn ? String(k.somaxconn) : '—');
+  docSet('docNofileVal', k.limit_nofile ? String(k.limit_nofile) : '—');
+  const kernelIssues = findings.filter(f => f.area === 'kernel').length;
+  docBadge($('docKernelBadge'), kernelIssues ? 'Needs tuning' : 'Tuned', kernelIssues ? 'warn' : 'ok');
 
   // Reverse-path card: per-peer two-direction diagnosis + fix buttons.
   renderRevPath(rep.revpath || []);
+}
+
+// Tunnels card: one row per tunnel (service, session, data) plus Bagher.
+function renderDocTunnels(tunnels, bagher) {
+  const card = $('docTunnelsCard'), box = $('docTunnelsBox');
+  if (!card || !box) return;
+  const layer = (name, v) => {
+    const cls = v === 'ok' ? 'ok' : (v === 'fail' ? 'fail' : '');
+    return '<span class="doc-layer ' + cls + '">' + esc(tr('', name)) + '</span>';
+  };
+  const verdict = v => v === 'PASS' ? '<span class="badge ok">' + esc(tr('', 'Working')) + '</span>'
+    : (v === 'FAIL' ? '<span class="badge err">' + esc(tr('', 'Failing')) + '</span>' : '<span class="badge warn">' + esc(tr('', 'Unreachable')) + '</span>');
+  let rows = tunnels.map(t => {
+    const l = t.layers || {};
+    const lat = t.latency_ms >= 0 ? '<span class="doc-tun-lat">' + t.latency_ms + ' ms</span>' : '';
+    return '<div class="doc-tun"><div class="doc-tun-name"><span data-no-i18n>' + esc(t.name || ('tunnel-' + t.id)) + '</span> <span class="doc-tun-eng">' +
+      esc(DOC_ENGINE[t.engine] || t.engine || '') + '</span></div>' + verdict(t.verdict) +
+      '<div class="doc-layers">' + layer('Service', l.service) + layer('Session', l.session) + layer('Data', l.data) + lat + '</div>' +
+      (t.verdict !== 'PASS' && t.reason ? '<div class="doc-tun-reason" data-no-i18n>' + esc(t.reason) + '</div>' : '') + '</div>';
+  }).join('');
+  if (bagher) {
+    const ok = bagher.active && bagher.connected;
+    rows += '<div class="doc-tun"><div class="doc-tun-name">Bagher <span class="doc-tun-eng">SSH + FRP</span></div>' +
+      (ok ? '<span class="badge ok">' + esc(tr('', 'Working')) + '</span>' : '<span class="badge err">' + esc(tr('', 'Failing')) + '</span>') +
+      '<div class="doc-layers">' + layer('Service', bagher.active ? 'ok' : 'fail') + layer('Session', bagher.active ? (bagher.connected ? 'ok' : 'fail') : '') +
+      (bagher.latency_ms > 0 ? '<span class="doc-tun-lat">' + bagher.latency_ms.toFixed(1) + ' ms</span>' : '') + '</div></div>';
+  }
+  card.classList.toggle('hidden', !rows);
+  box.innerHTML = rows;
+}
+
+// Plain-text report for support chats (always English: it is read by whoever helps).
+function doctorReportText(rep) {
+  const L = [];
+  const p = rep.ping_result || {}, u = rep.underlay || {}, m = rep.mtu_result || {}, k = rep.kernel_audit || {}, s = rep.speed_result || {};
+  L.push('Hashem Doctor — ' + (rep.timestamp || '') + ' — score ' + rep.score + '/100 (' + rep.rating + ')');
+  L.push('Engine: ' + (rep.engine || '-') + ' · Role: ' + (rep.role || '-'));
+  if (p.tested) L.push('Tunnel ping ' + p.target + ': ' + (p.success ? p.avg_rtt.toFixed(1) + ' ms, loss ' + p.packet_loss + '%, jitter ' + p.jitter.toFixed(1) + ' ms' : 'no reply'));
+  if (u.tested) L.push('Public IP ping ' + u.target + ': ' + (u.success ? u.avg_rtt.toFixed(1) + ' ms, loss ' + u.packet_loss + '%' : 'no reply'));
+  if (m.tested) L.push('MTU: interface ' + m.interface + ', largest packet ' + (m.max_packet || 'unknown'));
+  if (s.tested) L.push('Throughput: ' + s.throughput_mbps + ' Mbps');
+  L.push('Kernel: ' + (k.congestion_alg || '?') + ', MSS ' + (k.mss_rule || 'none') + ', forwarding ' + (k.ip_forwarding ? 'on' : 'off') + ', somaxconn ' + k.somaxconn + ', nofile ' + k.limit_nofile);
+  (rep.tunnels || []).forEach(t => L.push('Tunnel ' + t.name + ' [' + t.engine + ']: ' + t.verdict + (t.reason ? ' — ' + t.reason : '')));
+  if (rep.bagher) L.push('Bagher: ' + (rep.bagher.active ? 'running' : 'stopped') + ', ' + (rep.bagher.connected ? 'connected' : 'not connected'));
+  const f = rep.findings || [];
+  L.push(f.length ? 'Findings:' : 'Findings: none');
+  f.forEach(x => L.push('- [' + x.severity + '] ' + x.title + (x.fix ? ' → ' + x.fix : '')));
+  (rep.notes || []).forEach(n => L.push('Note: ' + n));
+  if (rep.last_error) L.push('Last tunnel error: ' + rep.last_error.code + ' ' + rep.last_error.time + ' ' + (rep.last_error.detail || ''));
+  return L.join('\n');
 }
 
 // ---- Reverse path (Phase 4): diagnosis cards + dry-run / apply ----
@@ -4841,10 +4944,9 @@ function revVerdictBadge(v) {
 function renderRevPath(entries) {
   const box = $('docRevPathBox');
   if (!box) return;
-  if (!entries || !entries.length) {
-    box.innerHTML = '<div class="qs-hint">No peer reverse-path data yet — run diagnostics on a hub with peers.</div>';
-    return;
-  }
+  const card = $('docRevPathCard');
+  if (card) card.classList.toggle('hidden', !entries || !entries.length); // hubs with peers only
+  if (!entries || !entries.length) { box.innerHTML = ''; return; }
   box.innerHTML = entries.map(e => {
     const d = e.diagnosis || {};
     const ev = (d.evidence || []).map(x => '<div class="qs-hint">· ' + esc(x) + '</div>').join('');
@@ -4966,34 +5068,32 @@ async function runDoctor() {
   if (doctorRunning) return;
   doctorRunning = true;
   const btn = $('docRunBtn');
-  if (btn) {
-    btn.disabled = true;
-    btn.classList.add('doc-pulse');
-    btn.querySelector('span').textContent = tr('x017', "Diagnosing… (sweep MTU & ping)");
-  }
+  const label = btn && btn.querySelector('span');
+  const t0 = Date.now();
+  const tick = () => { if (label) label.textContent = tr('x017', 'Diagnosing…') + ' ' + Math.round((Date.now() - t0) / 1000) + 's'; };
+  let timer = null;
+  if (btn) { btn.disabled = true; btn.classList.add('doc-pulse'); tick(); timer = setInterval(tick, 1000); }
   try {
-    await loadDoctor(true);
-    toastOk(tr('x018', "Diagnostics complete"), `${tr('x019', "Health score")}: ${doctorData ? doctorData.score : '—'}/100`);
+    renderDoctor(await api('/api/doctor', { action: 'run' }));
+    toastOk(tr('x018', "Diagnostics complete"), `${tr('x019', "Health score")}: ${doctorData && doctorData.rating !== 'unset' ? doctorData.score + '/100' : '—'}`);
   } catch(e) {
     toastErr(tr('x020', "Diagnostics failed"), e.message);
   } finally {
     doctorRunning = false;
-    if (btn) {
-      btn.disabled = false;
-      btn.classList.remove('doc-pulse');
-      btn.querySelector('span').textContent = tr('x021', "Run Diagnostics");
-    }
+    clearInterval(timer);
+    if (btn) { btn.disabled = false; btn.classList.remove('doc-pulse'); }
+    if (label) label.textContent = tr('doc_run_btn', "Run Diagnostics");
   }
 }
 
 async function fixDoctor() {
   const confirmTitle = tr('x022', "Apply Automated Optimizations?");
-  const confirmDesc = tr('x023', "This will enable TCP BBR, configure MSS clamping, ensure IPv4 forwarding, tune FRP concurrency limits, and restore tunnel interface connectivity.");
-  const confirmBtn = tr('x024', "Repair & Optimize");
+  const confirmDesc = tr('x023', "Quick Repair enables TCP BBR, adds the MSS clamp if missing, turns on IPv4 forwarding, raises socket limits, restarts a stopped tunnel service and brings a missing GRE interface back. Tunnel settings are not changed.");
+  const confirmBtn = tr('x024', "Quick Repair");
 
   if (!await entConfirm(confirmTitle, confirmDesc, confirmBtn)) return;
   const btn = $('docFixBtn');
-  const boxBtn = $('docBoxFixBtn');
+  let boxBtn = $('docBoxFixBtn');
   if (btn) {
     btn.disabled = true;
     const sp = btn.querySelector('span');
@@ -5011,12 +5111,19 @@ async function fixDoctor() {
       appliedList.length > 0 ? appliedList.join(' · ') : (tr('x028', "System stack optimized")));
     if (res && res.report) renderDoctor(res.report);
     else await loadDoctor(true);
+    boxBtn = null; // re-rendered
   } catch(e) {
     toastErr(tr('x029', "Fix failed"), e.message);
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg><span data-i18n="doc_fix_btn">${tr('x030', "Quick Repair & Optimize")}</span>`;
+      const sp = btn.querySelector('span');
+      if (sp) sp.textContent = tr('doc_fix_btn', "Quick Repair");
+    }
+    if (boxBtn) {
+      boxBtn.disabled = false;
+      const sp = boxBtn.querySelector('span');
+      if (sp) sp.textContent = tr('doc_fix_btn', "Quick Repair");
     }
   }
 }
@@ -5027,17 +5134,17 @@ async function toggleIperf() {
   const btn = $('docIperfBtn');
   const txt = $('docIperfTxt');
   if (btn) btn.disabled = true;
-  if (txt) txt.textContent = isRunning ? 'Stopping…' : 'Starting…';
+  if (txt) txt.textContent = tr('', isRunning ? 'Stopping…' : 'Starting…');
   try {
     const res = await api('/api/doctor', { action });
     toastOk(isRunning ? 'iPerf3 Stopped' : 'iPerf3 Started', (res && res.message) || (isRunning ? 'Server listener stopped' : 'Listening on port 5201'));
-    await loadDoctor(false);
+    if (doctorData && doctorData.speed_result) { doctorData.speed_result.server_active = !isRunning; renderDoctor(doctorData); }
   } catch(e) {
     toastErr('iPerf3 action failed', e.message);
   } finally {
     if (btn) btn.disabled = false;
     if (txt && doctorData && doctorData.speed_result) {
-      txt.textContent = doctorData.speed_result.server_active ? 'Stop iPerf3 Server' : 'Start iPerf3 Server';
+      txt.textContent = tr('', doctorData.speed_result.server_active ? 'Stop iPerf3 Server' : 'Start iPerf3 Server');
     }
   }
 }
@@ -5045,6 +5152,7 @@ async function toggleIperf() {
 if ($('docRunBtn')) $('docRunBtn').onclick = runDoctor;
 if ($('docFixBtn')) $('docFixBtn').onclick = fixDoctor;
 if ($('docIperfBtn')) $('docIperfBtn').onclick = toggleIperf;
+if ($('docCopyBtn')) $('docCopyBtn').onclick = () => { if (doctorData) copyTextSafe(doctorReportText(doctorData), tr('', 'Report copied'), tr('', 'Paste it in a support chat')); };
 
 // boot: if already logged in, status works; else show login
 (async () => {
@@ -5552,7 +5660,7 @@ function uiObserve(s) {
   window._hashemEmpty = empty; // refreshDash shows a neutral "not set up" state instead of errors
   const c = $('onbCard'); if (c) c.hidden = !empty || dismissed;
 }
-{ const _rd = renderDoctor; renderDoctor = function (rep) { _rd(rep); try { navBadge('doctor', window._hashemEmpty === true ? 0 : ((rep && rep.issues) || []).length, rep && rep.rating === 'critical' ? 'err' : 'warn', 'badge_doctor'); } catch (e) { /* cosmetic */ } }; }
+{ const _rd = renderDoctor; renderDoctor = function (rep) { _rd(rep); try { navBadge('doctor', !rep || rep.configured === false ? 0 : ((rep.findings || []).filter(f => f.severity !== 'minor').length), rep && rep.rating === 'critical' ? 'err' : 'warn', 'badge_doctor'); } catch (e) { /* cosmetic */ } }; }
 $('onbGo').onclick = () => goTab('setup');
 function onbHide() { try { localStorage.setItem('hashem_onb_done', '1'); } catch (e) { /* session only */ } $('onbCard').hidden = true; }
 $('onbLater').onclick = onbHide; $('onbX').onclick = onbHide;
