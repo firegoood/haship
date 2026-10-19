@@ -3,8 +3,8 @@
 # the real v0.7.2 core in two namespaces.
 #
 # The tunnel runs tcpmux (TCP only: the core ignores accept_udp there). The UDP
-# companion hashem.sh adds (backhaul_udp_conf: same config, udp transport, same
-# port number) must carry the UDP of the same ports, while TCP keeps working.
+# companion hashem.sh adds (backhaul_udp_conf: same config, udp transport, its
+# own control port) must carry the UDP of the same ports, while TCP keeps working.
 # Proves: TCP through tcpmux; no UDP without the companion; UDP with it, both
 # small and near-MTU datagrams; recovery after kill -9 of the companion client.
 #
@@ -24,9 +24,10 @@ ver=$("$BIN" -v 2>&1)
 
 HUB=bu-hub
 SPOKE=bu-spoke
-CTRL=18090   # tunnel control port (TCP for tcpmux, UDP for the companion)
+CTRL=18090   # tunnel control port (tcpmux)
 FWD=18091    # forwarded port on the hub (TCP and UDP)
 ECHO=18092   # echo target in the spoke (TCP and UDP)
+UCTRL=18095  # the UDP companion's own control port (the udp transport holds it on TCP)
 TMP=$(mktemp -d /tmp/bh-udp.XXXXXX)
 pids=()
 set +m
@@ -88,8 +89,8 @@ retry_interval = 1
 dial_timeout = 5
 log_level = "debug"
 EOF
-backhaul_udp_conf "$TMP/server.toml" "$TMP/server-udp.toml"; check "companion server config built" 0 $?
-backhaul_udp_conf "$TMP/client.toml" "$TMP/client-udp.toml"; check "companion client config built" 0 $?
+backhaul_udp_conf "$TMP/server.toml" "$TMP/server-udp.toml" "$UCTRL"; check "companion server config built" 0 $?
+backhaul_udp_conf "$TMP/client.toml" "$TMP/client-udp.toml" "$UCTRL"; check "companion client config built" 0 $?
 check "companion transport" udp "$(backhaul_conf_transport "$TMP/server-udp.toml")"
 
 # echo responders (TCP and UDP) in the spoke: the tunnel target
@@ -167,7 +168,7 @@ sleep 1
 start "$SPOKE" "$TMP/client-udp.toml" "$TMP/client-udp.log"
 ucpid=$last
 sleep 1
-{ echo "== hub sockets"; ip netns exec "$HUB" ss -lntup 2>/dev/null; echo "== spoke sockets"; ip netns exec "$SPOKE" ss -ntup 2>/dev/null | head -20; } > "$TMP/sockets.txt"
+{ echo "== hub sockets"; ip netns exec "$HUB" ss -lntup 2>/dev/null | grep -E ":1809[0-5] "; echo "== spoke sockets"; ip netns exec "$SPOKE" ss -ntup 2>/dev/null | grep -E ":1809[0-5] " | head -8; } > "$TMP/sockets.txt"
 wait_for 15 udp_probe 5 64; check "2. UDP through the companion" 0 $?
 udp_probe 50 64;   check "2. 50 small datagrams (>=90% byte-exact)" 0 $?
 udp_probe 20 1200; check "2. 20 datagrams of 1200 B (>=90% byte-exact)" 0 $?
@@ -180,11 +181,11 @@ t0=$SECONDS
 wait_for 20 udp_probe 5 64; rc=$?
 check "3. UDP back within 20 s of kill -9 (took $((SECONDS - t0))s)" 0 "$rc"
 
-{ cat "$TMP/result.txt"; echo "core: $ver"; cat "$TMP/sockets.txt" 2>/dev/null
+{ echo "core: $ver"; cat "$TMP/sockets.txt" 2>/dev/null
   if (( fail )); then
-      for f in server-udp client-udp server client client-udp2; do echo "--- $f.log"; tail -n 12 "$TMP/$f.log" 2>/dev/null; done
+      for f in server-udp client-udp server client client-udp2; do echo "--- $f.log"; tail -n 6 "$TMP/$f.log" 2>/dev/null | cut -c1-200; done
       echo "--- server-udp.toml"; cat "$TMP/server-udp.toml"
-  fi; } > "$TMP/report.txt"
+  fi; echo "=== results"; cat "$TMP/result.txt"; } > "$TMP/report.txt"
 if (( fail == 0 )); then
     annotate notice "Backhaul UDP lab" "$TMP/report.txt"
     echo "PASS test_backhaul_udp_lab"

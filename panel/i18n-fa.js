@@ -186,7 +186,7 @@ window.FA_TEXT = {
 "FRP always forwards TCP and UDP on these ports.": "FRP همیشه TCP و UDP این پورت‌ها را فوروارد می‌کند.",
 "UDP rides inside the tunnel.": "UDP داخل همین تونل منتقل می‌شود.",
 "UDP is forwarded too.": "UDP هم فوروارد می‌شود.",
-"A second Backhaul with the udp transport carries UDP on the same port number (open it for UDP too).": "یک Backhaul دوم با ترنسپورت udp، UDP را روی همان شماره‌ی پورت منتقل می‌کند (این پورت را برای UDP هم باز کنید).",
+"A second Backhaul with the udp transport carries UDP, on its own port (the first free one after this port; open it for TCP and UDP).": "یک Backhaul دوم با ترنسپورت udp، UDP را منتقل می‌کند، روی پورت خودش (اولین پورت آزاد بعد از این پورت؛ آن را برای TCP و UDP باز کنید).",
 "WS (Plain WebSocket)": "WS (WebSocket ساده)",
 "WSMUX (Multiplexed WebSocket)": "WSMUX (WebSocket مالتی‌پلکس)",
 "WSS (TLS WebSocket)": "WSS (WebSocket با TLS)",

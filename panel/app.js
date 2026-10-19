@@ -2904,7 +2904,7 @@ function syncIranUdp() {
   if (frp) cb.checked = true;
   if (hint) hint.textContent = frp ? tr('', 'FRP always forwards TCP and UDP on these ports.')
     : tr_ === 'tcp' ? tr('', 'UDP rides inside the tunnel.')
-    : tr('', 'A second Backhaul with the udp transport carries UDP on the same port number (open it for UDP too).');
+    : tr('', 'A second Backhaul with the udp transport carries UDP, on its own port (the first free one after this port; open it for TCP and UDP).');
 }
 if ($('sTransport')) $('sTransport').addEventListener('change', syncIranUdp);
 if ($('sshfwdUdp')) $('sshfwdUdp').addEventListener('change', e => { e.target.dataset.touched = '1'; });
@@ -2982,7 +2982,7 @@ function parseBundleClient(s) {
     if (!/^\d+$/.test(portS) || port < 1 || port > 65535) return {error: 'bad port in bundle'};
     if (!token || token.length > 128) return {error: 'bad token in bundle'};
     const rawPorts = (parts[4] || '').trim();
-    return {engine: 'backhaul', iranPub, port, transport: (transport || 'tcpmux').replace(/\+udp$/, ''), udp: /\+udp$/.test(transport), token, rawPorts, ports: rawPorts ? rawPorts.split(',') : []};
+    return {engine: 'backhaul', iranPub, port, transport: (transport || 'tcpmux').replace(/\+udp\d*$/, ''), udp: /\+udp\d*$/.test(transport), token, rawPorts, ports: rawPorts ? rawPorts.split(',') : []};
   }
   if (s.startsWith('gh1_')) {
     const parts = s.slice(4).split('_');
@@ -2995,7 +2995,7 @@ function parseBundleClient(s) {
     if (!v4(foreignGre)) return {error: 'bad foreign GRE IP in bundle'};
     if (!token || token.length > 128) return {error: 'bad token in bundle'};
     const rawPorts = (parts[6] || '').trim();
-    return {engine: 'gre-backhaul', iranPub, port, iranGre, foreignGre, transport: (transport || 'tcpmux').replace(/\+udp$/, ''), udp: /\+udp$/.test(transport), token, rawPorts, ports: rawPorts ? rawPorts.split(',') : []};
+    return {engine: 'gre-backhaul', iranPub, port, iranGre, foreignGre, transport: (transport || 'tcpmux').replace(/\+udp\d*$/, ''), udp: /\+udp\d*$/.test(transport), token, rawPorts, ports: rawPorts ? rawPorts.split(',') : []};
   }
   if (s.startsWith('hsh1_')) {
     const parts = s.slice(5).split('_');

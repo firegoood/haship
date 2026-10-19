@@ -57,7 +57,7 @@
 - 🗺️ **Cluster map.** A live picture of the whole cluster. Line thickness is each server's share of traffic and color is its health. Click any server, pool, line, hub or DNS to change it in place.
 - 🧪 **Path test before any tunnel.** Benchmark tab: every transport between your two servers (TCP/UDP, GRE, SSH, FRP x 5, Backhaul x 7) with latency and speed, so you know what gets through before you build anything.
 - 🧩 **Every tunnel in Setup.** GRE + FRP, Backhaul (with or without GRE, now one engine) and Bagher, all from the same Setup and Tunnel tabs. Old "Modified Backhaul" tunnels move in by themselves.
-- 📡 **UDP in every tunnel.** One tick (Also forward UDP) and Backhaul forwards UDP on any transport, tcpmux and wss included (a UDP companion on the same port number, managed with the tunnel), and Bagher forwards it through the SSH tunnel. FRP always did. For Hysteria, TUIC, WireGuard, QUIC and games.
+- 📡 **UDP in every tunnel.** One tick (Also forward UDP) and Backhaul forwards UDP on any transport, tcpmux and wss included (a UDP companion on the next free port, managed with the tunnel), and Bagher forwards it through the SSH tunnel. FRP always did. For Hysteria, TUIC, WireGuard, QUIC and games.
 - 🔁 **Back to GRE by itself.** A foreign server that fell back to the hub's public IP returns to GRE once GRE carries the tunnel again.
 - 💻 **`hashem` is a terminal app** with arrow-key menus that follow the panel tabs; everything the panel does works from SSH too (TLS, settings, cluster, performance).
 - ⚙️ **FRP options where they apply:** PROXY protocol (v1/v2), bandwidth limit per port, health check, TCP multiplexing; Backhaul connection pool. Let's Encrypt in Settings fixed.

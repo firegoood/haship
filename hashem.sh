@@ -1505,7 +1505,7 @@ bundle_parse() {
         [[ ${#d} -ge 1 && ${#d} -le 128 ]] || return 1
         B_IRAN_PUB="$a"
         B_FRP_PORT="$((10#$b))"
-        B_TRANSPORT="${c%+udp}"; [[ "$c" == *+udp ]] && { B_UDP=1; BH_ACCEPT_UDP=1; }
+        B_TRANSPORT="${c%%+udp*}"; [[ "$c" == *+udp* ]] && { B_UDP=1; BH_ACCEPT_UDP=1; BH_UDP_PORT=${c##*+udp}; }
         B_TOKEN="$d"
         B_PORTS="${e:-}"
         return 0
@@ -1524,7 +1524,7 @@ bundle_parse() {
         B_FRP_PORT="$((10#$b))"
         B_IRAN_GRE="$c"
         B_FOREIGN_GRE="$d"
-        B_TRANSPORT="${e%+udp}"; [[ "$e" == *+udp ]] && { B_UDP=1; BH_ACCEPT_UDP=1; }
+        B_TRANSPORT="${e%%+udp*}"; [[ "$e" == *+udp* ]] && { B_UDP=1; BH_ACCEPT_UDP=1; BH_UDP_PORT=${e##*+udp}; }
         B_TOKEN="$f"
         B_PORTS="${g:-}"
         return 0
@@ -2247,8 +2247,11 @@ backhaul_transport_ok() { [[ -n "$1" && " $BACKHAUL_TRANSPORTS " == *" $1 "* ]];
 # accept_udp on tcpmux and the ws family, so those get a UDP companion below.
 backhaul_udp_wanted() { [[ "${BH_ACCEPT_UDP:-0}" == "1" && "$1" == "tcp" ]]; }
 
-# The UDP companion: a second Backhaul with the udp transport on the same port
-# number (UDP), same token and same ports, next to a TCP-only tunnel. Its unit
+# The UDP companion: a second Backhaul with the udp transport next to a
+# TCP-only tunnel, same token and same ports. The v0.7.2 core opens the udp
+# transport's control channel on TCP, so the companion has its own control
+# port (BH_UDP_PORT: the first free one after the tunnel's port on the Iran
+# side; the bundle carries it to the foreign side). Its unit
 # backhaul-udp-<name> is PartOf the main unit, so every start, stop and restart
 # of the tunnel takes it along, and it rebuilds its config from the main one on
 # each start (ExecCondition), so any change of the main config reaches it.
@@ -2260,21 +2263,48 @@ backhaul_conf_transport() {
     sed -n -E 's/^[[:space:]]*(transport|type)[[:space:]]*=[[:space:]]*"([a-z]+)".*/\2/p' "$1" 2>/dev/null | head -n1
 }
 
-# backhaul_udp_conf MAIN OUT: writes the companion config from the main one.
-# Exit 1 (systemd skips the unit, no failure) when the main config is gone or
-# carries UDP itself (transport tcp or udp).
+# backhaul_conf_port CONF: the port of bind_addr (server) or remote_addr (client).
+backhaul_conf_port() {
+    sed -n -E 's/^[[:space:]]*(bind_addr|remote_addr)[[:space:]]*=[[:space:]]*".*:([0-9]+)".*/\2/p' "$1" 2>/dev/null | head -n1
+}
+
+# backhaul_udp_conf MAIN OUT PORT: writes the companion config from the main
+# one, on control port PORT. Exit 1 (systemd skips the unit, no failure) when
+# the main config is gone or carries UDP itself (transport tcp or udp).
 backhaul_udp_conf() {
-    local main=$1 out=$2 tr
-    [[ -f "$main" && -n "$out" ]] || return 1
+    local main=$1 out=$2 port=$3 tr
+    [[ -f "$main" && -n "$out" && "$port" =~ ^[0-9]+$ ]] || return 1
     tr=$(backhaul_conf_transport "$main")
     [[ -n "$tr" && "$tr" != tcp && "$tr" != udp ]] || return 1
     mkdir -p "$(dirname "$out")"
     sed -E -e 's/^([[:space:]]*(transport|type)[[:space:]]*=[[:space:]]*)"[a-z]+"/\1"udp"/' \
+        -e "s/^([[:space:]]*(bind_addr|remote_addr)[[:space:]]*=[[:space:]]*\".*:)[0-9]+\"/\1${port}\"/" \
         -e '/^[[:space:]]*accept_udp[[:space:]]*=/d' \
         -e 's/^([[:space:]]*web_port[[:space:]]*=).*/\1 0/' \
         -e 's/^([[:space:]]*sniffer[[:space:]]*=).*/\1 false/' "$main" > "$out.tmp" || { rm -f "$out.tmp"; return 1; }
     chmod 600 "$out.tmp" 2>/dev/null || true  # holds the auth token
     mv -f "$out.tmp" "$out"
+}
+
+# backhaul_udp_port UNIT: the control port of UNIT's companion ("" when none).
+backhaul_udp_port() {
+    local d="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"
+    sed -n -E 's/^ExecCondition=.* ([0-9]+)$/\1/p' "$d/$(backhaul_udp_unit "$1").service" 2>/dev/null | head -n1
+}
+
+# backhaul_udp_pick_port MAIN_PORT: the first port after MAIN_PORT that nothing
+# listens on and no other Backhaul config or companion uses.
+backhaul_udp_pick_port() {
+    local p=$(( $1 + 1 )) i d="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"
+    for ((i = 0; i < 200; i++, p++)); do
+        (( p > 65535 )) && p=20000
+        ss -Hltn "sport = :$p" 2>/dev/null | grep -q . && continue
+        ss -Hlun "sport = :$p" 2>/dev/null | grep -q . && continue
+        grep -Eqs ":${p}\"" "${BACKHAUL_CONFIG_DIR}"/*.toml && continue
+        grep -Eqs "^ExecCondition=.* ${p}\$" "$d"/backhaul-udp-*.service && continue
+        echo "$p"; return 0
+    done
+    echo $(( $1 + 1 ))
 }
 
 # backhaul_udp_remove UNIT: stops and deletes the UDP companion of UNIT.
@@ -2297,7 +2327,9 @@ backhaul_udp_on() {
 
 # backhaul_udp_apply UNIT CONF: after the main unit is written, adds the UDP
 # companion when it is wanted (BH_ACCEPT_UDP and a TCP-only transport) and
-# removes it otherwise.
+# removes it otherwise. The control port is BH_UDP_PORT (from the bundle), the
+# one the companion already has, or the first free one after the tunnel's;
+# BH_UDP_PORT holds it afterwards for the bundle.
 backhaul_udp_apply() {
     local unit=$1 conf=$2 d="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}" u out tr port
     tr=$(backhaul_conf_transport "$conf")
@@ -2307,17 +2339,27 @@ backhaul_udp_apply() {
     fi
     u=$(backhaul_udp_unit "$unit")
     out="${BACKHAUL_CONFIG_DIR}/udp/${unit}.toml"
-    backhaul_udp_conf "$conf" "$out" || return 1
-    cat > "$d/$u.service" <<EOF
+    port=${BH_UDP_PORT:-}
+    [[ "$port" =~ ^[0-9]+$ ]] || port=$(backhaul_udp_port "$unit")
+    if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+        if [[ "$unit" == backhaul-server* ]]; then
+            port=$(backhaul_udp_pick_port "$(backhaul_conf_port "$conf")")
+        else
+            port=$(( $(backhaul_conf_port "$conf") + 1 ))  # a bundle without the port: the Iran default
+        fi
+    fi
+    BH_UDP_PORT=$port
+    backhaul_udp_conf "$conf" "$out" "$port" || return 1
+    cat > "$d/$u.service" <<UNIT
 [Unit]
-Description=Backhaul UDP for ${unit} (udp transport, same ports)
+Description=Backhaul UDP for ${unit} (udp transport, control port ${port})
 PartOf=${unit}.service
 After=${unit}.service
 
 [Service]
 Type=simple
 User=root
-ExecCondition=${HASHEM_BIN} backhaul-udp-conf ${conf} ${out}
+ExecCondition=${HASHEM_BIN} backhaul-udp-conf ${conf} ${out} ${port}
 ExecStart=${INSTALL_DIR}/backhaul -c ${out}
 Restart=always
 RestartSec=3s
@@ -2325,21 +2367,21 @@ LimitNOFILE=1048576
 
 [Install]
 WantedBy=${unit}.service
-EOF
+UNIT
     systemctl daemon-reload
     systemctl enable "$u.service" >/dev/null 2>&1 || true
     systemctl restart "$u.service" >/dev/null 2>&1 || true
-    port=$(sed -n -E 's/^[[:space:]]*bind_addr[[:space:]]*=[[:space:]]*".*:([0-9]+)".*/\1/p' "$conf" | head -n1)
-    if [[ -n "$port" ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+    if [[ "$unit" == backhaul-server* ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
         ufw allow "${port}/udp" >/dev/null 2>&1 || true
     fi
-    echo -e "${CYAN}[*] UDP: ${u} carries the UDP of the same ports (udp transport).${NC}"
+    echo -e "${CYAN}[*] UDP: ${u} carries the UDP of the same ports on control port ${port}.${NC}"
 }
 
-# backhaul_bundle_transport TRANSPORT: the transport field of a bundle; "+udp"
-# tells the foreign side to forward UDP too.
+# backhaul_bundle_transport TRANSPORT: the transport field of a bundle;
+# "+udp<PORT>" tells the foreign side to forward UDP too, on that control port.
 backhaul_bundle_transport() {
-    if [[ "${BH_ACCEPT_UDP:-0}" == "1" && "$1" != "udp" ]]; then echo "${1}+udp"; else echo "$1"; fi
+    if [[ "${BH_ACCEPT_UDP:-0}" == "1" && "$1" != "udp" ]]; then echo "${1}+udp${BH_UDP_PORT:-}"; else echo "$1"; fi
 }
 
 # backhaul_ports_normalize "443 2083, 10000-10050:443" prints the entries the
@@ -4444,6 +4486,7 @@ cli_add_backhaul_peer() {
             --no-gre) NO_GRE=1; shift ;;
             --bundle) BUNDLE="$2"; shift 2 ;;
             --udp) BH_ACCEPT_UDP=1; shift ;;
+            --udp-port) BH_ACCEPT_UDP=1; BH_UDP_PORT="$2"; shift 2 ;;
             --force) FORCE=1; shift ;;
             -h|--help) echo 'Usage: hashem.sh add-backhaul-peer --remote-pub IP --port P --transport T --token K --ports "443, 10000-10050" [--no-gre] [--udp]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
@@ -8521,9 +8564,9 @@ backhaul_status() {
         fi
         if [[ -f "/etc/systemd/system/$(backhaul_udp_unit "$name").service" ]]; then
             if systemctl is-active --quiet "$(backhaul_udp_unit "$name")"; then
-                echo -e "  UDP ($(backhaul_udp_unit "$name")): ${GREEN}running${NC}"
+                echo -e "  UDP ($(backhaul_udp_unit "$name"), port $(backhaul_udp_port "$name")): ${GREEN}running${NC}"
             else
-                echo -e "  UDP ($(backhaul_udp_unit "$name")): ${RED}stopped${NC}"
+                echo -e "  UDP ($(backhaul_udp_unit "$name"), port $(backhaul_udp_port "$name")): ${RED}stopped${NC}"
             fi
         fi
     done
@@ -8537,6 +8580,7 @@ backhaul_show_bundle() {
     [[ -f "$conf" ]] || { echo -e "${YELLOW}[!] No Backhaul server on this server (bundles come from the Iran side).${NC}"; return 1; }
     local BH_ACCEPT_UDP=0
     backhaul_udp_on backhaul-server && BH_ACCEPT_UDP=1
+    local BH_UDP_PORT; BH_UDP_PORT=$(backhaul_udp_port backhaul-server)
     port=$(awk -F'"' '/^bind_addr/{print $2; exit}' "$conf"); port=${port##*:}
     tr=$(awk -F'"' '/^transport/{print $2; exit}' "$conf")
     tok=$(awk -F'"' '/^token/{print $2; exit}' "$conf")
@@ -9806,6 +9850,7 @@ cli_setup_backhaul_iran() {
             --token) TOKEN="$2"; shift 2 ;;
             --ports) PORTS="$2"; shift 2 ;;
             --udp) BH_ACCEPT_UDP=1; shift ;;
+            --udp-port) BH_ACCEPT_UDP=1; BH_UDP_PORT="$2"; shift 2 ;;
             --force) FORCE=1; shift ;;
             -h|--help) echo 'Usage: hashem setup-backhaul-iran [--local-pub IP] [--remote-pub IP] --port P [--transport T] [--token K] [--ports "..."] [--udp]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
@@ -9839,7 +9884,8 @@ cli_setup_backhaul_foreign() {
             --bundle) BUNDLE="$2"; shift 2 ;;
             --force) FORCE=1; shift ;;
             --udp) BH_ACCEPT_UDP=1; shift ;;
-            -h|--help) echo 'Usage: hashem setup-backhaul-foreign --remote-pub IP --port P --token K [--transport T] [--udp] | --bundle bh1_...'; return 0 ;;
+            --udp-port) BH_ACCEPT_UDP=1; BH_UDP_PORT="$2"; shift 2 ;;
+            -h|--help) echo 'Usage: hashem setup-backhaul-foreign --remote-pub IP --port P --token K [--transport T] [--udp [--udp-port P]] | --bundle bh1_...'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
         esac
     done
@@ -9876,6 +9922,7 @@ cli_setup_gre_backhaul_iran() {
             --token) TOKEN="$2"; shift 2 ;;
             --ports) PORTS="$2"; shift 2 ;;
             --udp) BH_ACCEPT_UDP=1; shift ;;
+            --udp-port) BH_ACCEPT_UDP=1; BH_UDP_PORT="$2"; shift 2 ;;
             --force) FORCE=1; shift ;;
             -h|--help) echo 'Usage: hashem setup-gre-backhaul-iran --remote-pub IP [--port P] [--transport T] [--local-gre IP] [--peer-gre IP] [--ports "..."] [--udp]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
@@ -9913,7 +9960,8 @@ cli_setup_gre_backhaul_foreign() {
             --dial) FRP_DIAL="$2"; shift 2 ;;
             --force) FORCE=1; shift ;;
             --udp) BH_ACCEPT_UDP=1; shift ;;
-            -h|--help) echo 'Usage: hashem setup-gre-backhaul-foreign --bundle gh1_... | --remote-pub IP --port P --token K [--udp]'; return 0 ;;
+            --udp-port) BH_ACCEPT_UDP=1; BH_UDP_PORT="$2"; shift 2 ;;
+            -h|--help) echo 'Usage: hashem setup-gre-backhaul-foreign --bundle gh1_... | --remote-pub IP --port P --token K [--udp [--udp-port P]]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
         esac
     done

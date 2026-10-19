@@ -227,9 +227,9 @@ func currentIranBundle() (string, string) {
 			}
 			if token != "" {
 				if st.Engine == "gre-backhaul" || setupMeta.Engine == "gre-backhaul" || st.Gre.Exists {
-					return MakeGreBackhaulBundle(iranPub, bindPort, iranGre, foreignGre, backhaulBundleTransport(transport, backhaulUnitUDP("backhaul-server")), token, rawPorts), token
+					return MakeGreBackhaulBundle(iranPub, bindPort, iranGre, foreignGre, backhaulBundleTransport(transport, backhaulUDPPort("backhaul-server")), token, rawPorts), token
 				}
-				return MakeBackhaulBundle(iranPub, bindPort, backhaulBundleTransport(transport, backhaulUnitUDP("backhaul-server")), token, rawPorts), token
+				return MakeBackhaulBundle(iranPub, bindPort, backhaulBundleTransport(transport, backhaulUDPPort("backhaul-server")), token, rawPorts), token
 			}
 		}
 	}
@@ -278,10 +278,10 @@ func currentIranBundle() (string, string) {
 			}
 		}
 		if setupMeta.Engine == "backhaul" {
-			return MakeBackhaulBundle(iranPub, p, backhaulBundleTransport(setupMeta.Transport, backhaulUnitUDP("backhaul-server")), setupMeta.Token, []string{setupMeta.Ports}), setupMeta.Token
+			return MakeBackhaulBundle(iranPub, p, backhaulBundleTransport(setupMeta.Transport, backhaulUDPPort("backhaul-server")), setupMeta.Token, []string{setupMeta.Ports}), setupMeta.Token
 		}
 		if setupMeta.Engine == "gre-backhaul" {
-			return MakeGreBackhaulBundle(iranPub, p, iGre, fGre, backhaulBundleTransport(setupMeta.Transport, backhaulUnitUDP("backhaul-server")), setupMeta.Token, []string{setupMeta.Ports}), setupMeta.Token
+			return MakeGreBackhaulBundle(iranPub, p, iGre, fGre, backhaulBundleTransport(setupMeta.Transport, backhaulUDPPort("backhaul-server")), setupMeta.Token, []string{setupMeta.Ports}), setupMeta.Token
 		}
 		return MakeBundle(iranPub, p, iGre, fGre, setupMeta.Token, ports), setupMeta.Token
 	}
@@ -431,6 +431,7 @@ type setupRequest struct {
 	Engine         string `json:"engine,omitempty"`     // "" | "frp" | "backhaul" | "gre-backhaul"
 	Transport      string `json:"transport,omitempty"`  // "tcpmux" (default), "tcp", "ws", "wss", "wsmux", "wssmux", "udp"
 	AcceptUDP      bool   `json:"accept_udp,omitempty"` // Backhaul: also forward UDP (tcp: inside the tunnel; tcpmux/ws/wss: a udp companion)
+	UDPPort        int    `json:"udp_port,omitempty"`   // foreign: the Iran companion's control port (from the bundle)
 	Name           string `json:"name"`                 // add-peer label
 	LocalPub       string `json:"local_public"`
 	RemotePub      string `json:"remote_public"`
@@ -703,9 +704,9 @@ func runInstaller(b setupRequest, ports []int, rawPorts []string) (string, strin
 	if b.Role == "iran" || b.Role == "add-peer" {
 		switch b.Engine {
 		case "backhaul":
-			bundleStr = MakeBackhaulBundle(b.LocalPub, b.FrpPort, backhaulBundleTransport(b.Transport, b.AcceptUDP), token, rawPorts)
+			bundleStr = MakeBackhaulBundle(b.LocalPub, b.FrpPort, backhaulBundleTransport(b.Transport, udpPortFromSteps(steps)), token, rawPorts)
 		case "gre-backhaul":
-			bundleStr = MakeGreBackhaulBundle(b.LocalPub, b.FrpPort, b.LocalGre, b.PeerGre, backhaulBundleTransport(b.Transport, b.AcceptUDP), token, rawPorts)
+			bundleStr = MakeGreBackhaulBundle(b.LocalPub, b.FrpPort, b.LocalGre, b.PeerGre, backhaulBundleTransport(b.Transport, udpPortFromSteps(steps)), token, rawPorts)
 		default:
 			trans := b.FRPTransport
 			if trans == "" && b.Transport != "" && b.Transport != "tcpmux" {
@@ -911,9 +912,13 @@ func installerArgs(b *setupRequest, ports []int, rawPorts []string) ([]string, s
 		}
 	}
 	// UDP on both sides: the Iran server and the foreign client of a TCP-only
-	// transport each run a UDP companion (hashem.sh backhaul_udp_apply).
+	// transport each run a UDP companion on its own control port (hashem.sh
+	// backhaul_udp_apply); the foreign side takes the port from the bundle.
 	if b.AcceptUDP && (b.Engine == "backhaul" || b.Engine == "gre-backhaul") {
 		args = append(args, "--udp")
+		if b.UDPPort > 0 && b.UDPPort <= 65535 {
+			args = append(args, "--udp-port", strconv.Itoa(b.UDPPort))
+		}
 	}
 	// Route to Iran for a foreign side with GRE (FRP, Backhaul with GRE).
 	if b.Role == "foreign" && b.Engine != "backhaul" && validDialMode(b.Dial) && b.Dial != "auto" {
