@@ -2331,7 +2331,14 @@ backhaul_write_client_conf_v2() {
 }
 
 backhaul_write_server_conf() {
-    local rc=0
+    local rc=0 _svc="" _addr
+    case "$(basename "$1")" in
+        config.toml) _svc=backhaul-server ;;
+        server-*.toml) _svc="backhaul-server-$(basename "$1" .toml | sed 's/^server-//')" ;;
+    esac
+    _addr=$(lb_bound_addr "$_svc")
+    [[ -n "$_addr" ]] || _addr="${LB_BIND_ADDR:-}"
+    [[ -n "$_addr" ]] && set -- "$1" "$2" "$3" "$4" "$(lb_prefix_ports "$_addr" "$5")"
     if backhaul_is_v2; then backhaul_write_server_conf_v2 "$@" || rc=$?; else backhaul_write_server_conf_v1 "$@" || rc=$?; fi
     chmod 600 "$1" 2>/dev/null || true  # holds the auth token
     return "$rc"
@@ -3184,6 +3191,7 @@ transport.heartbeatTimeout = 45
 transport.maxPoolCount = ${MAX_POOL}
 EOF
     chmod 600 "${CONFIG_DIR}/frps.toml" 2>/dev/null || true  # holds the auth token
+    lb_frps_bind "${CONFIG_DIR}/frps.toml" frps
     cat <<EOF > /etc/systemd/system/frps.service
 [Unit]
 Description=FRP Server Service
@@ -4076,7 +4084,7 @@ release_frps_port() {
 remove_hashem_tunnel_ifaces() {
     command -v ip >/dev/null 2>&1 || return 0
     local gif names
-    names="$TUNNEL_NAME $(ip -o link show 2>/dev/null | awk -F': ' '{sub(/@.*/, "", $2); print $2}' | grep -E '^gre-t[0-9]+$')"
+    names="$TUNNEL_NAME $(ip -o link show 2>/dev/null | awk -F': ' '{sub(/@.*/, "", $2); print $2}' | grep -E '^gre-[th][0-9]+$')"
     if [[ -f "$PEERS_FILE" ]]; then
         names="$names $(grep -o '"gre_if": *"[^"]*"' "$PEERS_FILE" 2>/dev/null | cut -d'"' -f4)"
     fi
@@ -4110,6 +4118,7 @@ transport.heartbeatTimeout = 45
 transport.maxPoolCount = ${MAX_POOL}
 EOF
     chmod 600 "${CONFIG_DIR}/frps${SUF}.toml" 2>/dev/null || true  # holds the auth token
+    lb_frps_bind "${CONFIG_DIR}/frps${SUF}.toml" "frps${SUF}"
     local SVC="frps${SUF}"
     cat <<EOF > /etc/systemd/system/${SVC}.service
 [Unit]
@@ -4149,7 +4158,7 @@ EOF
 # explicit flags always win.
 cli_add_peer() {
     local NAME="" LOCAL_PUB="" REMOTE_PUB="" FRP_PORT="" TOKEN="" LOCAL_GRE="" PEER_GRE="" PORTS="" FORCE=0 BUNDLE=""
-    local PEER_FRP_TRANSPORT=""
+    local PEER_FRP_TRANSPORT="" POOLED=0 LB_BIND_ADDR=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --name) NAME="$2"; shift 2 ;;
@@ -4206,6 +4215,8 @@ cli_add_peer() {
     local USED entry CONFLICT=""
     USED=$(peer_ports_used)
     for p in $CLEANED; do
+        # a cluster pool serves this port from several peers
+        lb_port_pooled "$p" && { POOLED=1; continue; }
         for entry in $USED; do
             if [[ "${entry%%:*}" == "$p" ]]; then CONFLICT="$CONFLICT $p (used by peer '${entry#*:}')"; fi
         done
@@ -4229,11 +4240,13 @@ cli_add_peer() {
     if [[ "$ID" -eq 1 ]] && ! tunnel_present; then
         # first tunnel keeps legacy names (gre-tunnel, frps) — old setups untouched
         setup_gre_systemd "$LOCAL_PUB" "$REMOTE_PUB" "$LOCAL_GRE" "$PEER_GRE"
+        [[ "$POOLED" == 1 ]] && LB_BIND_ADDR=$(lb_addr_for_svc frps)
         peer_write_frps "" "$FRP_PORT" "$TOKEN"
         GRE_IF="$TUNNEL_NAME"; FRPS_SVC="frps"; LEGACY=true
         else
         GRE_IF="gre-t${ID}"; FRPS_SVC="frps-${ID}"; LEGACY=false
         setup_gre_iface "$GRE_IF" "$LOCAL_PUB" "$REMOTE_PUB" "$LOCAL_GRE" "$PEER_GRE"
+        [[ "$POOLED" == 1 ]] && LB_BIND_ADDR=$(lb_addr_for_svc "frps-${ID}")
         peer_write_frps "-${ID}" "$FRP_PORT" "$TOKEN"
         # point the new unit at the right interface
         sed -i "s/After=network.target/After=network.target ${GRE_IF}.service/" /etc/systemd/system/${FRPS_SVC}.service
@@ -4374,6 +4387,10 @@ cli_add_backhaul_peer() {
     backhaul_ensure_tls "$TRANSPORT"
 
     local GRE_IF="none" SVC_NAME="backhaul-server-${ID}" CONF_FILE="/etc/backhaul/server-${ID}.toml"
+    local LB_BIND_ADDR="" _lp
+    for _lp in $(echo "$PORTS" | tr ',' ' '); do
+        lb_port_pooled "${_lp%%=*}" && LB_BIND_ADDR=$(lb_addr_for_svc "$SVC_NAME")
+    done
     local ENGINE="backhaul"
     if [[ "$NO_GRE" -eq 1 ]]; then
         ENGINE="backhaul"
@@ -5395,9 +5412,9 @@ uninstall_all_force() {
         # 1. Stop & disable all services & timers
         systemctl stop 'frps-wss*' >/dev/null 2>&1 || true
         systemctl stop frps frpc "${TUNNEL_NAME}.service" gre-panel hashem-watchdog.timer hashem-watchdog.service backhaul-server backhaul-client backhaul >/dev/null 2>&1 || true
-        systemctl stop 'frps*' 'frpc*' 'backhaul*' 'gre-t*' >/dev/null 2>&1 || true
+        systemctl stop 'frps*' 'frpc*' 'backhaul*' 'gre-t*' 'gre-h*' >/dev/null 2>&1 || true
         systemctl disable frps frpc "${TUNNEL_NAME}.service" gre-panel hashem-watchdog.timer hashem-watchdog.service backhaul-server backhaul-client backhaul >/dev/null 2>&1 || true
-        systemctl disable 'frps*' 'frpc*' 'backhaul*' 'gre-t*' >/dev/null 2>&1 || true
+        systemctl disable 'frps*' 'frpc*' 'backhaul*' 'gre-t*' 'gre-h*' hashem-lb-net >/dev/null 2>&1 || true
         purge_legacy_obfuscation
 
         # 2. Terminate any leftover processes
@@ -5411,6 +5428,7 @@ uninstall_all_force() {
         rm -f /etc/systemd/system/frps*.service /etc/systemd/system/frpc*.service \
               /etc/systemd/system/backhaul*.service /etc/systemd/system/${TUNNEL_NAME}.service \
               /etc/systemd/system/gre-t*.service /etc/systemd/system/gre-panel.service \
+              /etc/systemd/system/gre-h*.service /etc/systemd/system/hashem-lb-net.service \
               /etc/systemd/system/hashem-watchdog.*
         rm -f /var/lock/hashem-watchdog.lock
         remove_legacy_units
@@ -5426,7 +5444,10 @@ uninstall_all_force() {
             mss_clamp_drop POSTROUTING
             iptables -t nat -D OUTPUT -p udp --dport 19999 -j DNAT --to-destination 127.0.0.1:19999 2>/dev/null || true
             iptables -D INPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
+            # cluster pools and hub forwarding
+            [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" cluster reset >/dev/null 2>&1 || true
         fi
+        ip link del hashem-lb >/dev/null 2>&1 || true
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"
 
         # 6. Revert network tuning
@@ -5498,7 +5519,10 @@ remove_tunnel_force() {
             mss_clamp_drop POSTROUTING
             iptables -t nat -D OUTPUT -p udp --dport 19999 -j DNAT --to-destination 127.0.0.1:19999 2>/dev/null || true
             iptables -D INPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
+            # cluster pools and hub forwarding
+            [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" cluster reset >/dev/null 2>&1 || true
         fi
+        ip link del hashem-lb >/dev/null 2>&1 || true
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"
 
         # Remove configs
@@ -8886,56 +8910,157 @@ menu_bagher() {
 menu_sshfwd() { menu_bagher "$@"; }
 
 # --------------------------------------------------------------- Cluster ----
-cluster_cmd() { # the panel owns the cluster; without it fall back to the script
-    if [[ -x "$PANEL_BIN" ]]; then "$PANEL_BIN" cluster "$@"; else cli_cluster "$@"; fi
+cluster_cmd() { # the panel owns the cluster
+    if [[ -x "$PANEL_BIN" ]]; then
+        "$PANEL_BIN" cluster "$@"
+    else
+        echo -e "${YELLOW}The panel is not installed: the cluster runs in it.${NC}"
+        return 1
+    fi
+}
+
+# cluster_is_spoke: a foreign server (it dials a hub and runs no relay server)
+cluster_is_spoke() {
+    { systemctl is-enabled --quiet frpc 2>/dev/null || systemctl is-enabled --quiet backhaul-client 2>/dev/null; } &&
+        ! compgen -G "/etc/systemd/system/frps*.service" >/dev/null &&
+        ! compgen -G "/etc/systemd/system/backhaul-server*.service" >/dev/null
+}
+
+cluster_pick_mode() { # $1=varname
+    local __m
+    ui_menu __m "Pool mode" "" \
+        "1|Failover|All traffic on the first healthy server; the next takes over in seconds." \
+        "2|Balance|Each new connection to a server, by weight." \
+        "3|Sticky per user|Each user always on the same server (their exit IP stays the same)." \
+        "4|Lowest latency|All traffic on the server with the lowest ping."
+    case "$__m" in
+        1) printf -v "$1" '%s' failover ;;
+        2) printf -v "$1" '%s' balance ;;
+        3) printf -v "$1" '%s' sticky ;;
+        4) printf -v "$1" '%s' latency ;;
+        *) printf -v "$1" '%s' "" ;;
+    esac
 }
 
 menu_cluster() {
-    local c a b p w s
+    local c a b w m
+    ui_pro cluster Cluster || return 0
+    if cluster_is_spoke; then
+        menu_cluster_spoke
+        return 0
+    fi
     while true; do
-        ui_menu c "Cluster" "Several foreign servers behind this Iran server, with failover or load balancing." \
-            "1|Status|Foreign servers, health, latency and weights." \
-            "2|Add a foreign server|Name, IP, port, weight and protocol." \
-            "3|Remove a foreign server|By name or id." \
-            "4|Switch the active server|Send traffic to another foreign server now." \
-            "5|Balancing strategy|Weighted round robin, failover or lowest latency." \
-            "6|Revert failover|Clear the balancing rules and use the local tunnel."
+        ui_menu c "Cluster" "Pools: one public port served by several foreign servers. Hubs: Iran servers that back each other up." \
+            "-|Pools" \
+            "1|Status|Pools, members and Iran hubs." \
+            "2|New pool|A public port served by several foreign servers." \
+            "3|Pool mode|Failover, balance, sticky per user or lowest latency." \
+            "4|Members|Add, remove, drain or resume a foreign server in a pool." \
+            "5|Remove a pool|Its port goes back to a single tunnel." \
+            "-|Iran hubs" \
+            "6|Join code|The code another Iran hub pastes to link with this one." \
+            "7|Link a hub|Paste the join code of another Iran hub." \
+            "8|Unlink a hub|Stop backing up with a hub." \
+            "-|Log" \
+            "9|Events|Failovers, servers going down and up, rule changes." \
+            "10|Kernel rules|The DNAT rules the cluster keeps."
         case "$c" in
             1) ui_run "Cluster status" cluster_cmd status ;;
             2)
-                ui_page "Cluster: add a foreign server"
-                ui_ask a "Name (e.g. de-1)"; [[ -z "$a" ]] && { ui_pause; continue; }
-                ui_ask b "Public IP"; [[ -z "$b" ]] && { ui_pause; continue; }
-                ui_ask p "Tunnel port" "7000"
-                ui_ask w "Weight (1-100)" "1"
-                ui_ask s "Protocol (gre or wss)" "gre"
-                if [[ -x "$PANEL_BIN" ]]; then "$PANEL_BIN" cluster add-foreign "$a" "$b" "$p" "$w" "$s"; else echo -e "${YELLOW}The panel is not installed: the cluster needs it.${NC}"; fi
+                ui_page "New pool"
+                echo -e " A pool serves one public port from several tunnels. Tunnel ids: 0 is the main"
+                echo -e " tunnel, N is peer N (hashem peer-list). Empty takes every tunnel that has the port.\n"
+                ui_ask a "Public port"
+                [[ "$a" =~ ^[0-9]+$ ]] || { ui_pause; continue; }
+                ui_ask b "Protocol (tcp, udp or both)" "both"
+                cluster_pick_mode m
+                [[ -n "$m" ]] || continue
+                ui_page "New pool"
+                ui_ask w "Tunnel ids, comma separated" ""
+                cluster_cmd pool add "$a" --proto "$b" --mode "$m" ${w:+--links "$w"}
                 ui_pause
                 ;;
             3)
-                ui_page "Cluster: remove a foreign server"
-                ui_ask a "Name or id"
-                [[ -n "$a" ]] && cluster_cmd del-foreign "$a"
-                ui_pause
+                ui_page "Pool mode"
+                ui_ask a "Pool port"
+                [[ "$a" =~ ^[0-9]+$ ]] || { ui_pause; continue; }
+                cluster_pick_mode m
+                [[ -n "$m" ]] && ui_run "Pool mode" cluster_cmd pool mode "$a" "$m"
                 ;;
             4)
-                ui_page "Cluster: switch the active server"
-                ui_ask a "Name or id"
-                [[ -n "$a" ]] && cluster_cmd switch-foreign "$a"
-                ui_pause
-                ;;
-            5)
-                ui_menu s "Balancing strategy" "" \
-                    "1|Weighted round robin|Spread connections by weight." \
-                    "2|Failover|One server; the next takes over when it is down." \
-                    "3|Lowest latency|Always the server with the lowest ping."
-                case "$s" in
-                    1) ui_run "Strategy" cluster_cmd set-mode wrr ;;
-                    2) ui_run "Strategy" cluster_cmd set-mode failover ;;
-                    3) ui_run "Strategy" cluster_cmd set-mode lowest_latency ;;
+                ui_page "Members"
+                ui_ask a "Pool port"
+                [[ "$a" =~ ^[0-9]+$ ]] || { ui_pause; continue; }
+                ui_ask b "Tunnel id (0 = main tunnel, N = peer N)"
+                [[ "$b" =~ ^[0-9]+$ ]] || { ui_pause; continue; }
+                ui_menu m "Member $b of pool $a" "" \
+                    "1|Add|The tunnel serves this pool." \
+                    "2|Remove|The tunnel leaves the pool (and is not added back by itself)." \
+                    "3|Drain|No new connections; open ones finish. For maintenance." \
+                    "4|Resume|New connections again." \
+                    "5|Weight|Share of traffic in balance and sticky modes." \
+                    "6|Priority|Order in failover mode (0 first)."
+                case "$m" in
+                    1) ui_run "Add member" cluster_cmd member add "$a" "$b" ;;
+                    2) ui_run "Remove member" cluster_cmd member rm "$a" "$b" ;;
+                    3) ui_run "Drain member" cluster_cmd member drain "$a" "$b" ;;
+                    4) ui_run "Resume member" cluster_cmd member resume "$a" "$b" ;;
+                    5) ui_page "Weight"; ui_ask w "Weight (1-100)" "1"; cluster_cmd member set "$a" "$b" --weight "$w"; ui_pause ;;
+                    6) ui_page "Priority"; ui_ask w "Priority (0-1000, lower first)" "0"; cluster_cmd member set "$a" "$b" --priority "$w"; ui_pause ;;
                 esac
                 ;;
-            6) ui_run "Revert failover" cli_cluster revert ;;
+            5)
+                ui_page "Remove a pool"
+                ui_ask a "Pool port"
+                [[ "$a" =~ ^[0-9]+$ ]] && ui_confirm "Remove the pool on port $a?" && cluster_cmd pool rm "$a"
+                ui_pause
+                ;;
+            6) ui_run "Join code" cluster_cmd join-code ;;
+            7)
+                ui_page "Link a hub"
+                echo -e " On the other Iran hub: Cluster > Join code. Paste it here.\n"
+                ui_ask a "Join code (hc1_...)"
+                [[ -n "$a" ]] && cluster_cmd add-hub "$a"
+                ui_pause
+                ;;
+            8)
+                ui_page "Unlink a hub"
+                cluster_cmd status | sed -n '/^Iran hubs/,$p'
+                ui_ask a "Hub id"
+                [[ -n "$a" ]] && cluster_cmd remove-hub "$a"
+                ui_pause
+                ;;
+            9) ui_run "Cluster events" cluster_cmd events ;;
+            10) ui_run "Cluster kernel rules" cluster_cmd rules ;;
+            0) return 0 ;;
+        esac
+    done
+}
+
+# On a foreign server the cluster means serving several Iran hubs.
+menu_cluster_spoke() {
+    local c a
+    while true; do
+        ui_menu c "Cluster" "This foreign server can serve several Iran hubs: when one Iran server dies, users of the others keep working." \
+            "1|Hubs served|The Iran hubs this server is linked with." \
+            "2|Join another Iran hub|On that hub add this server as a peer, then paste the bundle here." \
+            "3|Leave a hub|Stop serving one of the extra hubs."
+        case "$c" in
+            1) ui_run "Hubs served" cli_hubs ;;
+            2)
+                ui_page "Join another Iran hub"
+                ui_ask a "Bundle (hsh1_, bh1_ or gh1_)"
+                [[ -n "$a" ]] && cli_join_hub --bundle "$a"
+                ui_pause
+                ;;
+            3)
+                ui_page "Leave a hub"
+                cli_hubs
+                echo
+                ui_ask a "Hub id (2 or more)"
+                [[ "$a" =~ ^[0-9]+$ ]] && ui_confirm "Stop serving hub $a?" && cli_leave_hub --id "$a"
+                ui_pause
+                ;;
             0) return 0 ;;
         esac
     done
@@ -9303,7 +9428,7 @@ menu_loop() {
             "2|Setup|Set this server up: Iran or foreign, GRE + FRP, Backhaul or Bagher." \
             "3|Tunnel|Peers, bundle, carrier, route, restart, tear down." \
             "4|Bagher [PRO]|Stealth hybrid tunnel over SSH." \
-            "5|Cluster|Several foreign servers with failover or load balancing." \
+            "5|Cluster [PRO]|Pools of foreign servers, linked Iran hubs, failover." \
             "6|Performance [PRO]|FRP and Backhaul options, pools, network tuning." \
             "7|Watchdog [PRO]|Tunnel checks, Telegram alerts, encrypted backups." \
             "8|Diagnostics [PRO]|Health check, fixes, ports, stress test." \
@@ -9364,6 +9489,8 @@ Usage:
   hashem tls [status | issue DOMAIN [EMAIL] | renew | remove | ip [IP] | custom CERT KEY]   # panel HTTPS (Settings tab)
   hashem settings [show | 2fa off | terminal on|off | terminal-allow [IP ...] | idle MIN]  # panel settings
   hashem license [status | activate KEY | machine-id | deactivate]
+  hashem cluster [status | pool add PORT [--mode M] | pool rm|mode ... | member add|rm|drain|resume PORT LINK | join-code | add-hub CODE | events | rules]
+  hashem join-hub --bundle hsh1_...|bh1_...|gh1_... | leave-hub --id N | hubs   # foreign side: serve several Iran hubs
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
   hashem ssh-fwd [status|enable|disable|gen-key|clear-dnat] # SSH port forward carrier
@@ -10356,82 +10483,275 @@ cli_license() {
     esac
 }
 
-cli_cluster() {
-    local SUB="${1:-status}"
-    local CONF_FILE="/etc/gre-panel/cluster.json"
+# --------------------------------------------------------------- Cluster ----
+# The panel owns the cluster: pools (one Iran port served by several foreign
+# servers), linked Iran hubs and DNS failover. The script keeps two things in
+# step with it: relays of pool members listen on a private address
+# (169.254.77.N, the same rule as the panel), and a foreign server can serve
+# several Iran hubs (join-hub).
+LB_BINDS_FILE="${PANEL_CONFIG_DIR}/lb-binds"
+LB_PORTS_FILE="${PANEL_CONFIG_DIR}/lb-ports"
+HUBS_FILE="${PANEL_CONFIG_DIR}/hubs.json"
 
-    case "$SUB" in
-        status)
-            echo -e "${CYAN}=== Hashem Iran Mesh Cluster Status ===${NC}"
-            if [[ ! -f "$CONF_FILE" ]]; then
-                echo -e "Cluster Mesh:     ${YELLOW}Not Initialized (No config at $CONF_FILE)${NC}"
-                return 0
-            fi
-
-            if command -v jq >/dev/null 2>&1; then
-                local EN
-                EN=$(jq -r '.enabled // false' "$CONF_FILE")
-                local NODE_ID
-                NODE_ID=$(jq -r '.node_id // "N/A"' "$CONF_FILE")
-                local PUB_IP
-                PUB_IP=$(jq -r '.public_ip // "N/A"' "$CONF_FILE")
-                local AUTO_FO
-                AUTO_FO=$(jq -r '.auto_failover // false' "$CONF_FILE")
-                local ACT_FO
-                # active_failover is the target node id ("" = not rerouted)
-                ACT_FO=$(jq -r '.active_failover // ""' "$CONF_FILE")
-                local FO_TGT
-                FO_TGT=$(jq -r '.failover_target // "None"' "$CONF_FILE")
-                local PEER_CNT
-                PEER_CNT=$(jq -r '.nodes | length // 0' "$CONF_FILE")
-
-                echo -e "Mesh Enabled:     $([[ "$EN" == "true" ]] && echo -e "${GREEN}YES${NC}" || echo -e "${YELLOW}NO${NC}")"
-                echo -e "Node ID:          ${GREEN}${NODE_ID}${NC}"
-                echo -e "Public IP:        ${GREEN}${PUB_IP}${NC}"
-                echo -e "Auto-Failover:    $([[ "$AUTO_FO" == "true" ]] && echo -e "${GREEN}Enabled${NC}" || echo -e "${YELLOW}Disabled${NC}")"
-                echo -e "Failover State:   $([[ -n "$ACT_FO" && "$ACT_FO" != "false" ]] && echo -e "${RED}ACTIVE (Rerouted to ${ACT_FO} / ${FO_TGT})${NC}" || echo -e "${GREEN}NORMAL (Local)${NC}")"
-                echo -e "Connected Peers:  ${CYAN}${PEER_CNT}${NC}"
-            else
-                cat "$CONF_FILE"
-            fi
-            ;;
-        peers)
-            echo -e "${CYAN}=== Connected Iran Peers ===${NC}"
-            if [[ ! -f "$CONF_FILE" ]] || ! command -v jq >/dev/null 2>&1; then
-                echo "No peers configured or jq missing."
-                return 0
-            fi
-            jq -r '.nodes[] | "\(.id)\t\(.name)\t\(.public_ip)\tHealth:\(.is_healthy)\tTunnel:\(.tunnel_status)"' "$CONF_FILE" 2>/dev/null || echo "No peers."
-            ;;
-        revert)
-            echo -e "${CYAN}[*] Reverting failover iptables rules...${NC}"
-            # The panel owns the cluster state: let it flush its chains and save
-            # cluster.json (it also updates its in-memory copy).
-            if [[ -x "${PANEL_BIN:-/usr/local/bin/gre-panel}" ]] && "${PANEL_BIN:-/usr/local/bin/gre-panel}" cluster revert >/dev/null 2>&1; then
-                systemctl restart gre-panel 2>/dev/null || true  # drop the panel's cached cluster state
-                echo -e "${GREEN}[OK] Failover rules removed and state reverted to local tunnel.${NC}"
-                return 0
-            fi
-            # Fallback: the chains the panel uses, and string fields (the panel
-            # stores node ids/IPs there; a bool made cluster.json unreadable).
-            iptables -t nat -F HASHEM-CLUSTER-PREROUTING 2>/dev/null || true
-            iptables -t nat -F HASHEM-CLUSTER-POSTROUTING 2>/dev/null || true
-            if [[ -f "$CONF_FILE" ]] && command -v jq >/dev/null 2>&1; then
-                local tmp
-                tmp=$(mktemp "${CONF_FILE}.XXXXXX")
-                if jq '.active_failover = "" | .failover_target = ""' "$CONF_FILE" > "$tmp"; then
-                    chmod 600 "$tmp"; mv -f "$tmp" "$CONF_FILE"
-                else
-                    rm -f "$tmp"
-                fi
-            fi
-            systemctl restart gre-panel 2>/dev/null || true  # reload the panel's cached state
-            echo -e "${GREEN}[OK] Failover rules removed and state reverted to local tunnel.${NC}"
-            ;;
-        *)
-            echo "Usage: hashem cluster {status|peers|revert}"
+# lb_addr_for_svc SVC: the private address of relay unit SVC
+lb_addr_for_svc() {
+    local n
+    case "$1" in
+        frps|backhaul-server) echo "169.254.77.1" ;;
+        frps-*|backhaul-server-*)
+            n="${1##*-}"
+            [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= 250 )) && echo "169.254.77.$((n + 1))"
             ;;
     esac
+    return 0
+}
+
+# lb_port_pooled PORT: a pool on this hub owns PORT (another peer may claim it)
+lb_port_pooled() { [[ -f "$LB_PORTS_FILE" ]] && grep -q "^$((10#${1:-0}))/" "$LB_PORTS_FILE" 2>/dev/null; }
+
+# lb_bound_addr SVC: the address the panel binds SVC to, "" when not bound
+lb_bound_addr() { [[ -f "$LB_BINDS_FILE" ]] && awk -v s="$1" '$1 == s {print $2; exit}' "$LB_BINDS_FILE"; return 0; }
+
+# lb_frps_bind CONF SVC: a relay the panel bound (or LB_BIND_ADDR for a new
+# pool member) keeps listening on its private address after a rewrite.
+lb_frps_bind() {
+    local addr
+    addr=$(lb_bound_addr "$2")
+    [[ -n "$addr" ]] || addr="${LB_BIND_ADDR:-}"
+    [[ -n "$addr" && -f "$1" ]] || return 0
+    sed -i '/^[[:space:]]*proxyBindAddr[[:space:]]*=/d' "$1"
+    sed -i "/^bindPort[[:space:]]*=/a proxyBindAddr = \"${addr}\"" "$1"
+}
+
+# lb_prefix_ports ADDR "443, 2083=8443": Backhaul entries that listen on ADDR
+lb_prefix_ports() {
+    local addr=$1 out="" e left
+    if [[ -z "$addr" ]]; then echo "$2"; return 0; fi
+    for e in $(echo "$2" | tr ',' ' '); do
+        left="${e%%=*}"
+        [[ "$left" == *:* ]] || e="${addr}:${e}"
+        out="${out:+$out,}$e"
+    done
+    echo "$out"
+}
+
+cli_cluster() {
+    local bin="${PANEL_BIN:-/usr/local/bin/gre-panel}"
+    if [[ ! -x "$bin" ]]; then
+        echo -e "${RED}[!] The cluster runs in the panel; install it first (run: hashem).${NC}"
+        return 1
+    fi
+    case "${1:-status}" in
+        status|events|rules|help|-h|--help) ;;
+        *) pro_ok cluster Cluster || return 1 ;;
+    esac
+    "$bin" cluster "$@"
+}
+
+hubs_init() {
+    [[ -f "$HUBS_FILE" ]] && return 0
+    mkdir -p "$PANEL_CONFIG_DIR"
+    echo '{"hubs": []}' > "$HUBS_FILE"
+    chmod 600 "$HUBS_FILE" 2>/dev/null || true
+}
+
+# main_hub_ip: the Iran hub of this server's first tunnel
+main_hub_ip() {
+    ip tunnel show "$TUNNEL_NAME" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "remote") print $(i + 1)}' | head -n1
+}
+
+hub_next_id() {
+    python3 - "$HUBS_FILE" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+used = {h.get("id") for h in d.get("hubs", [])}
+print(next((i for i in range(2, 10) if i not in used), 0))
+PYEOF
+}
+
+# hub_write_frpc FILE ADDR PORT TOKEN TRANSPORT "PORTS" RELAY_IP: the client of
+# an extra hub, with the same Performance options as the first one.
+hub_write_frpc() {
+    local f=$1 addr=$2 port=$3 tok=$4 tr=$5 ports=$6 relay=${7:-127.0.0.1}
+    local pool _max pp enc comp tcpx udpx p
+    read -r pool _max <<< "$(pool_effective_values)"
+    pp=$(perf_get_str proxy_protocol off)
+    enc=$(perf_get_enc); comp=$(perf_get_comp)
+    tcpx=$(perf_frpc_extra_lines tcp 2>/dev/null); udpx=$(perf_frpc_extra_lines udp 2>/dev/null)
+    {
+        printf 'serverAddr = "%s"\nserverPort = %s\nauth.method = "token"\nauth.token = "%s"\nloginFailExit = false\n' "$addr" "$port" "$tok"
+        printf 'transport.protocol = "%s"\n' "$tr"
+        perf_tcpmux_lines
+        printf 'transport.heartbeatInterval = 15\ntransport.heartbeatTimeout = 45\ntransport.dialServerTimeout = 10\ntransport.dialServerKeepalive = 15\ntransport.poolCount = %s\n\n' "$pool"
+        for p in $ports; do
+            printf '[[proxies]]\nname = "tcp_%s"\ntype = "tcp"\nlocalIP = "%s"\nlocalPort = %s\nremotePort = %s\n' "$p" "$relay" "$p" "$p"
+            [[ "$pp" == v1 || "$pp" == v2 ]] && printf 'transport.proxyProtocolVersion = "%s"\n' "$pp"
+            [[ "$enc" == 1 ]] && printf 'transport.useEncryption = true\n'
+            [[ "$comp" == 1 ]] && printf 'transport.useCompression = true\n'
+            [[ -n "$tcpx" ]] && printf '%s\n' "$tcpx"
+            printf '\n[[proxies]]\nname = "udp_%s"\ntype = "udp"\nlocalIP = "%s"\nlocalPort = %s\nremotePort = %s\n' "$p" "$relay" "$p" "$p"
+            [[ -n "$udpx" ]] && printf '%s\n' "$udpx"
+            printf '\n'
+        done
+    } > "$f"
+    chmod 600 "$f" 2>/dev/null || true  # holds the auth token
+}
+
+# hub_write_frpc_unit SVC CONF GRE_IF
+hub_write_frpc_unit() {
+    local after=""
+    [[ "$3" != "none" ]] && after=" $3.service"
+    cat <<EOF > "/etc/systemd/system/$1.service"
+[Unit]
+Description=FRP Client for an extra Iran hub ($1)
+After=network.target network-online.target${after}
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Restart=always
+RestartSec=5s
+LimitNOFILE=1048576
+ExecStart=${INSTALL_DIR}/frpc -c $2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable "$1" >/dev/null 2>&1 || true
+    systemctl restart "$1"
+}
+
+# join-hub: this foreign server also serves another Iran hub. On that hub, add
+# this server as a peer (Setup, or hashem add-peer) and paste its bundle here.
+cli_join_hub() {
+    local BUNDLE="" NAME="" DIAL="${FRP_DIAL:-auto}" RELAY_IP="127.0.0.1"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --bundle) BUNDLE="$2"; shift 2 ;;
+            --name) NAME="$2"; shift 2 ;;
+            --dial) DIAL="$2"; shift 2 ;;
+            --relay-ip) RELAY_IP="$2"; shift 2 ;;
+            -h|--help) echo 'Usage: hashem join-hub --bundle hsh1_...|bh1_...|gh1_... [--name LABEL] [--dial auto|gre|public] [--relay-ip IP]'; return 0 ;;
+            *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
+        esac
+    done
+    pro_ok cluster "Serving several Iran hubs" || return 1
+    [[ -n "$BUNDLE" ]] || { echo -e "${RED}[!] --bundle is required: on the other Iran hub add this server as a peer and paste the bundle it prints.${NC}"; return 1; }
+    bundle_parse "$BUNDLE" || { echo -e "${RED}[!] Not a valid bundle (hsh1_, bh1_ or gh1_).${NC}"; return 1; }
+    case "$DIAL" in auto|gre|public) ;; *) DIAL=auto ;; esac
+    is_valid_ip "$RELAY_IP" || { echo -e "${RED}[!] Invalid --relay-ip '${RELAY_IP}'.${NC}"; return 1; }
+    if ! systemctl is-enabled --quiet frpc 2>/dev/null && ! systemctl is-enabled --quiet backhaul-client 2>/dev/null; then
+        echo -e "${RED}[!] Set this server up with its first Iran hub first (Setup, or hashem setup-foreign --bundle ...). join-hub adds the second and later hubs.${NC}"
+        return 1
+    fi
+    hubs_init; peer_require_py || return 1
+    if [[ "$(main_hub_ip)" == "$B_IRAN_PUB" ]] || grep -q "\"iran_pub\": *\"${B_IRAN_PUB}\"" "$HUBS_FILE" 2>/dev/null; then
+        echo -e "${RED}[!] This server already serves the Iran hub ${B_IRAN_PUB}.${NC}"
+        return 1
+    fi
+    local ID
+    ID=$(hub_next_id)
+    [[ "$ID" -ge 2 ]] || { echo -e "${RED}[!] A foreign server can serve at most 9 Iran hubs.${NC}"; return 1; }
+    [[ -n "$NAME" ]] || NAME="hub-${ID}"
+    local LOCAL_PUB GRE_IF="none" DIAL_ADDR="$B_IRAN_PUB" SVC CONF SPORT="$B_FRP_PORT"
+    LOCAL_PUB=$(ip route get "$B_IRAN_PUB" 2>/dev/null | awk '/src/ {for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
+    # GRE when the bundle carries one and its inner addresses are free here
+    if [[ "$B_ENGINE" != "backhaul" && -n "${B_FOREIGN_GRE:-}" ]]; then
+        if ip -o -4 addr show 2>/dev/null | grep -qw "$B_FOREIGN_GRE"; then
+            echo -e "${YELLOW}[!] The GRE address ${B_FOREIGN_GRE} in this bundle is already used here; this hub is dialed on its public IP, without GRE.${NC}"
+        else
+            GRE_IF="gre-h${ID}"
+            carrier_init_kernel 2>/dev/null || true
+            setup_gre_iface "$GRE_IF" "$LOCAL_PUB" "$B_IRAN_PUB" "$B_FOREIGN_GRE" "$B_IRAN_GRE" || GRE_IF="none"
+        fi
+    fi
+    if [[ "$B_ENGINE" == "frp" ]]; then
+        install_frp_binaries || return 1
+        case "${B_TRANSPORT:-tcp}" in
+            quic) SPORT=$((B_FRP_PORT + 1)); (( SPORT > 65535 )) && SPORT=$((B_FRP_PORT - 1)) ;;
+            wss) SPORT=$(wss_front_port "$B_FRP_PORT") ;;
+        esac
+        [[ "$GRE_IF" != "none" ]] && DIAL_ADDR=$(dial_pick "$DIAL" "$B_IRAN_GRE" "$B_IRAN_PUB" "$SPORT")
+        SVC="frpc-h${ID}"; CONF="${CONFIG_DIR}/frpc-h${ID}.toml"
+        mkdir -p "$CONFIG_DIR"
+        hub_write_frpc "$CONF" "$DIAL_ADDR" "$SPORT" "$B_TOKEN" "${B_TRANSPORT:-tcp}" "$B_PORTS" "$RELAY_IP"
+        hub_write_frpc_unit "$SVC" "$CONF" "$GRE_IF"
+    else
+        install_backhaul_binaries || return 1
+        [[ "$GRE_IF" != "none" ]] && DIAL_ADDR=$(dial_pick "$DIAL" "$B_IRAN_GRE" "$B_IRAN_PUB" "$B_FRP_PORT")
+        SVC="backhaul-client-h${ID}"; CONF="${BACKHAUL_CONFIG_DIR}/client-h${ID}.toml"
+        backhaul_write_client_conf "$CONF" "${DIAL_ADDR}:${B_FRP_PORT}" "${B_TRANSPORT:-tcpmux}" "$B_TOKEN"
+        setup_backhaul_client_systemd "$SVC" "$CONF" >/dev/null
+        if [[ "$GRE_IF" != "none" ]]; then
+            sed -i "s/After=network.target/After=network.target ${GRE_IF}.service/" "/etc/systemd/system/${SVC}.service" 2>/dev/null || true
+            systemctl daemon-reload
+        fi
+    fi
+    HUBS_F="$HUBS_FILE" python3 - "$ID" "$NAME" "$B_IRAN_PUB" "$B_ENGINE" "$SVC" "$CONF" "$GRE_IF" "$B_FRP_PORT" "${B_IRAN_GRE:-}" "${B_FOREIGN_GRE:-}" "${B_TRANSPORT:-}" "${B_PORTS:-}" "$DIAL_ADDR" <<'PYEOF'
+import json, os, sys
+f = os.environ["HUBS_F"]
+iid, name, pub, eng, svc, conf, gif, port, igre, fgre, tr, ports, dial = sys.argv[1:]
+d = json.load(open(f))
+d.setdefault("hubs", []).append({"id": int(iid), "name": name, "iran_pub": pub, "engine": eng,
+    "svc": svc, "conf": conf, "gre_if": gif, "port": int(port), "iran_gre": igre, "foreign_gre": fgre,
+    "transport": tr, "ports": [int(x) for x in ports.replace("-", " ").replace(",", " ").split() if x.isdigit()],
+    "dial": dial})
+json.dump(d, open(f, "w"), indent=2)
+PYEOF
+    sleep 2
+    if systemctl is-active --quiet "$SVC"; then
+        echo -e "${GREEN}[OK] This server now also serves the Iran hub ${B_IRAN_PUB} ('${NAME}', ${SVC}, dialing ${DIAL_ADDR}).${NC}"
+    else
+        echo -e "${YELLOW}[!] ${SVC} did not start yet: journalctl -u ${SVC}${NC}"
+    fi
+}
+
+# leave-hub --id N: stop serving an extra Iran hub
+cli_leave_hub() {
+    local ID=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in --id) ID="$2"; shift 2 ;; *) ID="$1"; shift ;; esac
+    done
+    [[ "$ID" =~ ^[0-9]+$ ]] || { echo "Usage: hashem leave-hub --id N   (hashem hubs lists them)"; return 1; }
+    hubs_init; peer_require_py || return 1
+    local rec SVC CONF GIF NAME
+    rec=$(HUBS_F="$HUBS_FILE" python3 -c 'import json,os,sys; d=json.load(open(os.environ["HUBS_F"])); h=[x for x in d.get("hubs",[]) if x.get("id")==int(sys.argv[1])]; print("|".join([h[0]["svc"],h[0]["conf"],h[0]["gre_if"],h[0]["name"]]) if h else "")' "$ID")
+    [[ -n "$rec" ]] || { echo -e "${RED}[!] No extra hub with id ${ID}.${NC}"; return 1; }
+    IFS='|' read -r SVC CONF GIF NAME <<< "$rec"
+    systemctl stop "$SVC" >/dev/null 2>&1; systemctl disable "$SVC" >/dev/null 2>&1
+    rm -f "/etc/systemd/system/${SVC}.service" "$CONF"
+    if [[ -n "$GIF" && "$GIF" != "none" ]]; then
+        systemctl stop "${GIF}.service" >/dev/null 2>&1; systemctl disable "${GIF}.service" >/dev/null 2>&1
+        rm -f "/etc/systemd/system/${GIF}.service"
+        ip link del "$GIF" >/dev/null 2>&1 || ip tunnel del "$GIF" >/dev/null 2>&1 || true
+    fi
+    systemctl daemon-reload; systemctl reset-failed >/dev/null 2>&1 || true
+    HUBS_F="$HUBS_FILE" python3 -c 'import json,os,sys; f=os.environ["HUBS_F"]; d=json.load(open(f)); d["hubs"]=[x for x in d.get("hubs",[]) if x.get("id")!=int(sys.argv[1])]; json.dump(d,open(f,"w"),indent=2)' "$ID"
+    echo -e "${GREEN}[OK] Stopped serving the Iran hub '${NAME}'.${NC}"
+}
+
+cli_hubs() {
+    local main
+    main=$(main_hub_ip)
+    echo -e "${BOLD}Iran hubs this server serves${NC}"
+    if systemctl is-enabled --quiet frpc 2>/dev/null || systemctl is-enabled --quiet backhaul-client 2>/dev/null; then
+        echo -e "  1  first hub      ${main:-?}"
+    else
+        echo "  (none: this is not a foreign server)"
+        return 0
+    fi
+    [[ -f "$HUBS_FILE" ]] || return 0
+    python3 - "$HUBS_FILE" <<'PYEOF' | while IFS='|' read -r id name pub svc; do
+import json, sys
+for h in json.load(open(sys.argv[1])).get("hubs", []):
+    print("|".join(str(h.get(k, "")) for k in ("id", "name", "iran_pub", "svc")))
+PYEOF
+        local st="down"
+        systemctl is-active --quiet "$svc" && st="running"
+        printf '  %-2s %-14s %-16s %s (%s)\n' "$id" "$name" "$pub" "$svc" "$st"
+    done
 }
 
 if [[ $# -gt 0 ]]; then
@@ -10505,6 +10825,9 @@ if [[ $# -gt 0 ]]; then
         bagher|hashem-bagher|ssh-fwd|sshfwd) shift; cli_bagher "$@" ;;
         license|lic) shift; cli_license "$@" ;;
         cluster|mesh) shift; cli_cluster "$@" ;;
+        join-hub) shift; cli_join_hub "$@" ;;
+        leave-hub) shift; cli_leave_hub "$@" ;;
+        hubs) cli_hubs ;;
         carrier-kernel-init) carrier_init_kernel ;;
         dial) shift; cli_dial "$@" ;;
         dial-select) dial_reselect >/dev/null 2>&1; exit 0 ;;

@@ -171,6 +171,17 @@ var errCatalog = map[string]errInfo{
 	"E-TLS-12": {400, "bad custom certificate", "Paste a matching cert+key PEM pair, upload both files, or give readable server paths."},
 	"E-TLS-13": {400, "bad IP certificate request", "Send {\"ip\":\"1.2.3.4\"} with a valid IPv4/IPv6 address of this server."},
 	"E-TLS-14": {400, "a custom certificate cannot be renewed here", "Renew it where you got it, then install the new pair under Use your own certificate."},
+	// cluster
+	"E-CLUSTER-01": {400, "bad cluster request", "Reload the page and try again."},
+	"E-CLUSTER-02": {400, "invalid cluster value", "Check the port (1-65535), protocol (tcp, udp, both), mode, weight (1-100) and priority (0-1000)."},
+	"E-CLUSTER-03": {409, "the port is already used", "Pick a port that is not another pool, the panel port or a tunnel's control port."},
+	"E-CLUSTER-04": {400, "unknown tunnel", "Use a tunnel of this server: 0 is the main tunnel, N is peer N (Tunnel tab)."},
+	"E-CLUSTER-05": {404, "no such pool or hub", "Reload the Cluster tab: it may have been removed already."},
+	"E-CLUSTER-06": {500, "cannot save cluster.json", "Check that /etc/gre-panel is writable (disk full or read-only?)."},
+	"E-CLUSTER-07": {400, "invalid code or bundle", "Copy the whole code again: hc1_ for an Iran hub, hsh1_/bh1_/gh1_ for a tunnel bundle."},
+	"E-CLUSTER-08": {502, "cannot link with the other Iran hub", "Both panels need the same version, the panel port open between the hubs, and correct clocks (NTP)."},
+	"E-CLUSTER-10": {502, "DNS provider refused the request", "Use a Cloudflare API token with Zone > DNS > Edit for the zone, and a DNS-only (grey cloud) record."},
+	"E-CLUSTER-11": {500, "hashem could not change the hub links", "Read the message; the full log is in journalctl -u gre-panel."},
 	// panel access settings
 	"E-ACCESS-00": {0, "access settings changed", "Informational: panel port/username/path saved; gre-panel restarts, tunnels unaffected."},
 	"E-ACCESS-01": {400, "bad access-settings request", "Send current_password plus at least one of port, username, base_path."},

@@ -1735,94 +1735,125 @@
       </section>
       <!-- ==================== CLUSTER TAB ==================== -->
       <section id="tab-cluster" role="tabpanel" hidden>
-        <!-- Locked Banner (shown when un-licensed) -->
-        <div id="clusterLockedBanner" class="hidden u-text-center u-p-48x20 u-bg-s1 u-bd-sc u-r-12 u-mb-20">
-          <div class="u-fs-42 u-mb-16"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></div>
-          <h3 class="u-fs-18 u-fw-700 u-c-sc u-mb-8">Iran Mesh Cluster Requires an Active License</h3>
-          <p class="u-fs-13 u-c-mu u-maxw-520 u-m-0xautox20xauto u-lh-16">
-            Autonomous Iran-to-Iran health gossip, latency probing, and automated zero-downtime failover rerouting is exclusively unlocked with a Bagher or Cluster license.
-          </p>
-          <button class="hashem-btn hashem-btn-primary" onclick="openBagherLicModal()">
-            Activate License
-          </button>
+        <div class="tunnel-card">
+          <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-12">
+            <div>
+              <p class="tc-title u-m-0">Cluster</p>
+              <div class="ent-help u-m-0" id="clIntro">Several servers back each other up, so one failure does not take your users down.</div>
+            </div>
+            <div class="u-flex u-gap-8 u-ai-c">
+              <span class="badge dim" id="clRoleBadge">Checking…</span>
+              <button class="hashem-btn hashem-btn-secondary" onclick="loadClusterStatus(true)">Refresh</button>
+            </div>
+          </div>
+          <div class="cl-kpis" id="clKpis"></div>
+          <div id="clApplyErr" class="hidden cl-alert"></div>
         </div>
 
-        <div id="clusterCardContainer" class="tunnel-card u-bd-sc u-bg-s1 u-noglow u-r-12">
-          <div class="tc-header u-bb-sc u-pb-16 u-mb-20">
-            <div>
-              <div class="u-flex-center-gap10 u-flex u-ai-c u-wrap u-gap-12">
-                <span class="tc-title u-fs-20 u-fw-700 u-flex u-ai-c u-gap-12 u-c-tx u-ls-n02 u-nowrap">
-                  <span class="u-iflex u-ai-c u-jc-c u-w-36 u-h-36 u-r-8 u-bg-sc-fill u-c-white">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                  </span>
-                  Iran Hub Mesh Cluster
-                </span>
-                <span class="badge u-pill-violet u-nowrap">MULTI-HUB HA</span>
-                <span class="badge dim u-nowrap" id="clusterStatusBadge">Checking...</span>
+        <!-- Iran hub view -->
+        <div id="clHubView" class="hidden">
+          <div class="tunnel-card">
+            <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-8">
+              <div class="u-flex-1 cl-head-txt">
+                <p class="tc-title u-m-0">Pools</p>
+                <div class="ent-help u-m-0">One public port on this server, served by several foreign servers. When one fails, its users move to the others within seconds.</div>
               </div>
-              <div class="qs-hint u-mt-4 u-c-mu u-fs-12">Real-time gossip heartbeats across Iran nodes · Automatic zero-downtime client failover upon foreign tunnel drop</div>
+              <button class="hashem-btn hashem-btn-primary" onclick="clPoolOpen()">New Pool</button>
             </div>
-            <div class="qs-actions u-flex u-gap-8 u-ai-c">
-              <button class="hashem-btn u-btn-30" onclick="openClusterConfigModal()">Settings</button>
-              <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddNodeModal()">+ Add Peer Node</button>
-            </div>
+            <div id="clPools"></div>
           </div>
 
-          <!-- Cluster Live Gauges -->
-          <div class="u-grid u-gtc-fit-140 u-gap-12 u-bg-inset u-bd-sc u-r-10 u-p-12x20 u-mb-20">
-            <div>
-              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">This Node ID</div>
-              <div class="u-fs-16 u-fw-700 u-c-sc u-mono u-mt-2" id="clusterLocalNodeID">--</div>
+          <div class="tunnel-card">
+            <div class="tc-header">
+              <p class="tc-title u-m-0">Tunnels on This Server</p>
+              <div class="ent-help u-m-0">Each foreign server's link, checked every second. A tunnel in a pool listens on a private address; the pool sends users to it.</div>
             </div>
-            <div>
-              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Public IP</div>
-              <div class="u-fs-14 u-fw-700 u-c-tx u-mono u-mt-4" id="clusterLocalIP">--</div>
-            </div>
-            <div>
-              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Local Tunnel to Kharej</div>
-              <div class="u-fs-13 u-fw-700 u-mt-4" id="clusterLocalTunnelStatus"><span class="badge ok">UP</span></div>
-            </div>
-            <div>
-              <div class="u-fs-12 u-upper u-c-mu u-fw-600 u-ls-06">Active Routing Path</div>
-              <div class="u-fs-13 u-fw-700 u-c-ok u-mono u-mt-4" id="clusterActiveRouting">Local Tunnel (Direct)</div>
-            </div>
+            <div class="ent-tbl-wrap"><table class="ent-tbl">
+              <thead><tr><th>Tunnel</th><th>Foreign Server</th><th>Health</th><th class="num">Latency</th><th>Ports</th></tr></thead>
+              <tbody id="clLinks"></tbody>
+            </table></div>
           </div>
 
-          <!-- Active Failover Alert Bar (Visible only when rerouted) -->
-          <div id="clusterFailoverBar" class="hidden u-flex u-ai-c u-jc-sb u-gap-12 u-bd-er u-r-8 u-p-12x16 u-mb-20" style="background:linear-gradient(90deg, color-mix(in srgb, var(--er) 20%, transparent), color-mix(in srgb, var(--wr) 20%, transparent));">
-            <div class="u-flex u-ai-c u-gap-12">
-              <span class="u-fs-20"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></span>
-              <div>
-                <b class="u-c-er u-fs-13">FAILOVER ACTIVE:</b>
-                <span class="u-c-tx u-fs-13 u-ml-8" id="clusterFailoverBarText">Local tunnel dropped. All client traffic is currently rerouted through Iran peer.</span>
+          <div class="tunnel-card">
+            <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-8">
+              <div class="u-flex-1 cl-head-txt">
+                <p class="tc-title u-m-0">Iran Hubs</p>
+                <div class="ent-help u-m-0">Other Iran servers that back this one up. When every foreign server of a pool is down here, its port is forwarded to a hub where the same pool works.</div>
+              </div>
+              <div class="u-flex u-gap-8 u-wrap">
+                <button class="hashem-btn hashem-btn-secondary" onclick="clJoinCodeOpen()">Show Join Code</button>
+                <button class="hashem-btn hashem-btn-primary" onclick="clHubAddOpen()">Link a Hub</button>
               </div>
             </div>
-            <button class="hashem-btn hashem-btn-danger u-btn-30" onclick="revertClusterFailover()">Revert to Local</button>
+            <label class="u-check-row u-mb-8"><input type="checkbox" id="clHubForward" onchange="clSettingsSave()"> Forward a pool to another hub when no foreign server here can serve it</label>
+            <div id="clHubs"></div>
           </div>
 
-          <!-- Foreign Exit Nodes Pool (Multi-Kharej HA) -->
-          <div class="u-mb-24">
-            <div class="u-flex u-jc-sb u-ai-c u-mb-12">
-              <h4 class="u-fs-14 u-fw-700 u-c-tx2 u-m-0 u-flex u-ai-c u-gap-8">
-                <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> Foreign Exit Nodes Pool (<span id="clusterForeignCount">0</span>)
-              </h4>
-              <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddForeignModal()">+ Add Foreign Server</button>
+          <div class="tunnel-card">
+            <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-8">
+              <div class="u-flex-1 cl-head-txt">
+                <p class="tc-title u-m-0">DNS Failover</p>
+                <div class="ent-help u-m-0">A domain that always points to the Iran hubs that work. Users who connect by name move to a working hub when one dies. Cloudflare, DNS only (grey cloud).</div>
+              </div>
+              <span class="badge dim" id="clDnsBadge">Off</span>
             </div>
-            <div id="clusterForeignList" class="u-grid u-gtc-fit-280 u-gap-16">
-              <!-- Dynamic Foreign Node Cards -->
+            <div class="ent-grid-2">
+              <div class="fg"><label for="clDnsName">Record name</label><input class="hashem-input u-mono" id="clDnsName" placeholder="vpn.example.com" autocomplete="off"></div>
+              <div class="fg"><label for="clDnsTTL">TTL (seconds)</label><input class="hashem-input" id="clDnsTTL" type="number" min="60" max="3600" value="60"></div>
+            </div>
+            <div class="fg"><label for="clDnsToken">Cloudflare API token (Zone, DNS, Edit)</label><input class="hashem-input u-mono" id="clDnsToken" type="password" autocomplete="off" placeholder="Saved; paste a new one to replace it"></div>
+            <label class="u-check-row u-mb-8"><input type="checkbox" id="clDnsEnabled"> Keep the record pointed at the working hubs</label>
+            <div class="ent-help cl-pre" id="clDnsState"></div>
+            <div class="u-flex u-gap-8 u-wrap">
+              <button class="hashem-btn hashem-btn-secondary" onclick="clDnsSave(true)">Test</button>
+              <button class="hashem-btn hashem-btn-primary" onclick="clDnsSave(false)">Save</button>
             </div>
           </div>
 
-          <!-- Nodes Topology Section -->
-          <div class="u-mb-20">
-            <div class="u-flex u-jc-sb u-ai-c u-mb-12">
-              <h4 class="u-fs-14 u-fw-700 u-c-tx2 u-m-0">Connected Iran Hubs (<span id="clusterNodeCount">0</span>)</h4>
-              <button class="hashem-btn u-btn-30" onclick="loadClusterStatus()">↻ Ping Now</button>
+          <details class="tunnel-card">
+            <summary class="tc-title u-cursor-pointer">Health Check</summary>
+            <div class="ent-help">How fast a failed foreign server is taken out and put back. Lower is faster; too low can take a server out on a short hiccup.</div>
+            <div class="ent-grid-2">
+              <div class="fg"><label for="clHcInterval">Check every (ms)</label><input class="hashem-input" id="clHcInterval" type="number" min="500" max="10000" step="100"></div>
+              <div class="fg"><label for="clHcFall">Out after failed checks</label><input class="hashem-input" id="clHcFall" type="number" min="1" max="30"></div>
+              <div class="fg"><label for="clHcRise">Back after good checks</label><input class="hashem-input" id="clHcRise" type="number" min="1" max="60"></div>
             </div>
-            <div id="clusterNodesList" class="u-grid u-gtc-fit-280 u-gap-16">
-              <!-- Dynamic Peer Node Cards -->
+            <div class="u-flex u-gap-8 u-wrap">
+              <button class="hashem-btn hashem-btn-primary" onclick="clSettingsSave(true)">Save</button>
+              <a class="hashem-btn hashem-btn-secondary" href="#" onclick="clRulesShow(); return false;">Show Kernel Rules</a>
             </div>
+            <pre class="ent-code hidden u-mt-8" id="clRules"></pre>
+          </details>
+        </div>
+
+        <!-- Foreign server view -->
+        <div id="clSpokeView" class="hidden">
+          <div class="tunnel-card">
+            <div class="tc-header">
+              <p class="tc-title u-m-0">Iran Hubs This Server Serves</p>
+              <div class="ent-help u-m-0">Serve several Iran servers from this foreign server: when one Iran server dies, users who connect through the others keep working.</div>
+            </div>
+            <div class="ent-tbl-wrap"><table class="ent-tbl">
+              <thead><tr><th>Hub</th><th>Iran Server</th><th>Status</th><th>Unit</th><th></th></tr></thead>
+              <tbody id="clJoined"></tbody>
+            </table></div>
           </div>
+          <div class="tunnel-card">
+            <div class="tc-header"><p class="tc-title u-m-0">Join Another Iran Hub</p></div>
+            <ol class="cl-steps">
+              <li>On the other Iran server: Setup, add a foreign server with this server's IP and the same ports.</li>
+              <li>Copy the bundle it prints and paste it here.</li>
+            </ol>
+            <div class="fg"><label for="clJoinBundle">Bundle (hsh1_, bh1_ or gh1_)</label><textarea class="hashem-input u-mono u-resize-none" id="clJoinBundle" rows="3" placeholder="hsh1_…"></textarea></div>
+            <div class="fg"><label for="clJoinName">Name (optional)</label><input class="hashem-input" id="clJoinName" maxlength="32" placeholder="tehran-2"></div>
+            <button class="hashem-btn hashem-btn-primary" id="clJoinBtn" onclick="clJoinHub()">Join Hub</button>
+            <pre class="ent-code hidden u-mt-8" id="clJoinOut"></pre>
+          </div>
+        </div>
+
+        <div class="tunnel-card">
+          <div class="tc-header"><p class="tc-title u-m-0">Events</p></div>
+          <ul class="cl-events" id="clEvents"></ul>
         </div>
       </section>
       <section id="tab-setup" role="tabpanel" hidden>
@@ -3637,188 +3668,78 @@
   </div>
 </div>
 
-<!-- Cluster Add Peer Node Modal -->
-<div class="ent-modal-ov" id="clusterNodeModal" hidden>
-  <div class="ent-modal u-maxw-520 u-w-full u-bd-sc u-lift" role="dialog" aria-modal="true" aria-labelledby="clusterNodeModalTitle">
-    <div class="ent-modal-h u-bb-sc u-tint-sc">
-      <b id="clusterNodeModalTitle" class="u-flex u-ai-c u-gap-8 u-c-sc u-fs-16 u-fw-700">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#c084fc" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-        Connect Peer Iran Server
-      </b>
-      <button class="ent-x" onclick="closeClusterAddNodeModal()" aria-label="Close">&#xD7;</button>
+<!-- Cluster: new / edit pool -->
+<div class="ent-modal-ov" id="clPoolModal" hidden>
+  <div class="ent-modal u-maxw-540 u-w-full" role="dialog" aria-modal="true" aria-labelledby="clPoolTitle">
+    <div class="ent-modal-h">
+      <b id="clPoolTitle">New Pool</b>
+      <button class="ent-x" onclick="clPoolClose()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b u-gap-16 u-p-20">
-      <div class="fg">
-        <label for="clusterPeerID" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Peer Node ID (Unique Slug):
-        </label>
-        <input type="text" class="hashem-input u-w-full u-mono" id="clusterPeerID" placeholder="e.g. iran-2">
+    <div class="ent-modal-b">
+      <div class="ent-grid-2">
+        <div class="fg"><label for="clPoolPort">Public port</label><input class="hashem-input" id="clPoolPort" type="number" min="1" max="65535" placeholder="443" oninput="clPoolPortChanged()"></div>
+        <div class="fg"><label for="clPoolProto">Protocol</label>
+          <select class="hashem-input" id="clPoolProto">
+            <option value="both">TCP and UDP</option>
+            <option value="tcp">TCP</option>
+            <option value="udp">UDP</option>
+          </select></div>
+      </div>
+      <div class="fg"><label for="clPoolName">Name (optional)</label><input class="hashem-input" id="clPoolName" maxlength="40" placeholder="vless"></div>
+      <div class="fg"><label for="clPoolMode">Mode</label>
+        <select class="hashem-input" id="clPoolMode" onchange="clPoolModeHelp()">
+          <option value="failover">Failover</option>
+          <option value="balance">Balance</option>
+          <option value="sticky">Sticky per user</option>
+          <option value="latency">Lowest latency</option>
+        </select>
+        <div class="ent-help" id="clPoolModeHelp"></div>
       </div>
       <div class="fg">
-        <label for="clusterPeerName" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Display Label:
-        </label>
-        <input type="text" class="hashem-input u-w-full" id="clusterPeerName" placeholder="e.g. Tehran Hub (MCI)">
-      </div>
-      <div class="fg">
-        <label for="clusterPeerAPI" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Peer Panel Base URL:
-        </label>
-        <input type="text" class="hashem-input u-w-full u-mono" id="clusterPeerAPI" placeholder="http://1.2.3.4:7777/secret-path">
-        <div class="u-hint-12 u-mt-4">Include http/https, port and panel secret path if applicable.</div>
-      </div>
-      <div class="fg">
-        <label for="clusterPeerIP" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Peer Public IP (For Failover DNAT):
-        </label>
-        <input type="text" class="hashem-input u-w-full u-mono" id="clusterPeerIP" placeholder="e.g. 1.2.3.4">
+        <span class="ent-label">Foreign servers in this pool</span>
+        <div id="clPoolMembers" class="cl-pick"></div>
+        <div class="ent-help">Tunnels whose ports include this port join by themselves. Each one's relay restarts once (a few seconds) to move behind the pool.</div>
       </div>
     </div>
-    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
-      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddNodeModal()">Cancel</button>
-      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddNode()">
-        Handshake &amp; Save Node
-      </button>
+    <div class="ent-modal-f">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="clPoolClose()">Cancel</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" id="clPoolSave" onclick="clPoolSave()">Save Pool</button>
     </div>
   </div>
 </div>
 
-<!-- Cluster Add Foreign Server Modal -->
-<div class="ent-modal-ov" id="clusterForeignModal" hidden>
-  <div class="ent-modal u-maxw-520 u-w-full u-bd-info u-lift" role="dialog" aria-modal="true" aria-labelledby="clusterForeignModalTitle">
-    <div class="ent-modal-h u-bb-info u-tint-info">
-      <b id="clusterForeignModalTitle" class="u-flex u-ai-c u-gap-8 u-c-info u-fs-16 u-fw-700">
-        <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> Add Foreign Exit Server (Kharej)
-      </b>
-      <button class="ent-x" onclick="closeClusterAddForeignModal()" aria-label="Close">&#xD7;</button>
+<!-- Cluster: this hub's join code -->
+<div class="ent-modal-ov" id="clJoinCodeModal" hidden>
+  <div class="ent-modal u-maxw-540 u-w-full" role="dialog" aria-modal="true" aria-labelledby="clJoinCodeTitle">
+    <div class="ent-modal-h">
+      <b id="clJoinCodeTitle">Join Code of This Hub</b>
+      <button class="ent-x" onclick="clJoinCodeClose()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b u-gap-16 u-p-20">
-      <div class="fg">
-        <label for="clusterForeignID" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Foreign Node ID (Unique Slug):
-        </label>
-        <input type="text" class="hashem-input u-w-full u-mono" id="clusterForeignID" placeholder="e.g. kharej-germany">
-      </div>
-      <div class="fg">
-        <label for="clusterForeignName" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Display Label:
-        </label>
-        <input type="text" class="hashem-input u-w-full" id="clusterForeignName" placeholder="e.g. Frankfurt Hetzner">
-      </div>
-      <div class="fg">
-        <label for="clusterForeignIP" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Kharej Public IP:
-        </label>
-        <input type="text" class="hashem-input u-w-full u-mono" id="clusterForeignIP" placeholder="e.g. 198.51.100.73">
-      </div>
-      <div class="fg">
-        <label for="clusterForeignPort" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Tunnel / FRP Port:
-        </label>
-        <input type="number" class="hashem-input u-w-full u-mono" id="clusterForeignPort" placeholder="55354" value="55354">
-      </div>
-      <div class="fg">
-        <label for="clusterForeignProtocol" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Carrying Protocol:
-        </label>
-        <select class="hashem-input u-w-full" id="clusterForeignProtocol">
-          <option value="wss">WSS (WebSocket TLS)</option>
-          <option value="gre">Direct GRE (Proto 47)</option>
-          <option value="bagher">Bagher SSH Engine</option>
-        </select>
-      </div>
-      <div class="fg">
-        <label for="clusterForeignWeight" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Traffic Weight (Round-Robin Ratio):
-        </label>
-        <input type="number" class="hashem-input u-w-full u-mono" id="clusterForeignWeight" min="1" max="100" value="1">
-        <div class="u-hint-12 u-mt-4">Higher weight receives proportionally more connections (e.g. 2 gets 2x traffic of 1).</div>
-      </div>
-      <div class="fg">
-        <label for="clusterForeignTargetPorts" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Custom Target Ports Mapping (Optional):
-        </label>
-        <input type="text" class="hashem-input u-w-full u-mono" id="clusterForeignTargetPorts" placeholder="e.g. 443:8443 (leave blank for identical 1:1 ports)">
-        <div class="u-hint-12 u-mt-4">Leave empty to forward to identical ports on this server.</div>
-      </div>
+    <div class="ent-modal-b">
+      <div class="ent-help">On the other Iran server open Cluster, Link a Hub, and paste this code. It carries the cluster secret: share it only with your own servers.</div>
+      <pre class="ent-code cl-code" id="clJoinCode"></pre>
     </div>
-    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
-      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterAddForeignModal()">Cancel</button>
-      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterAddForeign()">
-        Save Foreign Exit
-      </button>
+    <div class="ent-modal-f">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="clJoinCodeClose()">Close</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="clJoinCodeCopy()">Copy Code</button>
     </div>
   </div>
 </div>
 
-<!-- Cluster Configuration Modal -->
-<div class="ent-modal-ov" id="clusterConfigModal" hidden>
-  <div class="ent-modal u-maxw-540 u-w-full u-bd-sc u-lift" role="dialog" aria-modal="true" aria-labelledby="clusterConfigModalTitle">
-    <div class="ent-modal-h u-bb-sc u-tint-sc">
-      <b id="clusterConfigModalTitle" class="u-flex u-ai-c u-gap-8 u-c-sc u-fs-16 u-fw-700">
-        Cluster Mesh Configuration
-      </b>
-      <button class="ent-x" onclick="closeClusterConfigModal()" aria-label="Close">&#xD7;</button>
+<!-- Cluster: link another hub -->
+<div class="ent-modal-ov" id="clHubAddModal" hidden>
+  <div class="ent-modal u-maxw-540 u-w-full" role="dialog" aria-modal="true" aria-labelledby="clHubAddTitle">
+    <div class="ent-modal-h">
+      <b id="clHubAddTitle">Link a Hub</b>
+      <button class="ent-x" onclick="clHubAddClose()" aria-label="Close">&#xD7;</button>
     </div>
-    <div class="ent-modal-b u-gap-16 u-p-20">
-      <div class="u-flex u-ai-c u-jc-sb u-p-12x16 u-bg-sunk u-bd-ln u-r-8">
-        <div>
-          <b class="u-fs-13 u-c-tx">Enable Cluster Gossip</b>
-          <div class="u-hint-12">Participate in heartbeat health checks with peer Iran servers</div>
-        </div>
-        <input type="checkbox" id="clusterCfgEnabled" class="u-w-18 u-h-18 u-cursor-pointer">
-      </div>
-
-      <div class="u-flex u-ai-c u-jc-sb u-p-12x16 u-bg-sunk u-bd-ln u-r-8">
-        <div>
-          <b class="u-c-er u-fs-13">Auto-Failover Rerouting</b>
-          <div class="u-hint-12">Reroute client traffic to peer Iran server on tunnel drop</div>
-        </div>
-        <input type="checkbox" id="clusterCfgAutoFailover" class="u-w-18 u-h-18 u-cursor-pointer">
-      </div>
-
-      <div class="fg">
-        <label for="clusterCfgNodeID" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          This Node Identifier:
-        </label>
-        <input type="text" class="hashem-input u-w-full u-mono" id="clusterCfgNodeID">
-      </div>
-
-      <div class="fg">
-        <label for="clusterCfgBalancingMode" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Multi-Foreign Balancing Strategy:
-        </label>
-        <select class="hashem-input u-w-full" id="clusterCfgBalancingMode">
-          <option value="wrr">Weighted Round-Robin (WRR + Kernel Statistic)</option>
-          <option value="failover">Active-Passive Priority Failover</option>
-          <option value="lowest_latency">Lowest Latency Dynamic</option>
-        </select>
-        <div class="u-hint-12 u-mt-4">Traffic across healthy foreign servers on identical ports.</div>
-      </div>
-
-      <div class="fg">
-        <label for="clusterCfgSecret" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Cluster Shared Secret (Gossip Auth Token):
-        </label>
-        <div class="u-flex u-gap-8">
-          <input type="text" class="hashem-input u-w-full u-mono" id="clusterCfgSecret" placeholder="Must match across all Iran servers">
-          <button type="button" class="hashem-btn" onclick="generateClusterSecret()">Gen</button>
-        </div>
-      </div>
-
-      <div class="fg">
-        <label for="clusterCfgPorts" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">
-          Failover Service Ports (comma-separated):
-        </label>
-        <input type="text" class="hashem-input u-w-full u-mono" id="clusterCfgPorts" placeholder="443, 8443, 2083">
-        <div class="u-hint-12 u-mt-4">Ports redirected via DNAT to the healthy Iran hub upon failure.</div>
-      </div>
+    <div class="ent-modal-b">
+      <div class="ent-help">On the other Iran server open Cluster, Show Join Code, and paste it here. Both panels need the same version, the panel port open between them, and correct clocks.</div>
+      <div class="fg"><label for="clHubCode">Join code</label><textarea class="hashem-input u-mono u-resize-none" id="clHubCode" rows="3" placeholder="hc1_…"></textarea></div>
     </div>
-    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
-      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeClusterConfigModal()">Cancel</button>
-      <button type="button" class="hashem-btn hashem-btn-primary" onclick="submitClusterConfig()">
-        Save Settings
-      </button>
+    <div class="ent-modal-f">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="clHubAddClose()">Cancel</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" id="clHubAddBtn" onclick="clHubAdd()">Link Hub</button>
     </div>
   </div>
 </div>

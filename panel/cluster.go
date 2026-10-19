@@ -1,17 +1,26 @@
 package main
 
+// Cluster: redundancy across several servers.
+//
+//   - Pools (cluster_lb.go): one public port on this Iran hub served by several
+//     foreign servers, with failover, weighted balance, per-user stickiness or
+//     lowest latency, and a one-second health check per link.
+//   - Hubs (cluster_mesh.go): other Iran hubs this one trusts. They exchange
+//     signed heartbeats; when every member of a pool here is down, the port is
+//     forwarded to a hub where the same pool is healthy.
+//   - DNS failover (cluster_dns.go): a domain whose A records list the healthy
+//     hubs, so users move to a working Iran server when one dies.
+//
+// A foreign server can join several hubs (hashem join-hub), which gives the
+// many-Iran-to-one-foreign shape; pools give one-Iran-to-many-foreign; both
+// together give a full mesh.
+
 import (
-	"bytes"
-	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,1254 +29,1680 @@ import (
 	"time"
 )
 
-// ClusterConfig persists the multi-Iran mesh cluster state.
+// ClusterConfig is /etc/gre-panel/cluster.json (version 2).
 type ClusterConfig struct {
-	Enabled        bool                   `json:"enabled"`
-	NodeID         string                 `json:"node_id"`
-	ClusterSecret  string                 `json:"cluster_secret"`
-	PublicIP       string                 `json:"public_ip"`
-	ServicePorts   []int                  `json:"service_ports"`
-	BalancingMode  string                 `json:"balancing_mode"` // "wrr" (weighted round-robin), "failover", "lowest_latency"
-	Nodes          map[string]ClusterNode `json:"nodes"`          // Peer Iran Hubs (P2P mesh)
-	ForeignNodes   map[string]ForeignNode `json:"foreign_nodes"`  // Foreign Exit Nodes Pool
-	ActiveForeign  string                 `json:"active_foreign,omitempty"`
-	AutoFailover   bool                   `json:"auto_failover"`
-	ActiveFailover string                 `json:"active_failover,omitempty"` // Target NodeID if currently redirected
-	FailoverTarget string                 `json:"failover_target,omitempty"` // Target Public IP
-	Updated        string                 `json:"updated,omitempty"`
+	Version    int       `json:"version"`
+	Pools      []LBPool  `json:"pools"`
+	Health     LBHealth  `json:"health"`
+	NodeID     string    `json:"node_id"`
+	Name       string    `json:"name,omitempty"`
+	Secret     string    `json:"secret,omitempty"`
+	PublicIP   string    `json:"public_ip,omitempty"`
+	Hubs       []HubPeer `json:"hubs"`
+	HubForward bool      `json:"hub_forward"`
+	DNS        DNSConfig `json:"dns"`
+	Updated    string    `json:"updated,omitempty"`
 }
 
-// ForeignNode represents an exit foreign server in the cluster pool.
-type ForeignNode struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	PublicIP    string      `json:"public_ip"`
-	TunnelPort  int         `json:"tunnel_port"`
-	TargetPorts map[int]int `json:"target_ports,omitempty"` // Map local service port -> foreign target port (if custom)
-	Weight      int         `json:"weight"`                 // Weight for WRR (default: 1)
-	Protocol    string      `json:"protocol"`               // "gre", "wss", "bagher"
-	IsActive    bool        `json:"is_active"`
-	IsHealthy   bool        `json:"is_healthy"`
-	LatencyMs   float64     `json:"latency_ms"`
-	LastProbe   time.Time   `json:"last_probe"`
+// LBPool is one public port served by several links.
+type LBPool struct {
+	Port     int        `json:"port"`
+	Proto    string     `json:"proto"` // tcp | udp | both
+	Name     string     `json:"name,omitempty"`
+	Mode     string     `json:"mode"` // failover | balance | sticky | latency
+	Disabled bool       `json:"disabled,omitempty"`
+	Members  []LBMember `json:"members"`
+	// Excluded links were removed by hand: they are not joined back
+	// automatically even though their ports include this one.
+	Excluded []int `json:"excluded,omitempty"`
 }
 
-// ClusterNode represents a remote Iran hub peer in the cluster.
-type ClusterNode struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	APIURL       string    `json:"api_url"` // e.g. "http://1.2.3.4:7777/secret"
-	PublicIP     string    `json:"public_ip"`
-	TunnelStatus string    `json:"tunnel_status"` // "UP", "DOWN", "DEGRADED"
-	TunnelLoss   float64   `json:"tunnel_loss"`
-	LatencyMs    float64   `json:"latency_ms"`
-	LastSeen     time.Time `json:"last_seen"`
-	IsHealthy    bool      `json:"is_healthy"`
-	IsFailing    bool      `json:"is_failing"` // Remote peer's tunnel to Kharej is down
+// LBMember is one link (tunnel to a foreign server) in a pool.
+type LBMember struct {
+	Link     int    `json:"link"`             // 0 = main tunnel, N = peer N
+	Remote   string `json:"remote,omitempty"` // foreign IP when added; a reused peer id shows up
+	Port     int    `json:"port,omitempty"`   // the link's port for this service (default: the pool port)
+	Weight   int    `json:"weight"`
+	Priority int    `json:"priority"`
+	Drain    bool   `json:"drain,omitempty"`
 }
 
-// ClusterHeartbeatPayload is exchanged between Iran nodes.
-type ClusterHeartbeatPayload struct {
-	NodeID       string  `json:"node_id"`
-	PublicIP     string  `json:"public_ip"`
-	TunnelStatus string  `json:"tunnel_status"`
-	TunnelLoss   float64 `json:"tunnel_loss"`
-	IsFailing    bool    `json:"is_failing"`
-	Timestamp    int64   `json:"timestamp"`
+// LBHealth tunes the per-link health check.
+type LBHealth struct {
+	IntervalMs int `json:"interval_ms"`
+	Fall       int `json:"fall"` // failed checks in a row before a link is taken out
+	Rise       int `json:"rise"` // good checks in a row before it is put back
+}
+
+func (h LBHealth) norm() LBHealth {
+	if h.IntervalMs < 500 || h.IntervalMs > 10000 {
+		h.IntervalMs = 1000
+	}
+	if h.Fall < 1 || h.Fall > 30 {
+		h.Fall = 3
+	}
+	if h.Rise < 1 || h.Rise > 60 {
+		h.Rise = 3
+	}
+	return h
+}
+
+func (p LBPool) key() string { return p.Proto + "/" + strconv.Itoa(p.Port) }
+
+// overlaps reports whether two pools claim the same port and protocol.
+func (p LBPool) overlaps(q LBPool) bool {
+	if p.Port != q.Port {
+		return false
+	}
+	return p.Proto == q.Proto || p.Proto == "both" || q.Proto == "both"
+}
+
+func (p *LBPool) member(link int) *LBMember {
+	for i := range p.Members {
+		if p.Members[i].Link == link {
+			return &p.Members[i]
+		}
+	}
+	return nil
 }
 
 var (
-	clusterMu            sync.RWMutex
-	clusterCache         *ClusterConfig
-	clusterClient        = &http.Client{Timeout: 3 * time.Second}
-	consecutiveFailures  int
-	consecutiveSuccesses int
+	clusterMu    sync.Mutex
+	clusterCache *ClusterConfig
+	// clusterMod is cluster.json's mtime when it was read or written here: a
+	// change by the CLI (gre-panel cluster ...) is picked up on the next read.
+	clusterMod time.Time
 )
 
-func clusterConfigFile() string {
-	return filepath.Join(configDir, "cluster.json")
-}
+func clusterConfigFile() string { return filepath.Join(configDir, "cluster.json") }
 
 func defaultClusterConfig() ClusterConfig {
+	host, _ := os.Hostname()
 	return ClusterConfig{
-		Enabled:       false,
-		NodeID:        "iran-" + strconv.FormatInt(time.Now().Unix()%10000, 10),
-		ClusterSecret: "",
-		PublicIP:      "",
-		ServicePorts:  []int{443, 8443, 2083},
-		BalancingMode: "wrr",
-		Nodes:         make(map[string]ClusterNode),
-		ForeignNodes:  make(map[string]ForeignNode),
-		AutoFailover:  true,
+		Version:    2,
+		NodeID:     "hub-" + randHex(4),
+		Name:       host,
+		Health:     LBHealth{}.norm(),
+		HubForward: true,
+		DNS:        DNSConfig{TTL: 60},
 	}
 }
 
-func isClusterLicensed() bool {
-	return HasFeature("bagher") || HasFeature("cluster")
-}
+func isClusterLicensed() bool { return hasPro("cluster") }
 
-// cloneClusterConfig deep-copies the maps and slices so a caller's copy never
-// shares storage with clusterCache. Shared maps let handlers write while the
-// monitor or JSON encoder iterated them: a fatal, unrecoverable runtime error.
 func cloneClusterConfig(c ClusterConfig) ClusterConfig {
 	out := c
-	out.ServicePorts = append([]int(nil), c.ServicePorts...)
-	out.Nodes = make(map[string]ClusterNode, len(c.Nodes))
-	for k, v := range c.Nodes {
-		out.Nodes[k] = v
+	out.Pools = make([]LBPool, len(c.Pools))
+	for i, p := range c.Pools {
+		p.Members = append([]LBMember(nil), p.Members...)
+		p.Excluded = append([]int(nil), p.Excluded...)
+		out.Pools[i] = p
 	}
-	out.ForeignNodes = make(map[string]ForeignNode, len(c.ForeignNodes))
-	for k, v := range c.ForeignNodes {
-		if v.TargetPorts != nil {
-			tp := make(map[int]int, len(v.TargetPorts))
-			for p, q := range v.TargetPorts {
-				tp[p] = q
-			}
-			v.TargetPorts = tp
-		}
-		out.ForeignNodes[k] = v
-	}
+	out.Hubs = append([]HubPeer(nil), c.Hubs...)
+	out.DNS.Records = append([]string(nil), c.DNS.Records...)
 	return out
 }
 
-// loadClusterConfig returns a private copy of the cluster config.
+// loadClusterConfig returns a private copy.
 func loadClusterConfig() ClusterConfig {
 	clusterMu.Lock()
 	defer clusterMu.Unlock()
-	return cloneClusterConfig(*clusterCacheLocked())
-}
-
-// updateClusterRuntime mutates the cached config in place under clusterMu
-// without persisting it; used for health state that is refreshed every tick.
-func updateClusterRuntime(fn func(c *ClusterConfig)) {
-	clusterMu.Lock()
-	defer clusterMu.Unlock()
-	fn(clusterCacheLocked())
-}
-
-// clusterCacheLocked loads clusterCache from disk if needed. Caller holds clusterMu.
-func clusterCacheLocked() *ClusterConfig {
-	if clusterCache != nil {
-		return clusterCache
+	var mod time.Time
+	if fi, err := os.Stat(clusterConfigFile()); err == nil {
+		mod = fi.ModTime()
 	}
+	if clusterCache == nil || !mod.Equal(clusterMod) {
+		c := readClusterConfig()
+		clusterCache, clusterMod = &c, mod
+	}
+	return cloneClusterConfig(*clusterCache)
+}
 
+// readClusterConfig reads cluster.json, upgrading the first design (v1).
+func readClusterConfig() ClusterConfig {
 	data, err := os.ReadFile(clusterConfigFile())
 	if err != nil || len(data) == 0 {
-		def := defaultClusterConfig()
-		clusterCache = &def
-		return clusterCache
+		return defaultClusterConfig()
 	}
-
 	var c ClusterConfig
-	if err := json.Unmarshal(data, &c); err != nil {
-		def := defaultClusterConfig()
-		clusterCache = &def
-		return clusterCache
+	if json.Unmarshal(data, &c) != nil {
+		return defaultClusterConfig()
 	}
-
-	if c.Nodes == nil {
-		c.Nodes = make(map[string]ClusterNode)
+	if c.Version < 2 {
+		c = upgradeClusterV1(data)
 	}
-	if c.ForeignNodes == nil {
-		c.ForeignNodes = make(map[string]ForeignNode)
+	c.Health = c.Health.norm()
+	if c.NodeID == "" {
+		c.NodeID = "hub-" + randHex(4)
 	}
-	for id, fn := range c.ForeignNodes {
-		if fn.Weight <= 0 {
-			fn.Weight = 1
-			c.ForeignNodes[id] = fn
+	if c.DNS.TTL <= 0 {
+		c.DNS.TTL = 60
+	}
+	for i := range c.Pools {
+		if !lbModeOK(c.Pools[i].Mode) {
+			c.Pools[i].Mode = lbFailover
+		}
+		if !lbProtoOK(c.Pools[i].Proto) {
+			c.Pools[i].Proto = "tcp"
 		}
 	}
-	if len(c.ServicePorts) == 0 {
-		c.ServicePorts = []int{443, 8443, 2083}
+	return c
+}
+
+// upgradeClusterV1 keeps the hub identity and the peer hubs of the first
+// design. Its foreign-server pool is dropped: it sent users straight to the
+// foreign servers' public IPs, outside the tunnel.
+func upgradeClusterV1(data []byte) ClusterConfig {
+	var v1 struct {
+		NodeID        string `json:"node_id"`
+		ClusterSecret string `json:"cluster_secret"`
+		PublicIP      string `json:"public_ip"`
+		Nodes         map[string]struct {
+			Name     string `json:"name"`
+			APIURL   string `json:"api_url"`
+			PublicIP string `json:"public_ip"`
+		} `json:"nodes"`
+		ForeignNodes map[string]json.RawMessage `json:"foreign_nodes"`
 	}
-	if c.BalancingMode == "" {
-		c.BalancingMode = "wrr"
+	_ = json.Unmarshal(data, &v1)
+	c := defaultClusterConfig()
+	if v1.NodeID != "" {
+		c.NodeID = v1.NodeID
 	}
-	clusterCache = &c
-	return clusterCache
+	c.Secret, c.PublicIP = v1.ClusterSecret, v1.PublicIP
+	ids := make([]string, 0, len(v1.Nodes))
+	for id := range v1.Nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		n := v1.Nodes[id]
+		c.Hubs = append(c.Hubs, HubPeer{ID: id, Name: n.Name, URL: n.APIURL, PublicIP: n.PublicIP})
+	}
+	if len(v1.ForeignNodes) > 0 {
+		clusterEventf("warn", "Cluster upgraded. The old foreign-server list (%d servers) was removed: it sent users straight to foreign IPs, outside the tunnel. Make a pool from your tunnels instead.", len(v1.ForeignNodes))
+	}
+	return c
 }
 
 func saveClusterConfig(c ClusterConfig) error {
 	clusterMu.Lock()
 	defer clusterMu.Unlock()
-
+	c.Version = 2
 	c.Updated = time.Now().Format("2006-01-02 15:04:05")
-	if c.Nodes == nil {
-		c.Nodes = make(map[string]ClusterNode)
-	}
-	if c.ForeignNodes == nil {
-		c.ForeignNodes = make(map[string]ForeignNode)
-	}
-
-	_ = os.MkdirAll(configDir, 0700)
+	_ = os.MkdirAll(configDir, 0o700)
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-
 	tmp := clusterConfigFile() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-
 	if err := os.Rename(tmp, clusterConfigFile()); err != nil {
 		return err
 	}
-
 	saved := cloneClusterConfig(c)
 	clusterCache = &saved
+	if fi, err := os.Stat(clusterConfigFile()); err == nil {
+		clusterMod = fi.ModTime()
+	}
+	writeLBSideFiles(saved)
+	clusterWake()
 	return nil
 }
 
-// verifyClusterSecret checks incoming inter-node request authentication.
-func verifyClusterSecret(r *http.Request, secret string) bool {
-	if secret == "" {
-		return false
+// updateClusterConfig applies fn to the latest config and saves it.
+func updateClusterConfig(fn func(c *ClusterConfig) error) (ClusterConfig, error) {
+	c := loadClusterConfig()
+	if err := fn(&c); err != nil {
+		return c, err
 	}
-	got := r.Header.Get("X-Cluster-Secret")
-	if got == "" {
-		auth := r.Header.Get("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") {
-			got = strings.TrimPrefix(auth, "Bearer ")
+	return c, saveClusterConfig(c)
+}
+
+// writeLBSideFiles writes the pool ports for hashem.sh (lb-ports).
+func writeLBSideFiles(c ClusterConfig) {
+	var b strings.Builder
+	for _, p := range c.Pools {
+		if p.Disabled {
+			continue
+		}
+		for _, proto := range lbProtos(p.Proto) {
+			fmt.Fprintf(&b, "%d/%s\n", p.Port, proto)
 		}
 	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(secret)) == 1
-}
-
-// handleClusterStatus returns current cluster mesh overview (licensed UI only).
-func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
-	licensed := isClusterLicensed()
-	cfg := loadClusterConfig()
-
-	// Get local tunnel health
-	localStatus, localLoss, localLat := getLocalTunnelStatus()
-
-	type clusterStatusResponse struct {
-		Licensed       bool                   `json:"licensed"`
-		Enabled        bool                   `json:"enabled"`
-		NodeID         string                 `json:"node_id"`
-		PublicIP       string                 `json:"public_ip"`
-		ClusterSecret  string                 `json:"cluster_secret"`
-		ServicePorts   []int                  `json:"service_ports"`
-		AutoFailover   bool                   `json:"auto_failover"`
-		ActiveFailover string                 `json:"active_failover"`
-		FailoverTarget string                 `json:"failover_target"`
-		LocalTunnel    map[string]any         `json:"local_tunnel"`
-		Nodes          map[string]ClusterNode `json:"nodes"`
-		ForeignNodes   map[string]ForeignNode `json:"foreign_nodes"`
-		ActiveForeign  string                 `json:"active_foreign"`
-		Updated        string                 `json:"updated"`
-	}
-
-	resp := clusterStatusResponse{
-		Licensed:       licensed,
-		Enabled:        cfg.Enabled,
-		NodeID:         cfg.NodeID,
-		PublicIP:       cfg.PublicIP,
-		ClusterSecret:  cfg.ClusterSecret,
-		ServicePorts:   cfg.ServicePorts,
-		AutoFailover:   cfg.AutoFailover,
-		ActiveFailover: cfg.ActiveFailover,
-		FailoverTarget: cfg.FailoverTarget,
-		LocalTunnel: map[string]any{
-			"status":     localStatus,
-			"loss_pct":   localLoss,
-			"latency_ms": localLat,
-		},
-		Nodes:         cfg.Nodes,
-		ForeignNodes:  cfg.ForeignNodes,
-		ActiveForeign: cfg.ActiveForeign,
-		Updated:       cfg.Updated,
-	}
-
-	writeJSON(w, resp)
-}
-
-// handleClusterConfigPost updates cluster settings.
-func handleClusterConfigPost(w http.ResponseWriter, r *http.Request) {
-	if !isClusterLicensed() {
-		http.Error(w, `{"error":"Cluster mesh requires an active Bagher or Cluster license"}`, http.StatusPaymentRequired)
+	if b.Len() == 0 {
+		_ = os.Remove(lbPooledPortsFile())
 		return
 	}
+	_ = os.WriteFile(lbPooledPortsFile(), []byte(b.String()), 0o644)
+}
 
-	var req struct {
-		Enabled       *bool  `json:"enabled"`
-		NodeID        string `json:"node_id"`
-		ClusterSecret string `json:"cluster_secret"`
-		PublicIP      string `json:"public_ip"`
-		ServicePorts  []int  `json:"service_ports"`
-		BalancingMode string `json:"balancing_mode"`
-		AutoFailover  *bool  `json:"auto_failover"`
-	}
+// ---- events ----
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json body"}`, http.StatusBadRequest)
-		return
-	}
+type clusterEvent struct {
+	At    string `json:"at"`
+	Level string `json:"level"` // info | warn | error
+	Text  string `json:"text"`
+}
 
-	cfg := loadClusterConfig()
-	if req.Enabled != nil {
-		cfg.Enabled = *req.Enabled
+var (
+	clusterEvMu  sync.Mutex
+	clusterEvs   []clusterEvent
+	clusterEvMax = 200
+	clusterEvOK  bool // loaded from disk
+)
+
+func clusterEventsFile() string { return filepath.Join(configDir, "cluster-events.json") }
+
+func clusterEventf(level, f string, a ...any) {
+	e := clusterEvent{At: time.Now().Format("2006-01-02 15:04:05"), Level: level, Text: fmt.Sprintf(f, a...)}
+	log.Printf("[cluster] %s", e.Text)
+	clusterEvMu.Lock()
+	defer clusterEvMu.Unlock()
+	clusterEventsLoadLocked()
+	clusterEvs = append(clusterEvs, e)
+	if len(clusterEvs) > clusterEvMax {
+		clusterEvs = clusterEvs[len(clusterEvs)-clusterEvMax:]
 	}
-	if strings.TrimSpace(req.NodeID) != "" {
-		cfg.NodeID = strings.TrimSpace(req.NodeID)
-	}
-	if req.ClusterSecret != "" {
-		cfg.ClusterSecret = strings.TrimSpace(req.ClusterSecret)
-	}
-	if req.PublicIP != "" {
-		cfg.PublicIP = strings.TrimSpace(req.PublicIP)
-	}
-	if len(req.ServicePorts) > 0 {
-		var validPorts []int
-		for _, p := range req.ServicePorts {
-			if p > 0 && p < 65536 {
-				validPorts = append(validPorts, p)
-			}
-		}
-		if len(validPorts) > 0 {
-			cfg.ServicePorts = validPorts
+	if data, err := json.Marshal(clusterEvs); err == nil {
+		tmp := clusterEventsFile() + ".tmp"
+		if os.WriteFile(tmp, data, 0o600) == nil {
+			_ = os.Rename(tmp, clusterEventsFile())
 		}
 	}
-	if req.BalancingMode != "" {
-		bm := strings.ToLower(strings.TrimSpace(req.BalancingMode))
-		if bm == "wrr" || bm == "failover" || bm == "lowest_latency" {
-			cfg.BalancingMode = bm
-		}
-	}
-	if req.AutoFailover != nil {
-		cfg.AutoFailover = *req.AutoFailover
-	}
-
-	if err := saveClusterConfig(cfg); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"failed to save config: %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	if cfg.Enabled && cfg.BalancingMode == "wrr" && len(cfg.ForeignNodes) > 0 {
-		_ = applyClusterLoadBalancing(&cfg)
-	} else if !cfg.Enabled {
-		_ = clearClusterFailover(&cfg)
-	}
-
-	writeJSON(w, map[string]string{"status": "ok"})
 }
 
-// handleClusterNodeAdd adds or updates a peer Iran node.
-func handleClusterNodeAdd(w http.ResponseWriter, r *http.Request) {
-	if !isClusterLicensed() {
-		http.Error(w, `{"error":"Cluster mesh requires an active Bagher or Cluster license"}`, http.StatusPaymentRequired)
+func clusterEventsLoadLocked() {
+	if clusterEvOK {
 		return
 	}
-
-	var req struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		APIURL   string `json:"api_url"`
-		PublicIP string `json:"public_ip"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-
-	req.ID = strings.TrimSpace(req.ID)
-	req.APIURL = strings.TrimRight(strings.TrimSpace(req.APIURL), "/")
-	if req.ID == "" || req.APIURL == "" {
-		http.Error(w, `{"error":"id and api_url are required"}`, http.StatusBadRequest)
-		return
-	}
-
-	cfg := loadClusterConfig()
-	if req.ID == cfg.NodeID {
-		http.Error(w, `{"error":"cannot add self as peer node"}`, http.StatusBadRequest)
-		return
-	}
-
-	node := ClusterNode{
-		ID:           req.ID,
-		Name:         req.Name,
-		APIURL:       req.APIURL,
-		PublicIP:     strings.TrimSpace(req.PublicIP),
-		TunnelStatus: "UNKNOWN",
-		LastSeen:     time.Time{},
-		IsHealthy:    false,
-	}
-
-	// Immediate probe to test handshake
-	if cfg.ClusterSecret != "" {
-		probe, lat, err := sendClusterHeartbeat(node.APIURL, cfg.ClusterSecret, ClusterHeartbeatPayload{
-			NodeID:   cfg.NodeID,
-			PublicIP: cfg.PublicIP,
-		})
-		if err == nil {
-			node.TunnelStatus = probe.TunnelStatus
-			node.TunnelLoss = probe.TunnelLoss
-			node.LatencyMs = lat
-			node.IsFailing = probe.IsFailing
-			node.IsHealthy = true
-			node.LastSeen = time.Now()
-			if node.PublicIP == "" && probe.PublicIP != "" {
-				node.PublicIP = probe.PublicIP
-			}
-		}
-	}
-
-	cfg.Nodes[req.ID] = node
-	if err := saveClusterConfig(cfg); err != nil {
-		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, map[string]any{"status": "ok", "node": node})
-}
-
-// handleClusterNodeDelete removes a peer node from the cluster.
-func handleClusterNodeDelete(w http.ResponseWriter, r *http.Request) {
-	if !isClusterLicensed() {
-		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
-		return
-	}
-
-	var req struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-
-	cfg := loadClusterConfig()
-	delete(cfg.Nodes, req.ID)
-	if cfg.ActiveFailover == req.ID {
-		_ = clearClusterFailover(&cfg)
-	}
-
-	if err := saveClusterConfig(cfg); err != nil {
-		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, map[string]string{"status": "ok"})
-}
-
-// handleClusterForeignNodeAdd adds or updates a foreign exit node.
-func handleClusterForeignNodeAdd(w http.ResponseWriter, r *http.Request) {
-	if !isClusterLicensed() {
-		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
-		return
-	}
-
-	var req struct {
-		ID          string      `json:"id"`
-		Name        string      `json:"name"`
-		PublicIP    string      `json:"public_ip"`
-		TunnelPort  int         `json:"tunnel_port"`
-		Protocol    string      `json:"protocol"`
-		Weight      int         `json:"weight"`
-		TargetPorts map[int]int `json:"target_ports"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-
-	req.ID = strings.TrimSpace(req.ID)
-	req.PublicIP = strings.TrimSpace(req.PublicIP)
-	if req.ID == "" || req.PublicIP == "" {
-		http.Error(w, `{"error":"id and public_ip are required"}`, http.StatusBadRequest)
-		return
-	}
-	if req.TunnelPort <= 0 {
-		req.TunnelPort = 55354
-	}
-	if req.Protocol == "" {
-		req.Protocol = "wss"
-	}
-	if req.Weight <= 0 {
-		req.Weight = 1
-	}
-
-	cfg := loadClusterConfig()
-	fn := ForeignNode{
-		ID:          req.ID,
-		Name:        req.Name,
-		PublicIP:    req.PublicIP,
-		TunnelPort:  req.TunnelPort,
-		Protocol:    req.Protocol,
-		Weight:      req.Weight,
-		TargetPorts: req.TargetPorts,
-		IsActive:    len(cfg.ForeignNodes) == 0,
-		LastProbe:   time.Now(),
-	}
-
-	status, lat := probeForeignNodeHealth(fn)
-	fn.IsHealthy = (status == "UP")
-	fn.LatencyMs = lat
-
-	if cfg.ForeignNodes == nil {
-		cfg.ForeignNodes = make(map[string]ForeignNode)
-	}
-	cfg.ForeignNodes[req.ID] = fn
-	if cfg.ActiveForeign == "" {
-		cfg.ActiveForeign = req.ID
-	}
-
-	if err := saveClusterConfig(cfg); err != nil {
-		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, map[string]any{"status": "ok", "foreign_node": fn})
-}
-
-// handleClusterForeignNodeDelete removes a foreign exit node from the pool.
-func handleClusterForeignNodeDelete(w http.ResponseWriter, r *http.Request) {
-	if !isClusterLicensed() {
-		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
-		return
-	}
-
-	var req struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-
-	cfg := loadClusterConfig()
-	delete(cfg.ForeignNodes, req.ID)
-	if cfg.ActiveForeign == req.ID {
-		cfg.ActiveForeign = ""
-		for k, fn := range cfg.ForeignNodes {
-			cfg.ActiveForeign = k
-			fn.IsActive = true
-			cfg.ForeignNodes[k] = fn
-			break
-		}
-	}
-
-	if err := saveClusterConfig(cfg); err != nil {
-		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, map[string]string{"status": "ok"})
-}
-
-// handleClusterForeignSwitch switches the active foreign exit node.
-func handleClusterForeignSwitch(w http.ResponseWriter, r *http.Request) {
-	if !isClusterLicensed() {
-		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
-		return
-	}
-
-	var req struct {
-		TargetID string `json:"target_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-
-	cfg := loadClusterConfig()
-	target, exists := cfg.ForeignNodes[req.TargetID]
-	if !exists {
-		http.Error(w, `{"error":"target foreign node not found"}`, http.StatusBadRequest)
-		return
-	}
-
-	for k, fn := range cfg.ForeignNodes {
-		fn.IsActive = (k == req.TargetID)
-		cfg.ForeignNodes[k] = fn
-	}
-	cfg.ActiveForeign = req.TargetID
-
-	if err := saveClusterConfig(cfg); err != nil {
-		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, map[string]any{"status": "ok", "active_foreign": target.ID})
-}
-
-// handleClusterHeartbeat is the inter-node endpoint for gossip and status exchange.
-func handleClusterHeartbeat(w http.ResponseWriter, r *http.Request) {
-	cfg := loadClusterConfig()
-	if !verifyClusterSecret(r, cfg.ClusterSecret) {
-		http.Error(w, `{"error":"unauthorized cluster secret"}`, http.StatusUnauthorized)
-		return
-	}
-
-	var payload ClusterHeartbeatPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, `{"error":"invalid json payload"}`, http.StatusBadRequest)
-		return
-	}
-
-	// Update record of peer
-	if payload.NodeID != "" && payload.NodeID != cfg.NodeID {
-		updateClusterRuntime(func(c *ClusterConfig) {
-			if existing, ok := c.Nodes[payload.NodeID]; ok {
-				existing.TunnelStatus = payload.TunnelStatus
-				existing.TunnelLoss = payload.TunnelLoss
-				existing.IsFailing = payload.IsFailing
-				existing.IsHealthy = payload.TunnelStatus == "UP" && !payload.IsFailing
-				existing.LastSeen = time.Now()
-				if payload.PublicIP != "" {
-					existing.PublicIP = payload.PublicIP
-				}
-				c.Nodes[payload.NodeID] = existing
-			}
-		})
-	}
-
-	localStatus, localLoss, _ := getLocalTunnelStatus()
-	resp := ClusterHeartbeatPayload{
-		NodeID:       cfg.NodeID,
-		PublicIP:     cfg.PublicIP,
-		TunnelStatus: localStatus,
-		TunnelLoss:   localLoss,
-		IsFailing:    localStatus == "DOWN",
-		Timestamp:    time.Now().Unix(),
-	}
-
-	writeJSON(w, resp)
-}
-
-// handleClusterFailoverTrigger manually sets or tests rerouting to a peer node.
-func handleClusterFailoverTrigger(w http.ResponseWriter, r *http.Request) {
-	if !isClusterLicensed() {
-		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
-		return
-	}
-
-	var req struct {
-		TargetID string `json:"target_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
-		return
-	}
-
-	cfg := loadClusterConfig()
-	target, ok := cfg.Nodes[req.TargetID]
-	if !ok || target.PublicIP == "" {
-		http.Error(w, `{"error":"target node not found or has no public IP"}`, http.StatusBadRequest)
-		return
-	}
-
-	if target.IsFailing {
-		http.Error(w, `{"error":"target node tunnel is failing; cannot reroute to it"}`, http.StatusBadRequest)
-		return
-	}
-
-	if err := applyClusterFailover(&cfg, target); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"failed to apply failover: %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	_ = saveClusterConfig(cfg)
-	writeJSON(w, map[string]string{"status": "ok", "active_failover": target.ID})
-}
-
-// handleClusterFailoverRevert reverts rerouting back to local tunnel.
-func handleClusterFailoverRevert(w http.ResponseWriter, r *http.Request) {
-	if !isClusterLicensed() {
-		http.Error(w, `{"error":"license required"}`, http.StatusPaymentRequired)
-		return
-	}
-
-	cfg := loadClusterConfig()
-	if err := clearClusterFailover(&cfg); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"failed to clear failover: %s"}`, err.Error()), http.StatusInternalServerError)
-		return
-	}
-
-	_ = saveClusterConfig(cfg)
-	writeJSON(w, map[string]string{"status": "ok", "active_failover": ""})
-}
-
-// sendClusterHeartbeat contacts a peer node and measures latency.
-func sendClusterHeartbeat(apiURL string, secret string, req ClusterHeartbeatPayload) (*ClusterHeartbeatPayload, float64, error) {
-	body, _ := json.Marshal(req)
-	url := strings.TrimRight(apiURL, "/") + "/api/cluster/heartbeat"
-
-	httpReq, err := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, 0, err
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-Cluster-Secret", secret)
-
-	start := time.Now()
-	resp, err := clusterClient.Do(httpReq)
-	lat := float64(time.Since(start).Microseconds()) / 1000.0
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, lat, fmt.Errorf("peer status %d: %s", resp.StatusCode, string(b))
-	}
-
-	var res ClusterHeartbeatPayload
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, lat, err
-	}
-
-	return &res, lat, nil
-}
-
-// probeForeignNodeHealth performs a synthetic TCP connection test to the foreign exit node.
-func probeForeignNodeHealth(node ForeignNode) (status string, latency float64) {
-	if node.PublicIP == "" || node.TunnelPort <= 0 {
-		return "UNKNOWN", 0
-	}
-	addr := net.JoinHostPort(node.PublicIP, strconv.Itoa(node.TunnelPort))
-	start := time.Now()
-	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
-	if err != nil {
-		return "DOWN", 0
-	}
-	_ = conn.Close()
-	lat := float64(time.Since(start).Microseconds()) / 1000.0
-	return "UP", lat
-}
-
-// getLocalTunnelStatus inspects the local machine's connection to Kharej.
-func getLocalTunnelStatus() (status string, loss float64, latency float64) {
-	cfg := loadClusterConfig()
-	if cfg.ActiveForeign != "" && len(cfg.ForeignNodes) > 0 {
-		if fn, ok := cfg.ForeignNodes[cfg.ActiveForeign]; ok {
-			s, lat := probeForeignNodeHealth(fn)
-			if s == "UP" {
-				return "UP", 0, lat
-			}
-			return "DOWN", 100.0, 0
-		}
-	}
-
-	peer := loadPeerConfig()
-	if peer.PeerURL != "" {
-		if peer.IsConnected {
-			return "UP", 0, peer.LatencyMs
-		}
-		return "DOWN", 100.0, 0
-	}
-
-	// Check tunnel health cache
-	th := tunnelHealthCached()
-	if th != nil && len(th.Tunnels) > 0 {
-		for _, t := range th.Tunnels {
-			if t.Verdict == "PASS" || t.Verdict == "UP" {
-				return "UP", 0, t.LatencyMs
-			}
-		}
-		return "DOWN", 100.0, 0
-	}
-
-	// Nothing above knows the tunnel (no foreign pool, Peer Link or health
-	// run). Internet reachability says nothing about the tunnel, so it was a
-	// misleading "UP" (L22): report UNKNOWN, which never triggers failover.
-	return "UNKNOWN", 0, 0
-}
-
-func ensureClusterChains() {
-	_ = exec.Command("iptables", "-t", "nat", "-N", "HASHEM-CLUSTER-PREROUTING").Run()
-	_ = exec.Command("iptables", "-t", "nat", "-N", "HASHEM-CLUSTER-POSTROUTING").Run()
-
-	if err := exec.Command("iptables", "-t", "nat", "-C", "PREROUTING", "-j", "HASHEM-CLUSTER-PREROUTING").Run(); err != nil {
-		_ = exec.Command("iptables", "-t", "nat", "-I", "PREROUTING", "1", "-j", "HASHEM-CLUSTER-PREROUTING").Run()
-	}
-	if err := exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-j", "HASHEM-CLUSTER-POSTROUTING").Run(); err != nil {
-		_ = exec.Command("iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-j", "HASHEM-CLUSTER-POSTROUTING").Run()
+	clusterEvOK = true
+	if data, err := os.ReadFile(clusterEventsFile()); err == nil {
+		_ = json.Unmarshal(data, &clusterEvs)
 	}
 }
 
-// applyClusterFailover adds safe iptables DNAT/MASQUERADE rules inside dedicated HASHEM-CLUSTER chains.
-func applyClusterFailover(cfg *ClusterConfig, target ClusterNode) error {
-	if target.PublicIP == "" {
-		return fmt.Errorf("target node has no public IP")
+// clusterEvents returns the newest n events, newest first.
+func clusterEvents(n int) []clusterEvent {
+	clusterEvMu.Lock()
+	defer clusterEvMu.Unlock()
+	clusterEventsLoadLocked()
+	out := make([]clusterEvent, 0, n)
+	for i := len(clusterEvs) - 1; i >= 0 && len(out) < n; i-- {
+		out = append(out, clusterEvs[i])
 	}
-
-	ensureClusterChains()
-	_ = clearClusterFailover(cfg)
-
-	// Enable IP forwarding
-	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()
-
-	for _, port := range cfg.ServicePorts {
-		pStr := strconv.Itoa(port)
-		// HASHEM-CLUSTER-PREROUTING TCP & UDP
-		_ = exec.Command("iptables", "-t", "nat", "-A", "HASHEM-CLUSTER-PREROUTING", "-p", "tcp", "--dport", pStr, "-j", "DNAT", "--to-destination", target.PublicIP+":"+pStr).Run()
-		_ = exec.Command("iptables", "-t", "nat", "-A", "HASHEM-CLUSTER-PREROUTING", "-p", "udp", "--dport", pStr, "-j", "DNAT", "--to-destination", target.PublicIP+":"+pStr).Run()
-		// HASHEM-CLUSTER-POSTROUTING MASQUERADE
-		_ = exec.Command("iptables", "-t", "nat", "-A", "HASHEM-CLUSTER-POSTROUTING", "-d", target.PublicIP, "-p", "tcp", "--dport", pStr, "-j", "MASQUERADE").Run()
-		_ = exec.Command("iptables", "-t", "nat", "-A", "HASHEM-CLUSTER-POSTROUTING", "-d", target.PublicIP, "-p", "udp", "--dport", pStr, "-j", "MASQUERADE").Run()
-	}
-
-	cfg.ActiveFailover = target.ID
-	cfg.FailoverTarget = target.PublicIP
-	log.Printf("[cluster] failover activated: rerouting ports %v to %s (%s)", cfg.ServicePorts, target.ID, target.PublicIP)
-	return nil
+	return out
 }
 
-// clearClusterFailover removes iptables rerouting rules cleanly by flushing dedicated chains.
-func clearClusterFailover(cfg *ClusterConfig) error {
-	ensureClusterChains()
-	_ = exec.Command("iptables", "-t", "nat", "-F", "HASHEM-CLUSTER-PREROUTING").Run()
-	_ = exec.Command("iptables", "-t", "nat", "-F", "HASHEM-CLUSTER-POSTROUTING").Run()
+// ---- links ----
 
-	cfg.ActiveFailover = ""
-	cfg.FailoverTarget = ""
-	log.Printf("[cluster] failover cleared: returned to local tunnel")
-	return nil
+// lbLink is one tunnel on this hub that can serve a pool.
+type lbLink struct {
+	ID         int
+	Name       string
+	Remote     string
+	Svc        string
+	Engine     string
+	Transport  string
+	CtrlPort   int
+	PeerGre    string
+	NoGre      bool
+	Ports      []int
+	SnapHealth string
+	LatencyMs  float64
+	Addr       string
 }
 
-// generateClusterBalancingRules constructs iptables WRR load balancing rules across healthy foreign nodes.
-func generateClusterBalancingRules(cfg *ClusterConfig) []string {
-	if cfg == nil || !cfg.Enabled || len(cfg.ServicePorts) == 0 {
+// lbLinksFrom lists the hub's relays (frps / backhaul-server units). A spoke
+// has none. When the main tunnel and the legacy peer 1 are the same relay,
+// the peer record wins.
+func lbLinksFrom(s *HubSnapshot) []lbLink {
+	if s == nil {
 		return nil
 	}
-
-	type targetNode struct {
-		id          string
-		ip          string
-		weight      int
-		targetPorts map[int]int
-	}
-
-	var healthy []targetNode
-	for id, fn := range cfg.ForeignNodes {
-		if fn.IsHealthy && fn.PublicIP != "" {
-			w := fn.Weight
-			if w <= 0 {
-				w = 1
-			}
-			healthy = append(healthy, targetNode{
-				id:          id,
-				ip:          fn.PublicIP,
-				weight:      w,
-				targetPorts: fn.TargetPorts,
-			})
+	bySvc := map[string]lbLink{}
+	for _, l := range s.All() {
+		svc := l.FrpsSvc
+		if l.ID == mainTunnelID && svc == "" {
+			svc = s.Local.FrpSvc
 		}
-	}
-
-	sort.Slice(healthy, func(i, j int) bool {
-		return healthy[i].id < healthy[j].id
-	})
-
-	if len(healthy) == 0 {
-		return nil
-	}
-
-	var rules []string
-	totalWeight := 0
-	for _, n := range healthy {
-		totalWeight += n.weight
-	}
-
-	for _, port := range cfg.ServicePorts {
-		pStr := strconv.Itoa(port)
-		remainingWeight := totalWeight
-
-		for i, node := range healthy {
-			targetPort := port
-			if node.targetPorts != nil && node.targetPorts[port] > 0 {
-				targetPort = node.targetPorts[port]
-			}
-			targetDst := fmt.Sprintf("%s:%d", node.ip, targetPort)
-
-			isLast := (i == len(healthy)-1)
-			if isLast || remainingWeight <= node.weight {
-				// Remainder traffic
-				rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-PREROUTING -p tcp --dport %s -j DNAT --to-destination %s", pStr, targetDst))
-				rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-PREROUTING -p udp --dport %s -j DNAT --to-destination %s", pStr, targetDst))
-			} else {
-				prob := float64(node.weight) / float64(remainingWeight)
-				probStr := fmt.Sprintf("%.4f", prob)
-				rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-PREROUTING -p tcp --dport %s -m statistic --mode random --probability %s -j DNAT --to-destination %s", pStr, probStr, targetDst))
-				rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-PREROUTING -p udp --dport %s -m statistic --mode random --probability %s -j DNAT --to-destination %s", pStr, probStr, targetDst))
-				remainingWeight -= node.weight
-			}
-
-			rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-POSTROUTING -d %s -p tcp --dport %d -j MASQUERADE", node.ip, targetPort))
-			rules = append(rules, fmt.Sprintf("iptables -t nat -A HASHEM-CLUSTER-POSTROUTING -d %s -p udp --dport %d -j MASQUERADE", node.ip, targetPort))
+		addr := lbAddrFor(svc)
+		if addr == "" {
+			continue
 		}
+		if old, dup := bySvc[svc]; dup && old.ID != mainTunnelID {
+			continue
+		}
+		tr := l.FRPTransport
+		if tr == "" {
+			tr = l.Transport
+		}
+		_, engine := lbConfFor(svc)
+		bySvc[svc] = lbLink{ID: l.ID, Name: l.Name, Remote: l.RemotePub, Svc: svc, Engine: engine, Transport: tr,
+			CtrlPort: l.FrpPort, PeerGre: l.PeerGre, NoGre: l.NoGre, Ports: append([]int(nil), l.Ports...),
+			SnapHealth: l.HealthState, LatencyMs: l.LatencyMs, Addr: addr}
 	}
-
-	return rules
+	out := make([]lbLink, 0, len(bySvc))
+	for _, l := range bySvc {
+		out = append(out, l)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
-// applyClusterLoadBalancing applies kernel-level iptables WRR load balancing across healthy foreign nodes.
-func applyClusterLoadBalancing(cfg *ClusterConfig) error {
-	ensureClusterChains()
-	_ = clearClusterFailover(cfg)
-
-	rules := generateClusterBalancingRules(cfg)
-	if len(rules) == 0 {
-		return nil
+func lbLinkName(l lbLink) string {
+	if l.Name != "" {
+		return l.Name
 	}
+	if l.ID == mainTunnelID {
+		return "Main tunnel"
+	}
+	return fmt.Sprintf("peer-%d", l.ID)
+}
 
-	// Enable IP forwarding
-	_ = exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").Run()
+// ---- health ----
 
-	for _, rule := range rules {
-		parts := strings.Fields(rule)
-		if len(parts) > 1 {
-			_ = exec.Command(parts[0], parts[1:]...).Run()
+// lbLinkRT is the debounced health of one link.
+type lbLinkRT struct {
+	Known      bool
+	Up         bool
+	okStreak   int
+	failStreak int
+	Since      time.Time
+	Session    bool
+	Remote     string // where the control session comes from
+	ICMPms     float64
+	icmpGoodAt time.Time
+	LatencyMs  float64 // smoothed, -1 unknown
+	Reason     string
+}
+
+// lbIcmpTrust is how long a link that answered ping is expected to keep
+// answering: inside it, lost pings take the link out; after it, ICMP counts
+// as filtered and only the session decides.
+const lbIcmpTrust = 10 * time.Minute
+
+// lbObserve feeds one check into the link's state. It returns +1 when the
+// link came up, -1 when it went down, 0 otherwise.
+func (rt *lbLinkRT) lbObserve(now time.Time, session bool, icmpMs float64, icmpUsable bool, h LBHealth) int {
+	rt.Session, rt.ICMPms = session, icmpMs
+	if icmpMs >= 0 {
+		rt.icmpGoodAt = now
+		if rt.LatencyMs < 0 {
+			rt.LatencyMs = icmpMs
+		} else {
+			rt.LatencyMs = round1(rt.LatencyMs*0.7 + icmpMs*0.3)
 		}
 	}
-
-	log.Printf("[cluster] load balancing applied: %d rules across %d foreign nodes", len(rules), len(cfg.ForeignNodes))
-	return nil
+	trusted := icmpUsable && !rt.icmpGoodAt.IsZero() && now.Sub(rt.icmpGoodAt) < lbIcmpTrust
+	good := session && !(trusted && icmpMs < 0)
+	switch {
+	case !session:
+		rt.Reason = "the foreign client is not connected (no control session)"
+	case !good:
+		rt.Reason = "the foreign server stopped answering ping on the tunnel path"
+	default:
+		rt.Reason = ""
+	}
+	if good {
+		rt.okStreak, rt.failStreak = rt.okStreak+1, 0
+	} else {
+		rt.okStreak, rt.failStreak = 0, rt.failStreak+1
+	}
+	if !rt.Known {
+		rt.Known, rt.Up, rt.Since = true, good, now
+		return 0
+	}
+	if rt.Up && rt.failStreak >= h.Fall {
+		rt.Up, rt.Since = false, now
+		return -1
+	}
+	if !rt.Up && rt.okStreak >= h.Rise {
+		rt.Up, rt.Since = true, now
+		return 1
+	}
+	return 0
 }
 
-var lastClusterBalancingHash string
-
-// persistClusterFailover saves only the failover fields onto the latest config,
-// so the monitor's (seconds-old) copy never overwrites nodes edited meanwhile.
-func persistClusterFailover(active, target string) {
-	fresh := loadClusterConfig()
-	fresh.ActiveFailover = active
-	fresh.FailoverTarget = target
-	_ = saveClusterConfig(fresh)
+// lbSessionOf finds the link's control session among the host's sockets.
+// Sessions from loopback (the WSS front relaying to frps) count, but the
+// remote reported is a real one when there is any.
+func lbSessionOf(socks []sockInfo, ctrlPort int) (bool, string) {
+	if ctrlPort <= 0 {
+		return false, ""
+	}
+	ports := map[uint16]bool{}
+	for _, p := range controlPorts(ctrlPort) {
+		ports[uint16(p)] = true
+	}
+	found, remote := false, ""
+	for _, s := range socks {
+		if s.Proto != "tcp" || s.State != sockEstablished || !ports[s.Local.Port()] {
+			continue
+		}
+		found = true
+		if a := s.Remote.Addr(); !a.IsLoopback() && remote == "" {
+			remote = a.String()
+		}
+	}
+	return found, remote
 }
 
-// startClusterMonitor runs the periodic gossip and failover check loop.
+// lbListening lists the ports each address listens on: TCP LISTEN sockets and
+// bound UDP sockets.
+func lbListening(socks []sockInfo) map[string]map[string][]int {
+	out := map[string]map[string][]int{}
+	for _, s := range socks {
+		ok := (s.Proto == "tcp" && s.State == sockListen) || (s.Proto == "udp" && s.State == sockUDPBound)
+		if !ok {
+			continue
+		}
+		a := s.Local.Addr().String()
+		if out[a] == nil {
+			out[a] = map[string][]int{}
+		}
+		out[a][s.Proto] = append(out[a][s.Proto], int(s.Local.Port()))
+	}
+	return out
+}
+
+func hasInt(xs []int, v int) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- runtime ----
+
+type clusterRuntime struct {
+	mu        sync.Mutex
+	links     map[int]*lbLinkRT
+	view      []lbLinkView
+	pools     map[string]*lbPoolRT
+	plans     map[string]lbPoolPlan
+	poolState map[string]string
+	pass      []lbPortRange
+	warnings  []string
+	rules     string
+	chains    []string
+	applyErr  string
+	appliedAt time.Time
+	hooksAt   time.Time
+	// hadAddrs: hashem-lb carried addresses after the last check; addrsSeen:
+	// the interface was checked once since start (it outlives a restart).
+	hadAddrs  bool
+	addrsSeen bool
+	bindAt    time.Time
+	bindErr   map[string]string
+	targeted  map[string]map[int]bool
+	icmpOK    bool
+	ticks     uint64
+}
+
+var clusterRT = newClusterRuntime()
+
+func newClusterRuntime() *clusterRuntime {
+	return &clusterRuntime{links: map[int]*lbLinkRT{}, pools: map[string]*lbPoolRT{}, plans: map[string]lbPoolPlan{},
+		poolState: map[string]string{}, bindErr: map[string]string{}, targeted: map[string]map[int]bool{}}
+}
+
+// lbLinkView is a link as the API shows it.
+type lbLinkView struct {
+	ID        int     `json:"id"`
+	Name      string  `json:"name"`
+	Remote    string  `json:"remote"`
+	Engine    string  `json:"engine"`
+	Svc       string  `json:"svc"`
+	Addr      string  `json:"addr"`
+	Bound     bool    `json:"bound"`
+	Up        bool    `json:"up"`
+	Session   bool    `json:"session"`
+	LatencyMs float64 `json:"latency_ms"`
+	ICMPMs    float64 `json:"icmp_ms"`
+	Since     string  `json:"since,omitempty"`
+	Reason    string  `json:"reason,omitempty"`
+	Ports     []int   `json:"ports"`
+	ListenTCP []int   `json:"listen_tcp"`
+	ListenUDP []int   `json:"listen_udp"`
+	BindError string  `json:"bind_error,omitempty"`
+}
+
+var clusterWakeCh = make(chan struct{}, 1)
+
+// clusterWake runs the next tick now (after a config change).
+func clusterWake() {
+	select {
+	case clusterWakeCh <- struct{}{}:
+	default:
+	}
+}
+
+// startClusterMonitor runs the health and rules loop for the life of the panel.
 func startClusterMonitor() {
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
+	lbClearLegacyV1()
+	writeLBSideFiles(loadClusterConfig())
+	for {
+		wait := time.Duration(loadClusterConfig().Health.IntervalMs) * time.Millisecond
+		if clusterTick(time.Now()) {
+			wait = 3 * time.Second
+		}
+		select {
+		case <-time.After(wait):
+		case <-clusterWakeCh:
+		}
+	}
+}
 
-	for range ticker.C {
-		if !isClusterLicensed() {
+// Seams for tests.
+var (
+	lbSnapshot   = currentSnapshot
+	lbApply      = lbApplyRules
+	lbClear      = lbClearRules
+	lbAddrs      = lbEnsureAddrs
+	lbBind       = lbSetRelayBind
+	lbIsBound    = lbRelayBound
+	lbForget     = lbConntrackForget
+	lbHubForward = meshForwardTarget
+)
+
+// clusterTick is one pass: health, membership, binding, rules. Without any
+// pool, rule or bound relay (also left from before a restart) it only lists
+// the links with the snapshot's health, and reports idle.
+func clusterTick(now time.Time) (idle bool) {
+	cfg := loadClusterConfig()
+	rt := clusterRT
+	links := lbLinksFrom(lbSnapshot())
+	rt.mu.Lock()
+	idle = len(cfg.Pools) == 0 && rt.rules == "" && !rt.hadAddrs && !fileExists(lbBindsFile()) && !fileExists(lbRulesFile())
+	if idle {
+		rt.view = lbIdleView(links)
+		rt.mu.Unlock()
+		return true
+	}
+	rt.mu.Unlock()
+	socks := readSockets()
+	listen := lbListening(socks)
+
+	// Links whose ports include a pool port join that pool by themselves.
+	if joined := lbAutoJoin(&cfg, links); joined {
+		if err := saveClusterConfig(cfg); err != nil {
+			clusterEventf("error", "Cannot save cluster.json: %v", err)
+		}
+	}
+
+	// Ping each link where its control session comes from (the path the
+	// relay really uses), else its GRE peer or public IP.
+	rt.mu.Lock()
+	targets := map[int]string{}
+	var pingList []string
+	sess := map[int]bool{}
+	for _, l := range links {
+		s, remote := lbSessionOf(socks, l.CtrlPort)
+		if !s && (l.Transport == "kcp" || l.Transport == "quic" || l.Transport == "udp") {
+			// UDP transports hold no TCP session: use the snapshot's verdict.
+			s = l.SnapHealth == stateHealthy || l.SnapHealth == stateDegraded
+		}
+		sess[l.ID] = s
+		t := remote
+		if t == "" {
+			t = l.PeerGre
+		}
+		if t == "" {
+			t = l.Remote
+		}
+		if t != "" {
+			targets[l.ID] = t
+			pingList = append(pingList, t)
+		}
+		if rt.links[l.ID] == nil {
+			rt.links[l.ID] = &lbLinkRT{LatencyMs: -1, ICMPms: -1}
+		}
+		rt.links[l.ID].Remote = remote
+	}
+	h := cfg.Health
+	rt.mu.Unlock()
+
+	timeout := time.Duration(h.IntervalMs) * time.Millisecond * 8 / 10
+	if timeout > 900*time.Millisecond {
+		timeout = 900 * time.Millisecond
+	}
+	pings, icmpOK := lbPinger(pingList, timeout)
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.ticks++
+	rt.icmpOK = icmpOK
+	alive := map[int]bool{}
+	for _, l := range links {
+		alive[l.ID] = true
+		ms := -1.0
+		if t, ok := targets[l.ID]; ok {
+			ms = pings[t]
+		}
+		lr := rt.links[l.ID]
+		switch lr.lbObserve(now, sess[l.ID], ms, icmpOK, h) {
+		case -1:
+			clusterEventf("warn", "%s is down: %s.", lbLinkName(l), lr.Reason)
+		case 1:
+			clusterEventf("info", "%s is back up.", lbLinkName(l))
+		}
+	}
+	for id := range rt.links {
+		if !alive[id] {
+			delete(rt.links, id)
+		}
+	}
+
+	// Relays of pool members listen on their private address.
+	want := map[string]string{}
+	member := map[int]bool{}
+	for _, p := range cfg.Pools {
+		if p.Disabled {
 			continue
 		}
-
-		cfg := loadClusterConfig()
-		if !cfg.Enabled || (len(cfg.Nodes) == 0 && len(cfg.ForeignNodes) == 0) {
-			continue
+		for _, m := range p.Members {
+			member[m.Link] = true
 		}
-
-		// cfg is a private copy; probeMu guards it while probes run, and the
-		// results are then published to the shared cache.
-		var probeMu sync.Mutex
-
-		// Probe foreign nodes pool
-		if len(cfg.ForeignNodes) > 0 {
-			ids := make([]string, 0, len(cfg.ForeignNodes))
-			nodes := make([]ForeignNode, 0, len(cfg.ForeignNodes))
-			for fid, fnode := range cfg.ForeignNodes {
-				ids = append(ids, fid)
-				nodes = append(nodes, fnode)
+	}
+	bound := map[int]bool{}
+	checkBinds := now.Sub(rt.bindAt) >= 5*time.Second
+	for _, l := range links {
+		if member[l.ID] {
+			want[l.Svc] = l.Addr
+		}
+	}
+	addrs := make([]string, 0, len(want))
+	for _, a := range want {
+		addrs = append(addrs, a)
+	}
+	if checkBinds {
+		rt.bindAt = now
+		if len(addrs) > 0 || rt.hadAddrs || !rt.addrsSeen {
+			if err := lbAddrs(addrs); err != nil {
+				clusterEventf("error", "Private addresses: %v", err)
 			}
-			var fwg sync.WaitGroup
-			for i := range ids {
-				fwg.Add(1)
-				go func(id string, fn ForeignNode) {
-					defer fwg.Done()
-					status, lat := probeForeignNodeHealth(fn)
-					probeMu.Lock()
-					fn.IsHealthy = (status == "UP")
-					fn.LatencyMs = lat
-					fn.LastProbe = time.Now()
-					cfg.ForeignNodes[id] = fn
-					probeMu.Unlock()
-				}(ids[i], nodes[i])
-			}
-			fwg.Wait()
-			updateClusterRuntime(func(c *ClusterConfig) {
-				for id, probed := range cfg.ForeignNodes {
-					if existing, ok := c.ForeignNodes[id]; ok {
-						existing.IsHealthy = probed.IsHealthy
-						existing.LatencyMs = probed.LatencyMs
-						existing.LastProbe = probed.LastProbe
-						c.ForeignNodes[id] = existing
-					}
-				}
-			})
-
-			// In WRR Load Balancing mode, synchronize kernel rules with healthy foreign nodes
-			if cfg.Enabled && cfg.BalancingMode == "wrr" {
-				rules := generateClusterBalancingRules(&cfg)
-				rulesHash := strings.Join(rules, "\n")
-				if rulesHash != lastClusterBalancingHash {
-					_ = applyClusterLoadBalancing(&cfg)
-					lastClusterBalancingHash = rulesHash
-				}
-			} else if !cfg.Enabled && lastClusterBalancingHash != "" {
-				_ = clearClusterFailover(&cfg)
-				lastClusterBalancingHash = ""
-			}
+			rt.hadAddrs, rt.addrsSeen = len(addrs) > 0, true
 		}
-
-		if len(cfg.Nodes) == 0 || cfg.ClusterSecret == "" {
-			continue
-		}
-
-		localStatus, localLoss, _ := getLocalTunnelStatus()
-		isLocalFailing := localStatus == "DOWN" || localLoss > 50.0
-
-		// Probe peer nodes concurrently
-		peerIDs := make([]string, 0, len(cfg.Nodes))
-		peers := make([]ClusterNode, 0, len(cfg.Nodes))
-		for id, node := range cfg.Nodes {
-			peerIDs = append(peerIDs, id)
-			peers = append(peers, node)
-		}
-		var wg sync.WaitGroup
-		for i := range peerIDs {
-			wg.Add(1)
-			go func(nid string, n ClusterNode) {
-				defer wg.Done()
-				res, lat, err := sendClusterHeartbeat(n.APIURL, cfg.ClusterSecret, ClusterHeartbeatPayload{
-					NodeID:       cfg.NodeID,
-					PublicIP:     cfg.PublicIP,
-					TunnelStatus: localStatus,
-					TunnelLoss:   localLoss,
-					IsFailing:    isLocalFailing,
-				})
-
-				probeMu.Lock()
-				defer probeMu.Unlock()
-				if updated, exists := cfg.Nodes[nid]; exists {
-					if err == nil {
-						updated.TunnelStatus = res.TunnelStatus
-						updated.TunnelLoss = res.TunnelLoss
-						updated.IsFailing = res.IsFailing
-						updated.IsHealthy = res.TunnelStatus == "UP" && !res.IsFailing
-						updated.LatencyMs = lat
-						updated.LastSeen = time.Now()
-						if updated.PublicIP == "" && res.PublicIP != "" {
-							updated.PublicIP = res.PublicIP
-						}
-					} else {
-						updated.IsHealthy = false
-						updated.LatencyMs = 0
-					}
-					cfg.Nodes[nid] = updated
-				}
-			}(peerIDs[i], peers[i])
-		}
-		wg.Wait()
-		updateClusterRuntime(func(c *ClusterConfig) {
-			for id, probed := range cfg.Nodes {
-				if existing, ok := c.Nodes[id]; ok {
-					existing.TunnelStatus = probed.TunnelStatus
-					existing.TunnelLoss = probed.TunnelLoss
-					existing.IsFailing = probed.IsFailing
-					existing.IsHealthy = probed.IsHealthy
-					existing.LatencyMs = probed.LatencyMs
-					existing.LastSeen = probed.LastSeen
-					if existing.PublicIP == "" {
-						existing.PublicIP = probed.PublicIP
-					}
-					c.Nodes[id] = existing
-				}
-			}
-		})
-
-		// Evaluate auto-failover
-		if cfg.AutoFailover {
-			if isLocalFailing {
-				consecutiveSuccesses = 0
-				consecutiveFailures++
-				// Require 3 consecutive failed cycles (approx 9s) to prevent flapping
-				if consecutiveFailures >= 3 && cfg.ActiveFailover == "" {
-					// Select best candidate: healthy, not failing, lowest latency, valid IP
-					var bestNode *ClusterNode
-					for _, candidate := range cfg.Nodes {
-						if candidate.IsHealthy && !candidate.IsFailing && candidate.PublicIP != "" {
-							if bestNode == nil || candidate.LatencyMs < bestNode.LatencyMs {
-								n := candidate
-								bestNode = &n
-							}
-						}
-					}
-					if bestNode != nil {
-						_ = applyClusterFailover(&cfg, *bestNode)
-						persistClusterFailover(cfg.ActiveFailover, cfg.FailoverTarget)
-					}
-				}
+		lbWriteBinds(want)
+	}
+	for _, l := range links {
+		isBound := lbIsBound(l.Svc, l.Addr)
+		switch {
+		case checkBinds && member[l.ID] && !isBound:
+			changed, err := lbBind(l.Svc, l.Addr)
+			if err != nil {
+				rt.bindErr[l.Svc] = err.Error()
+				clusterEventf("error", "%s: cannot move its ports behind the cluster: %v", lbLinkName(l), err)
 			} else {
-				consecutiveFailures = 0
-				consecutiveSuccesses++
-				// Revert if healthy for 3 cycles and currently failed over
-				if consecutiveSuccesses >= 3 && cfg.ActiveFailover != "" {
-					_ = clearClusterFailover(&cfg)
-					persistClusterFailover("", "")
+				delete(rt.bindErr, l.Svc)
+				isBound = true
+				if changed {
+					clusterEventf("info", "%s now serves its ports through the cluster (%s restarted, listening on %s).", lbLinkName(l), l.Svc, l.Addr)
+				}
+			}
+		case checkBinds && !member[l.ID] && isBound:
+			if _, err := lbBind(l.Svc, ""); err != nil {
+				rt.bindErr[l.Svc] = err.Error()
+				clusterEventf("error", "%s: cannot give its ports back: %v", lbLinkName(l), err)
+			} else {
+				delete(rt.bindErr, l.Svc)
+				isBound = false
+				clusterEventf("info", "%s left every pool and listens on its public ports again (%s restarted).", lbLinkName(l), l.Svc)
+			}
+		}
+		bound[l.ID] = isBound
+	}
+
+	// Plan.
+	byID := map[int]lbLink{}
+	for _, l := range links {
+		byID[l.ID] = l
+	}
+	plan := lbPlan{}
+	pooled := map[string]bool{}
+	rt.plans = map[string]lbPoolPlan{}
+	for _, p := range cfg.Pools {
+		if !p.Disabled {
+			for _, proto := range lbProtos(p.Proto) {
+				pooled[proto+"/"+strconv.Itoa(p.Port)] = true
+			}
+		}
+		var ms []lbMemberState
+		for _, m := range p.Members {
+			st := lbMemberState{LBMember: m, LatencyMs: -1}
+			if l, ok := byID[m.Link]; ok && bound[m.Link] {
+				st.Name, st.Addr = lbLinkName(l), l.Addr
+				if lr := rt.links[m.Link]; lr != nil {
+					st.Up, st.LatencyMs = lr.Up, lr.LatencyMs
+				}
+				port := memberPort(p, m)
+				ls := listen[l.Addr]
+				st.Listening = (p.Proto != "udp" && hasInt(ls["tcp"], port)) || (p.Proto == "udp" && hasInt(ls["udp"], port))
+			}
+			ms = append(ms, st)
+		}
+		prt := rt.pools[p.key()]
+		if prt == nil {
+			prt = &lbPoolRT{Current: -1, Better: -1}
+			rt.pools[p.key()] = prt
+		}
+		ts, state := lbPickTargets(p, ms, prt)
+		if (state == poolDown || state == poolFailOpen) && cfg.HubForward {
+			if to := lbHubForward(cfg, p); to != "" {
+				plan.Forward = append(plan.Forward, lbForward{Port: p.Port, Proto: p.Proto, To: to})
+				ts, state = nil, poolForward
+			}
+		}
+		pp := lbPoolPlan{Port: p.Port, Proto: p.Proto, Mode: p.Mode, State: state, Targets: ts}
+		plan.Pools = append(plan.Pools, pp)
+		rt.plans[p.key()] = pp
+		lbPoolTransition(rt, p, state, ts, byID)
+	}
+	listenByLink := map[int]map[string][]int{}
+	addrByLink := map[int]string{}
+	for _, l := range links {
+		if bound[l.ID] {
+			listenByLink[l.ID] = listen[l.Addr]
+			addrByLink[l.ID] = l.Addr
+		}
+	}
+	plan.Pass, rt.warnings = lbPassRanges(listenByLink, addrByLink, pooled)
+	rt.pass = plan.Pass
+
+	// Apply when something changed, and re-check the hooks now and then.
+	active := len(cfg.Pools) > 0 || len(addrByLink) > 0
+	switch {
+	case !active && (rt.rules != "" || fileExists(lbRulesFile())):
+		lbClear(rt.chains)
+		rt.rules, rt.chains, rt.applyErr = "", nil, ""
+		clusterEventf("info", "No pools left: cluster rules removed.")
+	case active:
+		text := lbRulesText(plan)
+		if text != rt.rules || now.Sub(rt.hooksAt) >= 30*time.Second {
+			if err := lbApply(text, rt.chains); err != nil {
+				if rt.applyErr != err.Error() {
+					clusterEventf("error", "Cannot apply the cluster rules: %v", err)
+				}
+				rt.applyErr = err.Error()
+			} else {
+				rt.rules, rt.chains, rt.applyErr, rt.appliedAt = text, lbChainsIn(text), "", now
+			}
+			rt.hooksAt = now
+		}
+	}
+
+	// The API view.
+	rt.view = rt.view[:0]
+	for _, l := range links {
+		lr := rt.links[l.ID]
+		v := lbLinkView{ID: l.ID, Name: lbLinkName(l), Remote: l.Remote, Engine: l.Engine, Svc: l.Svc, Addr: l.Addr,
+			Bound: bound[l.ID], Ports: l.Ports, LatencyMs: -1, ICMPMs: -1, BindError: rt.bindErr[l.Svc]}
+		if lr != nil {
+			v.Up, v.Session, v.LatencyMs, v.ICMPMs, v.Reason = lr.Up, lr.Session, lr.LatencyMs, lr.ICMPms, lr.Reason
+			if !lr.Since.IsZero() {
+				v.Since = lr.Since.Format("2006-01-02 15:04:05")
+			}
+		}
+		if bound[l.ID] {
+			v.ListenTCP, v.ListenUDP = sortedCopy(listen[l.Addr]["tcp"]), sortedCopy(listen[l.Addr]["udp"])
+		}
+		rt.view = append(rt.view, v)
+	}
+	return false
+}
+
+// lbIdleView lists the links with the snapshot's verdict (no pool runs, so
+// the one-second check does not either).
+func lbIdleView(links []lbLink) []lbLinkView {
+	out := make([]lbLinkView, 0, len(links))
+	for _, l := range links {
+		up := l.SnapHealth == stateHealthy || l.SnapHealth == stateDegraded
+		out = append(out, lbLinkView{ID: l.ID, Name: lbLinkName(l), Remote: l.Remote, Engine: l.Engine, Svc: l.Svc, Addr: l.Addr,
+			Up: up, Session: up, LatencyMs: l.LatencyMs, ICMPMs: -1, Ports: l.Ports})
+	}
+	return out
+}
+
+func sortedCopy(xs []int) []int {
+	out := append([]int(nil), xs...)
+	sort.Ints(out)
+	return out
+}
+
+// lbPoolTransition records state changes, alerts on them and drops the UDP
+// flows of members that stopped receiving traffic.
+func lbPoolTransition(rt *clusterRuntime, p LBPool, state string, ts []lbTarget, byID map[int]lbLink) {
+	k := p.key()
+	now := map[int]bool{}
+	for _, t := range ts {
+		now[t.Link] = true
+	}
+	if p.Proto != "tcp" {
+		for link := range rt.targeted[k] {
+			if !now[link] {
+				if l, ok := byID[link]; ok {
+					go lbForget(l.Addr)
 				}
 			}
 		}
 	}
+	rt.targeted[k] = now
+	old, seen := rt.poolState[k]
+	rt.poolState[k] = state
+	if !seen || old == state {
+		return
+	}
+	var names []string
+	for _, t := range ts {
+		if l, ok := byID[t.Link]; ok {
+			names = append(names, lbLinkName(l))
+		}
+	}
+	where := strings.Join(names, ", ")
+	label := poolLabel(p)
+	switch state {
+	case poolOK:
+		clusterEventf("info", "%s: every member is healthy again (%s).", label, where)
+	case poolDegraded:
+		clusterEventf("warn", "%s: some members are out; traffic goes to %s.", label, where)
+	case poolFailOpen:
+		clusterEventf("error", "%s: no member passes the health check; trying every member that still listens.", label)
+	case poolForward:
+		clusterEventf("warn", "%s: no member works here; forwarded to another Iran hub.", label)
+	case poolDown:
+		clusterEventf("error", "%s: nothing can serve it.", label)
+	}
+	poolAlert(label, old, state, where)
 }
+
+func poolLabel(p LBPool) string {
+	s := fmt.Sprintf("Pool %d/%s", p.Port, p.Proto)
+	if p.Name != "" {
+		s += " (" + p.Name + ")"
+	}
+	return s
+}
+
+// poolAlert sends a pool state change through the alert channels (Settings ->
+// Alerts), with the link states' vocabulary.
+func poolAlert(label, from, to, where string) {
+	cfg := loadAlertConfig()
+	if !cfg.Enabled || from == poolOff || to == poolOff {
+		return
+	}
+	m := map[string]string{poolOK: stateHealthy, poolDegraded: stateDegraded, poolForward: stateDegraded,
+		poolFailOpen: stateDown, poolDown: stateDown}
+	if !cfg.NotifyDegrad && m[from] != stateDown && m[to] != stateDown {
+		return
+	}
+	why := "now on: " + where
+	if where == "" {
+		why = to
+	}
+	go alertSend(cfg, []alertEvent{{Link: label, From: m[from], To: m[to], Why: why, At: time.Now().Format(time.RFC3339)}})
+}
+
+// lbAutoJoin adds every link whose ports include a pool port to that pool
+// (unless it was removed from it by hand). It reports a change.
+func lbAutoJoin(c *ClusterConfig, links []lbLink) bool {
+	changed := false
+	for i := range c.Pools {
+		p := &c.Pools[i]
+		if p.Disabled {
+			continue
+		}
+		for _, l := range links {
+			if !hasInt(l.Ports, p.Port) || p.member(l.ID) != nil || hasInt(p.Excluded, l.ID) {
+				continue
+			}
+			p.Members = append(p.Members, LBMember{Link: l.ID, Remote: l.Remote, Weight: 1, Priority: nextPriority(*p)})
+			clusterEventf("info", "%s joined %s (its ports include %d).", lbLinkName(l), poolLabel(*p), p.Port)
+			changed = true
+		}
+	}
+	return changed
+}
+
+func nextPriority(p LBPool) int {
+	n := 0
+	for _, m := range p.Members {
+		if m.Priority >= n {
+			n = m.Priority + 1
+		}
+	}
+	return n
+}
+
+// lbWriteBinds tells hashem.sh which relays are bound.
+func lbWriteBinds(want map[string]string) {
+	if len(want) == 0 {
+		_ = os.Remove(lbBindsFile())
+		return
+	}
+	svcs := make([]string, 0, len(want))
+	for s := range want {
+		svcs = append(svcs, s)
+	}
+	sort.Strings(svcs)
+	var b strings.Builder
+	for _, s := range svcs {
+		fmt.Fprintf(&b, "%s %s\n", s, want[s])
+	}
+	_ = os.WriteFile(lbBindsFile(), []byte(b.String()), 0o644)
+}
+
+// ---- API ----
+
+type clusterPoolView struct {
+	LBPool
+	State   string         `json:"state"`
+	Targets []lbTarget     `json:"targets"`
+	Status  []memberStatus `json:"member_status"`
+}
+
+type memberStatus struct {
+	Link      int     `json:"link"`
+	Name      string  `json:"name"`
+	Up        bool    `json:"up"`
+	Listening bool    `json:"listening"`
+	Share     float64 `json:"share"`
+	LatencyMs float64 `json:"latency_ms"`
+	Stale     bool    `json:"stale"` // the peer id now belongs to another foreign IP
+	Missing   bool    `json:"missing"`
+}
+
+func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
+	cfg := loadClusterConfig()
+	rt := clusterRT
+	rt.mu.Lock()
+	links := append([]lbLinkView(nil), rt.view...)
+	pools := make([]clusterPoolView, 0, len(cfg.Pools))
+	byID := map[int]lbLinkView{}
+	for _, l := range links {
+		byID[l.ID] = l
+	}
+	for _, p := range cfg.Pools {
+		pl := rt.plans[p.key()]
+		v := clusterPoolView{LBPool: p, State: pl.State, Targets: pl.Targets}
+		if v.State == "" {
+			v.State = "starting"
+		}
+		share := map[int]float64{}
+		for _, t := range pl.Targets {
+			share[t.Link] = t.Share
+		}
+		for _, m := range p.Members {
+			l, ok := byID[m.Link]
+			ms := memberStatus{Link: m.Link, Name: l.Name, Up: l.Up, LatencyMs: l.LatencyMs, Share: share[m.Link], Missing: !ok}
+			if ok {
+				port := memberPort(p, m)
+				ms.Listening = (p.Proto != "udp" && hasInt(l.ListenTCP, port)) || (p.Proto == "udp" && hasInt(l.ListenUDP, port))
+				ms.Stale = m.Remote != "" && l.Remote != "" && m.Remote != l.Remote
+			}
+			v.Status = append(v.Status, ms)
+		}
+		pools = append(pools, v)
+	}
+	resp := map[string]any{
+		"licensed":    isClusterLicensed(),
+		"node_id":     cfg.NodeID,
+		"name":        cfg.Name,
+		"public_ip":   cfg.PublicIP,
+		"health":      cfg.Health,
+		"hub_forward": cfg.HubForward,
+		"pools":       pools,
+		"links":       links,
+		"warnings":    append([]string(nil), rt.warnings...),
+		"apply_error": rt.applyErr,
+		"icmp":        rt.icmpOK,
+		"events":      clusterEvents(60),
+		"hubs":        meshView(cfg),
+		"dns":         dnsView(cfg),
+		"joined_hubs": joinedHubsView(),
+	}
+	if !rt.appliedAt.IsZero() {
+		resp["applied_at"] = rt.appliedAt.Format("2006-01-02 15:04:05")
+	}
+	rt.mu.Unlock()
+	writeJSON(w, resp)
+}
+
+// handleClusterRules shows the kernel rules the cluster keeps (read only).
+func handleClusterRules(w http.ResponseWriter, r *http.Request) {
+	clusterRT.mu.Lock()
+	text := clusterRT.rules
+	clusterRT.mu.Unlock()
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(text))
+}
+
+// validatePool checks a pool against the others and the hub's own ports.
+func validatePool(c ClusterConfig, p LBPool, skip int) (string, string) {
+	if p.Port < 1 || p.Port > 65535 {
+		return "E-CLUSTER-02", "the port must be 1-65535"
+	}
+	if !lbProtoOK(p.Proto) {
+		return "E-CLUSTER-02", "protocol must be tcp, udp or both"
+	}
+	if !lbModeOK(p.Mode) {
+		return "E-CLUSTER-02", "mode must be failover, balance, sticky or latency"
+	}
+	for i, q := range c.Pools {
+		if i != skip && q.overlaps(p) {
+			return "E-CLUSTER-03", fmt.Sprintf("port %d already has a pool (%s)", p.Port, q.Proto)
+		}
+	}
+	if p.Port == cfg.Port {
+		return "E-CLUSTER-03", fmt.Sprintf("port %d is the panel's own port", p.Port)
+	}
+	for _, l := range lbLinksFrom(lbSnapshot()) {
+		if hasInt(controlPorts(l.CtrlPort), p.Port) {
+			return "E-CLUSTER-03", fmt.Sprintf("port %d is the control port of %s; the foreign server dials it", p.Port, lbLinkName(l))
+		}
+	}
+	seen := map[int]bool{}
+	for _, m := range p.Members {
+		if seen[m.Link] {
+			return "E-CLUSTER-02", fmt.Sprintf("link %d is listed twice", m.Link)
+		}
+		seen[m.Link] = true
+		if m.Port < 0 || m.Port > 65535 || m.Weight < 0 || m.Weight > 100 || m.Priority < 0 || m.Priority > 1000 {
+			return "E-CLUSTER-02", "member port 1-65535, weight 1-100, priority 0-1000"
+		}
+	}
+	return "", ""
+}
+
+func normMembers(p *LBPool, links []lbLink) {
+	remote := map[int]string{}
+	for _, l := range links {
+		remote[l.ID] = l.Remote
+	}
+	for i := range p.Members {
+		m := &p.Members[i]
+		if m.Weight <= 0 {
+			m.Weight = 1
+		}
+		if m.Remote == "" {
+			m.Remote = remote[m.Link]
+		}
+	}
+}
+
+// handleClusterPool creates or replaces a pool. Body: an LBPool, plus
+// "orig_port"/"orig_proto" when an existing pool changes its port.
+func handleClusterPool(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, "cluster", "Cluster") {
+		return
+	}
+	var req struct {
+		LBPool
+		OrigPort  int    `json:"orig_port"`
+		OrigProto string `json:"orig_proto"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		writeAPIError(w, r, "E-CLUSTER-01", "")
+		return
+	}
+	p := req.LBPool
+	p.Proto = strings.ToLower(strings.TrimSpace(p.Proto))
+	if p.Proto == "" {
+		p.Proto = "tcp"
+	}
+	p.Mode = strings.ToLower(strings.TrimSpace(p.Mode))
+	if p.Mode == "" {
+		p.Mode = lbFailover
+	}
+	p.Name = strings.TrimSpace(p.Name)
+	if len(p.Name) > 40 {
+		p.Name = p.Name[:40]
+	}
+	links := lbLinksFrom(lbSnapshot())
+	known := map[int]bool{}
+	for _, l := range links {
+		known[l.ID] = true
+	}
+	for _, m := range p.Members {
+		if !known[m.Link] {
+			writeAPIError(w, r, "E-CLUSTER-04", fmt.Sprintf("link %d is not a tunnel on this server", m.Link))
+			return
+		}
+	}
+	normMembers(&p, links)
+	var code, msg string
+	_, err := updateClusterConfig(func(c *ClusterConfig) error {
+		idx := -1
+		op, opr := req.OrigPort, req.OrigProto
+		if op == 0 {
+			op, opr = p.Port, p.Proto
+		}
+		for i, q := range c.Pools {
+			if q.Port == op && (opr == "" || q.Proto == opr) {
+				idx = i
+			}
+		}
+		if code, msg = validatePool(*c, p, idx); code != "" {
+			return fmt.Errorf("%s", msg)
+		}
+		if idx >= 0 {
+			if p.Excluded == nil {
+				p.Excluded = c.Pools[idx].Excluded
+			}
+			c.Pools[idx] = p
+			clusterEventf("info", "%s changed (mode %s, %d members).", poolLabel(p), p.Mode, len(p.Members))
+		} else {
+			c.Pools = append(c.Pools, p)
+			clusterEventf("info", "%s created (mode %s, %d members).", poolLabel(p), p.Mode, len(p.Members))
+		}
+		sort.Slice(c.Pools, func(i, j int) bool { return c.Pools[i].Port < c.Pools[j].Port })
+		return nil
+	})
+	if code != "" {
+		writeAPIError(w, r, code, msg)
+		return
+	}
+	if err != nil {
+		writeAPIError(w, r, "E-CLUSTER-06", err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"status": "ok"})
+}
+
+func handleClusterPoolDelete(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, "cluster", "Cluster") {
+		return
+	}
+	var req struct {
+		Port  int    `json:"port"`
+		Proto string `json:"proto"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&req) != nil {
+		writeAPIError(w, r, "E-CLUSTER-01", "")
+		return
+	}
+	found := false
+	_, err := updateClusterConfig(func(c *ClusterConfig) error {
+		out := c.Pools[:0]
+		for _, p := range c.Pools {
+			if p.Port == req.Port && (req.Proto == "" || p.Proto == req.Proto) {
+				found = true
+				clusterEventf("info", "%s deleted.", poolLabel(p))
+				continue
+			}
+			out = append(out, p)
+		}
+		c.Pools = out
+		return nil
+	})
+	if !found {
+		writeAPIError(w, r, "E-CLUSTER-05", "")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, r, "E-CLUSTER-06", err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"status": "ok"})
+}
+
+// handleClusterMember changes one member: add, remove, drain, resume or set
+// (weight, priority, port).
+func handleClusterMember(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, "cluster", "Cluster") {
+		return
+	}
+	var req struct {
+		Port     int    `json:"port"`
+		Proto    string `json:"proto"`
+		Link     int    `json:"link"`
+		Action   string `json:"action"`
+		Weight   int    `json:"weight"`
+		Priority *int   `json:"priority"`
+		LinkPort int    `json:"link_port"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&req) != nil {
+		writeAPIError(w, r, "E-CLUSTER-01", "")
+		return
+	}
+	code, msg := lbMemberChange(req.Port, req.Proto, req.Link, req.Action, req.Weight, req.Priority, req.LinkPort)
+	if code != "" {
+		writeAPIError(w, r, code, msg)
+		return
+	}
+	writeJSON(w, map[string]any{"status": "ok"})
+}
+
+// lbMemberChange is shared by the API and the CLI.
+func lbMemberChange(port int, proto string, link int, action string, weight int, prio *int, linkPort int) (string, string) {
+	links := lbLinksFrom(lbSnapshot())
+	var ln *lbLink
+	for i := range links {
+		if links[i].ID == link {
+			ln = &links[i]
+		}
+	}
+	var code, msg string
+	_, err := updateClusterConfig(func(c *ClusterConfig) error {
+		var p *LBPool
+		for i := range c.Pools {
+			if c.Pools[i].Port == port && (proto == "" || c.Pools[i].Proto == proto) {
+				p = &c.Pools[i]
+			}
+		}
+		if p == nil {
+			code, msg = "E-CLUSTER-05", fmt.Sprintf("no pool on port %d", port)
+			return fmt.Errorf("%s", msg)
+		}
+		m := p.member(link)
+		name := fmt.Sprintf("link %d", link)
+		if ln != nil {
+			name = lbLinkName(*ln)
+		}
+		switch action {
+		case "add":
+			if ln == nil {
+				code, msg = "E-CLUSTER-04", fmt.Sprintf("link %d is not a tunnel on this server", link)
+				return fmt.Errorf("%s", msg)
+			}
+			if m != nil {
+				return nil
+			}
+			nm := LBMember{Link: link, Remote: ln.Remote, Weight: max(weight, 1), Priority: nextPriority(*p), Port: linkPort}
+			if prio != nil {
+				nm.Priority = *prio
+			}
+			p.Members = append(p.Members, nm)
+			ex := p.Excluded[:0]
+			for _, x := range p.Excluded {
+				if x != link {
+					ex = append(ex, x)
+				}
+			}
+			p.Excluded = ex
+			clusterEventf("info", "%s added to %s.", name, poolLabel(*p))
+		case "remove":
+			if m == nil {
+				return nil
+			}
+			out := p.Members[:0]
+			for _, x := range p.Members {
+				if x.Link != link {
+					out = append(out, x)
+				}
+			}
+			p.Members = out
+			if !hasInt(p.Excluded, link) {
+				p.Excluded = append(p.Excluded, link)
+			}
+			clusterEventf("info", "%s removed from %s.", name, poolLabel(*p))
+		case "drain", "resume":
+			if m == nil {
+				code, msg = "E-CLUSTER-04", name+" is not in this pool"
+				return fmt.Errorf("%s", msg)
+			}
+			m.Drain = action == "drain"
+			if m.Drain {
+				clusterEventf("info", "%s drained in %s: no new connections, open ones finish.", name, poolLabel(*p))
+			} else {
+				clusterEventf("info", "%s takes new connections again in %s.", name, poolLabel(*p))
+			}
+		case "set":
+			if m == nil {
+				code, msg = "E-CLUSTER-04", name+" is not in this pool"
+				return fmt.Errorf("%s", msg)
+			}
+			if weight < 0 || weight > 100 || linkPort < 0 || linkPort > 65535 || (prio != nil && (*prio < 0 || *prio > 1000)) {
+				code, msg = "E-CLUSTER-02", "weight 1-100, priority 0-1000, port 1-65535"
+				return fmt.Errorf("%s", msg)
+			}
+			if weight > 0 {
+				m.Weight = weight
+			}
+			if prio != nil {
+				m.Priority = *prio
+			}
+			if linkPort > 0 {
+				m.Port = linkPort
+			}
+		default:
+			code, msg = "E-CLUSTER-01", "action must be add, remove, drain, resume or set"
+			return fmt.Errorf("%s", msg)
+		}
+		return nil
+	})
+	if code != "" {
+		return code, msg
+	}
+	if err != nil {
+		return "E-CLUSTER-06", err.Error()
+	}
+	return "", ""
+}
+
+// handleClusterSettings changes health tuning, hub forwarding and identity.
+func handleClusterSettings(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, "cluster", "Cluster") {
+		return
+	}
+	var req struct {
+		Health     *LBHealth `json:"health"`
+		HubForward *bool     `json:"hub_forward"`
+		Name       *string   `json:"name"`
+		PublicIP   *string   `json:"public_ip"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&req) != nil {
+		writeAPIError(w, r, "E-CLUSTER-01", "")
+		return
+	}
+	if req.PublicIP != nil && *req.PublicIP != "" && !isIPv4(*req.PublicIP) {
+		writeAPIError(w, r, "E-CLUSTER-02", "public IP must be an IPv4 address")
+		return
+	}
+	_, err := updateClusterConfig(func(c *ClusterConfig) error {
+		if req.Health != nil {
+			c.Health = req.Health.norm()
+		}
+		if req.HubForward != nil {
+			c.HubForward = *req.HubForward
+		}
+		if req.Name != nil {
+			c.Name = strings.TrimSpace(*req.Name)
+		}
+		if req.PublicIP != nil {
+			c.PublicIP = strings.TrimSpace(*req.PublicIP)
+		}
+		return nil
+	})
+	if err != nil {
+		writeAPIError(w, r, "E-CLUSTER-06", err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"status": "ok"})
+}
+
+// ---- CLI ----
 
 func cliCluster(args []string) int {
-	if len(args) == 0 || args[0] == "status" {
-		cfg := loadClusterConfig()
-		fmt.Printf("Cluster Enabled:  %v\n", cfg.Enabled)
-		fmt.Printf("Node ID:          %s\n", cfg.NodeID)
-		fmt.Printf("Balancing Mode:   %s\n", cfg.BalancingMode)
-		fmt.Printf("Public IP:        %s\n", cfg.PublicIP)
-		fmt.Printf("Auto Failover:    %v\n", cfg.AutoFailover)
-		fmt.Printf("Active Failover:  %v\n", cfg.ActiveFailover != "")
-		if cfg.ActiveFailover != "" {
-			fmt.Printf("Failover Target:  %s (%s)\n", cfg.ActiveFailover, cfg.FailoverTarget)
+	sub := "status"
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	if sub == "reset" { // uninstall: works even when panel.json is gone
+		if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
+			configDir = v
 		}
-		fmt.Printf("Peer Nodes:       %d\n", len(cfg.Nodes))
-		for id, node := range cfg.Nodes {
-			fmt.Printf(" - %s (%s, %s): Healthy=%v, Tunnel=%s\n", id, node.Name, node.PublicIP, node.IsHealthy, node.TunnelStatus)
-		}
-		fmt.Printf("Foreign Nodes:    %d (Active: %s)\n", len(cfg.ForeignNodes), cfg.ActiveForeign)
-		for id, fnode := range cfg.ForeignNodes {
-			activeMark := ""
-			if id == cfg.ActiveForeign || fnode.IsActive {
-				activeMark = " [ACTIVE]"
-			}
-			w := fnode.Weight
-			if w <= 0 {
-				w = 1
-			}
-			fmt.Printf(" - %s (%s, %s:%d/%s)%s: Healthy=%v, Latency=%.1fms, Weight=%d\n", id, fnode.Name, fnode.PublicIP, fnode.TunnelPort, fnode.Protocol, activeMark, fnode.IsHealthy, fnode.LatencyMs, w)
-		}
+		lbClearRules(lbChainsIn(readFileString(lbRulesFile())))
+		lbClearLegacyV1()
+		_ = lbEnsureAddrs(nil)
+		fmt.Println("[OK] Cluster rules and private addresses removed; the panel puts them back on start while pools exist.")
 		return 0
 	}
-	if args[0] == "revert" {
-		cfg := loadClusterConfig()
-		_ = clearClusterFailover(&cfg)
-		_ = saveClusterConfig(cfg)
-		fmt.Println("Failover iptables NAT rules reverted to local tunnel.")
-		return 0
+	// the panel's port and the license (join codes, validation)
+	if !cliStart() {
+		return 1
 	}
-	if args[0] == "add-foreign" {
-		if len(args) < 4 {
-			fmt.Println("Usage: gre-panel cluster add-foreign <name> <ip> <tunnel_port> [weight] [protocol]")
-			return 1
+	cfg := loadClusterConfig()
+	switch sub {
+	case "status":
+		fmt.Printf("Hub:          %s (%s)\n", cfg.Name, cfg.NodeID)
+		fmt.Printf("Health check: every %d ms, out after %d failures, back after %d passes\n", cfg.Health.IntervalMs, cfg.Health.Fall, cfg.Health.Rise)
+		if len(cfg.Pools) == 0 {
+			fmt.Println("Pools:        none (gre-panel cluster pool add PORT)")
 		}
-		name := args[1]
-		ip := args[2]
-		port, err := strconv.Atoi(args[3])
-		if err != nil || port < 1 || port > 65535 {
-			fmt.Println("Invalid port:", args[3])
-			return 1
-		}
-		weight := 1
-		if len(args) >= 5 {
-			if w, err := strconv.Atoi(args[4]); err == nil && w > 0 {
-				weight = w
+		for _, p := range cfg.Pools {
+			state := ""
+			if p.Disabled {
+				state = " [disabled]"
 			}
-		}
-		proto := "gre"
-		if len(args) >= 6 && args[5] != "" {
-			proto = args[5]
-		}
-		cfg := loadClusterConfig()
-		if cfg.ForeignNodes == nil {
-			cfg.ForeignNodes = make(map[string]ForeignNode)
-		}
-		id := fmt.Sprintf("fn_%d", time.Now().UnixNano()%100000)
-		cfg.ForeignNodes[id] = ForeignNode{
-			ID:         id,
-			Name:       name,
-			PublicIP:   ip,
-			TunnelPort: port,
-			Weight:     weight,
-			Protocol:   proto,
-			IsActive:   len(cfg.ForeignNodes) == 0,
-			IsHealthy:  true,
-			LastProbe:  time.Now(),
-		}
-		if cfg.ActiveForeign == "" {
-			cfg.ActiveForeign = id
-		}
-		if err := saveClusterConfig(cfg); err != nil {
-			fmt.Println("Failed to save cluster config:", err)
-			return 1
-		}
-		fmt.Printf("Foreign node '%s' added with ID: %s (Weight: %d)\n", name, id, weight)
-		return 0
-	}
-	if args[0] == "del-foreign" || args[0] == "rm-foreign" {
-		if len(args) < 2 {
-			fmt.Println("Usage: gre-panel cluster del-foreign <id_or_name>")
-			return 1
-		}
-		target := args[1]
-		cfg := loadClusterConfig()
-		found := false
-		for k, v := range cfg.ForeignNodes {
-			if k == target || v.Name == target {
-				delete(cfg.ForeignNodes, k)
-				found = true
-				if cfg.ActiveForeign == k {
-					cfg.ActiveForeign = ""
-					for nextID := range cfg.ForeignNodes {
-						cfg.ActiveForeign = nextID
-						break
-					}
+			fmt.Printf("%s: %s%s\n", poolLabel(p), p.Mode, state)
+			for _, m := range p.Members {
+				extra := ""
+				if m.Drain {
+					extra = " drained"
 				}
-				break
+				fmt.Printf("  - link %d  weight %d  priority %d  port %d%s\n", m.Link, max(m.Weight, 1), m.Priority, memberPort(p, m), extra)
 			}
 		}
-		if !found {
-			fmt.Println("Foreign node not found:", target)
+		fmt.Printf("Iran hubs:    %d\n", len(cfg.Hubs))
+		for _, h := range cfg.Hubs {
+			fmt.Printf("  - %s (%s) %s\n", h.Name, h.ID, h.PublicIP)
+		}
+		if cfg.DNS.Enabled {
+			fmt.Printf("DNS failover: %s on %s\n", cfg.DNS.Name, cfg.DNS.Provider)
+		}
+		fmt.Println("Live state:   the panel's Cluster tab, or: curl the panel's /api/cluster/status")
+		return 0
+	case "pool":
+		return cliClusterPool(args[1:])
+	case "member":
+		return cliClusterMember(args[1:])
+	case "rules":
+		data, err := os.ReadFile(lbRulesFile())
+		if err != nil {
+			fmt.Println("No cluster rules applied.")
+			return 0
+		}
+		fmt.Print(string(data))
+		return 0
+	case "events":
+		for _, e := range clusterEvents(40) {
+			fmt.Printf("%s  %-5s  %s\n", e.At, e.Level, e.Text)
+		}
+		return 0
+	case "join-code":
+		code, err := meshJoinCode(cfg)
+		if err != nil {
+			fmt.Println("[!]", err)
 			return 1
 		}
-		_ = saveClusterConfig(cfg)
-		fmt.Println("Foreign node removed:", target)
+		fmt.Println(code)
 		return 0
-	}
-	if args[0] == "set-mode" {
+	case "add-hub":
 		if len(args) < 2 {
-			fmt.Println("Usage: gre-panel cluster set-mode <wrr|failover|lowest_latency>")
+			fmt.Println("Usage: gre-panel cluster add-hub <join code from the other hub>")
 			return 1
 		}
-		mode := args[1]
-		if mode != "wrr" && mode != "failover" && mode != "lowest_latency" {
-			fmt.Println("Invalid mode. Allowed: wrr, failover, lowest_latency")
+		h, err := meshAddHub(args[1])
+		if err != nil {
+			fmt.Println("[!]", err)
 			return 1
 		}
-		cfg := loadClusterConfig()
-		cfg.BalancingMode = mode
-		_ = saveClusterConfig(cfg)
-		fmt.Println("Balancing mode set to:", mode)
+		fmt.Printf("[OK] Linked with hub %s (%s).\n", h.Name, h.PublicIP)
 		return 0
-	}
-	if args[0] == "switch-foreign" {
+	case "remove-hub":
 		if len(args) < 2 {
-			fmt.Println("Usage: gre-panel cluster switch-foreign <id_or_name>")
+			fmt.Println("Usage: gre-panel cluster remove-hub <id>")
 			return 1
 		}
-		target := args[1]
-		cfg := loadClusterConfig()
-		found := false
-		for k, v := range cfg.ForeignNodes {
-			if k == target || v.Name == target {
-				cfg.ActiveForeign = k
-				node := v
-				node.IsActive = true
-				cfg.ForeignNodes[k] = node
-				found = true
-			} else {
-				node := v
-				node.IsActive = false
-				cfg.ForeignNodes[k] = node
-			}
-		}
-		if !found {
-			fmt.Println("Foreign node not found:", target)
+		if !meshRemoveHub(args[1]) {
+			fmt.Println("[!] No hub with id", args[1])
 			return 1
 		}
-		_ = saveClusterConfig(cfg)
-		fmt.Println("Switched active foreign node to:", target)
+		fmt.Println("[OK] Hub removed.")
 		return 0
 	}
-	fmt.Println("Usage: gre-panel cluster [status | revert | add-foreign | del-foreign | set-mode | switch-foreign]")
+	fmt.Println("Usage: gre-panel cluster [status | pool add|rm|mode|enable|disable | member add|rm|drain|resume|set | rules | events | join-code | add-hub CODE | remove-hub ID | reset]")
 	return 1
+}
+
+func readFileString(p string) string {
+	b, _ := os.ReadFile(p)
+	return string(b)
+}
+
+// cliFlags parses "--key value" pairs after positional args.
+func cliFlags(args []string) (pos []string, flags map[string]string) {
+	flags = map[string]string{}
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "--") && i+1 < len(args) {
+			flags[strings.TrimPrefix(args[i], "--")] = args[i+1]
+			i++
+			continue
+		}
+		pos = append(pos, args[i])
+	}
+	return pos, flags
+}
+
+func cliClusterPool(args []string) int {
+	usage := "Usage: gre-panel cluster pool add PORT [--proto tcp|udp|both] [--mode failover|balance|sticky|latency] [--links 0,2,3] [--name N]\n" +
+		"       gre-panel cluster pool rm|enable|disable PORT [--proto P]\n" +
+		"       gre-panel cluster pool mode PORT MODE [--proto P]"
+	pos, fl := cliFlags(args)
+	if len(pos) < 2 {
+		fmt.Println(usage)
+		return 1
+	}
+	port, err := strconv.Atoi(pos[1])
+	if err != nil {
+		fmt.Println(usage)
+		return 1
+	}
+	proto := fl["proto"]
+	switch pos[0] {
+	case "add":
+		p := LBPool{Port: port, Proto: proto, Mode: fl["mode"], Name: fl["name"]}
+		if p.Proto == "" {
+			p.Proto = "tcp"
+		}
+		if p.Mode == "" {
+			p.Mode = lbFailover
+		}
+		links := lbLinksFrom(directSnapshot())
+		if s := fl["links"]; s != "" {
+			for _, f := range strings.Split(s, ",") {
+				id, err := strconv.Atoi(strings.TrimSpace(f))
+				if err != nil {
+					fmt.Println("[!] --links takes link ids: 0 is the main tunnel, N is peer N")
+					return 1
+				}
+				p.Members = append(p.Members, LBMember{Link: id, Weight: 1, Priority: len(p.Members)})
+			}
+		} else {
+			for _, l := range links {
+				if hasInt(l.Ports, port) {
+					p.Members = append(p.Members, LBMember{Link: l.ID, Weight: 1, Priority: len(p.Members)})
+				}
+			}
+		}
+		normMembers(&p, links)
+		c := loadClusterConfig()
+		lbSnapshotOverride(links)
+		code, msg := validatePool(c, p, -1)
+		if code != "" {
+			fmt.Println("[!]", msg)
+			return 1
+		}
+		c.Pools = append(c.Pools, p)
+		sort.Slice(c.Pools, func(i, j int) bool { return c.Pools[i].Port < c.Pools[j].Port })
+		if err := saveClusterConfig(c); err != nil {
+			fmt.Println("[!]", err)
+			return 1
+		}
+		fmt.Printf("[OK] %s created with %d members. The panel applies it within a second.\n", poolLabel(p), len(p.Members))
+		return 0
+	case "rm", "enable", "disable", "mode":
+		c := loadClusterConfig()
+		found := false
+		out := c.Pools[:0]
+		for _, p := range c.Pools {
+			if p.Port != port || (proto != "" && p.Proto != proto) {
+				out = append(out, p)
+				continue
+			}
+			found = true
+			switch pos[0] {
+			case "rm":
+				continue
+			case "enable", "disable":
+				p.Disabled = pos[0] == "disable"
+			case "mode":
+				if len(pos) < 3 || !lbModeOK(pos[2]) {
+					fmt.Println("[!] Mode must be failover, balance, sticky or latency.")
+					return 1
+				}
+				p.Mode = pos[2]
+			}
+			out = append(out, p)
+		}
+		if !found {
+			fmt.Println("[!] No pool on port", port)
+			return 1
+		}
+		c.Pools = out
+		if err := saveClusterConfig(c); err != nil {
+			fmt.Println("[!]", err)
+			return 1
+		}
+		fmt.Println("[OK] Saved.")
+		return 0
+	}
+	fmt.Println(usage)
+	return 1
+}
+
+func cliClusterMember(args []string) int {
+	usage := "Usage: gre-panel cluster member add|rm|drain|resume|set PORT LINK [--weight N] [--priority N] [--port N] [--proto P]"
+	pos, fl := cliFlags(args)
+	if len(pos) < 3 {
+		fmt.Println(usage)
+		return 1
+	}
+	port, err1 := strconv.Atoi(pos[1])
+	link, err2 := strconv.Atoi(pos[2])
+	if err1 != nil || err2 != nil {
+		fmt.Println(usage)
+		return 1
+	}
+	action := map[string]string{"rm": "remove"}[pos[0]]
+	if action == "" {
+		action = pos[0]
+	}
+	weight, _ := strconv.Atoi(fl["weight"])
+	lport, _ := strconv.Atoi(fl["port"])
+	var prio *int
+	if s, ok := fl["priority"]; ok {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			fmt.Println(usage)
+			return 1
+		}
+		prio = &n
+	}
+	lbSnapshotOverride(lbLinksFrom(directSnapshot()))
+	if code, msg := lbMemberChange(port, fl["proto"], link, action, weight, prio, lport); code != "" {
+		if msg == "" {
+			msg = errCatalog[code].Msg
+		}
+		fmt.Println("[!]", msg)
+		return 1
+	}
+	fmt.Println("[OK] Saved.")
+	return 0
+}
+
+// directSnapshot builds a snapshot without the background collector (CLI).
+func directSnapshot() *HubSnapshot {
+	return buildSnapshot()
+}
+
+// lbSnapshotOverride makes the CLI's validation see the links it just listed.
+func lbSnapshotOverride(links []lbLink) {
+	s := &HubSnapshot{}
+	for _, l := range links {
+		pl := peerLive{peerRecord: peerRecord{ID: l.ID, Name: l.Name, RemotePub: l.Remote, FrpPort: l.CtrlPort,
+			FrpsSvc: l.Svc, Ports: l.Ports, PeerGre: l.PeerGre, NoGre: l.NoGre}}
+		if l.ID == mainTunnelID {
+			s.Main = &pl
+			s.Local.FrpSvc = l.Svc
+		} else {
+			s.Peers = append(s.Peers, pl)
+		}
+	}
+	lbSnapshot = func() *HubSnapshot { return s }
 }

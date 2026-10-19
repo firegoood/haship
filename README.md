@@ -35,6 +35,7 @@
 - [Choosing an engine](#choosing-an-engine)
 - [Panel tour](#panel-tour)
 - [Tunnel types](#tunnel-types)
+- [Cluster](#cluster)
 - [Health model](#health-model)
 - [Automation](#automation)
 - [Updates, downgrade and channels](#updates-downgrade-and-channels)
@@ -233,6 +234,7 @@ The panel is one page with these tabs:
 - **Diagnostics** [PRO] — latency, jitter, MTU and speed tests; the same engine as `hashem doctor`.
 - **Setup** — create any tunnel: GRE + FRP, Backhaul (with or without GRE) or Bagher; bundles and peers.
 - **Watchdog** [PRO] — monitoring, backups and alerts.
+- **Cluster** [PRO] — pools (one Iran port served by several foreign servers: failover, balance, sticky per user or lowest latency, one-second health check), linked Iran hubs that take over each other's ports, DNS failover on Cloudflare, and on a foreign server, serving several Iran hubs. See [Cluster](#cluster).
 - **Benchmark** [PRO] — the Path Test (which transports get through between the two servers, before any tunnel: plain TCP/UDP, GRE, SSH, FRP x 5, Backhaul x 7, with latency and speed), carrier probing and the optional auto-pilot.
 - **Update** — channels, install any tag, rollback state.
 - **Logs, Settings, Terminal** — redacted logs with error codes; password, 2FA, idle timeout, alerts, TLS, metrics token; the audited shell (off by default).
@@ -250,6 +252,18 @@ The panel is one page with these tabs:
 
 **Hashem Pro** features: Bagher, setting up Backhaul (with or without GRE), the Path Test, Diagnostics, Performance, Watchdog, Benchmark and Cluster. A lock next to a tab in the sidebar marks the ones that need a license (Sentinel is a separate add-on). Every Pro license unlocks all of them, including features that became Pro after the key was issued, so an update never asks for a new key. Pro is checked on both servers. A Backhaul tunnel that already runs keeps running, restarting and being repaired without a license; only setting up a new one needs it. GRE + FRP stays free.
 - **Carriers for the GRE layer** — **Direct GRE** (IP protocol 47) and **WSS** (TLS WebSocket, default `:8443`). The FOU carrier was removed.
+
+---
+
+## Cluster
+
+Three ways to keep users up when a server dies; they combine.
+
+- **One Iran server, several foreign servers (pool).** Add each foreign server in Setup with the same port, then make a pool on that port. Each new connection goes to a foreign server that works, chosen by the pool's mode. A failed server is out within about three seconds.
+- **Several Iran servers, one foreign server.** On the second Iran server add the foreign server as a peer; on the foreign server run `hashem join-hub --bundle <its bundle>` (or Cluster in its panel). The foreign server then serves both, so either Iran server works on its own.
+- **Iran servers backing each other up.** Link the hubs with a join code. A pool with no working foreign server is forwarded to a hub where it works; with DNS failover, a domain points only at hubs that work.
+
+The relays of pool members listen on `169.254.77.N` (interface `hashem-lb`); kernel DNAT in the `HASHEM-LB` chains picks the member, so the real client IP is kept and nothing stops when the panel restarts. `hashem cluster rules` prints the rules.
 
 ---
 
@@ -311,6 +325,8 @@ hashem password <p>   # set the panel password non-interactively
 hashem tls issue <domain> [email]   # HTTPS for the panel (Let's Encrypt; also: status, renew, remove, ip, custom)
 hashem settings show  # panel settings; also: 2fa off, terminal on|off, idle N
 hashem license activate <key>
+hashem cluster status | pool add 443 --mode sticky | member drain 443 2 | join-code | add-hub <code>
+hashem join-hub --bundle <bundle>   # foreign side: also serve another Iran hub (hubs, leave-hub --id N)
 hashem logs           # relay logs
 hashem optimize       # BBR / MTU / sysctl tuning
 hashem doctor         # latency, jitter, MTU and speed diagnostics

@@ -226,18 +226,6 @@ func TestBackupKeyExportNeedsPassword(t *testing.T) {
 	}
 }
 
-// L22: without any tunnel signal the status is UNKNOWN, never a fake UP.
-func TestClusterLocalStatusUnknownWithoutSignal(t *testing.T) {
-	_, cleanup := setupClusterTest(t)
-	defer cleanup()
-	if th := tunnelHealthCached(); th != nil && len(th.Tunnels) > 0 {
-		t.Skip("a tunnel health result is cached in this test run")
-	}
-	if st, _, _ := getLocalTunnelStatus(); st != "UNKNOWN" {
-		t.Fatalf("status = %q, want UNKNOWN", st)
-	}
-}
-
 // M9: without Bagher, the snapshot status runs nothing and creates no key.
 func TestBagherSnapshotStatusWithoutConfig(t *testing.T) {
 	old := configDir

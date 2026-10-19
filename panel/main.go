@@ -528,7 +528,7 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | tls-proxy | pathtest | cluster | license [status|activate|deactivate]]")
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | tls-proxy | pathtest | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate]]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
@@ -708,17 +708,20 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/sentinel", requireAuth(handleSentinelGet))
 	mux.HandleFunc("POST "+base+"/api/sentinel", requireAuth(requireCSRF(handleSentinelPost)))
 
-	// Iran-to-Iran Mesh Cluster endpoints
+	// Cluster: pools, linked Iran hubs, DNS failover, extra hubs of a foreign server
 	mux.HandleFunc("GET "+base+"/api/cluster/status", requireAuth(handleClusterStatus))
-	mux.HandleFunc("POST "+base+"/api/cluster/config", requireAuth(requireCSRF(handleClusterConfigPost)))
-	mux.HandleFunc("POST "+base+"/api/cluster/nodes/add", requireAuth(requireCSRF(handleClusterNodeAdd)))
-	mux.HandleFunc("POST "+base+"/api/cluster/nodes/delete", requireAuth(requireCSRF(handleClusterNodeDelete)))
-	mux.HandleFunc("POST "+base+"/api/cluster/foreign/add", requireAuth(requireCSRF(handleClusterForeignNodeAdd)))
-	mux.HandleFunc("POST "+base+"/api/cluster/foreign/delete", requireAuth(requireCSRF(handleClusterForeignNodeDelete)))
-	mux.HandleFunc("POST "+base+"/api/cluster/foreign/switch", requireAuth(requireCSRF(handleClusterForeignSwitch)))
-	mux.HandleFunc("POST "+base+"/api/cluster/heartbeat", handleClusterHeartbeat)
-	mux.HandleFunc("POST "+base+"/api/cluster/failover/trigger", requireAuth(requireCSRF(handleClusterFailoverTrigger)))
-	mux.HandleFunc("POST "+base+"/api/cluster/failover/revert", requireAuth(requireCSRF(handleClusterFailoverRevert)))
+	mux.HandleFunc("GET "+base+"/api/cluster/rules", requireAuth(handleClusterRules))
+	mux.HandleFunc("POST "+base+"/api/cluster/pool", requireAuth(requireCSRF(handleClusterPool)))
+	mux.HandleFunc("POST "+base+"/api/cluster/pool/delete", requireAuth(requireCSRF(handleClusterPoolDelete)))
+	mux.HandleFunc("POST "+base+"/api/cluster/member", requireAuth(requireCSRF(handleClusterMember)))
+	mux.HandleFunc("POST "+base+"/api/cluster/settings", requireAuth(requireCSRF(handleClusterSettings)))
+	mux.HandleFunc("POST "+base+"/api/cluster/join-code", requireAuth(requireCSRF(handleClusterJoinCode)))
+	mux.HandleFunc("POST "+base+"/api/cluster/hubs/add", requireAuth(requireCSRF(handleClusterHubAdd)))
+	mux.HandleFunc("POST "+base+"/api/cluster/hubs/delete", requireAuth(requireCSRF(handleClusterHubDelete)))
+	mux.HandleFunc("POST "+base+"/api/cluster/dns", requireAuth(requireCSRF(handleClusterDNS)))
+	mux.HandleFunc("POST "+base+"/api/cluster/join-hub", requireAuth(requireCSRF(handleClusterJoinHub)))
+	mux.HandleFunc("POST "+base+"/api/cluster/leave-hub", requireAuth(requireCSRF(handleClusterLeaveHub)))
+	mountMeshRoutes(mux)
 	mux.HandleFunc("GET "+base+"/api/bagher", requireAuth(handleSSHFwdGet))
 	mux.HandleFunc("POST "+base+"/api/bagher", requireAuth(requireCSRF(handleSSHFwdPost)))
 	mux.HandleFunc("GET "+base+"/api/license", requireAuth(handleLicenseGet))
@@ -751,6 +754,7 @@ func main() {
 	go startFleetSampler()
 	go startRescueMonitor()
 	go startClusterMonitor()
+	go startMeshLoop()
 	go func() {
 		cc := loadCarrierConfig()
 		if strings.HasPrefix(cc.ActiveCarrier, "wss") {

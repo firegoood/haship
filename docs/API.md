@@ -42,15 +42,17 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/carrier` | session | `handleCarrierGet` |
 | `POST` | `/api/carrier` | session + CSRF | `handleCarrierPost` |
 | `GET` | `/api/carrier/advice` | session | `handleCarrierAdvice` |
-| `POST` | `/api/cluster/config` | session + CSRF | `handleClusterConfigPost` |
-| `POST` | `/api/cluster/failover/revert` | session + CSRF | `handleClusterFailoverRevert` |
-| `POST` | `/api/cluster/failover/trigger` | session + CSRF | `handleClusterFailoverTrigger` |
-| `POST` | `/api/cluster/foreign/add` | session + CSRF | `handleClusterForeignNodeAdd` |
-| `POST` | `/api/cluster/foreign/delete` | session + CSRF | `handleClusterForeignNodeDelete` |
-| `POST` | `/api/cluster/foreign/switch` | session + CSRF | `handleClusterForeignSwitch` |
-| `POST` | `/api/cluster/heartbeat` | none | `handleClusterHeartbeat` |
-| `POST` | `/api/cluster/nodes/add` | session + CSRF | `handleClusterNodeAdd` |
-| `POST` | `/api/cluster/nodes/delete` | session + CSRF | `handleClusterNodeDelete` |
+| `POST` | `/api/cluster/dns` | session + CSRF | `handleClusterDNS` |
+| `POST` | `/api/cluster/hubs/add` | session + CSRF | `handleClusterHubAdd` |
+| `POST` | `/api/cluster/hubs/delete` | session + CSRF | `handleClusterHubDelete` |
+| `POST` | `/api/cluster/join-code` | session + CSRF | `handleClusterJoinCode` |
+| `POST` | `/api/cluster/join-hub` | session + CSRF | `handleClusterJoinHub` |
+| `POST` | `/api/cluster/leave-hub` | session + CSRF | `handleClusterLeaveHub` |
+| `POST` | `/api/cluster/member` | session + CSRF | `handleClusterMember` |
+| `POST` | `/api/cluster/pool` | session + CSRF | `handleClusterPool` |
+| `POST` | `/api/cluster/pool/delete` | session + CSRF | `handleClusterPoolDelete` |
+| `GET` | `/api/cluster/rules` | session | `handleClusterRules` |
+| `POST` | `/api/cluster/settings` | session + CSRF | `handleClusterSettings` |
 | `GET` | `/api/cluster/status` | session | `handleClusterStatus` |
 | `GET` | `/api/dashboard` | session | `handleDashboard` |
 | `GET` | `/api/dial` | session | `handleDialGet` |
@@ -137,4 +139,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 113 routes.
+Total: 115 routes.

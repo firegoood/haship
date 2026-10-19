@@ -253,6 +253,7 @@ const PRO_TXT = {
   performance: ['pro_t_perf', 'Performance — Hashem Pro', 'pro_b_perf', 'Performance tuning is a Hashem Pro feature. Running tunnels keep the settings they have.'],
   watchdog: ['pro_t_wd', 'Watchdog — Hashem Pro', 'pro_b_wd', 'The watchdog is a Hashem Pro feature. A watchdog that already runs keeps its alerts, backups and schedules.'],
   benchmark: ['pro_t_bench', 'Benchmark — Hashem Pro', 'pro_b_bench', 'The benchmark and the path test are Hashem Pro features.'],
+  cluster: ['pro_t_cluster', 'Cluster — Hashem Pro', 'pro_b_cluster', 'The cluster is a Hashem Pro feature: pools of foreign servers behind one port, linked Iran hubs and DNS failover. Pools that already run keep running without it.'],
 };
 function isSentinelLicensed() {
   const f = (_licenseData && _licenseData.is_valid && _licenseData.features) || [];
@@ -267,7 +268,7 @@ function proSync() {
   tag('navPerfPro', 'performance');
   tag('navWatchdogPro', 'watchdog');
   tag('navBenchmarkPro', 'benchmark');
-  if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', isBagherLicensed());
+  if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', clLicensed());
   if ($('navSentinelPro')) $('navSentinelPro').classList.toggle('hidden', isSentinelLicensed());
   ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
     const el = $(id); if (!el) return;
@@ -295,15 +296,15 @@ function goTab(name) {
     openBagherLicModal(proTab);
     return;
   }
-  if (name === 'cluster' && !isBagherLicensed()) {
+  if (name === 'cluster' && !clLicensed()) {
     if (_licenseData === null) {
       loadLicense().then(() => {
-        if (isBagherLicensed()) goTab('cluster');
-        else openBagherLicModal();
+        if (clLicensed()) goTab('cluster');
+        else openBagherLicModal('cluster');
       });
       return;
     }
-    openBagherLicModal();
+    openBagherLicModal('cluster');
     return;
   }
   ['dashboard','tunnel','cluster','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
@@ -7817,466 +7818,471 @@ window.copyMachineHashClick = copyMachineHashClick;
 })();
 
 // ==========================================
-// Iran Mesh Cluster & High Availability
+// Cluster: pools, Iran hubs, DNS failover, extra hubs of a foreign server
 // ==========================================
 _clusterData = null;
+let _clTimer = null, _clPoolEdit = null, _clDnsFilled = false, _clHcFilled = false, _clJoinCode = '';
 
-async function loadClusterStatus() {
-  try {
-    const res = await api('/api/cluster/status');
-    _clusterData = res;
-    renderClusterUI(res);
-  } catch (err) {
-    if (err && err.message && (err.message.includes('402') || err.message.includes('Payment Required'))) {
-      const banner = $('clusterLockedBanner');
-      const card = $('clusterCardContainer');
-      if (banner) banner.classList.remove('hidden');
-      if (card) card.classList.add('hidden');
-      return;
-    }
-    toastMsg('err', 'Failed to load cluster status: ' + (err.message || err));
-  }
+const CL_MODE = {
+  failover: 'All traffic on the first healthy server (lowest priority number); the next one takes over within seconds.',
+  balance: 'Each new connection goes to a healthy server, in proportion to its weight.',
+  sticky: 'Each user (source IP) always goes to the same server, so their exit IP does not change. Users are spread by weight.',
+  latency: 'All traffic on the healthy server with the lowest ping. It moves only when another one is clearly faster for 10 seconds.',
+};
+const CL_MODE_NAME = { failover: 'Failover', balance: 'Balance', sticky: 'Sticky per user', latency: 'Lowest latency' };
+const CL_STATE = {
+  ok: ['ok', 'Healthy'], degraded: ['warn', 'Degraded'], 'fail-open': ['err', 'No Healthy Server'],
+  forward: ['warn', 'Forwarded to Another Hub'], down: ['err', 'Down'], disabled: ['dim', 'Disabled'], starting: ['dim', 'Starting'],
+};
+const CL_PROTO = { both: 'TCP+UDP', tcp: 'TCP', udp: 'UDP' };
+
+// Any Hashem Pro key, or a Cluster add-on key.
+function clLicensed() {
+  if (isBagherLicensed()) return true;
+  const f = (_licenseData && _licenseData.is_valid && _licenseData.features) || [];
+  return f.some(x => /^(cluster|\*|all)$/i.test(String(x)));
 }
 
-function renderClusterUI(data) {
-  const banner = $('clusterLockedBanner');
-  const card = $('clusterCardContainer');
-  if (!data || !data.licensed) {
-    if (banner) banner.classList.remove('hidden');
-    if (card) card.classList.add('hidden');
+function clPoll() {
+  clearTimeout(_clTimer);
+  _clTimer = setTimeout(() => {
+    const tab = $('tab-cluster');
+    if (tab && !tab.hidden && !document.hidden) loadClusterStatus(); else clPoll();
+  }, 3000);
+}
+
+async function loadClusterStatus(manual) {
+  try {
+    const d = await api('/api/cluster/status');
+    _clusterData = d;
+    renderClusterUI(d);
+  } catch (e) {
+    if (manual) toastErr(tr('cl_load_err', 'Cannot load the cluster'), e.message || String(e));
+  }
+  clPoll();
+}
+
+const clMs = v => (v == null || v < 0) ? '—' : Math.round(v) + ' ms';
+const clSt = (kind, text) => `<span class="ent-st ${kind}"><i></i>${esc(tr('', text))}</span>`;
+
+function renderClusterUI(d) {
+  const links = d.links || [], pools = d.pools || [], hubs = d.hubs || [], joined = d.joined_hubs || [];
+  const spoke = links.length === 0 && joined.length > 0;
+  $('clHubView').classList.toggle('hidden', spoke);
+  $('clSpokeView').classList.toggle('hidden', !spoke);
+  const rb = $('clRoleBadge');
+  rb.className = 'badge info';
+  rb.textContent = spoke ? tr('cl_role_spoke', 'Foreign server') : tr('cl_role_hub', 'Iran hub');
+  const kpi = (label, value, kind) => `<div class="cl-kpi ${kind || ''}"><span>${esc(tr('', label))}</span><b>${esc(value)}</b></div>`;
+  if (spoke) {
+    const on = joined.filter(h => h.active && h.session).length;
+    $('clKpis').innerHTML = kpi('Iran hubs served', on + ' / ' + joined.length, on === joined.length ? 'ok' : 'warn');
+  } else {
+    const okPools = pools.filter(p => p.state === 'ok').length;
+    const up = links.filter(l => l.up).length;
+    const hubsUp = hubs.filter(h => h.up).length;
+    $('clKpis').innerHTML =
+      kpi('Healthy pools', okPools + ' / ' + pools.length, pools.length && okPools < pools.length ? 'warn' : '') +
+      kpi('Foreign servers up', up + ' / ' + links.length, up < links.length ? 'warn' : '') +
+      kpi('Iran hubs reachable', hubsUp + ' / ' + hubs.length, hubsUp < hubs.length ? 'warn' : '') +
+      kpi('DNS failover', d.dns && d.dns.enabled ? tr('', 'On') : tr('', 'Off'));
+  }
+  const errs = [];
+  if (d.apply_error) errs.push(tr('', 'The kernel rules could not be applied:') + ' ' + d.apply_error);
+  (d.warnings || []).forEach(w => errs.push(w));
+  if (!d.licensed) errs.push(tr('', 'No Hashem Pro license: pools that run keep running, but nothing can be changed.'));
+  $('clApplyErr').classList.toggle('hidden', !errs.length);
+  $('clApplyErr').textContent = errs.join('\n');
+  if (spoke) {
+    clRenderJoined(joined);
+  } else {
+    clRenderPools(pools, links);
+    clRenderLinks(links);
+    clRenderHubs(hubs, d);
+    clRenderDNS(d.dns || {});
+    clRenderHealth(d);
+  }
+  clRenderEvents(d.events || []);
+}
+
+// ---- pools ----
+
+function clRenderPools(pools, links) {
+  const box = $('clPools');
+  if (!pools.length) {
+    box.innerHTML = `<div class="ent-empty">${esc(tr('', 'No pools yet. Add the foreign servers in Setup with the same port (for example 443), then press New Pool.'))}</div>`;
     return;
   }
-  if (banner) banner.classList.add('hidden');
-  if (card) card.classList.remove('hidden');
+  box.innerHTML = pools.map(p => clPoolCard(p, links)).join('');
+}
 
-  // Status Badge
-  const badge = $('clusterStatusBadge');
-  if (badge) {
-    if (!data.enabled) {
-      badge.className = 'badge info';
-      badge.textContent = 'Disabled';
-    } else if (data.active_failover) {
-      badge.className = 'badge warn';
-      badge.textContent = 'Failover Active';
-    } else {
-      badge.className = 'badge ok';
-      badge.textContent = 'Healthy & Mesh Active';
-    }
-  }
-
-  // Live Gauges
-  if ($('clusterLocalNodeID')) $('clusterLocalNodeID').textContent = data.node_id || '--';
-  if ($('clusterLocalIP')) $('clusterLocalIP').textContent = data.public_ip || '--';
-
-  const tStatusEl = $('clusterLocalTunnelStatus');
-  if (tStatusEl) {
-    const isUp = (data.tunnel_status || 'UP').toUpperCase() === 'UP';
-    tStatusEl.innerHTML = `<span class="badge ${isUp ? 'ok' : 'err'}">${isUp ? 'UP (Healthy)' : 'DOWN (Failed)'}</span>`;
-  }
-
-  const actRouteEl = $('clusterActiveRouting');
-  if (actRouteEl) {
-    if (data.active_failover && data.failover_target) {
-      actRouteEl.innerHTML = `<span class="u-c-er">Rerouted \u2192 ${esc(data.failover_target)}</span>`;
-    } else {
-      actRouteEl.innerHTML = `<span class="u-c-ok">Local Tunnel (Direct)</span>`;
-    }
-  }
-
-  // Failover Alert Banner
-  const foBar = $('clusterFailoverBar');
-  const foText = $('clusterFailoverBarText');
-  if (foBar) {
-    if (data.active_failover) {
-      foBar.classList.remove('hidden');
-      if (foText) {
-        foText.textContent = `Foreign tunnel down. All client traffic on forwarded ports is rerouted to peer ${data.failover_target}.`;
-      }
-    } else {
-      foBar.classList.add('hidden');
-    }
-  }
-
-  // Foreign Nodes List (Kharej Pool)
-  const foreignNodes = Array.isArray(data.foreign_nodes) ? data.foreign_nodes : Object.values(data.foreign_nodes || {});
-  if ($('clusterForeignCount')) $('clusterForeignCount').textContent = foreignNodes.length;
-  const fContainer = $('clusterForeignList');
-  if (fContainer) {
-    if (foreignNodes.length === 0) {
-      fContainer.innerHTML = `
-        <div class="u-col-full u-text-center u-p-24x16 u-bg-inset u-bdd-info u-r-10">
-          <div class="u-fs-24 u-mb-8"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></div>
-          <div class="u-fw-700 u-c-tx2 u-fs-13 u-mb-4">No Foreign Exit Servers Configured</div>
-          <div class="u-fs-12 u-c-mu u-maxw-440 u-m-0xautox12xauto">
-            Add your foreign servers here to monitor latency, auto-failover, or manually switch exit paths.
-          </div>
-          <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddForeignModal()">
-            + Add Foreign Exit Server
-          </button>
-        </div>`;
-    } else {
-      let fhtml = '';
-      foreignNodes.forEach(fn => {
-        const isActive = (fn.id === data.active_foreign) || !!fn.is_active;
-        const isHealthy = !!fn.is_healthy;
-        const latency = fn.latency_ms ? `${fn.latency_ms.toFixed(1)} ms` : '--';
-
-        fhtml += `
-          <div style="background:color-mix(in srgb, var(--bg) 70%, transparent); border:1px solid ${isActive ? '#0284c7' : 'rgba(2,132,199,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">
-            <div>
-              <div class="u-flex u-jc-sb u-ai-s u-mb-12">
-                <div>
-                  <div class="u-fw-700 u-c-tx u-fs-14 u-flex u-ai-c u-gap-8">
-                    <span><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg></span> ${esc(fn.name || fn.id)}
-                  </div>
-                  <div class="u-fs-12 u-mono u-c-mu u-mt-2">ID: ${esc(fn.id)}</div>
-                </div>
-                <div class="u-flex u-gap-8 u-ai-c">
-                  ${isActive ? `<span class="badge info">ACTIVE</span>` : ''}
-                  <span class="badge ${isHealthy ? 'ok' : 'err'} u-fs-12 u-fw-700">${isHealthy ? 'UP' : 'DOWN'}</span>
-                </div>
-              </div>
-
-              <div class="u-grid u-gtc-1fr-1fr u-gap-8 u-fs-12 u-mb-16 u-bg-inset u-p-8x12 u-r-8">
-                <div>
-                  <span class="u-c-mu">Public IP:</span>
-                  <div class="u-mono u-c-tx2 u-fw-600">${esc(fn.public_ip || '--')}</div>
-                </div>
-                <div>
-                  <span class="u-c-mu">Port / Proto:</span>
-                  <div class="u-mono u-c-info u-fw-600">${fn.tunnel_port || 55354} / ${(fn.protocol || 'wss').toUpperCase()}</div>
-                </div>
-                <div>
-                  <span class="u-c-mu">Weight (WRR):</span>
-                  <div class="u-mono u-c-sc u-fw-600">${fn.weight || 1}</div>
-                </div>
-                <div>
-                  <span class="u-c-mu">TCP Latency:</span>
-                  <div class="u-mono u-c-ok u-fw-600">${latency}</div>
-                </div>
-              </div>
-            </div>
-
-            <div class="u-flex u-jc-sb u-ai-c u-pt-8 u-bt-ln u-mt-8">
-              ${isActive
-                ? `<span class="u-fs-12 u-c-info u-fw-700">✓ In Use</span>`
-                : `<button class="hashem-btn u-btn-30" onclick="switchClusterForeign(${jsArg(fn.id)})">Switch to This</button>`
-              }
-              <button class="hashem-btn u-btn-30 hashem-btn-danger" onclick="deleteClusterForeign(${jsArg(fn.id)})" title="Remove foreign node">&#128465;</button>
-            </div>
-          </div>
-        `;
-      });
-      fContainer.innerHTML = fhtml;
-    }
-  }
-
-  // Nodes List
-  const nodes = Array.isArray(data.nodes) ? data.nodes : Object.values(data.nodes || {});
-  if ($('clusterNodeCount')) $('clusterNodeCount').textContent = nodes.length;
-
-  const container = $('clusterNodesList');
-  if (!container) return;
-
-  if (nodes.length === 0) {
-    container.innerHTML = `
-      <div class="u-col-full u-text-center u-p-32x16 u-bg-inset u-bdd-sc u-r-10">
-        <div class="u-fs-24 u-mb-8"><svg class="i" aria-hidden="true"><use href="#i-antenna"/></svg></div>
-        <div class="u-fw-700 u-c-tx2 u-fs-14 u-mb-4">No Peer Iran Servers Configured</div>
-        <div class="u-fs-12 u-c-mu u-maxw-440 u-m-0xautox12xauto">
-          Connect at least one additional Iran server to establish a resilient intra-Iran failover mesh.
-        </div>
-        <button class="hashem-btn hashem-btn-primary u-btn-30" onclick="openClusterAddNodeModal()">
-          + Add First Peer Node
-        </button>
-      </div>`;
-    return;
-  }
-
-  let html = '';
-  nodes.forEach(node => {
-    const isHealthy = !!node.is_healthy;
-    const isFailing = !!node.is_failing;
-    const tunnelUp = (node.tunnel_status || 'UP').toUpperCase() === 'UP';
-    // The API sends latency_ms and last_seen as an RFC3339 time (Go's zero
-    // time, year 1, means never seen).
-    const latency = node.latency_ms > 0 ? `${node.latency_ms.toFixed(1)} ms` : '--';
-    const seenAt = node.last_seen ? Date.parse(node.last_seen) : NaN;
-    const lastSeen = (Number.isFinite(seenAt) && new Date(seenAt).getUTCFullYear() > 2000) ? new Date(seenAt).toLocaleTimeString() : 'Never';
-
-    let statusBadgeClass = 'ok';
-    let statusText = 'HEALTHY';
-    if (!isHealthy) {
-      statusBadgeClass = 'err';
-      statusText = 'OFFLINE';
-    } else if (isFailing || !tunnelUp) {
-      statusBadgeClass = 'warn';
-      statusText = 'TUNNEL DOWN';
-    }
-
-    // active_failover holds the target node id; failover_target is its IP.
-    const isCurrentFailoverTarget = !!data.active_failover && data.active_failover === node.id;
-
-    html += `
-      <div style="background:color-mix(in srgb, var(--bg) 70%, transparent); border:1px solid ${isCurrentFailoverTarget ? '#ef4444' : 'rgba(168,85,247,0.25)'}; border-radius:10px; padding:16px; display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(0,0,0,0.3);">
-        <div>
-          <div class="u-flex u-jc-sb u-ai-s u-mb-12">
-            <div>
-              <div class="u-fw-700 u-c-tx u-fs-14 u-flex u-ai-c u-gap-8">
-                <span>🇮🇷</span> ${esc(node.name || node.id)}
-              </div>
-              <div class="u-fs-12 u-mono u-c-mu u-mt-2">ID: ${esc(node.id)}</div>
-            </div>
-            <span class="badge ${statusBadgeClass} u-fs-12 u-fw-700">${statusText}</span>
-          </div>
-
-          <div class="u-grid u-gtc-1fr-1fr u-gap-8 u-fs-12 u-mb-16 u-bg-inset u-p-8x12 u-r-8">
-            <div>
-              <span class="u-c-mu">Public IP:</span>
-              <div class="u-mono u-c-tx2 u-fw-600">${esc(node.public_ip || '--')}</div>
-            </div>
-            <div>
-              <span class="u-c-mu">Peer Ping:</span>
-              <div class="u-mono u-c-info u-fw-600">${latency}</div>
-            </div>
-            <div>
-              <span class="u-c-mu">Kharej Tunnel:</span>
-              <div style="font-weight:600; color:${tunnelUp ? '#34d399' : '#f87171'};">${tunnelUp ? 'UP' : 'DOWN'}</div>
-            </div>
-            <div>
-              <span class="u-c-mu">Last Heartbeat:</span>
-              <div class="u-c-tx2">${lastSeen}</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="u-flex u-jc-sb u-ai-c u-pt-8 u-bt-ln u-mt-8">
-          ${isCurrentFailoverTarget
-            ? `<button class="hashem-btn hashem-btn-danger u-btn-30" onclick="revertClusterFailover()">Revert Reroute</button>`
-            : `<button class="hashem-btn u-btn-30" onclick="triggerClusterFailover(${jsArg(node.id)})" ${(!isHealthy || isFailing || !tunnelUp) ? 'disabled' : ''}>\u2192 Failover Here</button>`
-          }
-          <button class="hashem-btn u-btn-30 hashem-btn-danger" onclick="deleteClusterNode(${jsArg(node.id)})" title="Remove peer">&#128465;</button>
-        </div>
+function clPoolCard(p, links) {
+  const st = CL_STATE[p.state] || CL_STATE.starting;
+  const P = jsArg(p.port), R = jsArg(p.proto);
+  const status = p.member_status || [];
+  const color = link => Math.max(0, (p.members || []).findIndex(m => m.link === link)) % 6;
+  const bar = (p.targets || []).map(t => {
+    const s = status.find(x => x.link === t.link) || {};
+    return `<span class="cl-c${color(t.link)}" style="width:${(t.share * 100).toFixed(1)}%" title="${esc((s.name || 'link ' + t.link) + ' ' + Math.round(t.share * 100) + '%')}"></span>`;
+  }).join('');
+  // Weight matters in balance and sticky, priority in failover; latency uses neither.
+  const cfgCol = p.mode === 'failover' ? 'priority' : (p.mode === 'balance' || p.mode === 'sticky') ? 'weight' : '';
+  const rows = (p.members || []).map(m => {
+    const s = status.find(x => x.link === m.link) || {};
+    let health;
+    if (s.missing) health = clSt('off', 'Tunnel removed');
+    else if (m.drain) health = clSt('warn', 'Draining');
+    else if (!s.listening) health = clSt('off', 'Not serving this port');
+    else if (s.up) health = clSt('on', 'Up');
+    else health = clSt('err', 'Down');
+    const L = m.link;
+    const stale = s.stale ? ` <span class="badge warn">${esc(tr('', 'Peer id now another server'))}</span>` : '';
+    const share = s.share ? Math.round(s.share * 100) + '%' : '—';
+    return `<tr>
+      <td><span class="cl-sw cl-c${color(L)}"></span><b>${esc(s.name || ('link ' + L))}</b>${stale}<div class="u-hint-12">${esc(L === 0 ? tr('', 'main tunnel') : tr('', 'peer') + ' ' + L)}${m.port ? ' · ' + tr('', 'port') + ' ' + m.port : ''}</div></td>
+      <td>${health}</td>
+      <td class="num">${clMs(s.latency_ms)}</td>
+      <td class="num">${share}</td>
+      ${cfgCol === 'weight' ? `<td><input class="hashem-input cl-num" type="number" min="1" max="100" value="${m.weight || 1}" aria-label="${esc(tr('', 'Weight'))}" onchange="clMemberSet(${P},${R},${L},'weight',this.value)"></td>` : ''}
+      ${cfgCol === 'priority' ? `<td><input class="hashem-input cl-num" type="number" min="0" max="1000" value="${m.priority || 0}" aria-label="${esc(tr('', 'Priority'))}" onchange="clMemberSet(${P},${R},${L},'priority',this.value)"></td>` : ''}
+      <td class="cl-acts">
+        <button class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="clMemberAct(${P},${R},${L},'${m.drain ? 'resume' : 'drain'}')">${esc(tr('', m.drain ? 'Resume' : 'Drain'))}</button>
+        <button class="hashem-btn hashem-btn-ghost u-btn-xs" onclick="clMemberAct(${P},${R},${L},'remove')">${esc(tr('', 'Remove'))}</button>
+      </td></tr>`;
+  }).join('');
+  const inPool = new Set((p.members || []).map(m => m.link));
+  const addable = links.filter(l => !inPool.has(l.id));
+  const addSel = addable.length ? `<select class="hashem-input cl-sel" aria-label="${esc(tr('', 'Add a foreign server'))}" onchange="clMemberAdd(${P},${R},this.value)">
+      <option value="">${esc(tr('', 'Add a foreign server…'))}</option>
+      ${addable.map(l => `<option value="${l.id}">${esc(l.name)} (${esc(l.remote || '')})</option>`).join('')}</select>` : '';
+  const modeSel = `<select class="hashem-input cl-sel" aria-label="${esc(tr('', 'Mode'))}" onchange="clPoolPatch(${P},${R},{mode:this.value})">
+      ${Object.keys(CL_MODE_NAME).map(k => `<option value="${k}" ${p.mode === k ? 'selected' : ''}>${esc(tr('', CL_MODE_NAME[k]))}</option>`).join('')}</select>`;
+  return `<div class="cl-pool">
+    <div class="cl-pool-h">
+      <div class="u-flex u-ai-c u-gap-8 u-wrap">
+        <b class="cl-port">${p.port}</b><span class="badge dim">${CL_PROTO[p.proto] || esc(p.proto)}</span>
+        ${p.name ? `<span class="u-c-tx2">${esc(p.name)}</span>` : ''}
+        <span class="badge ${st[0]}">${esc(tr('', st[1]))}</span>
       </div>
-    `;
+      <div class="u-flex u-gap-8 u-wrap u-ai-c">${modeSel}
+        <button class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="clPoolOpen(${P},${R})">${esc(tr('', 'Edit'))}</button>
+        <button class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="clPoolPatch(${P},${R},{disabled:${!p.disabled}})">${esc(tr('', p.disabled ? 'Enable' : 'Disable'))}</button>
+        <button class="hashem-btn hashem-btn-ghost u-btn-xs" onclick="clPoolDelete(${P},${R})">${esc(tr('', 'Delete'))}</button>
+      </div>
+    </div>
+    <div class="ent-help u-m-0">${esc(tr('', CL_MODE[p.mode] || ''))}</div>
+    <div class="cl-bar" role="img" aria-label="${esc(tr('', 'Where new connections go'))}">${bar}</div>
+    ${rows ? `<div class="ent-tbl-wrap"><table class="ent-tbl"><thead><tr><th>${esc(tr('', 'Foreign Server'))}</th><th>${esc(tr('', 'Health'))}</th><th class="num">${esc(tr('', 'Latency'))}</th><th class="num">${esc(tr('', 'Share'))}</th>${cfgCol ? `<th>${esc(tr('', cfgCol === 'weight' ? 'Weight' : 'Priority'))}</th>` : ''}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="ent-empty">${esc(tr('', 'No foreign server in this pool yet.'))}</div>`}
+    ${addSel}
+  </div>`;
+}
+
+function clPoolFind(port, proto) {
+  return ((_clusterData && _clusterData.pools) || []).find(p => p.port === Number(port) && p.proto === proto);
+}
+
+// clPoolPatch saves a pool with some fields changed (mode, disabled).
+async function clPoolPatch(port, proto, changes) {
+  const p = clPoolFind(port, proto);
+  if (!p) return;
+  const body = { port: p.port, proto: p.proto, name: p.name || '', mode: p.mode, disabled: !!p.disabled, members: p.members || [], excluded: p.excluded || [], orig_port: p.port, orig_proto: p.proto };
+  Object.assign(body, changes);
+  try {
+    await api('/api/cluster/pool', body);
+    toastOk(tr('', 'Pool saved'));
+  } catch (e) { toastErr(tr('', 'Cannot save the pool'), e.message || String(e)); }
+  loadClusterStatus();
+}
+
+async function clPoolDelete(port, proto) {
+  if (!await entConfirm(tr('', 'Delete Pool'), tr('', 'Delete the pool on port') + ' ' + port + '? ' + tr('', 'Its tunnels go back to their own public ports; each relay restarts once.'), tr('', 'Delete Pool'))) return;
+  try {
+    await api('/api/cluster/pool/delete', { port: Number(port), proto });
+    toastOk(tr('', 'Pool deleted'));
+  } catch (e) { toastErr(tr('', 'Cannot delete the pool'), e.message || String(e)); }
+  loadClusterStatus();
+}
+
+async function clMemberAdd(port, proto, link) {
+  if (link === '') return;
+  try {
+    await api('/api/cluster/member', { port: Number(port), proto, link: Number(link), action: 'add' });
+    toastOk(tr('', 'Foreign server added'), tr('', 'Its relay restarts once to move behind the pool.'));
+  } catch (e) { toastErr(tr('', 'Cannot add the server'), e.message || String(e)); }
+  loadClusterStatus();
+}
+
+async function clMemberSet(port, proto, link, field, value) {
+  const n = Number(value);
+  const body = { port: Number(port), proto, link: Number(link), action: 'set' };
+  if (field === 'weight') body.weight = n; else body.priority = n;
+  try { await api('/api/cluster/member', body); } catch (e) { toastErr(tr('', 'Cannot save'), e.message || String(e)); }
+  loadClusterStatus();
+}
+
+async function clMemberAct(port, proto, link, action) {
+  if (action === 'remove' && !await entConfirm(tr('', 'Remove From Pool'), tr('', 'Remove this foreign server from the pool? It is not added back by itself, even though its ports include the pool port.'), tr('', 'Remove'))) return;
+  try {
+    await api('/api/cluster/member', { port: Number(port), proto, link: Number(link), action });
+    if (action === 'drain') toastOk(tr('', 'Draining'), tr('', 'No new connections; open ones finish. Resume it after the maintenance.'));
+  } catch (e) { toastErr(tr('', 'Cannot change the member'), e.message || String(e)); }
+  loadClusterStatus();
+}
+
+// ---- pool dialog ----
+
+function clPoolOpen(port, proto) {
+  const d = _clusterData || {};
+  const links = d.links || [];
+  const p = port != null ? clPoolFind(port, proto) : null;
+  _clPoolEdit = p ? { port: p.port, proto: p.proto } : null;
+  $('clPoolTitle').textContent = tr('', p ? 'Edit Pool' : 'New Pool');
+  $('clPoolPort').value = p ? p.port : '';
+  $('clPoolProto').value = p ? p.proto : 'both';
+  $('clPoolName').value = p ? (p.name || '') : '';
+  $('clPoolMode').value = p ? p.mode : 'failover';
+  const sel = new Set((p ? p.members : []).map(m => m.link));
+  $('clPoolMembers').innerHTML = links.length ? links.map(l => `<label class="u-check-row"><input type="checkbox" value="${l.id}" ${sel.has(l.id) ? 'checked' : ''}>
+      <b>${esc(l.name)}</b> <span class="u-mono u-c-mu">${esc(l.remote || '')} · ${esc((l.ports || []).join(', ') || '—')}</span></label>`).join('')
+    : `<div class="ent-empty">${esc(tr('', 'No tunnels on this server yet: add the foreign servers in Setup first.'))}</div>`;
+  clPoolModeHelp();
+  modalShow($('clPoolModal'), clPoolClose);
+  setTimeout(() => $('clPoolPort').focus(), 30);
+}
+
+function clPoolClose() { modalHide($('clPoolModal')); }
+
+// A new pool picks the tunnels that already serve its port.
+function clPoolPortChanged() {
+  if (_clPoolEdit) return;
+  const port = Number($('clPoolPort').value);
+  const links = (_clusterData && _clusterData.links) || [];
+  $('clPoolMembers').querySelectorAll('input[type=checkbox]').forEach(cb => {
+    const l = links.find(x => x.id === Number(cb.value));
+    cb.checked = !!(l && (l.ports || []).includes(port));
   });
-
-  container.innerHTML = html;
 }
 
-function openClusterAddNodeModal() {
-  $('clusterPeerID').value = '';
-  $('clusterPeerName').value = '';
-  $('clusterPeerAPI').value = '';
-  $('clusterPeerIP').value = '';
-  modalShow($('clusterNodeModal'), closeClusterAddNodeModal);
+function clPoolModeHelp() { $('clPoolModeHelp').textContent = tr('', CL_MODE[$('clPoolMode').value] || ''); }
+
+async function clPoolSave() {
+  const port = Number($('clPoolPort').value);
+  if (!(port >= 1 && port <= 65535)) { toastErr(tr('', 'Enter a port from 1 to 65535')); return; }
+  const links = (_clusterData && _clusterData.links) || [];
+  const prev = _clPoolEdit ? clPoolFind(_clPoolEdit.port, _clPoolEdit.proto) : null;
+  const checked = [...$('clPoolMembers').querySelectorAll('input[type=checkbox]')].filter(cb => cb.checked).map(cb => Number(cb.value));
+  const members = checked.map((id, i) => {
+    const old = prev && (prev.members || []).find(m => m.link === id);
+    return old || { link: id, weight: 1, priority: i };
+  });
+  // Tunnels left out that serve the port would join by themselves: keep them out.
+  const excluded = links.filter(l => !checked.includes(l.id) && ((l.ports || []).includes(port) || (prev && (prev.excluded || []).includes(l.id)))).map(l => l.id);
+  const body = { port, proto: $('clPoolProto').value, name: $('clPoolName').value.trim(), mode: $('clPoolMode').value, members, excluded, disabled: prev ? !!prev.disabled : false };
+  if (_clPoolEdit) { body.orig_port = _clPoolEdit.port; body.orig_proto = _clPoolEdit.proto; }
+  const btn = $('clPoolSave');
+  btn.disabled = true;
+  try {
+    await api('/api/cluster/pool', body);
+    toastOk(tr('', 'Pool saved'), tr('', 'The relays of its tunnels restart once to move behind the pool.'));
+    clPoolClose();
+  } catch (e) { toastErr(tr('', 'Cannot save the pool'), e.message || String(e)); }
+  finally { btn.disabled = false; }
+  loadClusterStatus();
 }
 
-function closeClusterAddNodeModal() {
-  modalHide($('clusterNodeModal'));
+// ---- tunnels ----
+
+function clRenderLinks(links) {
+  $('clLinks').innerHTML = links.length ? links.map(l => {
+    const health = (l.up ? clSt('on', 'Up') : clSt('err', 'Down')) +
+      (l.reason ? `<div class="u-hint-12">${esc(tr('', l.reason))}</div>` : '') +
+      (l.bind_error ? `<div class="u-hint-12 u-c-er">${esc(l.bind_error)}</div>` : '');
+    const ports = l.bound
+      ? `<span class="badge info" title="${esc(l.addr)}">${esc(tr('', 'In a pool'))}</span> <span class="u-mono">${esc((l.listen_tcp || []).join(', ') || '—')}</span>`
+      : `<span class="u-mono">${esc((l.ports || []).join(', ') || '—')}</span>`;
+    return `<tr><td><b>${esc(l.name)}</b><div class="u-hint-12">${esc(l.id === 0 ? tr('', 'main tunnel') : tr('', 'peer') + ' ' + l.id)} · ${esc(l.engine)}</div></td>
+      <td class="mono">${esc(l.remote || '—')}</td><td class="cl-wrap">${health}</td><td class="num">${clMs(l.latency_ms)}</td><td>${ports}</td></tr>`;
+  }).join('') : `<tr><td colspan="5"><div class="ent-empty">${esc(tr('', 'No tunnels on this server yet. Pools are made of the tunnels to your foreign servers (Setup).'))}</div></td></tr>`;
 }
 
-async function submitClusterAddNode() {
-  const id = ($('clusterPeerID').value || '').trim();
-  const name = ($('clusterPeerName').value || '').trim();
-  const api_url = ($('clusterPeerAPI').value || '').trim();
-  const public_ip = ($('clusterPeerIP').value || '').trim();
+// ---- Iran hubs ----
 
-  if (!id || !api_url) {
-    toastMsg('err', 'Node ID and Panel Base URL are required');
+function clRenderHubs(hubs, d) {
+  $('clHubForward').checked = !!d.hub_forward;
+  const box = $('clHubs');
+  if (!hubs.length) {
+    box.innerHTML = `<div class="ent-empty">${esc(tr('', 'No other Iran hub is linked. Show Join Code here and paste it on the other Iran server.'))}</div>`;
     return;
   }
+  const rows = hubs.map(h => {
+    const status = !h.up ? clSt('err', 'Unreachable') + (h.error ? `<div class="u-hint-12">${esc(h.error)}</div>` : '')
+      : h.healthy ? clSt('on', 'Up') : clSt('warn', 'Up, no working tunnel');
+    const pools = Object.keys(h.pools || {}).sort().map(k => {
+      const v = h.pools[k], s = CL_STATE[v.state] || CL_STATE.starting;
+      return `<span class="badge ${s[0]}">${esc(k)}</span>`;
+    }).join(' ') || '—';
+    return `<tr><td><b>${esc(h.name || h.id)}</b><div class="u-hint-12 u-mono">${esc(h.id)}${h.version ? ' · ' + esc(h.version) : ''}</div></td>
+      <td class="mono">${esc(h.public_ip || '—')}</td><td class="cl-wrap">${status}${h.last_seen ? `<div class="u-hint-12">${esc(tr('', 'last seen'))} ${esc(h.last_seen)}</div>` : ''}</td>
+      <td class="num">${clMs(h.up ? h.latency_ms : -1)}</td><td>${pools}</td>
+      <td><button class="hashem-btn hashem-btn-ghost u-btn-xs" onclick="clHubRemove(${jsArg(h.id)},${jsArg(h.name || h.id)})">${esc(tr('', 'Unlink'))}</button></td></tr>`;
+  }).join('');
+  box.innerHTML = `<div class="ent-tbl-wrap"><table class="ent-tbl"><thead><tr><th>${esc(tr('', 'Hub'))}</th><th>${esc(tr('', 'Public IP'))}</th><th>${esc(tr('', 'Status'))}</th><th class="num">${esc(tr('', 'Latency'))}</th><th>${esc(tr('', 'Pools There'))}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
 
+async function clJoinCodeOpen() {
   try {
-    await api('/api/cluster/nodes/add', { id, name, api_url, public_ip });
-    toastMsg('ok', 'Peer node added and verified');
-    closeClusterAddNodeModal();
-    loadClusterStatus();
-  } catch (err) {
-    toastMsg('err', 'Failed to add node: ' + (err.message || err));
-  }
+    const r = await api('/api/cluster/join-code', {});
+    _clJoinCode = r.code || '';
+    $('clJoinCode').textContent = _clJoinCode;
+    modalShow($('clJoinCodeModal'), clJoinCodeClose);
+  } catch (e) { toastErr(tr('', 'Cannot make the join code'), e.message || String(e)); }
 }
+function clJoinCodeClose() { modalHide($('clJoinCodeModal')); }
+function clJoinCodeCopy() { copyTextSafe(_clJoinCode, tr('', 'Join code copied'), tr('', 'Paste it on the other Iran server: Cluster, Link a Hub.')); }
 
-async function deleteClusterNode(id) {
-  if (!await entConfirm('Delete Peer Node', `Are you sure you want to remove peer node "${id}" from the cluster?`, 'Delete Node')) return;
+function clHubAddOpen() {
+  $('clHubCode').value = '';
+  modalShow($('clHubAddModal'), clHubAddClose);
+  setTimeout(() => $('clHubCode').focus(), 30);
+}
+function clHubAddClose() { modalHide($('clHubAddModal')); }
+
+async function clHubAdd() {
+  const code = $('clHubCode').value.trim();
+  if (!code) return;
+  const btn = $('clHubAddBtn');
+  btn.disabled = true;
   try {
-    await api('/api/cluster/nodes/delete', { id });
-    toastMsg('ok', 'Peer node removed');
-    loadClusterStatus();
-  } catch (err) {
-    toastMsg('err', 'Failed to delete node: ' + (err.message || err));
-  }
+    const r = await api('/api/cluster/hubs/add', { code });
+    toastOk(tr('', 'Hub linked'), (r.hub && (r.hub.name || r.hub.public_ip)) || '');
+    clHubAddClose();
+  } catch (e) { toastErr(tr('', 'Cannot link the hub'), e.message || String(e)); }
+  finally { btn.disabled = false; }
+  loadClusterStatus();
 }
 
-function openClusterConfigModal() {
-  if (!_clusterData) return;
-  $('clusterCfgEnabled').checked = !!_clusterData.enabled;
-  $('clusterCfgAutoFailover').checked = !!_clusterData.auto_failover;
-  if ($('clusterCfgBalancingMode')) {
-    $('clusterCfgBalancingMode').value = _clusterData.balancing_mode || 'wrr';
-  }
-  $('clusterCfgNodeID').value = _clusterData.node_id || '';
-  $('clusterCfgSecret').value = _clusterData.cluster_secret || '';
-  $('clusterCfgPorts').value = (_clusterData.service_ports || []).join(', ');
-  modalShow($('clusterConfigModal'), closeClusterConfigModal);
+async function clHubRemove(id, name) {
+  if (!await entConfirm(tr('', 'Unlink Hub'), tr('', 'Stop backing up with') + ' ' + name + '? ' + tr('', 'It is asked to forget this hub too.'), tr('', 'Unlink'))) return;
+  try { await api('/api/cluster/hubs/delete', { id }); toastOk(tr('', 'Hub unlinked')); }
+  catch (e) { toastErr(tr('', 'Cannot unlink the hub'), e.message || String(e)); }
+  loadClusterStatus();
 }
 
-function closeClusterConfigModal() {
-  modalHide($('clusterConfigModal'));
+// ---- settings ----
+
+function clRenderHealth(d) {
+  if (_clHcFilled || !d.health) return;
+  _clHcFilled = true;
+  $('clHcInterval').value = d.health.interval_ms;
+  $('clHcFall').value = d.health.fall;
+  $('clHcRise').value = d.health.rise;
 }
 
-function generateClusterSecret() {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_';
-  let sec = '';
-  const arr = new Uint8Array(32);
-  window.crypto.getRandomValues(arr);
-  arr.forEach(b => { sec += chars[b % chars.length]; });
-  $('clusterCfgSecret').value = sec;
-}
-
-async function submitClusterConfig() {
-  const enabled = $('clusterCfgEnabled').checked;
-  const auto_failover = $('clusterCfgAutoFailover').checked;
-  const balancing_mode = ($('clusterCfgBalancingMode') ? $('clusterCfgBalancingMode').value : 'wrr') || 'wrr';
-  const node_id = ($('clusterCfgNodeID').value || '').trim();
-  const cluster_secret = ($('clusterCfgSecret').value || '').trim();
-  const rawPorts = ($('clusterCfgPorts').value || '').split(',');
-  const service_ports = [];
-  rawPorts.forEach(p => {
-    const n = parseInt(p.trim(), 10);
-    if (!isNaN(n) && n > 0 && n <= 65535) service_ports.push(n);
-  });
-
+async function clSettingsSave(health) {
+  const body = {};
+  if (health) body.health = { interval_ms: Number($('clHcInterval').value), fall: Number($('clHcFall').value), rise: Number($('clHcRise').value) };
+  else body.hub_forward = $('clHubForward').checked;
   try {
-    await api('/api/cluster/config', {
-      enabled,
-      auto_failover,
-      balancing_mode,
-      node_id,
-      cluster_secret,
-      service_ports
-    });
-    toastMsg('ok', 'Cluster configuration updated');
-    closeClusterConfigModal();
-    loadClusterStatus();
-  } catch (err) {
-    toastMsg('err', 'Failed to save configuration: ' + (err.message || err));
-  }
+    await api('/api/cluster/settings', body);
+    toastOk(tr('', 'Saved'));
+    _clHcFilled = false;
+  } catch (e) { toastErr(tr('', 'Cannot save'), e.message || String(e)); }
+  loadClusterStatus();
 }
 
-async function triggerClusterFailover(targetId) {
-  if (!await entConfirm('Trigger Failover', `Manual failover: Reroute all client traffic to peer "${targetId}"?`, 'Reroute Traffic')) return;
+async function clRulesShow() {
+  const box = $('clRules');
   try {
-    await api('/api/cluster/failover/trigger', { target_id: targetId });
-    toastMsg('ok', `Failover active: Traffic rerouted to ${targetId}`);
-    loadClusterStatus();
-  } catch (err) {
-    toastMsg('err', 'Failover failed: ' + (err.message || err));
-  }
+    const r = await fetch(at('/api/cluster/rules'));
+    box.textContent = (await r.text()) || tr('', 'No rules: no pool and no forwarding.');
+  } catch (e) { box.textContent = String(e); }
+  box.classList.remove('hidden');
 }
 
-async function revertClusterFailover() {
-  if (!await entConfirm('Revert to Local?', 'Client traffic goes back through this server’s own tunnel.', 'Revert to Local')) return;
+function clRenderDNS(dns) {
+  const b = $('clDnsBadge');
+  b.className = 'badge ' + (!dns.enabled ? 'dim' : dns.error ? 'err' : 'ok');
+  b.textContent = tr('', !dns.enabled ? 'Off' : dns.error ? 'Error' : 'On');
+  if (!_clDnsFilled) {
+    _clDnsFilled = true;
+    $('clDnsName').value = dns.name || '';
+    $('clDnsTTL').value = dns.ttl || 60;
+    $('clDnsEnabled').checked = !!dns.enabled;
+    $('clDnsToken').placeholder = tr('', dns.has_token ? 'Saved; paste a new one to replace it' : 'API token');
+  }
+  const lines = [];
+  if (dns.enabled) {
+    lines.push(tr('', 'Points to:') + ' ' + ((dns.records || []).join(', ') || '—'));
+    if ((dns.want || []).length) lines.push(tr('', 'Working hubs:') + ' ' + dns.want.join(', '));
+    lines.push(tr('', dns.leader ? 'This hub writes the record.' : 'Another hub writes the record (the one with the lowest id).'));
+    if (dns.last_run) lines.push(tr('', 'Last check:') + ' ' + dns.last_run);
+  }
+  if (dns.error) lines.push(tr('', 'Error:') + ' ' + dns.error);
+  $('clDnsState').textContent = lines.join('\n');
+}
+
+async function clDnsSave(test) {
+  const body = { name: $('clDnsName').value.trim(), ttl: Number($('clDnsTTL').value) || 60, enabled: $('clDnsEnabled').checked, test: !!test };
+  const tok = $('clDnsToken').value.trim();
+  if (tok) body.token = tok;
   try {
-    await api('/api/cluster/failover/revert', {});
-    toastMsg('ok', 'Failover reverted: Local routing restored');
-    loadClusterStatus();
-  } catch (err) {
-    toastMsg('err', 'Revert failed: ' + (err.message || err));
-  }
+    const r = await api('/api/cluster/dns', body);
+    if (test) toastOk(tr('', 'Cloudflare answered'), tr('', 'The record points to:') + ' ' + ((r.records || []).join(', ') || '—'));
+    else { toastOk(tr('', 'DNS failover saved')); $('clDnsToken').value = ''; _clDnsFilled = false; }
+  } catch (e) { toastErr(tr('', test ? 'The test failed' : 'Cannot save'), e.message || String(e)); }
+  if (!test) loadClusterStatus();
 }
 
-function openClusterAddForeignModal() {
-  $('clusterForeignID').value = '';
-  $('clusterForeignName').value = '';
-  $('clusterForeignIP').value = '';
-  $('clusterForeignPort').value = '55354';
-  $('clusterForeignProtocol').value = 'wss';
-  if ($('clusterForeignWeight')) $('clusterForeignWeight').value = '1';
-  if ($('clusterForeignTargetPorts')) $('clusterForeignTargetPorts').value = '';
-  modalShow($('clusterForeignModal'), closeClusterAddForeignModal);
+// ---- foreign server ----
+
+function clRenderJoined(joined) {
+  $('clJoined').innerHTML = joined.map(h => {
+    const st = !h.active ? clSt('err', 'Stopped') : h.session ? clSt('on', 'Connected') : clSt('warn', 'Running, not connected');
+    const act = h.first ? `<span class="u-hint-12">${esc(tr('', 'set up in Setup'))}</span>`
+      : `<button class="hashem-btn hashem-btn-ghost u-btn-xs" onclick="clLeaveHub(${h.id},${jsArg(h.name)})">${esc(tr('', 'Leave'))}</button>`;
+    return `<tr><td><b>${esc(h.first ? tr('', 'First hub') : h.name)}</b></td><td class="mono">${esc(h.iran_pub || '—')}</td>
+      <td>${st}</td><td class="mono">${esc(h.svc || '')}</td><td>${act}</td></tr>`;
+  }).join('');
 }
 
-function closeClusterAddForeignModal() {
-  modalHide($('clusterForeignModal'));
-}
-
-async function submitClusterAddForeign() {
-  const id = ($('clusterForeignID').value || '').trim();
-  const name = ($('clusterForeignName').value || '').trim();
-  const public_ip = ($('clusterForeignIP').value || '').trim();
-  const tunnel_port = parseInt(($('clusterForeignPort').value || '55354').trim(), 10) || 55354;
-  const protocol = ($('clusterForeignProtocol').value || 'wss').trim();
-  const weight = parseInt(($('clusterForeignWeight') ? $('clusterForeignWeight').value : '1') || '1', 10) || 1;
-
-  const rawTargetPorts = ($('clusterForeignTargetPorts') ? $('clusterForeignTargetPorts').value : '').trim();
-  const target_ports = {};
-  if (rawTargetPorts) {
-    rawTargetPorts.split(',').forEach(part => {
-      const pair = part.trim().split(':');
-      if (pair.length === 2) {
-        const src = parseInt(pair[0].trim(), 10);
-        const dst = parseInt(pair[1].trim(), 10);
-        if (!isNaN(src) && !isNaN(dst) && src > 0 && dst > 0) {
-          target_ports[src] = dst;
-        }
-      }
-    });
-  }
-
-  if (!id || !public_ip) {
-    toastMsg('err', 'Node ID and Public IP are required');
-    return;
-  }
-
+async function clJoinHub() {
+  const bundle = $('clJoinBundle').value.trim();
+  if (!bundle) return;
+  const btn = $('clJoinBtn'), out = $('clJoinOut');
+  btn.disabled = true;
+  btn.textContent = tr('', 'Joining… (up to 4 min)');
+  out.classList.add('hidden');
   try {
-    await api('/api/cluster/foreign/add', { id, name, public_ip, tunnel_port, protocol, weight, target_ports });
-    toastMsg('ok', 'Foreign exit node added to pool');
-    closeClusterAddForeignModal();
-    loadClusterStatus();
-  } catch (err) {
-    toastMsg('err', 'Failed to add foreign node: ' + (err.message || err));
+    const r = await api('/api/cluster/join-hub', { bundle, name: $('clJoinName').value.trim() });
+    toastOk(tr('', 'Hub joined'));
+    out.textContent = r.output || '';
+    out.classList.toggle('hidden', !r.output);
+    $('clJoinBundle').value = '';
+  } catch (e) {
+    toastErr(tr('', 'Cannot join the hub'), e.message || String(e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = tr('', 'Join Hub');
   }
+  loadClusterStatus();
 }
 
-async function deleteClusterForeign(id) {
-  if (!await entConfirm('Remove Foreign Node', `Remove foreign exit node "${id}" from the pool?`, 'Remove Node')) return;
-  try {
-    await api('/api/cluster/foreign/delete', { id });
-    toastMsg('ok', 'Foreign exit node removed');
-    loadClusterStatus();
-  } catch (err) {
-    toastMsg('err', 'Failed to remove foreign node: ' + (err.message || err));
-  }
+async function clLeaveHub(id, name) {
+  if (!await entConfirm(tr('', 'Leave Hub'), tr('', 'Stop serving') + ' ' + name + '? ' + tr('', 'Its client, config and GRE interface are removed from this server.'), tr('', 'Leave'))) return;
+  try { await api('/api/cluster/leave-hub', { id }); toastOk(tr('', 'Left the hub')); }
+  catch (e) { toastErr(tr('', 'Cannot leave the hub'), e.message || String(e)); }
+  loadClusterStatus();
 }
 
-async function switchClusterForeign(targetId) {
-  if (!await entConfirm('Switch Exit Tunnel', `Switch active exit tunnel to "${targetId}"?`, 'Switch Active')) return;
-  try {
-    await api('/api/cluster/foreign/switch', { target_id: targetId });
-    toastMsg('ok', `Active foreign exit switched to ${targetId}`);
-    loadClusterStatus();
-  } catch (err) {
-    toastMsg('err', 'Failed to switch foreign node: ' + (err.message || err));
-  }
+// ---- events ----
+
+function clRenderEvents(evs) {
+  $('clEvents').innerHTML = evs.length ? evs.map(e => `<li class="cl-ev ${esc(e.level)}"><i></i><time class="u-mono">${esc(e.at)}</time><span>${esc(e.text)}</span></li>`).join('')
+    : `<li class="ent-empty">${esc(tr('', 'No events yet. Failovers, servers going down and up, and changes show up here.'))}</li>`;
 }
 
 window.loadClusterStatus = loadClusterStatus;
-window.openClusterAddNodeModal = openClusterAddNodeModal;
-window.closeClusterAddNodeModal = closeClusterAddNodeModal;
-window.submitClusterAddNode = submitClusterAddNode;
-window.deleteClusterNode = deleteClusterNode;
-window.openClusterAddForeignModal = openClusterAddForeignModal;
-window.closeClusterAddForeignModal = closeClusterAddForeignModal;
-window.submitClusterAddForeign = submitClusterAddForeign;
-window.deleteClusterForeign = deleteClusterForeign;
-window.switchClusterForeign = switchClusterForeign;
-window.openClusterConfigModal = openClusterConfigModal;
-window.closeClusterConfigModal = closeClusterConfigModal;
-window.generateClusterSecret = generateClusterSecret;
-window.submitClusterConfig = submitClusterConfig;
-window.triggerClusterFailover = triggerClusterFailover;
-window.revertClusterFailover = revertClusterFailover;
 
 // ==========================================
 // Sentinel Infrastructure & Node Health Addon
