@@ -102,6 +102,7 @@ ports = [
 }
 
 func TestPeerApplyEngineHandler(t *testing.T) {
+	withPro(t)
 	engineLab(t, []string{"backhaul", "frpc", "frps"}, []string{"backhaul-server", "backhaul-client"})
 	tmpDir, err := os.MkdirTemp("", "hashem_peer_engine_test_*")
 	if err != nil {
