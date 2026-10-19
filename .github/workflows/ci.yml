@@ -70,8 +70,6 @@ jobs:
           ./backhaul -v
       - name: Backhaul e2e (handshake, data, wrong token, kill -9 recovery)
         run: sudo env "PATH=$PATH" bash tests/test_backhaul_e2e.sh
-      - name: Backhaul UDP lab (tcpmux plus the UDP companion, UDP on the same port, TCP unharmed, kill -9 recovery)
-        run: sudo env "PATH=$PATH" bash tests/test_backhaul_udp_lab.sh
       - name: GRE + Backhaul lab (dial over GRE, MTU 1380, token/transport faults, public fallback)
         run: sudo env "PATH=$PATH" bash tests/test_gre_backhaul_lab.sh
       - name: Reverse-path lab (GRE + rp_filter/firewall faults)
@@ -102,4 +100,6 @@ jobs:
       - name: Bagher lab (ssh -R + frp, TCP and UDP, key lock-down, crash and outage recovery)
         run: |
           (cd panel && go test -c -o /tmp/bagherlab.test .)
-          sudo env "PATH=$PATH" BAGHER_LAB_TEST_BIN=/tmp/bagherlab.test bash tests/test_bagher_lab.sh
+          sudo env "PATH=$PATH" GITHUB_ACTIONS="$GITHUB_ACTIONS" BAGHER_LAB_TEST_BIN=/tmp/bagherlab.test bash tests/test_bagher_lab.sh
+      - name: Backhaul UDP lab (tcpmux plus the UDP companion, UDP on the same port, TCP unharmed, kill -9 recovery)
+        run: sudo env "PATH=$PATH" GITHUB_ACTIONS="$GITHUB_ACTIONS" bash tests/test_backhaul_udp_lab.sh

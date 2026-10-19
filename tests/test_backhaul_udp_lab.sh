@@ -47,7 +47,18 @@ ip netns exec "$HUB" bash -c 'ip addr add 192.0.2.1/24 dev vbu-hub; ip link set 
 ip netns exec "$SPOKE" bash -c 'ip addr add 192.0.2.2/24 dev vbu-spoke; ip link set vbu-spoke up; ip link set lo up'
 
 fail=0
-check() { if [[ "$2" != "$3" ]]; then echo "FAIL: $1 (want [$2] got [$3])"; fail=1; else echo "ok:   $1"; fi; }
+check() {
+    local line
+    if [[ "$2" != "$3" ]]; then line="FAIL: $1 (want [$2] got [$3])"; fail=1; else line="ok:   $1"; fi
+    echo "$line"; echo "$line" >> "$TMP/result.txt"
+}
+# annotate LEVEL TITLE FILE: the job log needs auth; annotations are public.
+annotate() {
+    [[ -n ${GITHUB_ACTIONS:-} ]] || return 0
+    local msg
+    msg=$(tail -c 6000 "$3" | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g' -e 's/\r/%0D/g')
+    echo "::$1 title=$2::$msg"
+}
 
 # hashem.sh's own companion builder
 for fn in backhaul_conf_transport backhaul_udp_conf; do
@@ -155,6 +166,8 @@ start "$HUB" "$TMP/server-udp.toml" "$TMP/server-udp.log"
 sleep 1
 start "$SPOKE" "$TMP/client-udp.toml" "$TMP/client-udp.log"
 ucpid=$last
+sleep 1
+{ echo "== hub sockets"; ip netns exec "$HUB" ss -lntup 2>/dev/null; echo "== spoke sockets"; ip netns exec "$SPOKE" ss -ntup 2>/dev/null | head -20; } > "$TMP/sockets.txt"
 wait_for 15 udp_probe 5 64; check "2. UDP through the companion" 0 $?
 udp_probe 50 64;   check "2. 50 small datagrams (>=90% byte-exact)" 0 $?
 udp_probe 20 1200; check "2. 20 datagrams of 1200 B (>=90% byte-exact)" 0 $?
@@ -167,9 +180,16 @@ t0=$SECONDS
 wait_for 20 udp_probe 5 64; rc=$?
 check "3. UDP back within 20 s of kill -9 (took $((SECONDS - t0))s)" 0 "$rc"
 
+{ cat "$TMP/result.txt"; echo "core: $ver"; cat "$TMP/sockets.txt" 2>/dev/null
+  if (( fail )); then
+      for f in server-udp client-udp server client client-udp2; do echo "--- $f.log"; tail -n 12 "$TMP/$f.log" 2>/dev/null; done
+      echo "--- server-udp.toml"; cat "$TMP/server-udp.toml"
+  fi; } > "$TMP/report.txt"
 if (( fail == 0 )); then
+    annotate notice "Backhaul UDP lab" "$TMP/report.txt"
     echo "PASS test_backhaul_udp_lab"
 else
-    for f in server client server-udp client-udp client-udp2; do echo "--- $f.log"; tail -n 15 "$TMP/$f.log" 2>/dev/null; done
+    cat "$TMP/report.txt"
+    annotate error "Backhaul UDP lab" "$TMP/report.txt"
     exit 1
 fi

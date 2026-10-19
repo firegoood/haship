@@ -54,8 +54,8 @@ ip -n $FO addr add $FO_IP/24 dev vg-fo;   ip -n $US addr add $US_IP/24 dev vg-us
 for l in "$IR vg-ir" "$IR vg-irus" "$IR lo" "$FO vg-fo" "$FO lo" "$US vg-us" "$US lo"; do set -- $l; ip -n "$1" link set "$2" up; done
 
 fail=0
-ok()   { echo "ok:   $1"; }
-bad()  { echo "FAIL: $1"; fail=1; }
+ok()   { echo "ok:   $1"; echo "ok:   $1" >> "$TMP/result.txt"; }
+bad()  { echo "FAIL: $1"; echo "FAIL: $1" >> "$TMP/result.txt"; fail=1; }
 check() { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (want [$2] got [$3])"; fi; }
 # wait_for SECS CMD...: true once CMD succeeds, polling every second.
 wait_for() { local n=$1; shift; local i; for ((i = 0; i < n; i++)); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
@@ -199,4 +199,10 @@ t0=$(date +%s)
 if wait_for 240 tunnel_up; then ok "recovers after a 60s Iran<->Foreign outage ($(( $(date +%s) - t0 ))s after the link returned)"
 else bad "no recovery within 240s after a 60s outage"; echo "--- ssh.log"; tail -n 15 "$TMP/ssh.log"; echo "--- sshd.log"; tail -n 15 "$TMP/sshd.log"; fi
 
+# the job log needs auth; annotations are public
+if [[ -n ${GITHUB_ACTIONS:-} ]]; then
+    { cat "$TMP/result.txt"; (( fail )) && { echo "--- frpc.log"; tail -n 10 "$TMP/frpc.log"; }; } > "$TMP/report.txt"
+    msg=$(tail -c 6000 "$TMP/report.txt" | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g' -e 's/\r/%0D/g')
+    echo "::$([[ $fail -eq 0 ]] && echo notice || echo error) title=Bagher lab::$msg"
+fi
 [[ $fail -eq 0 ]] && echo "PASS test_bagher_lab" || { echo "--- frpc.log"; tail -n 10 "$TMP/frpc.log"; exit 1; }
