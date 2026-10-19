@@ -29,6 +29,7 @@ type SSHFwdConfig struct {
 	BindAddr            string `json:"bind_addr"`
 	FRPBindPort         int    `json:"frp_bind_port"`
 	PoolCount           int    `json:"pool_count"`
+	UDP                 bool   `json:"udp,omitempty"` // Bagher mode: also forward UDP (frp udp proxies); direct SSH cannot
 	Enabled             bool   `json:"enabled"`
 	ServerAliveInterval int    `json:"server_alive_interval"`
 	ServerAliveCountMax int    `json:"server_alive_count_max"`
@@ -338,7 +339,9 @@ WantedBy=multi-user.target
 }
 
 // buildFRPCConfig generates the frpc TOML configuration for Foreign host in Bagher mode.
-func buildFRPCConfig(frpBindPort int, poolCount int, ports []int) string {
+// With udp, each port also gets a udp proxy: frp carries it over the same
+// work connections, so it rides the SSH tunnel like TCP.
+func buildFRPCConfig(frpBindPort int, poolCount int, ports []int, udp bool) string {
 	var proxyBlocks strings.Builder
 	for _, p := range ports {
 		proxyBlocks.WriteString(fmt.Sprintf(`
@@ -349,6 +352,16 @@ localIP = "127.0.0.1"
 localPort = %d
 remotePort = %d
 `, p, p, p))
+		if udp {
+			proxyBlocks.WriteString(fmt.Sprintf(`
+[[proxies]]
+name = "u%d"
+type = "udp"
+localIP = "127.0.0.1"
+localPort = %d
+remotePort = %d
+`, p, p, p))
+		}
 	}
 	dashPort := frpBindPort + 2
 	return fmt.Sprintf(`serverAddr = "127.0.0.1"
@@ -373,7 +386,7 @@ func buildForeignSetupCommand(cfg SSHFwdConfig) string {
 	if len(cfg.Ports) == 0 {
 		return ""
 	}
-	frpcToml := buildFRPCConfig(cfg.FRPBindPort, cfg.PoolCount, cfg.Ports)
+	frpcToml := buildFRPCConfig(cfg.FRPBindPort, cfg.PoolCount, cfg.Ports, cfg.UDP)
 	return fmt.Sprintf(`mkdir -p /etc/gre-panel/bagher
 cat > /etc/gre-panel/bagher/frpc.toml <<'EOF'
 %sEOF
@@ -409,6 +422,7 @@ type BagherBundle struct {
 	Ports        []int  `json:"ports"`
 	Token        string `json:"token"`
 	PoolCount    int    `json:"pool_count"`
+	UDP          bool   `json:"udp,omitempty"`
 	SSHPublicKey string `json:"ssh_pub_key"`
 	SSHPort      int    `json:"ssh_port"`
 	Timestamp    int64  `json:"ts"`
@@ -469,6 +483,7 @@ func MakeBagherBundle(cfg SSHFwdConfig, pubKey string) (string, error) {
 		Ports:        cfg.Ports,
 		Token:        "hashem-bagher-sec",
 		PoolCount:    cfg.PoolCount,
+		UDP:          cfg.UDP,
 		SSHPublicKey: strings.TrimSpace(pubKey),
 		SSHPort:      cfg.RemoteSSHPort,
 		Timestamp:    time.Now().Unix(),
@@ -523,7 +538,7 @@ func applyBagherBundle(b *BagherBundle) error {
 	}
 
 	_ = os.MkdirAll("/etc/gre-panel/bagher", 0755)
-	frpcToml := buildFRPCConfig(b.FRPPort, b.PoolCount, b.Ports)
+	frpcToml := buildFRPCConfig(b.FRPPort, b.PoolCount, b.Ports, b.UDP)
 	if err := writeTokenFile("/etc/gre-panel/bagher/frpc.toml", []byte(frpcToml)); err != nil {
 		return fmt.Errorf("failed writing frpc.toml: %w", err)
 	}
@@ -561,6 +576,7 @@ WantedBy=multi-user.target
 	cfg.Mode = "bagher"
 	cfg.FRPBindPort = b.FRPPort
 	cfg.PoolCount = b.PoolCount
+	cfg.UDP = b.UDP
 	cfg.Ports = b.Ports
 	if b.IranPub != "" {
 		cfg.RemoteHost = b.IranPub
@@ -897,6 +913,7 @@ func getSSHFwdSnapshotStatus() map[string]any {
 		"role":            cfg.Role,
 		"remote_host":     cfg.RemoteHost,
 		"ports":           cfg.Ports,
+		"udp":             cfg.UDP,
 		"frp_bind_port":   cfg.FRPBindPort,
 		"last_error":      cfg.LastError,
 		"connected":       metrics.Connected,
@@ -994,6 +1011,7 @@ func getSSHFwdStatusLocked() map[string]any {
 		"bind_addr":         cfg.BindAddr,
 		"frp_bind_port":     cfg.FRPBindPort,
 		"pool_count":        cfg.PoolCount,
+		"udp":               cfg.UDP,
 		"licensed_bagher":   hasBagher,
 		"licensed_frp_ssh":  hasBagher,
 		"machine_hash":      getMachineHash(),
@@ -1034,6 +1052,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		FRPBindPort int    `json:"frp_bind_port"`
 		PoolCount   int    `json:"pool_count"`
 		Bundle      string `json:"bundle"`
+		UDP         *bool  `json:"udp"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-SSHFWD-01", "invalid json payload")
@@ -1078,6 +1097,9 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.RemoteHost != "" {
 			cfg.RemoteHost = strings.TrimSpace(body.RemoteHost)
+		}
+		if body.UDP != nil {
+			cfg.UDP = *body.UDP
 		}
 		if body.Ports != "" {
 			parsed := parsePorts(body.Ports)
@@ -1147,6 +1169,9 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.PoolCount > 0 {
 			cfg.PoolCount = body.PoolCount
+		}
+		if body.UDP != nil {
+			cfg.UDP = *body.UDP
 		}
 		if body.Ports != "" {
 			parsed := parsePorts(body.Ports)

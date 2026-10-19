@@ -1595,6 +1595,7 @@ $('addPeerBtn').onclick = async () => {
       peer_gre: $('pPeerGre') ? $('pPeerGre').value.trim() : '',
       frp_port: parseInt($('pFrpPort').value, 10),
       ports: $('pPorts').value,
+      accept_udp: !!($('pAcceptUdp') && $('pAcceptUdp').checked && !$('wrapPeerUdp').classList.contains('hidden')),
       autogen: true,
     };
     let r;
@@ -2762,7 +2763,7 @@ async function doSetup() {
       frp_port: parseInt($('sFrpPort').value, 10),
       token: '',
       ports: ($('sIranPorts') && !$('wrapIranPorts').classList.contains('hidden')) ? $('sIranPorts').value.trim() : '',
-      accept_udp: !!($('sAcceptUdp') && $('sAcceptUdp').checked && !$('wrapIranUdp').classList.contains('hidden')),
+      accept_udp: !!($('sAcceptUdp') && $('sAcceptUdp').checked && !$('sAcceptUdp').disabled && !$('wrapIranUdp').classList.contains('hidden')),
       force: setupExists,
     };
     let r;
@@ -2887,13 +2888,26 @@ function setIranEngine(eng) {
   proSync();
   renderSetupLock();
 }
-// Backhaul forwards UDP only on the tcp transport (accept_udp).
+// UDP in Setup: FRP always forwards it; Backhaul forwards it when asked (tcp
+// inside the tunnel, the other transports with a second Backhaul on the udp
+// transport); the udp transport carries UDP only. Bagher has its own box.
 function syncIranUdp() {
   const eng = $('sEngine') ? $('sEngine').value : 'frp';
-  const on = eng !== 'frp' && eng !== 'bagher' && $('sTransport') && $('sTransport').value === 'tcp';
-  if ($('wrapIranUdp')) $('wrapIranUdp').classList.toggle('hidden', !on);
+  const tr_ = $('sTransport') ? $('sTransport').value : '';
+  const cb = $('sAcceptUdp'), wrap = $('wrapIranUdp'), hint = $('iranUdpHint');
+  if (!cb || !wrap) return;
+  const frp = eng === 'frp';
+  wrap.classList.toggle('hidden', eng === 'bagher' || (!frp && tr_ === 'udp'));
+  if (frp && !cb.disabled) cb.dataset.user = cb.checked ? '1' : '';
+  if (!frp && cb.disabled) cb.checked = cb.dataset.user === '1';
+  cb.disabled = frp;
+  if (frp) cb.checked = true;
+  if (hint) hint.textContent = frp ? tr('', 'FRP always forwards TCP and UDP on these ports.')
+    : tr_ === 'tcp' ? tr('', 'UDP rides inside the tunnel.')
+    : tr('', 'A second Backhaul with the udp transport carries UDP on the same port number (open it for UDP too).');
 }
 if ($('sTransport')) $('sTransport').addEventListener('change', syncIranUdp);
+if ($('sshfwdUdp')) $('sshfwdUdp').addEventListener('change', e => { e.target.dataset.touched = '1'; });
 if ($('engGreFrp')) $('engGreFrp').onclick = () => setIranEngine('frp');
 if ($('engBh')) $('engBh').onclick = () => setIranEngine('backhaul');
 if ($('engBagher')) $('engBagher').onclick = () => setIranEngine('bagher');
@@ -2916,6 +2930,8 @@ function bagherSetupSync() {
   fill('sshfwdRemoteUser', d.remote_user);
   fill('sshfwdFRPPort', d.frp_bind_port > 0 ? d.frp_bind_port : '');
   fill('sshfwdPoolCount', d.pool_count > 0 ? d.pool_count : '');
+  const u = $('sshfwdUdp');
+  if (u && !u.dataset.touched) u.checked = !!d.udp;
   if ($('sshfwdForeignCmd')) $('sshfwdForeignCmd').value = d.foreign_setup_cmd || '';
   if ($('sshfwdAuthLine')) $('sshfwdAuthLine').value = d.auth_line || '';
   const iranBagher = $('sEngine') && $('sEngine').value === 'bagher' && $('sRole').value !== 'foreign';
@@ -2941,8 +2957,17 @@ if ($('pEngine')) {
     updateTransportSelect('pTransport', v);
     if ($('wrapPeerLocalGre')) $('wrapPeerLocalGre').classList.toggle('hidden', isBh);
     if ($('wrapPeerPeerGre')) $('wrapPeerPeerGre').classList.toggle('hidden', isBh);
+    syncPeerUdp();
   });
 }
+
+// Add-peer UDP: Backhaul peers only (FRP always forwards it; udp carries UDP only).
+function syncPeerUdp() {
+  const v = $('pEngine') ? $('pEngine').value : 'frp';
+  const t = $('pTransport') ? $('pTransport').value : '';
+  if ($('wrapPeerUdp')) $('wrapPeerUdp').classList.toggle('hidden', v === 'frp' || t === 'udp');
+}
+if ($('pTransport')) $('pTransport').addEventListener('change', syncPeerUdp);
 
 // Foreign join: bundle-first UX supporting hsh1_, bh1_, and gh1_ bundles.
 function parseBundleClient(s) {
@@ -2957,7 +2982,7 @@ function parseBundleClient(s) {
     if (!/^\d+$/.test(portS) || port < 1 || port > 65535) return {error: 'bad port in bundle'};
     if (!token || token.length > 128) return {error: 'bad token in bundle'};
     const rawPorts = (parts[4] || '').trim();
-    return {engine: 'backhaul', iranPub, port, transport: transport || 'tcpmux', token, rawPorts, ports: rawPorts ? rawPorts.split(',') : []};
+    return {engine: 'backhaul', iranPub, port, transport: (transport || 'tcpmux').replace(/\+udp$/, ''), udp: /\+udp$/.test(transport), token, rawPorts, ports: rawPorts ? rawPorts.split(',') : []};
   }
   if (s.startsWith('gh1_')) {
     const parts = s.slice(4).split('_');
@@ -2970,7 +2995,7 @@ function parseBundleClient(s) {
     if (!v4(foreignGre)) return {error: 'bad foreign GRE IP in bundle'};
     if (!token || token.length > 128) return {error: 'bad token in bundle'};
     const rawPorts = (parts[6] || '').trim();
-    return {engine: 'gre-backhaul', iranPub, port, iranGre, foreignGre, transport: transport || 'tcpmux', token, rawPorts, ports: rawPorts ? rawPorts.split(',') : []};
+    return {engine: 'gre-backhaul', iranPub, port, iranGre, foreignGre, transport: (transport || 'tcpmux').replace(/\+udp$/, ''), udp: /\+udp$/.test(transport), token, rawPorts, ports: rawPorts ? rawPorts.split(',') : []};
   }
   if (s.startsWith('hsh1_')) {
     const parts = s.slice(5).split('_');
@@ -3046,6 +3071,7 @@ function joinBundleSync() {
   $('joinFrpOpts').hidden = b.engine !== 'frp';
   $('joinDialWrap').classList.toggle('hidden', b.engine === 'backhaul');
   let msg = docTpl('{0} bundle: Iran server {1}, port {2}, transport {3}.', [JOIN_ENGINE[b.engine] || b.engine, b.iranPub, b.port, b.transport]);
+  if (b.udp) msg += ' ' + tr('', 'UDP is forwarded too.');
   if (!b.ports.length) msg += ' ' + tr('', 'It has no ports: enter the reverse ports above.');
   info.textContent = msg;
   info.hidden = false;
@@ -3122,6 +3148,7 @@ $('joinBtn').onclick = async () => {
       frp_port: bundle.port,
       token: rawToken,
       dial: bundle.engine === 'backhaul' ? '' : ($('jDial') ? $('jDial').value : 'auto'),
+      accept_udp: !!bundle.udp,
       ports, force: true,
     } : {
       role: 'foreign',
@@ -7476,6 +7503,7 @@ async function bagherIranApplyClick() {
       ssh_port: parseInt(val('sshfwdRemotePort'), 10) || 22,
       ports,
       pool_count: parseInt(val('sshfwdPoolCount'), 10) || 25,
+      udp: !!($('sshfwdUdp') && $('sshfwdUdp').checked),
       frp_bind_port: parseInt(val('sshfwdFRPPort'), 10) || 55400
     });
     if (res && res.bundle) renderBundleBox($('setupBundle'), res.bundle);
@@ -7723,6 +7751,7 @@ function openBagherQuickEdit() {
   }
   if ($('bagherQuickPoolCount')) $('bagherQuickPoolCount').value = d.pool_count || 25;
   if ($('bagherQuickBindPort')) $('bagherQuickBindPort').value = d.frp_bind_port || 55400;
+  if ($('bagherQuickUdp')) $('bagherQuickUdp').checked = !!d.udp;
   const warn = $('bagherQuickEditWarn');
   if (warn) { warn.textContent = ''; warn.classList.add('hidden'); }
   modalShow($('bagherQuickEditModal'), closeBagherQuickEdit);
@@ -7737,6 +7766,7 @@ async function saveBagherQuickEdit() {
   const ports = $('bagherQuickPorts') ? $('bagherQuickPorts').value.trim() : '';
   const pool_count = parseInt($('bagherQuickPoolCount') ? $('bagherQuickPoolCount').value : '', 10) || 25;
   const frp_bind_port = parseInt($('bagherQuickBindPort') ? $('bagherQuickBindPort').value : '', 10) || 55400;
+  const udp = !!($('bagherQuickUdp') && $('bagherQuickUdp').checked);
   const warn = $('bagherQuickEditWarn');
 
   if (!remote_host) {
@@ -7760,7 +7790,8 @@ async function saveBagherQuickEdit() {
       ssh_port: 22,
       ports,
       pool_count,
-      frp_bind_port
+      frp_bind_port,
+      udp
     });
     toastOk('Bagher Updated', 'Tunnel settings updated and applied successfully!');
     closeBagherQuickEdit();

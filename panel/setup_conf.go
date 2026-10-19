@@ -35,6 +35,25 @@ var backhaulCoreVersion = func() string {
 // installed core accepts. All carry TCP except udp, which carries UDP only.
 var backhaulTransports = []string{"tcp", "tcpmux", "ws", "wss", "wsmux", "wssmux", "udp"}
 
+// backhaulUnitDir is where hashem.sh writes the Backhaul units; tests point it elsewhere.
+var backhaulUnitDir = "/etc/systemd/system"
+
+// backhaulUDPUnit names the UDP companion of a Backhaul unit (hashem.sh
+// backhaul_udp_unit): a udp-transport Backhaul on the same port number that
+// carries the UDP of a TCP-only transport (tcpmux, ws, wss and the mux kinds).
+func backhaulUDPUnit(unit string) string {
+	return "backhaul-udp-" + strings.TrimPrefix(unit, "backhaul-")
+}
+
+// backhaulUnitUDP reports whether the tunnel of a Backhaul unit has a UDP companion.
+func backhaulUnitUDP(unit string) bool {
+	if unit == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(backhaulUnitDir, backhaulUDPUnit(unit)+".service"))
+	return err == nil
+}
+
 func backhaulTransportOK(t string) bool {
 	for _, v := range backhaulTransports {
 		if t == v {

@@ -45,7 +45,7 @@ func TestSSHFwdFormatAuthorizedKeyLine(t *testing.T) {
 // frpc 0.71 rejects unknown fields; transport.tcpKeepalive is frps-only and
 // kept the Foreign frpc from starting, so Bagher carried no data at all.
 func TestBagherFRPCConfigHasOnlyClientFields(t *testing.T) {
-	c := buildFRPCConfig(55400, 5, []int{443})
+	c := buildFRPCConfig(55400, 5, []int{443}, true)
 	if strings.Contains(c, "tcpKeepalive") {
 		t.Fatalf("frpc config uses the frps-only field tcpKeepalive:\n%s", c)
 	}

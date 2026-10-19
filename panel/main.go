@@ -9,7 +9,9 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -851,6 +853,26 @@ func serveAsset(name, ctype string) http.HandlerFunc {
 	}
 }
 
+var (
+	assetTagOnce sync.Once
+	assetTagVal  string
+)
+
+// assetTag is the ?v= of the first-party assets: the version plus a hash of
+// their content, so a new build is fetched even under the same version (a dev
+// build, a rebuilt release). i18n-fa.js reuses app.js's query.
+func assetTag() string {
+	assetTagOnce.Do(func() {
+		h := sha256.New()
+		for _, f := range []string{"app.js", "i18n-fa.js", "tokens.css", "base.css", "enterprise.css"} {
+			b, _ := panelFS.ReadFile(f)
+			h.Write(b)
+		}
+		assetTagVal = panelVersion + "-" + hex.EncodeToString(h.Sum(nil)[:5])
+	})
+	return assetTagVal
+}
+
 func serveIndex(w http.ResponseWriter, r *http.Request) {
 	if authed(r) {
 		if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
@@ -864,11 +886,11 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := strings.ReplaceAll(string(data), "__BASE_PATH__", "/"+cfg.BasePath)
-	// Cache-bust first-party CSS per build: assets are served with a 24h cache.
+	// Cache-bust first-party assets per build: they are served with a 24h cache.
 	for _, f := range []string{"tokens.css", "base.css", "enterprise.css"} {
-		page = strings.ReplaceAll(page, `href="`+f+`"`, `href="`+f+`?v=`+panelVersion+`"`)
+		page = strings.ReplaceAll(page, `href="`+f+`"`, `href="`+f+`?v=`+assetTag()+`"`)
 	}
-	page = strings.ReplaceAll(page, `src="app.js"`, `src="app.js?v=`+panelVersion+`"`)
+	page = strings.ReplaceAll(page, `src="app.js"`, `src="app.js?v=`+assetTag()+`"`)
 	body := []byte(page)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && len(body) > 1024 {

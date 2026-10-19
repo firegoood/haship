@@ -64,7 +64,7 @@ in_ns() { local ns=$1; shift; ip netns exec "$ns" "$@"; }
 # ---- the panel's own configs -------------------------------------------------
 ssh-keygen -q -t ed25519 -N '' -f "$TMP/id" -C hashem-bagher-carrier
 ssh-keygen -q -t ed25519 -N '' -f "$TMP/wrong" -C stranger
-gen_env=(BAGHER_LAB_DIR="$TMP" BAGHER_LAB_KEY="$TMP/id" BAGHER_LAB_HOST="$FO_IP" BAGHER_LAB_PORTS="$P1,$P2" BAGHER_LAB_FRP_PORT="$FRP")
+gen_env=(BAGHER_LAB_DIR="$TMP" BAGHER_LAB_KEY="$TMP/id" BAGHER_LAB_HOST="$FO_IP" BAGHER_LAB_PORTS="$P1,$P2" BAGHER_LAB_FRP_PORT="$FRP" BAGHER_LAB_UDP=1)
 if [[ -n ${BAGHER_LAB_TEST_BIN:-} ]]; then
     (cd "$ROOT/panel" && env "${gen_env[@]}" "$BAGHER_LAB_TEST_BIN" -test.run '^TestBagherLabConfigs$' >"$TMP/gen.log" 2>&1)
 elif command -v go >/dev/null 2>&1; then
@@ -98,6 +98,14 @@ head -c 8388608 /dev/urandom >"$TMP/www1/blob"
 head -c 1048576 /dev/urandom >"$TMP/www2/blob"
 in_ns $FO python3 -m http.server $P1 --bind 127.0.0.1 --directory "$TMP/www1" >"$TMP/www1.log" 2>&1 & pids+=($!)
 in_ns $FO python3 -m http.server $P2 --bind 127.0.0.1 --directory "$TMP/www2" >"$TMP/www2.log" 2>&1 & pids+=($!)
+# UDP echo on the first port (the panel's frpc carries it as a udp proxy)
+in_ns $FO python3 -I -c '
+import socket, sys
+u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+u.bind(("127.0.0.1", int(sys.argv[1])))
+while True:
+    d, a = u.recvfrom(65535)
+    u.sendto(d, a)' $P1 >"$TMP/udpecho.log" 2>&1 & pids+=($!)
 in_ns $FO "$FRP_DIR/frpc" -c "$TMP/frpc.toml" >"$TMP/frpc.log" 2>&1 & pids+=($!)
 
 # ---- Iran: frps and the ssh carrier under a Restart=always loop ---------------
@@ -122,6 +130,29 @@ for i in $(seq 16); do (fetch $P2 >"$TMP/par.$i") & par+=($!); done
 wait "${par[@]}"   # only these: a bare wait would also wait for sshd and frp
 for i in $(seq 16); do [[ $(cat "$TMP/par.$i") == "$want2" ]] && okc=$((okc + 1)); done
 check "16 parallel requests all intact" 16 "$okc"
+
+# ---- 1b. UDP on the same port, through the same ssh tunnel -------------------------
+# udp_ok N SIZE: datagrams from the user to Iran:P1; true when >=90% come back intact.
+udp_ok() {
+    in_ns $US python3 -I - "$IR_US" "$P1" "$1" "$2" <<'PY'
+import os, socket, sys
+host, port, n, size = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(1.5)
+s.connect((host, port))
+ok = 0
+for _ in range(n):
+    d = os.urandom(size)
+    try:
+        s.send(d)
+        if s.recv(65535) == d: ok += 1
+    except Exception:
+        pass
+sys.exit(0 if ok * 10 >= n * 9 else 1)
+PY
+}
+if wait_for 30 udp_ok 5 64; then ok "UDP user -> Iran:$P1 -> ssh -> Foreign UDP service"; else bad "UDP never crossed the Bagher tunnel"; fi
+udp_ok 30 1200 && ok "30 datagrams of 1200 B (>=90% intact)" || bad "UDP datagrams of 1200 B lost"
 
 # ---- 2. nothing exposed -----------------------------------------------------------
 in_ns $US bash -c "exec 3<>/dev/tcp/$IR_US/$FRP" 2>/dev/null && bad "frps control port reachable from outside Iran" \

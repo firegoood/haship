@@ -13,6 +13,14 @@ The cluster (several foreign servers behind one Iran port, several Iran hubs, DN
 - Performance, Watchdog, Benchmark, the Path Test, Backhaul setup and Diagnostics are Hashem Pro. Every existing Pro key opens them; settings and tunnels that already run keep running without a license.
 - Bagher has no tab of its own any more: it is an engine in Setup and a card in Tunnel.
 
+### UDP in every tunnel
+- **Backhaul forwards UDP on every transport.** UDP rode only the `tcp` transport (`accept_udp`); the core ignores it on tcpmux and the ws/wss family, so the default tunnel carried TCP alone. With **Also forward UDP** (Setup, `--udp`, the terminal menu), a TCP-only transport gets a UDP companion on both servers: a second Backhaul with the `udp` transport on the same port number, same token, same ports (`backhaul-udp-<unit>`). It starts, stops and restarts with its tunnel (systemd `PartOf`), rebuilds its config from the tunnel's config at each start, and goes away with the tunnel (replace, remove peer, leave hub, uninstall). The bundle carries the choice (`tcpmux+udp`), so the foreign side follows by itself; older bundles are unchanged. Peers, extra hubs and pool members work the same way. Open the Backhaul port for UDP too on a firewall outside the server.
+- **Bagher forwards UDP** when asked (Setup and the Tunnel card's edit): a udp proxy per port next to the tcp one, through the same SSH tunnel; the bundle carries it to the foreign server. Direct SSH mode stays TCP only (SSH cannot carry UDP). `hashem bagher apply-bundle` now uses the bundle's ports instead of a fixed list.
+- **FRP** already forwarded TCP and UDP on every port; Setup now says so.
+- `hashem bundle inspect` shows whether a bundle forwards UDP; `hashem backhaul status` lists the UDP companions. The add-peer form has the same choice, and the foreign Setup says when a bundle forwards UDP.
+- **A new build is always loaded by the browser.** The panel's JS and CSS were cached for a day under the version number, so a rebuilt or dev build of the same version showed the old page; their URL now carries a hash of their content.
+- **Tested with the real cores in CI:** tcpmux carries TCP and no UDP alone, the companion carries UDP (small and 1200-byte datagrams) on the same port while TCP keeps working, and recovers after kill -9; Bagher carries UDP through ssh -R + frp.
+
 ### Cluster: any scenario, and the guide
 - **A second foreign server on a pooled port can be added from Setup.** The panel's port check refused it (only the script knew about pools), so the main way to grow a pool failed in the panel.
 - **[How it works, and a hands-on tutorial](docs/CLUSTER_TUTORIAL.md)** ([فارسی](docs/CLUSTER_TUTORIAL.fa.md)): what happens to a connection and to a failure, then ten lessons from the first pool to DNS failover, breaking things on purpose.

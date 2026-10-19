@@ -12,6 +12,7 @@ import (
 type setupBundle struct {
 	Engine     string // "frp" | "backhaul" | "gre-backhaul"
 	Transport  string // for backhaul: "tcpmux", "tcp", "ws", "wss", "wsmux", "wssmux"
+	UDP        bool   // backhaul: forward UDP too (transport written as "tcpmux+udp")
 	IranPub    string
 	FrpPort    int
 	IranGre    string
@@ -55,6 +56,21 @@ func MakeBundle(iranPub string, frpPort int, iranGre, foreignGre, token string, 
 	return s
 }
 
+// bundleUDPMark follows a Backhaul bundle's transport when the tunnel forwards
+// UDP too ("tcpmux+udp"): the foreign side then forwards it as well.
+const bundleUDPMark = "+udp"
+
+// backhaulBundleTransport is the transport field of a Backhaul bundle.
+func backhaulBundleTransport(transport string, udp bool) string {
+	if transport == "" {
+		transport = "tcpmux"
+	}
+	if udp && transport != "udp" && !strings.HasSuffix(transport, bundleUDPMark) {
+		return transport + bundleUDPMark
+	}
+	return transport
+}
+
 // MakeBackhaulBundle builds the Standalone Backhaul setup bundle (No-GRE).
 // Format: bh1_<IRAN_PUB>_<BH_PORT>_<TRANSPORT>_<TOKEN>[_<PORTS>]
 func MakeBackhaulBundle(iranPub string, bhPort int, transport, token string, ports []string) string {
@@ -94,6 +110,7 @@ func ParseBackhaulBundle(s string) (setupBundle, error) {
 		return b, fmt.Errorf("backhaul bundle must have 4 or 5 underscore parts (got %d)", len(parts))
 	}
 	iranPub, portS, transport, token := parts[0], parts[1], parts[2], parts[3]
+	transport, udp := strings.CutSuffix(transport, bundleUDPMark)
 	if net.ParseIP(iranPub) == nil || !isV4(iranPub) {
 		return b, fmt.Errorf("bad Iran public IP in bundle: %q", iranPub)
 	}
@@ -109,6 +126,7 @@ func ParseBackhaulBundle(s string) (setupBundle, error) {
 	}
 	b = setupBundle{
 		Engine:    "backhaul",
+		UDP:       udp,
 		Transport: transport,
 		IranPub:   iranPub,
 		FrpPort:   port,
@@ -135,6 +153,7 @@ func ParseGreBackhaulBundle(s string) (setupBundle, error) {
 		return b, fmt.Errorf("gre-backhaul bundle must have 6 or 7 underscore parts (got %d)", len(parts))
 	}
 	iranPub, portS, iranGre, foreignGre, transport, token := parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
+	transport, udp := strings.CutSuffix(transport, bundleUDPMark)
 	if net.ParseIP(iranPub) == nil || !isV4(iranPub) {
 		return b, fmt.Errorf("bad Iran public IP in bundle: %q", iranPub)
 	}
@@ -156,6 +175,7 @@ func ParseGreBackhaulBundle(s string) (setupBundle, error) {
 	}
 	b = setupBundle{
 		Engine:     "gre-backhaul",
+		UDP:        udp,
 		Transport:  transport,
 		IranPub:    iranPub,
 		FrpPort:    port,
@@ -266,6 +286,9 @@ func applyBundle(body *setupRequest, b setupBundle) {
 		if b.Engine == "frp" {
 			body.FRPTransport = b.Transport
 		}
+	}
+	if b.UDP {
+		body.AcceptUDP = true
 	}
 	body.RemotePub = b.IranPub
 	body.FrpPort = b.FrpPort

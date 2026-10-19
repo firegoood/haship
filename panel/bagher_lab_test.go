@@ -32,6 +32,7 @@ func TestBagherLabConfigs(t *testing.T) {
 	cfg.KeyPath = os.Getenv("BAGHER_LAB_KEY")
 	cfg.Ports = ports
 	cfg.PoolCount = 5
+	cfg.UDP = os.Getenv("BAGHER_LAB_UDP") == "1"
 	if v := os.Getenv("BAGHER_LAB_FRP_PORT"); v != "" {
 		cfg.FRPBindPort, _ = strconv.Atoi(v)
 	}
@@ -42,7 +43,7 @@ func TestBagherLabConfigs(t *testing.T) {
 		}
 	}
 	write("frps.toml", buildFRPSConfig(cfg))
-	write("frpc.toml", buildFRPCConfig(cfg.FRPBindPort, cfg.PoolCount, cfg.Ports))
+	write("frpc.toml", buildFRPCConfig(cfg.FRPBindPort, cfg.PoolCount, cfg.Ports, cfg.UDP))
 
 	// The unit's ExecStart is the exact ssh command the Iran side runs.
 	unit := buildSSHFwdService(cfg)
