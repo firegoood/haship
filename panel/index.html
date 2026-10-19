@@ -1361,9 +1361,9 @@
       <button role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" class="nav-item" data-tab="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span data-i18n="nav_logs">Logs</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_system">System</div>
       <button role="tab" aria-selected="false" aria-controls="tab-perf" tabindex="-1" class="nav-item" data-tab="perf" id="perfNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span data-i18n="nav_perf">Performance</span><span class="nav-lock hidden" id="navPerfPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
-      <button role="tab" aria-selected="false" aria-controls="tab-watchdog" tabindex="-1" class="nav-item" data-tab="watchdog" id="watchdogNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span data-i18n="nav_watchdog">Watchdog</span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-watchdog" tabindex="-1" class="nav-item" data-tab="watchdog" id="watchdogNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span data-i18n="nav_watchdog">Watchdog</span><span class="nav-lock hidden" id="navWatchdogPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-doctor" tabindex="-1" class="nav-item" data-tab="doctor" id="doctorNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span data-i18n="nav_doctor">Diagnostics</span><span class="nav-lock hidden" id="navDoctorPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span><span class="nav-badge hidden u-ml-auto"></span></button>
-      <button role="tab" aria-selected="false" aria-controls="tab-benchmark" tabindex="-1" class="nav-item" data-tab="benchmark" id="benchmarkNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span data-i18n="nav_benchmark">Benchmark</span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-benchmark" tabindex="-1" class="nav-item" data-tab="benchmark" id="benchmarkNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span data-i18n="nav_benchmark">Benchmark</span><span class="nav-lock hidden" id="navBenchmarkPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-update" tabindex="-1" class="nav-item" data-tab="update"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg><span data-i18n="nav_update">Update</span><span class="badge info hidden u-ml-auto" id="updBadge" >new</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" class="nav-item" data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2z"/></svg><span data-i18n="nav_settings">Settings</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-terminal" tabindex="-1" class="nav-item hidden" data-tab="terminal" id="termNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg><span data-i18n="nav_terminal">Terminal</span><span class="term-live hidden u-ml-auto" id="termLiveDot" ></span></button>
@@ -1973,7 +1973,7 @@
                   </label>
                   <label class="u-check-row">
                     <input type="checkbox" id="jProxyProtocol" value="v2">
-                    <span><b>PROXY Protocol v2</b> (Real client IP for Xray)</span>
+                    <span><b>PROXY Protocol v2</b> (real client IP: turn on acceptProxyProtocol in the Xray inbound first)</span>
                   </label>
                 </div>
                 </div>
@@ -2137,7 +2137,7 @@
             <p class="tc-title">FRP Transport</p>
             <span class="badge" id="perfRoleBadge">—</span>
           </div>
-          <div class="qs-hint">Extra encryption and multiplexing between frpc and frps. Leave both off for VLESS, Reality and Trojan: their traffic is already encrypted, so these only cost CPU and speed.</div>
+          <div class="qs-hint">The FRP options of this tunnel. Encryption, compression and multiplexing only cost CPU and speed for VLESS, Reality and Trojan, whose traffic is already encrypted: leave them off unless a service needs them.</div>
           <fieldset class="perf-fs" id="perfFrpSet">
             <legend class="sr-only">FRP transport options</legend>
             <div class="u-flex-col-gap14 u-mt-12">
@@ -2148,11 +2148,11 @@
                   <div class="qs-hint u-mt-2">Encrypts traffic between frpc and frps with AES-128. Only worth it for plain, unencrypted services.</div>
                 </div>
               </label>
-              <label class="wd-radio-opt u-items-start" id="perfCompRow" hidden>
+              <label class="wd-radio-opt u-items-start" id="perfCompRow">
                 <input type="checkbox" id="perfCompCheck" class="u-checkbox-ac">
                 <div>
                   <b class="u-color-tx">Proxy Compression <span class="perf-key" data-no-i18n>transport.useCompression</span></b>
-                  <div class="qs-hint u-mt-2">Snappy compression per proxy. Encrypted traffic does not compress, so this only uses CPU. Shown only while it is on: turn it off and apply.</div>
+                  <div class="qs-hint u-mt-2">Snappy compression per proxy. Helps plain text services; encrypted traffic does not compress, so for VPN traffic it only uses CPU.</div>
                 </div>
               </label>
               <label class="wd-radio-opt u-items-start">
@@ -2161,6 +2161,28 @@
                   <b class="u-color-tx">TCP Multiplexing <span class="perf-key" data-no-i18n>transport.tcpMux</span></b>
                   <div class="qs-hint u-mt-2">Carries every user connection inside one TCP connection. Over GRE this roughly halves throughput (measured 460 against 1010 Mbit). It must be the same on the Iran server and every foreign server, or frpc cannot log in.</div>
                   <div class="qs-hint u-mt-2" id="perfMuxLive">—</div>
+                </div>
+              </label>
+              <div class="fg">
+                <label for="perfPPSelect"><b class="u-color-tx">PROXY Protocol <span class="perf-key" data-no-i18n>transport.proxyProtocolVersion</span></b></label>
+                <select class="hashem-input u-max-w-260" id="perfPPSelect">
+                  <option value="off">Off</option>
+                  <option value="v2">v2 (Xray, 3x-ui)</option>
+                  <option value="v1">v1</option>
+                </select>
+                <div class="qs-hint u-mt-2">Sends each user's real IP to the service on this server, so Xray logs, limits and IP checks see real users instead of 127.0.0.1. Turn on Proxy Protocol (acceptProxyProtocol) in the Xray inbound first: without it every connection fails.</div>
+                <div class="qs-hint u-mt-2" id="perfPPLive" hidden></div>
+              </div>
+              <div class="fg">
+                <label for="perfBwInput"><b class="u-color-tx">Bandwidth Limit per Port <span class="perf-key" data-no-i18n>transport.bandwidthLimit</span></b></label>
+                <div class="u-flex-center-gap8"><input type="number" class="hashem-input u-max-w-140" id="perfBwInput" min="0" max="10000" step="1" value="0" inputmode="numeric"><span class="qs-hint">MB/s</span></div>
+                <div class="qs-hint u-mt-2">A cap on each forwarded port, for all its users together (megabytes per second). 0 means no limit.</div>
+              </div>
+              <label class="wd-radio-opt u-items-start">
+                <input type="checkbox" id="perfHcCheck" class="u-checkbox-ac">
+                <div>
+                  <b class="u-color-tx">Health Check <span class="perf-key" data-no-i18n>healthCheck</span></b>
+                  <div class="qs-hint u-mt-2">frpc checks the service on this server every 10 seconds and closes its port on the Iran server while it is down, so users fail at once instead of hanging.</div>
                 </div>
               </label>
             </div>
@@ -2281,7 +2303,7 @@
               <button class="hashem-btn hashem-btn-secondary" id="wdToggleBtn">Enable</button>
             </div>
           </div>
-          <div class="qs-hint">Monitors GRE ping and FRP service every 1 minute. Sends Telegram alerts and optional auto-restart after consecutive failures.</div>
+          <div class="qs-hint">Checks the tunnel every minute: the GRE link and the FRP service, or for Backhaul its control session. Sends Telegram alerts and, if you turn it on, restarts the tunnel after consecutive failures.</div>
           <div class="u-m-12x0x16x0">
             <label class="u-flex u-ai-c u-gap-8 u-cursor-pointer u-fs-13">
               <input type="checkbox" id="wdAutoRestart">
@@ -3016,6 +3038,7 @@
           <div class="u-flex u-gap-8">
             <button class="hashem-btn hashem-btn-primary" id="licActivateBtn" onclick="activateLicenseClick()">Activate License</button>
             <button class="hashem-btn hashem-btn-secondary hidden" id="licDeactivateBtn" onclick="deactivateLicenseClick()">Deactivate</button>
+            <a class="hashem-btn hashem-btn-secondary" id="licBuyBtn" href="https://pdnczone.com" target="_blank" rel="noopener noreferrer">Buy License</a>
           </div>
         </div>
         <div class="tunnel-card u-mt-16" id="sentinelAddonCard">
@@ -3369,20 +3392,7 @@
         </select>
       </div>
 
-      <div class="fg u-mt-2 u-flex u-wrap u-gap-12">
-        <label class="u-check-row">
-          <input type="checkbox" id="editPeerEncryption">
-          <span><b>Encryption</b> (AES/TLS)</span>
-        </label>
-        <label class="u-check-row">
-          <input type="checkbox" id="editPeerCompression">
-          <span><b>Compression</b> (Snappy)</span>
-        </label>
-        <label class="u-check-row">
-          <input type="checkbox" id="editPeerProxyProtocol" value="v2">
-          <span><b>PROXY Protocol v2</b> (Real client IP)</span>
-        </label>
-      </div>
+      <div class="qs-hint u-mt-2">Encryption, compression, PROXY protocol, bandwidth limit and health check are set on the foreign server, in its Performance tab: they live in its frpc.</div>
 
       <div>
         <label class="u-fs-12 u-fw-700 u-ls-06 u-upper u-c-mu u-block u-mb-8">Forwarded Ports</label>
@@ -3448,9 +3458,12 @@
         <button type="button" class="hashem-btn hashem-btn-ghost" id="bagherLicCancelBtn" onclick="cancelBagherLicModal()">Close</button>
         <button type="button" class="hashem-btn hashem-btn-secondary" onclick="openBagherLicenseSettings()">Settings</button>
       </div>
-      <button type="button" class="hashem-btn hashem-btn-primary" id="bagherLicSubmitBtn" onclick="activateBagherLicenseClick()">
-        Activate License
-      </button>
+      <div class="u-flex u-gap-8">
+        <a class="hashem-btn hashem-btn-secondary" id="proBuyBtn" href="https://pdnczone.com" target="_blank" rel="noopener noreferrer">Buy License</a>
+        <button type="button" class="hashem-btn hashem-btn-primary" id="bagherLicSubmitBtn" onclick="activateBagherLicenseClick()">
+          Activate License
+        </button>
+      </div>
     </div>
   </div>
 </div>

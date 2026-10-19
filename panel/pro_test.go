@@ -115,6 +115,36 @@ func TestProGatesAPIs(t *testing.T) {
 			handlePerfPost(rr, httptest.NewRequest("POST", "/api/perf", strings.NewReader(`{"action":"nope"}`)))
 			return rr
 		}},
+		{"watchdog read", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleWatchdogGet(rr, httptest.NewRequest("GET", "/api/watchdog", nil))
+			return rr
+		}},
+		{"watchdog change", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleWatchdogPost(rr, httptest.NewRequest("POST", "/api/watchdog", strings.NewReader(`{"action":"nope"}`)))
+			return rr
+		}},
+		{"backup download", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleBackupDownload(rr, httptest.NewRequest("GET", "/api/watchdog/backup-download?f=x", nil))
+			return rr
+		}},
+		{"benchmark read", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleBenchmarkGet(rr, httptest.NewRequest("GET", "/api/benchmark", nil))
+			return rr
+		}},
+		{"benchmark run", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleBenchmarkRun(rr, httptest.NewRequest("POST", "/api/benchmark/run", strings.NewReader(`{`)))
+			return rr
+		}},
+		{"benchmark auto-pilot", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleBenchmarkAutoPilot(rr, httptest.NewRequest("POST", "/api/benchmark/autopilot", strings.NewReader(`{`)))
+			return rr
+		}},
 		{"Backhaul setup", func() *httptest.ResponseRecorder {
 			rr := httptest.NewRecorder()
 			handleSetupPost(rr, httptest.NewRequest("POST", "/api/setup", strings.NewReader(`{"role":"iran","engine":"backhaul","local_public":"bad"}`)))

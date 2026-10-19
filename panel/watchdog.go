@@ -274,6 +274,9 @@ func runWatchdogCmd(args ...string) (string, error) {
 }
 
 func handleWatchdogGet(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proWatchdog, "The watchdog") {
+		return
+	}
 	c := loadWatchdogConfig()
 	checkResult, _ := runWatchdogCmd("watchdog", "check")
 
@@ -331,6 +334,9 @@ func isValidTimeHHMM(s string) bool {
 }
 
 func handleWatchdogPost(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proWatchdog, "The watchdog") {
+		return
+	}
 	var body watchdogPostRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-WD-01", "invalid request body")
@@ -547,6 +553,9 @@ func getBackupDir() string {
 }
 
 func handleBackupDownload(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proWatchdog, "The watchdog") {
+		return
+	}
 	f := r.URL.Query().Get("f")
 	base := filepath.Base(f)
 	if f == "" || base != f || !strings.HasSuffix(base, ".enc") || strings.Contains(base, "..") {

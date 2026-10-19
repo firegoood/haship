@@ -1132,10 +1132,19 @@ transport.maxPoolCount = %d
 					ppVersion = "v2"
 				}
 			}
+			pc := loadPerfConfig()
+			if pc.ProxyProtocol != "" { // set in the Performance tab: it wins
+				ppVersion = ""
+				if pc.ProxyProtocol != "off" {
+					ppVersion = pc.ProxyProtocol
+				}
+			}
+			pc.ProxyProtocol = "" // written below as ppLine
 			ppLine := ""
 			if ppVersion != "" {
 				ppLine = fmt.Sprintf("transport.proxyProtocolVersion = %q\n", ppVersion)
 			}
+			tcpExtra, udpExtra := frpcProxyExtras(pc, true), frpcProxyExtras(pc, false)
 			encLine := ""
 			if useEnc {
 				encLine = "transport.useEncryption = true\n"
@@ -1175,14 +1184,14 @@ type = "tcp"
 localIP = "127.0.0.1"
 localPort = %d
 remotePort = %d
-%s%s%s
+%s%s%s%s
 [[proxies]]
 name = "udp-%d"
 type = "udp"
 localIP = "127.0.0.1"
 localPort = %d
 remotePort = %d
-`, p, p, p, ppLine, encLine, compLine, p, p, p))
+%s`, p, p, p, ppLine, encLine, compLine, tcpExtra, p, p, p, udpExtra))
 			}
 			tx.backup(filepath.Join(frpDir, "frpc.toml"))
 			if err := writeEngineFile(frpDir, "frpc.toml", frpcBuf.String()); err != nil {

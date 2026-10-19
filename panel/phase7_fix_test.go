@@ -196,6 +196,7 @@ func postWatchdog(t *testing.T, body string) *httptest.ResponseRecorder {
 
 // L7: updating one Telegram field keeps the others.
 func TestWatchdogTelegramPartialUpdate(t *testing.T) {
+	withPro(t)
 	old := configDir
 	configDir = t.TempDir()
 	t.Cleanup(func() { configDir = old })
@@ -213,6 +214,7 @@ func TestWatchdogTelegramPartialUpdate(t *testing.T) {
 
 // M6: the backup key is only released with the panel password.
 func TestBackupKeyExportNeedsPassword(t *testing.T) {
+	withPro(t)
 	setupAuthCfg(t, hashPassword("Secret-Pass-1"))
 	_ = os.WriteFile(filepath.Join(configDir, "backup.key"), []byte("k3y-material\n"), 0600)
 	if rr := postWatchdog(t, `{"action":"backup-key","password":"wrong"}`); rr.Code == http.StatusOK || strings.Contains(rr.Body.String(), "k3y") {

@@ -30,6 +30,7 @@ func TestMaskBotToken(t *testing.T) {
 }
 
 func TestWatchdogAPIEndpoints(t *testing.T) {
+	withPro(t)
 	tmpDir, err := os.MkdirTemp("", "wd-test-*")
 	if err != nil {
 		t.Fatal(err)

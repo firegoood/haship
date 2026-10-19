@@ -623,6 +623,11 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		if body.Engine == "" || body.Engine == "frp" {
 			pc := loadPerfConfig()
 			pc.ProxyEncryption, pc.ProxyCompression = body.UseEncryption, body.UseCompression
+			if validProxyProtocol(body.ProxyProtocol) {
+				pc.ProxyProtocol = body.ProxyProtocol
+			} else {
+				pc.ProxyProtocol = "off"
+			}
 			_ = savePerfConfig(pc)
 		}
 		pcfg := loadPeerConfig()

@@ -711,6 +711,9 @@ func applyBenchmarkCarrier(target string) (string, error) {
 
 // GET /api/benchmark
 func handleBenchmarkGet(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proBenchmark, "The benchmark") {
+		return
+	}
 	rep := loadSavedBenchmarkReport()
 	if rep == nil {
 		rep = runCarrierBenchmark()
@@ -720,6 +723,9 @@ func handleBenchmarkGet(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/benchmark/run
 func handleBenchmarkRun(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proBenchmark, "The benchmark") {
+		return
+	}
 	var req BenchmarkRunRequest
 	if r.Body != nil && r.ContentLength > 0 {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -730,6 +736,9 @@ func handleBenchmarkRun(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/benchmark/apply
 func handleBenchmarkApply(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proBenchmark, "The benchmark") {
+		return
+	}
 	var req BenchmarkApplyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeAPIError(w, r, "E-ACTION-01", "invalid json")
@@ -757,6 +766,9 @@ func handleBenchmarkApply(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/benchmark/autopilot
 func handleBenchmarkAutoPilot(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proBenchmark, "The benchmark") {
+		return
+	}
 	var req BenchmarkAutoPilotRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeAPIError(w, r, "E-ACTION-01", "invalid json")

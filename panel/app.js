@@ -251,6 +251,8 @@ const PRO_TXT = {
   pathtest: ['pro_t_pathtest', 'Path Test — Hashem Pro', 'pro_b_pathtest', 'The path test is a Hashem Pro feature, on both servers.'],
   diagnostics: ['pro_t_diag', 'Diagnostics — Hashem Pro', 'pro_b_diag', 'Diagnostics is a Hashem Pro feature.'],
   performance: ['pro_t_perf', 'Performance — Hashem Pro', 'pro_b_perf', 'Performance tuning is a Hashem Pro feature. Running tunnels keep the settings they have.'],
+  watchdog: ['pro_t_wd', 'Watchdog — Hashem Pro', 'pro_b_wd', 'The watchdog is a Hashem Pro feature. A watchdog that already runs keeps its alerts, backups and schedules.'],
+  benchmark: ['pro_t_bench', 'Benchmark — Hashem Pro', 'pro_b_bench', 'The benchmark and the path test are Hashem Pro features.'],
 };
 function isSentinelLicensed() {
   const f = (_licenseData && _licenseData.is_valid && _licenseData.features) || [];
@@ -263,9 +265,11 @@ function proSync() {
   tag('navDoctorPro', 'diagnostics');
   tag('ptPro', 'pathtest');
   tag('navPerfPro', 'performance');
+  tag('navWatchdogPro', 'watchdog');
+  tag('navBenchmarkPro', 'benchmark');
   if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', isBagherLicensed());
   if ($('navSentinelPro')) $('navSentinelPro').classList.toggle('hidden', isSentinelLicensed());
-  ['navPerfPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
+  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
     const el = $(id); if (!el) return;
     const t = id === 'navSentinelPro' ? tr('pro_addon', 'Add-on license') : 'Hashem Pro';
     el.title = t; el.setAttribute('aria-label', t);
@@ -281,20 +285,14 @@ function goTab(name) {
   if (name === 'add-peer') { goTab('setup'); const c = $('setupAddPeerStep'); if (c && c.scrollIntoView) c.scrollIntoView({behavior: 'smooth', block: 'start'}); return; }
   // Bagher lives in Setup (create) and Tunnel (run) like every other tunnel.
   if (name === 'sshfwd' || name === 'bagher') { openBagherSetup(); return; }
-  if (name === 'doctor' && !isProLicensed('diagnostics')) {
+  // Hashem Pro tabs: the license window instead of the tab
+  const proTab = { doctor: 'diagnostics', perf: 'performance', watchdog: 'watchdog', benchmark: 'benchmark' }[name];
+  if (proTab && !isProLicensed(proTab)) {
     if (_licenseData === null) {
-      loadLicense().then(() => { if (isProLicensed('diagnostics')) goTab('doctor'); else openBagherLicModal('diagnostics'); });
+      loadLicense().then(() => { if (isProLicensed(proTab)) goTab(name); else openBagherLicModal(proTab); });
       return;
     }
-    openBagherLicModal('diagnostics');
-    return;
-  }
-  if (name === 'perf' && !isProLicensed('performance')) {
-    if (_licenseData === null) {
-      loadLicense().then(() => { if (isProLicensed('performance')) goTab('perf'); else openBagherLicModal('performance'); });
-      return;
-    }
-    openBagherLicModal('performance');
+    openBagherLicModal(proTab);
     return;
   }
   if (name === 'cluster' && !isBagherLicensed()) {
@@ -655,6 +653,10 @@ const I18N = {
     bench_failover_save: "Save Failover Policy",
     bench_leaderboard_title: "Carrier Performance Leaderboard",
     bench_run_btn: "Run Carrier Benchmark",
+    pro_t_wd: "Watchdog — Hashem Pro",
+    pro_b_wd: "The watchdog is a Hashem Pro feature. A watchdog that already runs keeps its alerts, backups and schedules.",
+    pro_t_bench: "Benchmark — Hashem Pro",
+    pro_b_bench: "The benchmark and the path test are Hashem Pro features.",
     pro_t_perf: "Performance — Hashem Pro",
     pro_b_perf: "Performance tuning is a Hashem Pro feature. Running tunnels keep the settings they have.",
     pro_addon: "Add-on license",
@@ -4118,17 +4120,22 @@ function perfForm() {
     proxy_encryption: $('perfEncCheck').checked,
     proxy_compression: $('perfCompCheck').checked,
     tcp_mux: $('perfMuxCheck').checked,
+    proxy_protocol: $('perfPPSelect').value,
+    bandwidth_limit_mb: Math.max(0, Math.min(10000, parseInt($('perfBwInput').value, 10) || 0)),
+    health_check: $('perfHcCheck').checked,
   };
 }
 function perfDirty() {
   const f = perfForm(), s = perfState;
-  return f.proxy_encryption !== !!s.proxy_encryption || f.proxy_compression !== !!s.proxy_compression || f.tcp_mux !== !!s.tcp_mux;
+  return f.proxy_encryption !== !!s.proxy_encryption || f.proxy_compression !== !!s.proxy_compression || f.tcp_mux !== !!s.tcp_mux
+    || f.proxy_protocol !== (s.proxy_protocol || 'off') || f.bandwidth_limit_mb !== (s.bandwidth_limit_mb || 0) || f.health_check !== !!s.health_check;
 }
 function perfSyncDirty() {
   const dirty = perfDirty();
   $('perfDirty').hidden = !dirty;
 }
-['perfEncCheck', 'perfCompCheck', 'perfMuxCheck'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', perfSyncDirty); });
+['perfEncCheck', 'perfCompCheck', 'perfMuxCheck', 'perfPPSelect', 'perfHcCheck'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', perfSyncDirty); });
+if ($('perfBwInput')) $('perfBwInput').addEventListener('input', perfSyncDirty);
 
 function fmtBufMB(b) { return b ? (b >= 1048576 ? (Math.round(b / 104857.6) / 10) + ' MB' : Math.round(b / 1024) + ' KB') : '—'; }
 
@@ -4229,9 +4236,8 @@ async function loadPerf() {
     perfSetText('perfPoolSub', tr('', s.backhaul_role === 'foreign' ? 'Open to the Iran server' : 'Set on the foreign server'));
   } else {
     perfSetText('perfCryptoVal', isFrp ? tr('', speedFirst ? 'Speed-first' : 'Custom') : tr('', 'Not used'));
-    perfSetText('perfCryptoSub', s.proxy_compression
-      ? docTpl('Encryption {0} · Compression {1} · Multiplexing {2}', [onOff(s.proxy_encryption), onOff(true), onOff(s.tcp_mux)])
-      : docTpl('Encryption {0} · Multiplexing {1}', [onOff(s.proxy_encryption), onOff(s.tcp_mux)]));
+    perfSetText('perfCryptoSub', docTpl('Encryption {0} · Compression {1} · Multiplexing {2}', [onOff(s.proxy_encryption), onOff(s.proxy_compression), onOff(s.tcp_mux)])
+      + (s.proxy_protocol && s.proxy_protocol !== 'off' ? ' · PROXY ' + s.proxy_protocol : ''));
     perfSetLtr('perfPoolVal', isFrp ? `${s.effective_pool_count} / ${s.effective_max_pool}` : '—');
     perfSetText('perfPoolSub', s.auto_pool ? tr('perf_mode_auto', 'Auto Pool') : tr('perf_mode_manual', 'Manual'));
   }
@@ -4240,8 +4246,12 @@ async function loadPerf() {
   // FRP transport
   $('perfEncCheck').checked = !!s.proxy_encryption;
   $('perfCompCheck').checked = !!s.proxy_compression;
-  // compression never helps encrypted traffic: it shows only to be turned off
-  $('perfCompRow').hidden = !s.proxy_compression;
+  $('perfPPSelect').value = s.proxy_protocol || 'off';
+  $('perfBwInput').value = s.bandwidth_limit_mb || 0;
+  $('perfHcCheck').checked = !!s.health_check;
+  const ppl = $('perfPPLive');
+  ppl.hidden = !s.proxy_protocol_live || s.proxy_protocol_live === (s.proxy_protocol || 'off');
+  ppl.textContent = ppl.hidden ? '' : docTpl('In the running config: {0}', [s.proxy_protocol_live]);
   $('perfMuxCheck').checked = !!s.tcp_mux;
   const mux = $('perfMuxLive');
   const live = s.tcp_mux_live;
@@ -4262,11 +4272,10 @@ async function loadPerf() {
   roleBadge.className = 'badge ' + (s.role === 'none' ? '' : 'info');
   // frps ignores proxy encryption and compression: they live in frpc's proxies.
   const onIran = s.role === 'iran';
-  $('perfEncCheck').disabled = onIran;
-  $('perfCompCheck').disabled = onIran;
+  ['perfEncCheck', 'perfCompCheck', 'perfPPSelect', 'perfBwInput', 'perfHcCheck'].forEach(id => { $(id).disabled = onIran; });
   const rh = $('perfRoleHint');
   rh.hidden = !onIran;
-  rh.textContent = onIran ? tr('', 'Encryption and compression are set on each foreign server; this server follows them. Multiplexing must match on both sides.') : '';
+  rh.textContent = onIran ? tr('', 'Encryption, compression, PROXY protocol, bandwidth limit and health check are set on each foreign server, in its frpc. Multiplexing must match on both sides.') : '';
   perfSyncDirty();
 
   // Auto Pool
@@ -4649,6 +4658,7 @@ function formatBytes(bytes) {
 }
 
 async function loadWatchdog() {
+  if (!isProLicensed('watchdog')) return;
   try {
     const s = await api('/api/watchdog');
     wdState = s;
@@ -6536,7 +6546,7 @@ async function saveEditPorts() {
   const carrierVal   = $('editPeerCarrier') ? $('editPeerCarrier').value : '';
   const engineVal    = $('editPeerEngine') ? $('editPeerEngine').value : '';
   const transportVal = $('editPeerTransport') ? $('editPeerTransport').value : '';
-  const ppVal        = $('editPeerProxyProtocol') && $('editPeerProxyProtocol').checked ? 'v2' : 'off';
+  const ppVal        = $('editPeerProxyProtocol') ? ($('editPeerProxyProtocol').checked ? 'v2' : 'off') : '';
   const frpTransVal  = $('editPeerFRPTransport') ? $('editPeerFRPTransport').value : 'tcp';
   const encVal       = $('editPeerEncryption') && $('editPeerEncryption').checked;
   const compVal      = $('editPeerCompression') && $('editPeerCompression').checked;
@@ -6570,8 +6580,8 @@ async function saveEditPorts() {
     if (transportVal) payload.transport = transportVal;
     if (ppVal) payload.proxy_protocol = ppVal;
     if (frpTransVal) payload.frp_transport = frpTransVal;
-    payload.use_encryption = encVal;
-    payload.use_compression = compVal;
+    if ($('editPeerEncryption')) payload.use_encryption = encVal;
+    if ($('editPeerCompression')) payload.use_compression = compVal;
 
     const res = await api('/api/peers', payload, 'PATCH');
     if (res && res.bundle) {
@@ -6643,6 +6653,7 @@ let peerData = null;
 let benchRunning = false;
 
 async function loadBenchmark(forceRun = false) {
+  if (!isProLicensed('benchmark')) return;
   let benchErr = null;
   const _tb = $('benchTableBody');
   if (_tb && !(benchData && benchData.metrics && benchData.metrics.length)) _tb.innerHTML = '<tr><td colspan="10">' + skel(3) + '</td></tr>';
@@ -6885,6 +6896,7 @@ function renderBenchmark(bench, peer) {
 
 async function runBenchmarkClick() {
   if (benchRunning) return;
+  if (!isProLicensed('benchmark')) { openBagherLicModal('benchmark'); return; }
   const targetHost = ($('benchTargetHost') ? $('benchTargetHost').value.trim() : '');
   const isConn = peerData && peerData.is_connected;
   

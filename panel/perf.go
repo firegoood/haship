@@ -28,6 +28,10 @@ type perfConfig struct {
 	TCPMux *bool `json:"tcp_mux,omitempty"`
 	// BackhaulPool: connection_pool of the Backhaul client; 0 = default (8).
 	BackhaulPool int `json:"backhaul_pool,omitempty"`
+	// FRP proxy options (perf_frp.go). ProxyProtocol "" = leave frpc.toml as it is.
+	ProxyProtocol string `json:"proxy_protocol,omitempty"`
+	BandwidthMB   int    `json:"bandwidth_limit_mb,omitempty"`
+	HealthCheck   bool   `json:"health_check,omitempty"`
 }
 
 // autoPoolState mirrors the auto_pool.json that hashem.sh autopool_tick maintains.
@@ -47,26 +51,30 @@ type autoPoolState struct {
 }
 
 type perfStatusResponse struct {
-	ProxyEncryption  bool            `json:"proxy_encryption"`
-	ProxyCompression bool            `json:"proxy_compression"`
-	AutoPool         bool            `json:"auto_pool"`
-	FRPPoolCount     int             `json:"frp_pool_count"`
-	FRPMaxPool       int             `json:"frp_max_pool"`
-	EffectivePool    int             `json:"effective_pool_count"`
-	EffectiveMaxPool int             `json:"effective_max_pool"`
-	AutoPoolState    autoPoolState   `json:"auto_pool_state"`
-	TCPMux           bool            `json:"tcp_mux"`
-	TCPMuxSet        bool            `json:"tcp_mux_set"`
-	TCPMuxLive       string          `json:"tcp_mux_live"`
-	InSync           bool            `json:"in_sync"`
-	SyncDetails      string          `json:"sync_details"`
-	Role             string          `json:"role"`
-	Engine           string          `json:"engine"` // "frp", "backhaul" or "" (no tunnel)
-	Overridden       map[string]bool `json:"overridden,omitempty"`
-	Net              netStackStatus  `json:"net"`
-	BackhaulPool     int             `json:"backhaul_pool"`      // saved (or default) pool
-	BackhaulPoolLive int             `json:"backhaul_pool_live"` // in the running client config, 0 = none
-	BackhaulRole     string          `json:"backhaul_role"`      // "foreign", "iran" or ""
+	ProxyEncryption   bool            `json:"proxy_encryption"`
+	ProxyCompression  bool            `json:"proxy_compression"`
+	AutoPool          bool            `json:"auto_pool"`
+	FRPPoolCount      int             `json:"frp_pool_count"`
+	FRPMaxPool        int             `json:"frp_max_pool"`
+	EffectivePool     int             `json:"effective_pool_count"`
+	EffectiveMaxPool  int             `json:"effective_max_pool"`
+	AutoPoolState     autoPoolState   `json:"auto_pool_state"`
+	TCPMux            bool            `json:"tcp_mux"`
+	TCPMuxSet         bool            `json:"tcp_mux_set"`
+	TCPMuxLive        string          `json:"tcp_mux_live"`
+	InSync            bool            `json:"in_sync"`
+	SyncDetails       string          `json:"sync_details"`
+	Role              string          `json:"role"`
+	Engine            string          `json:"engine"` // "frp", "backhaul" or "" (no tunnel)
+	Overridden        map[string]bool `json:"overridden,omitempty"`
+	Net               netStackStatus  `json:"net"`
+	BackhaulPool      int             `json:"backhaul_pool"`       // saved (or default) pool
+	BackhaulPoolLive  int             `json:"backhaul_pool_live"`  // in the running client config, 0 = none
+	BackhaulRole      string          `json:"backhaul_role"`       // "foreign", "iran" or ""
+	ProxyProtocol     string          `json:"proxy_protocol"`      // saved, or what frpc.toml runs when never saved
+	ProxyProtocolLive string          `json:"proxy_protocol_live"` // "v1", "v2", "off" or "" (no frpc.toml)
+	BandwidthMB       int             `json:"bandwidth_limit_mb"`
+	HealthCheck       bool            `json:"health_check"`
 }
 
 // netStackStatus is the kernel side of throughput: what Optimize Network sets.
@@ -92,14 +100,17 @@ const (
 )
 
 type perfPostRequest struct {
-	Action           string `json:"action"`
-	ProxyEncryption  *bool  `json:"proxy_encryption,omitempty"`
-	ProxyCompression *bool  `json:"proxy_compression,omitempty"`
-	AutoPool         *bool  `json:"auto_pool,omitempty"`
-	FRPPoolCount     *int   `json:"frp_pool_count,omitempty"`
-	FRPMaxPool       *int   `json:"frp_max_pool,omitempty"`
-	TCPMux           *bool  `json:"tcp_mux,omitempty"`
-	BackhaulPool     *int   `json:"backhaul_pool,omitempty"`
+	Action           string  `json:"action"`
+	ProxyEncryption  *bool   `json:"proxy_encryption,omitempty"`
+	ProxyCompression *bool   `json:"proxy_compression,omitempty"`
+	AutoPool         *bool   `json:"auto_pool,omitempty"`
+	FRPPoolCount     *int    `json:"frp_pool_count,omitempty"`
+	FRPMaxPool       *int    `json:"frp_max_pool,omitempty"`
+	TCPMux           *bool   `json:"tcp_mux,omitempty"`
+	BackhaulPool     *int    `json:"backhaul_pool,omitempty"`
+	ProxyProtocol    *string `json:"proxy_protocol,omitempty"`
+	BandwidthMB      *int    `json:"bandwidth_limit_mb,omitempty"`
+	HealthCheck      *bool   `json:"health_check,omitempty"`
 }
 
 func perfConfigPath() string {
@@ -124,13 +135,16 @@ func loadPerfConfig() perfConfig {
 		return def
 	}
 	var raw struct {
-		ProxyEncryption  *bool `json:"proxy_encryption"`
-		ProxyCompression *bool `json:"proxy_compression"`
-		AutoPool         *bool `json:"auto_pool"`
-		FRPPoolCount     *int  `json:"frp_pool_count"`
-		FRPMaxPool       *int  `json:"frp_max_pool"`
-		TCPMux           *bool `json:"tcp_mux"`
-		BackhaulPool     *int  `json:"backhaul_pool"`
+		ProxyEncryption  *bool  `json:"proxy_encryption"`
+		ProxyCompression *bool  `json:"proxy_compression"`
+		AutoPool         *bool  `json:"auto_pool"`
+		FRPPoolCount     *int   `json:"frp_pool_count"`
+		FRPMaxPool       *int   `json:"frp_max_pool"`
+		TCPMux           *bool  `json:"tcp_mux"`
+		BackhaulPool     *int   `json:"backhaul_pool"`
+		ProxyProtocol    string `json:"proxy_protocol"`
+		BandwidthMB      int    `json:"bandwidth_limit_mb"`
+		HealthCheck      bool   `json:"health_check"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return def
@@ -158,6 +172,13 @@ func loadPerfConfig() perfConfig {
 	if raw.BackhaulPool != nil && *raw.BackhaulPool >= bhPoolMin && *raw.BackhaulPool <= bhPoolMax {
 		c.BackhaulPool = *raw.BackhaulPool
 	}
+	if validProxyProtocol(raw.ProxyProtocol) {
+		c.ProxyProtocol = raw.ProxyProtocol
+	}
+	if raw.BandwidthMB > 0 && raw.BandwidthMB <= perfBandwidthMax {
+		c.BandwidthMB = raw.BandwidthMB
+	}
+	c.HealthCheck = raw.HealthCheck
 	return c
 }
 
@@ -348,6 +369,15 @@ func checkLiveTomlSync(c perfConfig) (bool, string, string) {
 		if c.ProxyCompression != hasComp {
 			return false, fmt.Sprintf("Proxy compression (%v) does not match frpc.toml (%v)", c.ProxyCompression, hasComp), role
 		}
+		if live := liveProxyProtocol(); c.ProxyProtocol != "" && live != c.ProxyProtocol {
+			return false, fmt.Sprintf("PROXY protocol (%s) does not match frpc.toml (%s)", c.ProxyProtocol, live), role
+		}
+		if hasBW := strings.Contains(content, fmt.Sprintf("transport.bandwidthLimit = \"%dMB\"", c.BandwidthMB)); c.BandwidthMB > 0 && !hasBW || c.BandwidthMB == 0 && strings.Contains(content, "transport.bandwidthLimit") {
+			return false, "Bandwidth limit does not match frpc.toml", role
+		}
+		if hasHC := strings.Contains(content, "healthCheck.type"); hasHC != c.HealthCheck {
+			return false, fmt.Sprintf("Health check (%v) does not match frpc.toml (%v)", c.HealthCheck, hasHC), role
+		}
 		if !c.AutoPool {
 			if live := tomlInt(content, "transport.poolCount"); live != c.FRPPoolCount {
 				return false, fmt.Sprintf("poolCount (%d) does not match frpc.toml (%d)", c.FRPPoolCount, live), role
@@ -401,26 +431,33 @@ func handlePerfGet(w http.ResponseWriter, r *http.Request) {
 	ePool, eMax := effectivePoolValues()
 
 	resp := perfStatusResponse{
-		ProxyEncryption:  c.ProxyEncryption,
-		ProxyCompression: c.ProxyCompression,
-		AutoPool:         c.AutoPool,
-		FRPPoolCount:     c.FRPPoolCount,
-		FRPMaxPool:       c.FRPMaxPool,
-		EffectivePool:    ePool,
-		EffectiveMaxPool: eMax,
-		AutoPoolState:    loadAutoPoolState(),
-		TCPMux:           c.TCPMux != nil && *c.TCPMux,
-		TCPMuxSet:        c.TCPMux != nil,
-		TCPMuxLive:       liveTCPMux(),
-		InSync:           inSync,
-		SyncDetails:      details,
-		Role:             role,
-		Engine:           perfEngine(),
-		Overridden:       over,
-		Net:              readNetStack(),
-		BackhaulPool:     backhaulPoolSize(),
-		BackhaulPoolLive: liveBackhaulPool(),
-		BackhaulRole:     backhaulRole(),
+		ProxyEncryption:   c.ProxyEncryption,
+		ProxyCompression:  c.ProxyCompression,
+		AutoPool:          c.AutoPool,
+		FRPPoolCount:      c.FRPPoolCount,
+		FRPMaxPool:        c.FRPMaxPool,
+		EffectivePool:     ePool,
+		EffectiveMaxPool:  eMax,
+		AutoPoolState:     loadAutoPoolState(),
+		TCPMux:            c.TCPMux != nil && *c.TCPMux,
+		TCPMuxSet:         c.TCPMux != nil,
+		TCPMuxLive:        liveTCPMux(),
+		InSync:            inSync,
+		SyncDetails:       details,
+		Role:              role,
+		Engine:            perfEngine(),
+		Overridden:        over,
+		Net:               readNetStack(),
+		BackhaulPool:      backhaulPoolSize(),
+		BackhaulPoolLive:  liveBackhaulPool(),
+		BackhaulRole:      backhaulRole(),
+		ProxyProtocol:     c.ProxyProtocol,
+		ProxyProtocolLive: liveProxyProtocol(),
+		BandwidthMB:       c.BandwidthMB,
+		HealthCheck:       c.HealthCheck,
+	}
+	if resp.ProxyProtocol == "" { // never set here: show what runs
+		resp.ProxyProtocol = resp.ProxyProtocolLive
 	}
 	writeJSON(w, resp)
 }
@@ -509,6 +546,26 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, "E-PERF-01", err.Error())
 		return
 	}
+	if body.ProxyProtocol != nil && !validProxyProtocol(*body.ProxyProtocol) {
+		writeAPIError(w, r, "E-PERF-01", "proxy_protocol must be off, v1 or v2")
+		return
+	}
+	if body.BandwidthMB != nil && (*body.BandwidthMB < 0 || *body.BandwidthMB > perfBandwidthMax) {
+		writeAPIError(w, r, "E-PERF-01", fmt.Sprintf("the bandwidth limit must be from 0 (none) to %d MB/s", perfBandwidthMax))
+		return
+	}
+	// FRP proxy options, for the actions that save the FRP Transport card
+	frpOpts := func() {
+		if body.ProxyProtocol != nil {
+			c.ProxyProtocol = *body.ProxyProtocol
+		}
+		if body.BandwidthMB != nil {
+			c.BandwidthMB = *body.BandwidthMB
+		}
+		if body.HealthCheck != nil {
+			c.HealthCheck = *body.HealthCheck
+		}
+	}
 
 	switch body.Action {
 	case "update":
@@ -528,6 +585,7 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 			v := *body.TCPMux
 			c.TCPMux = &v
 		}
+		frpOpts()
 		if body.AutoPool != nil {
 			c.AutoPool = *body.AutoPool
 			if c.AutoPool {
@@ -587,6 +645,7 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 			v := *body.TCPMux
 			c.TCPMux = &v
 		}
+		frpOpts()
 		if err := savePerfConfig(c); err != nil {
 			writeAPIError(w, r, "E-PERF-02", "failed to save config: "+err.Error())
 			return
@@ -627,9 +686,11 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"status": "ok", "detail": detail, "restarted": changed})
 
 	case "reset":
-		bhPool := c.BackhaulPool // the FRP reset leaves the Backhaul pool alone
+		// The reset is about speed: it leaves the Backhaul pool alone, and the
+		// PROXY protocol too, since the local service is set up to expect it.
+		bhPool, pp := c.BackhaulPool, c.ProxyProtocol
 		c = defaultPerfConfig()
-		c.BackhaulPool = bhPool
+		c.BackhaulPool, c.ProxyProtocol = bhPool, pp
 		c.TCPMux = boolPtr(false) // safe/speed-first defaults pin tcpMux off explicitly
 		if err := savePerfConfig(c); err != nil {
 			writeAPIError(w, r, "E-PERF-02", "failed to save config: "+err.Error())

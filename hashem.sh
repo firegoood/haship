@@ -594,6 +594,35 @@ except Exception:
 ' 2>/dev/null || echo "$def"
 }
 
+# string value from perf.json, $2 when missing
+perf_get_str() {
+    local key="$1" def="${2:-}"
+    [[ -f "$PERF_FILE" ]] && command -v python3 >/dev/null 2>&1 || { echo "$def"; return 0; }
+    python3 -c '
+import json
+try:
+    with open("'"$PERF_FILE"'") as f:
+        v = json.load(f).get("'"$key"'")
+    print(v if isinstance(v, str) else "'"$def"'")
+except Exception:
+    print("'"$def"'")
+' 2>/dev/null || echo "$def"
+}
+
+# perf_frpc_extra_lines tcp|udp: per-proxy lines from the Performance tab
+# (bandwidth limit on both, health check on tcp). PROXY protocol is written
+# by the callers, which know the setup choice.
+perf_frpc_extra_lines() {
+    local kind="$1" bw
+    bw=$(perf_get_int bandwidth_limit_mb 0)
+    [[ "$bw" =~ ^[0-9]+$ ]] && (( bw > 0 && bw <= 10000 )) && printf 'transport.bandwidthLimit = "%sMB"\ntransport.bandwidthLimitMode = "client"\n' "$bw"
+    if [[ "$kind" == "tcp" ]]; then
+        [[ -f "$PERF_FILE" ]] && grep -q '"health_check"[[:space:]]*:[[:space:]]*true' "$PERF_FILE" && \
+            printf 'healthCheck.type = "tcp"\nhealthCheck.timeoutSeconds = 3\nhealthCheck.maxFailed = 3\nhealthCheck.intervalSeconds = 10\n'
+    fi
+    return 0
+}
+
 # pool_clamp VALUE MIN MAX
 pool_clamp() {
     local v="$1" lo="$2" hi="$3"
@@ -2544,6 +2573,11 @@ perf_apply() {
     local EFF_MUX=$(perf_get_tcpmux)
     local EFF_POOL EFF_MAXPOOL
     read -r EFF_POOL EFF_MAXPOOL <<< "$(pool_effective_values)"
+    # PROXY protocol: empty = never set here, leave the setup's lines alone
+    local EFF_PP EFF_BW EFF_HC=0
+    EFF_PP=$(perf_get_str proxy_protocol "")
+    EFF_BW=$(perf_get_int bandwidth_limit_mb 0)
+    [[ -f "$PERF_FILE" ]] && grep -q '"health_check"[[:space:]]*:[[:space:]]*true' "$PERF_FILE" && EFF_HC=1
 
     local IS_FOREIGN=0
     local IS_IRAN=0
@@ -2574,6 +2608,12 @@ enc = ("'"$EFF_ENC"'".strip() in ("1", "true", "True"))
 comp = ("'"$EFF_COMP"'".strip() in ("1", "true", "True"))
 mux_raw = "'"$EFF_MUX"'".strip()
 pool_cnt = "'"$EFF_POOL"'".strip()
+pp = "'"$EFF_PP"'".strip()
+try:
+    bw = int("'"$EFF_BW"'".strip() or 0)
+except ValueError:
+    bw = 0
+hc = "'"$EFF_HC"'".strip() == "1"
 
 with open(path, "r") as f:
     lines = f.read().splitlines()
@@ -2614,6 +2654,10 @@ for i, sec in enumerate(sections):
             s = l.strip()
             if s.startswith("transport.useEncryption") or s.startswith("transport.useCompression"):
                 continue
+            if s.startswith("transport.bandwidthLimit") or s.startswith("healthCheck."):
+                continue
+            if pp in ("off", "v1", "v2") and s.startswith("transport.proxyProtocolVersion"):
+                continue
             new_sec.append(l)
         while new_sec and new_sec[-1].strip() == "":
             new_sec.pop()
@@ -2621,6 +2665,13 @@ for i, sec in enumerate(sections):
             new_sec.append("transport.useEncryption = true")
         if comp and is_tcp:
             new_sec.append("transport.useCompression = true")
+        if pp in ("v1", "v2") and is_tcp:
+            new_sec.append("transport.proxyProtocolVersion = \"" + pp + "\"")
+        if 0 < bw <= 10000:
+            new_sec.append("transport.bandwidthLimit = \"%dMB\"" % bw)
+            new_sec.append("transport.bandwidthLimitMode = \"client\"")
+        if hc and is_tcp:
+            new_sec += ["healthCheck.type = \"tcp\"", "healthCheck.timeoutSeconds = 3", "healthCheck.maxFailed = 3", "healthCheck.intervalSeconds = 10"]
         new_sec.append("")
         out_sections.append(new_sec)
 
@@ -3224,6 +3275,11 @@ EOF
     if [[ "$FRP_COMPRESSION" == "on" || "$FRP_COMPRESSION" == "1" || "$FRP_COMPRESSION" == "true" ]]; then
         COMP_LINE="transport.useCompression = true"
     fi
+    case "$PROXY_PROTOCOL" in v1|v2) ;; *) PROXY_PROTOCOL="off" ;; esac
+    perf_set_val proxy_protocol "$PROXY_PROTOCOL" >/dev/null 2>&1 || true
+    local TCP_EXTRA UDP_EXTRA
+    TCP_EXTRA=$(perf_frpc_extra_lines tcp 2>/dev/null)
+    UDP_EXTRA=$(perf_frpc_extra_lines udp 2>/dev/null)
     local PORT
     for PORT in $PORTS_CLEANED; do
         cat <<EOF >> "${CONFIG_DIR}/frpc.toml"
@@ -3236,6 +3292,7 @@ remotePort = ${PORT}
 ${PP_LINE:+$PP_LINE
 }${ENC_LINE:+$ENC_LINE
 }${COMP_LINE:+$COMP_LINE
+}${TCP_EXTRA:+$TCP_EXTRA
 }
 [[proxies]]
 name = "udp_${PORT}"
@@ -3243,7 +3300,8 @@ type = "udp"
 localIP = "${PROXY_TARGET_IP}"
 localPort = ${PORT}
 remotePort = ${PORT}
-
+${UDP_EXTRA:+$UDP_EXTRA
+}
 EOF
     done
 
@@ -6712,14 +6770,19 @@ watchdog_check() {
         BH_UNIT="backhaul-client"
     elif systemctl is-active --quiet backhaul-server 2>/dev/null; then
         BH_UNIT="backhaul-server"
+    else
+        # an Iran hub whose tunnels are all added peers: backhaul-server-N
+        BH_UNIT=$(systemctl list-units --type=service --state=active --plain --no-legend 'backhaul-server-*' 2>/dev/null | awk 'NR==1 {sub(/\.service$/, "", $1); print $1}')
     fi
     if [[ -n "$BH_UNIT" ]] && ! systemctl is-active --quiet frpc 2>/dev/null && ! systemctl is-active --quiet frps 2>/dev/null; then
         # Backhaul engine: unit state alone is not enough, check the session
         FRP_NAME="$BH_UNIT"
         if backhaul_session_ok "$BH_UNIT"; then
             FRP_OK=1
-            # a healthy session proves the carrier works even if ICMP is filtered
-            [[ "$BH_UNIT" == "backhaul-client" ]] && GRE_OK=1
+            # A healthy session proves the link on either side, even if ICMP is
+            # filtered or the client fell back to the public IP; and Backhaul
+            # without GRE has no GRE to ping (the Iran side was always "down").
+            GRE_OK=1
         fi
     elif [[ -f /etc/frp/frpc.toml ]] || systemctl list-unit-files 2>/dev/null | grep -q "^frpc\.service"; then
         FRP_NAME="frpc"
@@ -6771,7 +6834,11 @@ except Exception:
     local DETAIL=""
     if [[ $GRE_OK -eq 1 && $FRP_OK -eq 1 ]]; then
         STATUS="up"
-        DETAIL="GRE ping OK ($PEER_GRE), ${FRP_NAME:-FRP} active"
+        if [[ "$FRP_NAME" == backhaul-* ]]; then
+            DETAIL="Backhaul ${FRP_NAME} session up"
+        else
+            DETAIL="GRE ping OK ($PEER_GRE), ${FRP_NAME:-FRP} active"
+        fi
     else
         local ERR_PARTS=()
         if [[ $GRE_OK -ne 1 ]]; then

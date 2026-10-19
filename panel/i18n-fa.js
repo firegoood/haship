@@ -2354,5 +2354,21 @@ window.FA_TEXT = {
 "Backhaul pool saved": "استخر Backhaul ذخیره شد",
 "backhaul-client restarted with the new pool.": "backhaul-client با استخر جدید ری‌استارت شد.",
 "The running tunnel already uses it.": "تونل فعلی از همین مقدار استفاده می‌کند.",
-"Could not set the Backhaul pool": "تنظیم استخر Backhaul انجام نشد"
+"Could not set the Backhaul pool": "تنظیم استخر Backhaul انجام نشد",
+"Watchdog — Hashem Pro": "نگهبان — هاشم Pro",
+"The watchdog is a Hashem Pro feature. A watchdog that already runs keeps its alerts, backups and schedules.": "نگهبان یکی از قابلیت‌های هاشم Pro است. نگهبانی که الان روشن است هشدارها، بکاپ‌ها و زمان‌بندی‌هایش را ادامه می‌دهد.",
+"Benchmark — Hashem Pro": "بنچمارک — هاشم Pro",
+"The benchmark and the path test are Hashem Pro features.": "بنچمارک و تست مسیر از قابلیت‌های هاشم Pro هستند.",
+"Checks the tunnel every minute: the GRE link and the FRP service, or for Backhaul its control session. Sends Telegram alerts and, if you turn it on, restarts the tunnel after consecutive failures.": "هر دقیقه تونل را بررسی می‌کند: لینک GRE و سرویس FRP، یا برای Backhaul نشست کنترلی آن. هشدار تلگرام می‌فرستد و اگر روشنش کنید، بعد از چند خطای پشت سر هم تونل را ری‌استارت می‌کند.",
+"The FRP options of this tunnel. Encryption, compression and multiplexing only cost CPU and speed for VLESS, Reality and Trojan, whose traffic is already encrypted: leave them off unless a service needs them.": "گزینه‌های FRP این تونل. رمزنگاری، فشرده‌سازی و مالتی‌پلکس برای VLESS، Reality و Trojan که ترافیکشان از قبل رمز شده فقط CPU و سرعت مصرف می‌کنند: مگر سرویسی لازمشان داشته باشد، خاموش بمانند.",
+"Snappy compression per proxy. Helps plain text services; encrypted traffic does not compress, so for VPN traffic it only uses CPU.": "فشرده‌سازی Snappy برای هر پراکسی. برای سرویس‌های متنی ساده مفید است؛ ترافیک رمزشده فشرده نمی‌شود و برای ترافیک VPN فقط CPU مصرف می‌کند.",
+"PROXY Protocol": "پروتکل PROXY",
+"Sends each user's real IP to the service on this server, so Xray logs, limits and IP checks see real users instead of 127.0.0.1. Turn on Proxy Protocol (acceptProxyProtocol) in the Xray inbound first: without it every connection fails.": "IP واقعی هر کاربر را به سرویس روی این سرور می‌فرستد تا لاگ‌ها، محدودیت‌ها و بررسی IP در Xray به‌جای 127.0.0.1 کاربر واقعی را ببینند. اول در اینباند Xray گزینه‌ی Proxy Protocol (acceptProxyProtocol) را روشن کنید: بدون آن همه‌ی اتصال‌ها خطا می‌دهند.",
+"Bandwidth Limit per Port": "محدودیت پهنای باند هر پورت",
+"A cap on each forwarded port, for all its users together (megabytes per second). 0 means no limit.": "سقف سرعت برای هر پورت فورواردشده، برای همه‌ی کاربرانش با هم (مگابایت بر ثانیه). ۰ یعنی بدون محدودیت.",
+"Health Check": "بررسی سلامت",
+"frpc checks the service on this server every 10 seconds and closes its port on the Iran server while it is down, so users fail at once instead of hanging.": "frpc هر ۱۰ ثانیه سرویس روی این سرور را بررسی می‌کند و تا وقتی از کار افتاده پورتش را روی سرور ایران می‌بندد تا کاربران به‌جای معطل ماندن فوراً خطا بگیرند.",
+"Encryption, compression, PROXY protocol, bandwidth limit and health check are set on the foreign server, in its Performance tab: they live in its frpc.": "رمزنگاری، فشرده‌سازی، پروتکل PROXY، محدودیت پهنای باند و بررسی سلامت روی سرور خارج و در تب کارایی آن تنظیم می‌شوند: این‌ها در frpc همان سرور هستند.",
+"Encryption, compression, PROXY protocol, bandwidth limit and health check are set on each foreign server, in its frpc. Multiplexing must match on both sides.": "رمزنگاری، فشرده‌سازی، پروتکل PROXY، محدودیت پهنای باند و بررسی سلامت روی هر سرور خارج و در frpc آن تنظیم می‌شوند. مالتی‌پلکس باید در دو طرف یکی باشد.",
+"Buy License": "خرید لایسنس"
 };

@@ -24,4 +24,9 @@ backhaul_session_ok backhaul-server; chk "token rejected" $? 1
 jc "[INFO] something unrelated"
 backhaul_session_ok backhaul-server; chk "no signal -> no false alarm" $? 0
 grep -q 'backhaul_session_ok "\$BH_UNIT"' "$ROOT/hashem.sh" || { echo "FAIL watchdog_check does not use it"; fail=1; }
+# Backhaul without GRE: a healthy session is the whole check on both sides
+# (the Iran server used to stay "down" forever: no GRE interface to ping)
+body=$(awk '/^watchdog_check\(\) \{/ {p=1} p {print} p && /^}/ {p=0}' "$ROOT/hashem.sh")
+grep -q '\[\[ "\$BH_UNIT" == "backhaul-client" \]\] && GRE_OK=1' <<<"$body" && { echo "FAIL session only counts on the client"; fail=1; }
+grep -q "backhaul-server-\*" <<<"$body" || { echo "FAIL backhaul-server-N hubs not checked"; fail=1; }
 [[ $fail -eq 0 ]] && echo "PASS test_watchdog_backhaul" || exit 1
