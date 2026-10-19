@@ -39,4 +39,39 @@ for f in cli_backhaul_migrate backhaul_status backhaul_show_bundle watchdog_tick
     check "$f never asks for a license" 0 "$(ext "$f" | grep -c 'pro_ok')"
 done
 
+# Performance, Watchdog, Diagnostics and making backups are Pro in the
+# terminal too; what keeps applied settings running is not.
+for fn in cli_perf cli_watchdog cli_doctor cli_backup; do eval "$(ext "$fn")"; done
+perf_apply() { echo APPLIED; }
+autopool_tick() { echo TICKED; }
+pool_effective_values() { echo "20 60"; }
+watchdog_on() { echo ON; }
+watchdog_tick() { echo TICK; }
+watchdog_check() { echo CHECK; }
+watchdog_timer_ensure() { echo TIMER; }
+doctor_health_check() { echo DOCTOR; }
+doctor_stop_server() { echo STOPPED; }
+backup_now() { echo BACKED; }
+backup_restore() { echo RESTORED; }
+: > "$T/unlocked"
+check "no license: hashem perf enc refused" 1 "$(cli_perf enc on >/dev/null 2>&1; echo $?)"
+check "no license: tcpMux fix and apply still run" APPLIED "$(cli_perf apply)"
+check "no license: hashem watchdog on refused" "" "$(cli_watchdog on 2>/dev/null | grep -x ON)"
+check "no license: hashem doctor refused" "" "$(cli_doctor 2>/dev/null | grep DOCTOR)"
+check "no license: hashem backup now refused" "" "$(cli_backup now 2>/dev/null | grep BACKED)"
+check "no license: refusal says where to buy" yes "$(cli_perf status | grep -q 'pdnczone.com' && echo yes)"
+check "no license: Auto Pool tick still runs" TICKED "$(cli_perf autopool tick)"
+check "no license: watchdog timer tick still runs" TICK "$(cli_watchdog tick)"
+check "no license: watchdog check still runs" CHECK "$(cli_watchdog check)"
+check "no license: watchdog timer still starts" TIMER "$(cli_watchdog timer)"
+check "no license: doctor stop-server still runs" STOPPED "$(cli_doctor stop-server)"
+check "no license: backup restore still runs" RESTORED "$(cli_backup restore /x)"
+printf 'performance\nwatchdog\ndiagnostics\n' > "$T/unlocked"
+check "Pro license: hashem perf apply runs" APPLIED "$(cli_perf apply)"
+check "Pro license: hashem watchdog on runs" ON "$(cli_watchdog on)"
+check "Pro license: hashem doctor runs" DOCTOR "$(cli_doctor)"
+check "Pro license: hashem backup now runs" BACKED "$(cli_backup now)"
+# the update re-applies perf.json without asking
+check "update_all never asks for a license" 0 "$(ext update_all | grep -c 'pro_ok\|cli_perf')"
+
 (( fail )) && exit 1; echo "PASS test_pro_gate"

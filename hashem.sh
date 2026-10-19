@@ -2825,6 +2825,17 @@ with open(path, "w") as f:
 
 cli_perf() {
     local SUB="${1:-status}"
+    # Hashem Pro, as in the panel. Settings already applied keep working: the
+    # watchdog's Auto Pool tick and the update's re-apply call perf_apply and
+    # autopool_tick directly.
+    case "$SUB ${2:-}" in
+        "autopool tick"|"pool "*|"-h "*|"--help "*|"help "*) ;;
+        # tcpMux must match on both ends or FRP cannot log in (E-FRP-10 says
+        # to run this, then apply): a fix for a free tunnel, not a speed
+        # option. Apply only writes back what perf.json already holds.
+        "tcpmux "*|"mux "*|"apply "*) ;;
+        *) pro_ok performance Performance || return 1 ;;
+    esac
     case "$SUB" in
         status)
             init_perf_json
@@ -3013,6 +3024,7 @@ cli_perf() {
 
 menu_perf() {
     local c v
+    ui_pro performance Performance || return 0
     while true; do
         local pp bw
         pp=$(perf_get_str proxy_protocol "")
@@ -5255,6 +5267,7 @@ doctor_health_check() {
 }
 
 cli_doctor() {
+    [[ "${1:-}" == "stop-server" ]] || pro_ok diagnostics Diagnostics || return 1
     case "${1:-}" in
         server) doctor_start_server ;;
         stop-server) doctor_stop_server ;;
@@ -7601,6 +7614,7 @@ except Exception:
 }
 
 menu_watchdog() {
+    ui_pro watchdog Watchdog || return 0
     while true; do
         init_watchdog_json
         local W_EN
@@ -7879,6 +7893,13 @@ cli_watchdog() {
     local SUB="$1"
     shift || true
     case "$SUB" in
+        on|off|status|test)
+            # Hashem Pro, as in the panel; a running watchdog (timer, tick,
+            # check) keeps its alerts, backups and repairs without a license.
+            pro_ok watchdog Watchdog || return 1
+            ;;
+    esac
+    case "$SUB" in
         on) watchdog_on ;;
         off) watchdog_off ;;
         timer) watchdog_timer_ensure ;;
@@ -7893,6 +7914,12 @@ cli_watchdog() {
 cli_backup() {
     local SUB="$1"
     shift || true
+    # Making and scheduling backups is part of the Watchdog (Hashem Pro, as in
+    # the panel). Restore, status and the key stay free: nobody is locked out
+    # of their own data, and schedules already set keep running.
+    case "$SUB" in
+        now|schedule) pro_ok watchdog "Encrypted backup" || return 1 ;;
+    esac
     case "$SUB" in
         now) backup_now "$@" ;;
         restore) backup_restore "$@" ;;
@@ -8697,6 +8724,36 @@ panel_supports() {
     "$PANEL_BIN" --help 2>/dev/null | grep -q "$1"
 }
 
+# ui_pro FEATURE NAME: 0 when Hashem Pro opens FEATURE; otherwise a page that
+# offers to activate a key or shows where to buy, and 0 once a key opens it.
+ui_pro() {
+    local f="$1" name="$2" c k
+    [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" license check "$f" >/dev/null 2>&1 && return 0
+    while true; do
+        ui_menu c "$name [PRO]" "${name} needs a Hashem Pro license. One license opens every Pro feature: Bagher, Backhaul, Performance, Watchdog, Benchmark, Diagnostics and the path test." \
+            "1|Activate a license key|Paste the key from the seller." \
+            "2|Buy a license|https://pdnczone.com"
+        case "$c" in
+            1)
+                ui_page "Activate a license"
+                ui_ask k "License key"
+                [[ -n "$k" ]] && cli_license activate "$k"
+                UI_STATUS_AT=0
+                if "$PANEL_BIN" license check "$f" >/dev/null 2>&1; then ui_pause; return 0; fi
+                ui_pause
+                ;;
+            2)
+                ui_page "Buy a license"
+                echo -e " Buy Hashem Pro at ${CYAN}https://pdnczone.com${NC}"
+                echo -e " Give the seller this server's machine hash:"
+                cli_license machine-id
+                ui_pause
+                ;;
+            *) return 1 ;;
+        esac
+    done
+}
+
 # ---------------------------------------------------------------- Status ----
 page_status() {
     ui_page "Status"
@@ -8899,6 +8956,7 @@ show_ports_routes() {
 
 menu_diagnostics() {
     local c h p n
+    ui_pro diagnostics Diagnostics || return 0
     while true; do
         ui_menu c "Diagnostics" "" \
             "1|Full health check|Doctor: services, GRE, MTU, latency, jitter and what to fix." \
@@ -8961,13 +9019,13 @@ menu_backup() {
     local c f h d
     while true; do
         ui_menu c "Backup" "Encrypted snapshots of every config in ${BACKUP_DIR}." \
-            "1|Back up now|An encrypted, dated snapshot." \
+            "1|Back up now [PRO]|An encrypted, dated snapshot." \
             "2|Restore|Pick a snapshot; configs are replaced and services restarted." \
-            "3|Schedule|Every N hours, daily at a time, or off." \
+            "3|Schedule [PRO]|Every N hours, daily at a time, or off." \
             "4|Status and snapshots|Schedule, key and stored snapshots." \
             "5|Show the backup key|Needed to restore on another server."
         case "$c" in
-            1) ui_run "Back up now" backup_now ;;
+            1) ui_run "Back up now" cli_backup now ;;
             2)
                 ui_page "Restore"
                 cli_backup status
@@ -9246,9 +9304,9 @@ menu_loop() {
             "3|Tunnel|Peers, bundle, carrier, route, restart, tear down." \
             "4|Bagher [PRO]|Stealth hybrid tunnel over SSH." \
             "5|Cluster|Several foreign servers with failover or load balancing." \
-            "6|Performance|FRP and Backhaul options, pools, network tuning." \
-            "7|Watchdog|Tunnel checks, Telegram alerts, encrypted backups." \
-            "8|Diagnostics|Health check, fixes, ports, stress test." \
+            "6|Performance [PRO]|FRP and Backhaul options, pools, network tuning." \
+            "7|Watchdog [PRO]|Tunnel checks, Telegram alerts, encrypted backups." \
+            "8|Diagnostics [PRO]|Health check, fixes, ports, stress test." \
             "9|Logs|Live service logs." \
             "10|Backup|Back up, restore and schedule." \
             "11|Update|Update Hashem, channel, core binaries." \
@@ -10187,6 +10245,7 @@ pro_ok() {
     local bin="${PANEL_BIN:-/usr/local/bin/gre-panel}"
     [[ -x "$bin" ]] && "$bin" license check "$1" >/dev/null 2>&1 && return 0
     echo -e "${RED}[!] $2 is a Hashem Pro feature. Activate the license first: hashem license activate <KEY>${NC}"
+    echo -e "    Buy a license: https://pdnczone.com"
     return 1
 }
 

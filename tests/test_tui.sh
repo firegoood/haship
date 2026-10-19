@@ -52,13 +52,14 @@ for k in sys.argv[2:]:
 _, status = os.waitpid(pid, os.WNOHANG)
 print("@@ alive" if _ == 0 else "@@ exited")
 PY
-out=$(python3 "$T/drive.py" "$ROOT/hashem.sh" down enter esc 12 esc q 2>&1)
+out=$(python3 "$T/drive.py" "$ROOT/hashem.sh" down enter esc 12 esc 6 esc q 2>&1)
 [[ -n "${TUI_DEBUG:-}" ]] && echo "$out"
 step() { awk -v k="@@ $1" '$0 == k {p=1; next} /^@@ / {p=0} p' <<< "$out"; }
 has "$(step down)" "›  2  Setup" "arrow down moves the selection"
 has "$(step enter)" "From a bundle (recommended)" "enter opens Setup"
 has "$(step esc)" "›  2  Setup" "esc goes back and keeps the row"
 has "$(step 12)" "Two-factor sign-in" "number 12 opens Settings"
+has "$(step 6)" "Performance needs a Hashem Pro license" "a Pro menu without a license offers the key"
 has "$(step q)" "Bye." "q leaves the app"
 has "$out" "@@ exited" "the app exits"
 
