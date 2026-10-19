@@ -219,7 +219,7 @@ The panel binary comes from the active [update channel](#updates-downgrade-and-c
 
 Backhaul is one engine in Setup and in `hashem backhaul`; "with GRE" or "without GRE" is a question inside it. **Bagher** [PRO] (an SSH connection pool carrying FRP) is set up from the same Setup tab and runs from the Tunnel tab like the other tunnels.
 
-Start with **GRE + FRP** and the **Direct GRE** carrier. If IP protocol 47 is dropped between your servers, try the **WSS** carrier, then Backhaul without GRE. The Benchmark tab probes carriers for you. More detail: [docs/ENGINES.md](docs/ENGINES.md) and the [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md).
+Start with **GRE + FRP** and the **Direct GRE** carrier. If IP protocol 47 is dropped between your servers, try the **WSS** carrier, then Backhaul without GRE. Not sure what gets through? The Benchmark tab's **Path Test** checks every transport between your two servers before any tunnel exists. More detail: [docs/ENGINES.md](docs/ENGINES.md) and the [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md).
 
 ---
 
@@ -233,7 +233,7 @@ The panel is one page with these tabs:
 - **Diagnostics** — latency, jitter, MTU and speed tests; the same engine as `hashem doctor`.
 - **Setup** — create any tunnel: GRE + FRP, Backhaul (with or without GRE) or Bagher; bundles and peers.
 - **Watchdog** — monitoring, backups and alerts.
-- **Benchmark** — carrier probing and the optional auto-pilot.
+- **Benchmark** — the Path Test (which transports get through between the two servers, before any tunnel: plain TCP/UDP, GRE, SSH, FRP x 5, Backhaul x 7, with latency and speed), carrier probing and the optional auto-pilot.
 - **Update** — channels, install any tag, rollback state.
 - **Logs, Settings, Terminal** — redacted logs with error codes; password, 2FA, idle timeout, alerts, TLS, metrics token; the audited shell (off by default).
 

@@ -110,6 +110,7 @@ FAMILIES = {
     "CARRIER": "Carrier switch",
     "ENGINE": "Engine switch",
     "SENTINEL": "Sentinel addon",
+    "PATHTEST": "Path test (Benchmark tab)",
 }
 
 

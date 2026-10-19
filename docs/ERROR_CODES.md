@@ -217,6 +217,12 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-SENTINEL-05` | 409 | a sentinel install is already running | Wait for the current install to finish, then refresh. |
 | `E-SENTINEL-06` | 400 | bad sentinel request | Reload the page and try again. |
 
+## E-PATHTEST-xx — Path test (Benchmark tab)
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-PATHTEST-01` | 400 | path test could not start | See the detail: usually a port in use (pick another first port) or a damaged code (copy it again from the Iran server). |
+
 ## E-LIC-xx — LIC
 
 | Code | HTTP | Meaning | What to do |
@@ -250,4 +256,4 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
 | `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
 
-Total: 134 codes.
+Total: 135 codes.

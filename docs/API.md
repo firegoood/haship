@@ -69,6 +69,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/metrics-token` | session | `handleMetricsTokenGet` |
 | `POST` | `/api/metrics-token` | session + CSRF | `handleMetricsTokenPost` |
 | `POST` | `/api/password` | session + CSRF | `handlePassword` |
+| `GET` | `/api/pathtest` | session | `handlePathTestGet` |
+| `POST` | `/api/pathtest` | session + CSRF | `handlePathTestPost` |
 | `POST` | `/api/peer/apply-carrier` | peer secret (or session) | `handlePeerApplyCarrier` |
 | `POST` | `/api/peer/apply-engine` | peer secret (or session) | `handlePeerApplyEngine` |
 | `GET` | `/api/peer/config` | session | `handlePeerConfigGet` |
@@ -135,4 +137,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 111 routes.
+Total: 113 routes.

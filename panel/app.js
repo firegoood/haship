@@ -274,7 +274,7 @@ function goTab(name) {
   if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); }
   if (name === 'watchdog') loadWatchdog();
   if (name === 'doctor') loadDoctor();
-  if (name === 'benchmark') loadBenchmark();
+  if (name === 'benchmark') { loadBenchmark(); loadPathTest(); }
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
   if (name === 'terminal') termOnShow();
@@ -603,6 +603,52 @@ const I18N = {
     bench_failover_save: "Save Failover Policy",
     bench_leaderboard_title: "Carrier Performance Leaderboard",
     bench_run_btn: "Run Carrier Benchmark",
+    pt_title: "Path Test Before Any Tunnel",
+    pt_sub: "Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed.",
+    pt_idle: "Not running",
+    pt_running: "Running",
+    pt_cores: "Downloading cores",
+    pt_done: "Finished",
+    pt_role_aria: "Which server is this?",
+    pt_role_iran: "This is the Iran server",
+    pt_role_foreign: "This is the foreign server",
+    pt_foreign_lbl: "Foreign server IP (optional)",
+    pt_foreign_hint: "Used for the GRE and SSH (Bagher) checks. Left empty, it is taken from the foreign server when it connects.",
+    pt_opts: "Options",
+    pt_base_lbl: "First port",
+    pt_min_lbl: "Minutes",
+    pt_ssh_lbl: "Foreign SSH port",
+    pt_ip_lbl: "This server's IP",
+    pt_ip_ph: "Auto",
+    pt_base_hint: "The test listens on the first port and the next 10 (TCP and UDP). Pick ports your real tunnel would use if you want to test those.",
+    pt_start: "Start Test",
+    pt_stop: "Stop Test",
+    pt_code_lbl: "Test code from the Iran server",
+    pt_code_hint: "Start the test on the Iran server's Benchmark tab first, then paste its code here.",
+    pt_code_out: "Test code: paste it on the foreign server's Benchmark tab",
+    pt_copy: "Copy",
+    pt_copied: "Code copied",
+    pt_need_code: "Paste the test code from the Iran server first.",
+    pt_th_engine: "Engine",
+    pt_th_transport: "Transport",
+    pt_th_port: "Port",
+    pt_th_result: "Result",
+    pt_th_rtt: "Latency",
+    pt_th_speed: "Speed",
+    pt_ok: "Works",
+    pt_fail: "Blocked",
+    pt_wait: "Waiting",
+    pt_skip: "Not tested",
+    pt_eng_net: "Plain",
+    pt_eng_bagher: "Bagher",
+    pt_gre: "protocol 47",
+    pt_left: "{t} left",
+    pt_sum_noreach: "Plain TCP to the Iran server does not get through, so its results cannot be shown here. Open the Iran server's Benchmark tab to see them.",
+    pt_sum_connecting: "Connecting to the Iran server...",
+    pt_sum_wait: "Waiting for the foreign server. Paste the code on its Benchmark tab.",
+    pt_sum_works: "{n} of {m} work",
+    pt_sum_fast: "Fastest: {x}",
+    pt_sum_testing: "still testing",
     bench_tbl_rank: "Carrier & Route",
     bench_tbl_trans: "Transport",
     bench_tbl_port: "Port",
@@ -6943,6 +6989,138 @@ async function savePeerConfigClick() {
       }
     });
   }
+})();
+
+// ---------- Path test (tab-benchmark): which transports cross, before any tunnel ----------
+let _pt = null, _ptRole = null, _ptTimer = null;
+const PT_STATUS = { ok: ['ok', 'pt_ok', 'Works'], fail: ['err', 'pt_fail', 'Blocked'], waiting: ['dim', 'pt_wait', 'Waiting'], skip: ['warn', 'pt_skip', 'Not tested'] };
+
+function ptSetRole(role) {
+  _ptRole = role === 'foreign' ? 'foreign' : 'iran';
+  const iran = _ptRole === 'iran';
+  [['ptRoleIran', iran], ['ptRoleForeign', !iran]].forEach(([id, on]) => {
+    const b = $(id);
+    if (b) { b.classList.toggle('active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+  });
+  $('ptIranForm').hidden = !iran;
+  $('ptForeignForm').hidden = iran;
+}
+
+function ptWarn(msg) {
+  const w = $('ptWarn');
+  if (w) { w.textContent = msg || ''; w.classList.toggle('hidden', !msg); }
+}
+
+async function loadPathTest() {
+  try { _pt = await api('/api/pathtest'); } catch (e) { reportErr('pathtest', e); return; }
+  renderPathTest();
+}
+
+function ptSchedule() {
+  clearTimeout(_ptTimer);
+  if (_pt && _pt.active && !$('tab-benchmark').hidden) _ptTimer = setTimeout(loadPathTest, 2000);
+}
+
+function ptLeft(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return tr('pt_left', '{t} left').replace('{t}', m + ':' + String(s).padStart(2, '0'));
+}
+
+function ptRowName(c) {
+  if (c.id === 'gre') return ['GRE', tr('pt_gre', 'protocol 47')];
+  if (c.id === 'ssh') return [tr('pt_eng_bagher', 'Bagher'), 'SSH'];
+  if (c.engine === 'Network') return [tr('pt_eng_net', 'Plain'), c.name];
+  return [c.engine, c.name];
+}
+
+function renderPathTest() {
+  const v = _pt || {};
+  if (_ptRole === null) ptSetRole(v.role || v.role_hint);
+  const checks = v.checks || [];
+  const remote = v.remote && v.remote.checks && v.remote.checks.length ? v.remote : null;
+  const rows = remote ? remote.checks : checks;
+  $('ptForm').hidden = !!v.active;
+  $('ptRun').hidden = !rows.length;
+  const st = v.active ? (v.phase === 'cores' ? ['info', 'pt_cores', 'Downloading cores'] : ['info', 'pt_running', 'Running'])
+    : (rows.length ? ['dim', 'pt_done', 'Finished'] : ['dim', 'pt_idle', 'Not running']);
+  const badge = $('ptBadge');
+  badge.className = 'badge ' + st[0];
+  badge.textContent = tr(st[1], st[2]);
+  if (!rows.length) { ptSchedule(); return; }
+
+  const showCode = !!(v.active && v.role === 'iran' && v.code);
+  $('ptCodeWrap').hidden = !showCode;
+  if (showCode && $('ptCodeOut').value !== v.code) $('ptCodeOut').value = v.code;
+
+  const ok = rows.filter(c => c.status === 'ok');
+  const settled = remote ? remote.settled : v.settled;
+  let sum;
+  if (v.role === 'foreign' && !remote) {
+    const tcp = checks.find(c => c.id === 'tcp');
+    sum = tcp && tcp.status === 'fail'
+      ? tr('pt_sum_noreach', "Plain TCP to the Iran server does not get through, so its results cannot be shown here. Open the Iran server's Benchmark tab to see them.")
+      : tr('pt_sum_connecting', 'Connecting to the Iran server...');
+  } else if (v.role === 'iran' && !v.joined) {
+    sum = tr('pt_sum_wait', 'Waiting for the foreign server. Paste the code on its Benchmark tab.');
+  } else {
+    sum = tr('pt_sum_works', '{n} of {m} work').replace('{n}', ok.length).replace('{m}', rows.length);
+    const fast = ok.filter(c => c.mbps > 0).sort((a, b) => b.mbps - a.mbps)[0];
+    if (fast) sum += ' · ' + tr('pt_sum_fast', 'Fastest: {x}').replace('{x}', ptRowName(fast).join(' ') + ' (' + fast.mbps + ' Mbit/s)');
+    if (!settled) sum += ' · ' + tr('pt_sum_testing', 'still testing');
+  }
+  if (v.active && v.expires_in) sum += ' · ' + ptLeft(v.expires_in);
+  $('ptSummary').textContent = sum;
+
+  const order = { ok: 0, fail: 1, waiting: 2, skip: 3 };
+  const sorted = settled ? rows.slice().sort((a, b) => (order[a.status] - order[b.status]) || ((b.mbps || 0) - (a.mbps || 0))) : rows;
+  $('ptBody').innerHTML = sorted.map(c => {
+    const s = PT_STATUS[c.status] || PT_STATUS.waiting;
+    const [eng, name] = ptRowName(c);
+    const port = c.proto === 'gre' ? '47' : (c.port ? c.port + '/' + c.proto : '—');
+    return '<tr><td>' + esc(eng) + '</td><td class="mono">' + esc(name) + '</td>'
+      + '<td><span class="badge ' + s[0] + '">' + esc(tr(s[1], s[2])) + '</span>'
+      + (c.note ? '<div class="qs-hint u-mt-4" dir="ltr" data-no-i18n>' + esc(c.note) + '</div>' : '') + '</td>'
+      + '<td class="mono u-ltr">' + (c.rtt_ms ? esc(c.rtt_ms + ' ms') : '—') + '</td>'
+      + '<td class="mono u-ltr">' + (c.mbps ? esc(c.mbps + ' Mbit/s') : '—') + '</td>'
+      + '<td class="mono u-ltr">' + esc(port) + '</td></tr>';
+  }).join('');
+  const notes = v.notes || [];
+  $('ptNotes').hidden = !notes.length;
+  $('ptNotes').innerHTML = notes.map(n => '<li>' + esc(n) + '</li>').join('');
+  $('ptStopBtn').hidden = !v.active;
+  ptSchedule();
+}
+
+async function ptPost(body, btnId) {
+  const b = btnId && $(btnId);
+  if (b) b.disabled = true;
+  ptWarn('');
+  try {
+    _pt = await api('/api/pathtest', body);
+    renderPathTest();
+  } catch (e) {
+    ptWarn(e.message || String(e));
+  } finally {
+    if (b) b.disabled = false;
+  }
+}
+
+(function initPathTest() {
+  function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
+  on('ptRoleIran', 'click', () => ptSetRole('iran'));
+  on('ptRoleForeign', 'click', () => ptSetRole('foreign'));
+  on('ptStartBtn', 'click', () => ptPost({
+    action: 'start', foreign_ip: $('ptForeign').value.trim(), iran_ip: $('ptIranIp').value.trim(),
+    base_port: parseInt($('ptBase').value, 10) || 41000, ssh_port: parseInt($('ptSsh').value, 10) || 22,
+    minutes: parseInt($('ptMinutes').value, 10) || 10,
+  }, 'ptStartBtn'));
+  on('ptJoinBtn', 'click', () => {
+    const code = $('ptCode').value.trim();
+    if (!code) { ptWarn(tr('pt_need_code', 'Paste the test code from the Iran server first.')); return; }
+    ptPost({ action: 'join', code }, 'ptJoinBtn');
+  });
+  on('ptStopBtn', 'click', () => ptPost({ action: 'stop' }, 'ptStopBtn'));
+  on('ptCopyBtn', 'click', () => copyTextSafe($('ptCodeOut').value, tr('pt_copied', 'Code copied'), ''));
 })();
 
 // Expose on window for inline handlers

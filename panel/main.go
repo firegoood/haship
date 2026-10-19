@@ -528,10 +528,12 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy | cluster | license [status|deactivate]]")
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy | pathtest | cluster | license [status|deactivate]]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
+		case "pathtest":
+			os.Exit(cliPathTest(os.Args[2:]))
 		case "cluster", "mesh":
 			os.Exit(cliCluster(os.Args[2:]))
 		case "password", "pass", "set-password":
@@ -725,6 +727,9 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/benchmark/run", requireAuth(requireCSRF(handleBenchmarkRun)))
 	mux.HandleFunc("POST "+base+"/api/benchmark/apply", requireAuth(requireCSRF(handleBenchmarkApply)))
 	mux.HandleFunc("POST "+base+"/api/benchmark/autopilot", requireAuth(requireCSRF(handleBenchmarkAutoPilot)))
+	// Path test: which transports cross between the two servers, before any tunnel
+	mux.HandleFunc("GET "+base+"/api/pathtest", requireAuth(handlePathTestGet))
+	mux.HandleFunc("POST "+base+"/api/pathtest", requireAuth(requireCSRF(handlePathTestPost)))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Printf("gre-panel listening on %s under /%s", addr, cfg.BasePath)

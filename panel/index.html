@@ -1034,7 +1034,7 @@
     border-spacing: 0;
     margin: 0;
   }
-  #benchTable th {
+  #benchTable th, #ptTable th {
     padding: 14px 18px;
     font-size: 12px;
     font-weight: 700;
@@ -1046,24 +1046,33 @@
     white-space: nowrap;
     text-align: left;
   }
-  html[dir="rtl"] #benchTable th {
+  html[dir="rtl"] #benchTable th, html[dir="rtl"] #ptTable th {
     text-align: right;
   }
-  #benchTable td {
+  #benchTable td, #ptTable td {
     padding: 16px 18px;
     vertical-align: middle;
     border-bottom: 1px solid color-mix(in srgb, var(--tx) 5%, transparent);
     white-space: nowrap;
     font-size: 13px;
   }
-  #benchTable tr:last-child td {
+  #benchTable tr:last-child td, #ptTable tr:last-child td {
     border-bottom: none;
   }
-  #benchTable tbody tr {
+  #benchTable tbody tr, #ptTable tbody tr {
     transition: background 0.15s ease;
   }
-  #benchTable tbody tr:hover {
+  #benchTable tbody tr:hover, #ptTable tbody tr:hover {
     background: var(--sunk) !important;
+  }
+  #ptTable { width: 100%; min-width: 640px; border-collapse: separate; border-spacing: 0; margin: 0; }
+  #ptTable td { padding: 12px 16px; }
+  #ptTable td .qs-hint { white-space: normal; max-width: 280px; }
+  @media (max-width: 640px) {
+    #ptTable { min-width: 0; }
+    #ptTable th, #ptTable td { padding: 10px 8px; white-space: normal; }
+    #ptTable td:nth-child(-n+2) { white-space: nowrap; }
+    #ptTable th:last-child, #ptTable td:last-child { display: none; } /* port */
   }
   .bench-rank-num {
     display: inline-flex;
@@ -2564,6 +2573,90 @@
       </section>
       <!-- Tab: Carrier Benchmark & Auto-Pilot -->
       <section id="tab-benchmark" role="tabpanel" hidden>
+        <!-- Path test: which transports cross between the two servers, before any tunnel -->
+        <div class="tunnel-card u-mb-20" id="ptCard">
+          <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
+            <div>
+              <span class="tc-title u-fs-18 u-fw-700" data-i18n="pt_title">Path Test Before Any Tunnel</span>
+              <div class="qs-hint u-mt-4" data-i18n="pt_sub">Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed.</div>
+            </div>
+            <span class="badge dim" id="ptBadge" data-i18n="pt_idle">Not running</span>
+          </div>
+          <div id="ptForm">
+            <div class="qs-seg u-mb-12" role="group" data-i18n-aria="pt_role_aria" aria-label="Which server is this?">
+              <button type="button" id="ptRoleIran" class="active" aria-pressed="true" data-i18n="pt_role_iran">This is the Iran server</button>
+              <button type="button" id="ptRoleForeign" aria-pressed="false" data-i18n="pt_role_foreign">This is the foreign server</button>
+            </div>
+            <div id="ptIranForm">
+              <label class="qs-label" for="ptForeign" data-i18n="pt_foreign_lbl">Foreign server IP (optional)</label>
+              <input class="hashem-input u-ltr u-mono" id="ptForeign" placeholder="198.51.100.10" inputmode="decimal" autocomplete="off">
+              <div class="qs-hint u-mt-4" data-i18n="pt_foreign_hint">Used for the GRE and SSH (Bagher) checks. Left empty, it is taken from the foreign server when it connects.</div>
+              <details class="u-mt-12">
+                <summary class="u-fs-13 u-c-ac u-fw-600 u-cursor-pointer" data-i18n="pt_opts">Options</summary>
+                <div class="qs-row u-mt-8">
+                  <div>
+                    <label class="qs-label" for="ptBase" data-i18n="pt_base_lbl">First port</label>
+                    <input class="hashem-input u-mono" id="ptBase" type="number" min="1024" max="65504" value="41000">
+                  </div>
+                  <div>
+                    <label class="qs-label" for="ptMinutes" data-i18n="pt_min_lbl">Minutes</label>
+                    <input class="hashem-input u-mono" id="ptMinutes" type="number" min="1" max="60" value="10">
+                  </div>
+                  <div>
+                    <label class="qs-label" for="ptSsh" data-i18n="pt_ssh_lbl">Foreign SSH port</label>
+                    <input class="hashem-input u-mono" id="ptSsh" type="number" min="1" max="65535" value="22">
+                  </div>
+                  <div>
+                    <label class="qs-label" for="ptIranIp" data-i18n="pt_ip_lbl">This server's IP</label>
+                    <input class="hashem-input u-ltr u-mono" id="ptIranIp" data-i18n-ph="pt_ip_ph" placeholder="Auto" inputmode="decimal" autocomplete="off">
+                  </div>
+                </div>
+                <div class="qs-hint u-mt-4" data-i18n="pt_base_hint">The test listens on the first port and the next 10 (TCP and UDP). Pick ports your real tunnel would use if you want to test those.</div>
+              </details>
+              <div class="qs-actions u-mt-12">
+                <button type="button" class="hashem-btn hashem-btn-primary" id="ptStartBtn" data-i18n="pt_start">Start Test</button>
+              </div>
+            </div>
+            <div id="ptForeignForm" hidden>
+              <label class="qs-label" for="ptCode" data-i18n="pt_code_lbl">Test code from the Iran server</label>
+              <textarea class="hashem-input u-ltr u-mono u-fs-12" id="ptCode" rows="3" placeholder="HPT1-..." autocomplete="off" spellcheck="false"></textarea>
+              <div class="qs-hint u-mt-4" data-i18n="pt_code_hint">Start the test on the Iran server's Benchmark tab first, then paste its code here.</div>
+              <div class="qs-actions u-mt-12">
+                <button type="button" class="hashem-btn hashem-btn-primary" id="ptJoinBtn" data-i18n="pt_start">Start Test</button>
+              </div>
+            </div>
+            <div class="warnbox hidden u-mt-12" id="ptWarn"></div>
+          </div>
+          <div id="ptRun" hidden>
+            <div id="ptCodeWrap" class="u-mb-12" hidden>
+              <label class="qs-label" for="ptCodeOut" data-i18n="pt_code_out">Test code: paste it on the foreign server's Benchmark tab</label>
+              <div class="u-flex u-gap-8">
+                <input class="hashem-input u-ltr u-mono u-fs-12 u-flex-1" id="ptCodeOut" readonly>
+                <button type="button" class="hashem-btn hashem-btn-secondary" id="ptCopyBtn" data-i18n="pt_copy">Copy</button>
+              </div>
+            </div>
+            <div class="qs-hint u-mb-12" id="ptSummary" aria-live="polite"></div>
+            <div class="bench-table-wrap">
+              <table class="hashem-table" id="ptTable">
+                <thead>
+                  <tr>
+                    <th data-i18n="pt_th_engine">Engine</th>
+                    <th data-i18n="pt_th_transport">Transport</th>
+                    <th data-i18n="pt_th_result">Result</th>
+                    <th data-i18n="pt_th_rtt">Latency</th>
+                    <th data-i18n="pt_th_speed">Speed</th>
+                    <th data-i18n="pt_th_port">Port</th>
+                  </tr>
+                </thead>
+                <tbody id="ptBody"></tbody>
+              </table>
+            </div>
+            <ul class="qs-hint u-mt-8" id="ptNotes" dir="ltr" data-no-i18n hidden></ul>
+            <div class="qs-actions u-mt-12">
+              <button type="button" class="hashem-btn hashem-btn-secondary" id="ptStopBtn" data-i18n="pt_stop">Stop Test</button>
+            </div>
+          </div>
+        </div>
         <!-- Pre-connection Target & Role Configuration Card -->
         <div class="tunnel-card u-bd-info u-bg-s1 u-lift u-mb-20" style="backdrop-filter:blur(16px);">
           <div class="tc-header u-bb-ln u-pb-16 u-mb-16">

@@ -106,7 +106,7 @@ HASHEM_SHA256=<sha256> bash install.sh
 
 Backhaul در Setup و در `hashem backhaul` یک موتور است و «با GRE» یا «بدون GRE» فقط یک سؤال داخل آن است. **باقر** [PRO] (استخری از اتصال‌های SSH که FRP را حمل می‌کند) هم از همان تب Setup ساخته می‌شود و مثل بقیه‌ی تونل‌ها از تب Tunnel اداره می‌شود.
 
-با **GRE + FRP** و حامل **Direct GRE** شروع کنید. اگر پروتکل ۴۷ بین دو سرور مسدود است، حامل **WSS** و بعد Backhaul بدون GRE را امتحان کنید. تب Benchmark حامل‌ها را برایتان می‌سنجد. جزئیات: [docs/ENGINES.md](docs/ENGINES.md) و [راهنمای ترنسپورت‌های FRP](docs/FRP_TUNNELS_GUIDE.md).
+با **GRE + FRP** و حامل **Direct GRE** شروع کنید. اگر پروتکل ۴۷ بین دو سرور مسدود است، حامل **WSS** و بعد Backhaul بدون GRE را امتحان کنید. مطمئن نیستید چه چیزی رد می‌شود؟ **تست مسیر** در تب Benchmark پیش از ساخت تونل همه‌ی ترنسپورت‌ها را بین دو سرور تست می‌کند. جزئیات: [docs/ENGINES.md](docs/ENGINES.md) و [راهنمای ترنسپورت‌های FRP](docs/FRP_TUNNELS_GUIDE.md).
 
 ---
 
