@@ -606,6 +606,71 @@ html[data-sb="1"] .sidebar .brand-tier { display: none; }
 .cl-acts { display: flex; gap: 6px; justify-content: flex-end; }
 .cl-pick { display: grid; gap: 6px; max-height: 320px; overflow: auto; padding: 8px; border: 1px solid var(--ln); border-radius: var(--r-md); background: var(--sunk); }
 .cl-pm { display: grid; gap: 6px; padding-bottom: 6px; }
+/* cluster map */
+.cl-seg { display: inline-flex; border: 1px solid var(--ln); border-radius: var(--r-md); overflow: hidden; background: var(--sunk); }
+.cl-seg button { background: transparent; border: 0; padding: 0 14px; min-height: 32px; color: var(--tx2); font: inherit; font-size: var(--fs-small); cursor: pointer; }
+.cl-seg button.on { background: var(--ac-fill); color: #fff; }
+.cl-map-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; margin-top: 12px; align-items: start; }
+#clMapBody { container-type: inline-size; }
+/* the inspector goes under the map when the card is too narrow for both
+   (the sidebar and the activity panel take room too) */
+@container (max-width: 1060px) { .cl-map-wrap { grid-template-columns: minmax(0, 1fr); } }
+.cl-map-col { min-width: 0; }
+.cl-map-scroll { overflow-x: auto; border: 1px solid var(--ln); border-radius: var(--r-md); background: var(--sunk); direction: ltr; }
+#clMap { display: block; width: 100%; min-width: 680px; height: auto; direction: ltr; user-select: none; stroke: none; stroke-width: 0; }
+.cl-n { cursor: pointer; outline: none; }
+.cl-n-bg { fill: var(--s1); stroke: var(--ln2); stroke-width: 1.5; transition: stroke var(--dur-fast) ease; }
+.cl-n.hubbox > .cl-n-bg { fill: var(--s2); }
+.cl-n.pool > .cl-n-bg { fill: var(--s1); }
+.cl-n:hover > .cl-n-bg, .cl-n:focus-visible > .cl-n-bg { stroke: var(--ac); }
+.cl-n.sel > .cl-n-bg { stroke: var(--ac); stroke-width: 2.5; }
+.cl-n.add > .cl-n-bg { fill: transparent; stroke-dasharray: 6 5; }
+.cl-n.add text { fill: var(--mu); }
+.cl-n.add:hover text { fill: var(--tx); }
+.cl-n.dim { opacity: .55; }
+.cl-t1 { fill: var(--tx); font-size: 15px; font-weight: 600; }
+.cl-t2 { fill: var(--mu); font-size: 13px; font-variant-numeric: tabular-nums; }
+.cl-tb { fill: var(--tx); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cl-tr { text-anchor: end; }
+.cl-tc { text-anchor: middle; }
+.cl-dot.ok { fill: var(--ok); } .cl-dot.warn { fill: var(--wr); } .cl-dot.err { fill: var(--er); } .cl-dot.off { fill: var(--mu); }
+.cl-e[data-sel] { cursor: pointer; outline: none; }
+.cl-e-hit { fill: none; stroke: transparent; stroke-width: 16; }
+.cl-e-line { fill: none; stroke-linecap: round; transition: stroke-width var(--dur) ease; }
+.cl-e.ok .cl-e-line { stroke: var(--ok); }
+.cl-e.warn .cl-e-line { stroke: var(--wr); }
+.cl-e.err .cl-e-line { stroke: var(--er); stroke-dasharray: 3 7; }
+.cl-e.idle .cl-e-line { stroke: var(--mu); opacity: .7; }
+.cl-e.standby .cl-e-line { stroke: var(--info); stroke-dasharray: 8 6; opacity: .85; }
+.cl-e.off .cl-e-line { stroke: var(--mu); stroke-dasharray: 2 7; opacity: .55; }
+.cl-e[data-sel]:hover .cl-e-line, .cl-e[data-sel]:focus-visible .cl-e-line { stroke: var(--ac); opacity: 1; }
+.cl-e.sel .cl-e-line { stroke: var(--ac); opacity: 1; }
+.cl-e-flow { fill: none; stroke: var(--tx); stroke-opacity: .45; stroke-width: 2; stroke-dasharray: 3 13; animation: cl-flow 1s linear infinite; pointer-events: none; }
+@keyframes cl-flow { to { stroke-dashoffset: -16; } }
+@media (prefers-reduced-motion: reduce) { .cl-e-flow { display: none; } }
+.cl-t-share { fill: var(--tx); font-size: 12px; font-weight: 600; text-anchor: middle; paint-order: stroke; stroke: var(--sunk); stroke-width: 4px; pointer-events: none; }
+.cl-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: var(--fs-caption); color: var(--mu); }
+.cl-legend i { display: inline-block; width: 22px; border-top: 3px solid var(--mu); vertical-align: middle; margin-inline-end: 6px; }
+.cl-legend i.ok { border-top-color: var(--ok); } .cl-legend i.err { border-top: 3px dotted var(--er); }
+.cl-legend i.idle { border-top-color: var(--mu); } .cl-legend i.standby { border-top: 3px dashed var(--info); } .cl-legend i.off { border-top: 3px dotted var(--mu); }
+.cl-ins { border: 1px solid var(--ln); border-radius: var(--r-md); background: var(--s1); padding: 14px; display: grid; gap: 12px; min-width: 0; }
+.cl-ins-h b { font-size: var(--fs-h4); color: var(--tx); }
+.cl-ins dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: var(--fs-small); }
+.cl-ins dt { color: var(--mu); }
+.cl-ins dd { margin: 0; color: var(--tx); overflow-wrap: anywhere; }
+.cl-ins-sec { border-top: 1px solid var(--ln); padding-top: 12px; display: grid; gap: 10px; }
+.cl-ins .fg { margin: 0; }
+.cl-ins .ent-grid-2 { gap: 10px; }
+.cl-ins-list { display: grid; gap: 6px; }
+.cl-ins-pre { max-height: 260px; overflow: auto; margin: 0; }
+.cl-modes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.cl-mode { border: 1px solid var(--ln); border-radius: var(--r-md); background: var(--sunk); color: var(--tx2); padding: 6px 8px; min-height: 36px; font: inherit; font-size: var(--fs-small); cursor: pointer; }
+.cl-mode:hover { color: var(--tx); }
+.cl-mode.on { border-color: var(--ac); color: var(--tx); box-shadow: inset 0 0 0 1px var(--ac); }
+.cl-row-btn { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; background: var(--sunk); border: 1px solid var(--ln); border-radius: var(--r-md); color: var(--tx); font: inherit; font-size: var(--fs-small); text-align: start; cursor: pointer; }
+.cl-row-btn:hover, .cl-row-btn:focus-visible { border-color: var(--ac); }
+.cl-range { width: 100%; accent-color: var(--ac); min-height: 24px; }
+.cl-row-btn .u-ta-r { text-align: end; white-space: nowrap; }
 .cl-pm + .cl-pm { border-top: 1px solid var(--ln); padding-top: 6px; }
 .cl-pm-opts { display: flex; flex-wrap: wrap; gap: 8px 12px; padding-inline-start: 26px; align-items: flex-end; }
 .cl-pm-opts[hidden] { display: none; }

@@ -1750,6 +1750,35 @@
           <div id="clApplyErr" class="hidden cl-alert"></div>
         </div>
 
+        <!-- The map: every part can be clicked and changed in the inspector -->
+        <div class="tunnel-card" id="clMapCard">
+          <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-8">
+            <div class="u-flex-1 cl-head-txt">
+              <p class="tc-title u-m-0">Cluster Map</p>
+              <div class="ent-help u-m-0">Click any part of the map to see and change it. Line thickness is the share of new connections; color is health.</div>
+            </div>
+            <div class="cl-seg" role="group" aria-label="View">
+              <button type="button" id="clViewMap" onclick="clSetView('map')">Map</button>
+              <button type="button" id="clViewList" onclick="clSetView('list')">List</button>
+            </div>
+          </div>
+          <div id="clMapBody">
+            <div class="cl-map-wrap">
+              <div class="cl-map-col">
+                <div class="cl-map-scroll"><svg id="clMap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" role="group" aria-label="Cluster map"></svg></div>
+                <div class="cl-legend">
+                  <span><i class="ok"></i>Carries traffic</span>
+                  <span><i class="idle"></i>Healthy, idle</span>
+                  <span><i class="standby"></i>Standby, DNS or linked hub</span>
+                  <span><i class="err"></i>Down</span>
+                  <span><i class="off"></i>Drained or not serving</span>
+                </div>
+              </div>
+              <aside class="cl-ins" id="clIns"></aside>
+            </div>
+          </div>
+        </div>
+
         <!-- Iran hub view -->
         <div id="clHubView" class="hidden">
           <div class="tunnel-card">

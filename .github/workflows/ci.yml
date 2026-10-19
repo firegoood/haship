@@ -96,7 +96,7 @@ jobs:
       - name: Cluster lab (kernel rules, hub forwarding, a pool of real frps/frpc and Backhaul end to end)
         run: |
           (cd panel && go test -c -o /tmp/clusterlab.test .)
-          sudo env "PATH=$PATH" CLUSTER_LAB_TEST_BIN=/tmp/clusterlab.test FRP_DIR=/tmp/frp-rel BACKHAUL_BIN=/tmp/backhaul-rel/backhaul bash tests/test_cluster_lab.sh
+          sudo env "PATH=$PATH" GITHUB_ACTIONS="$GITHUB_ACTIONS" CLUSTER_LAB_TEST_BIN=/tmp/clusterlab.test FRP_DIR=/tmp/frp-rel BACKHAUL_BIN=/tmp/backhaul-rel/backhaul bash tests/test_cluster_lab.sh
       - name: Bagher lab (ssh -R + frp, key lock-down, crash and outage recovery)
         run: |
           (cd panel && go test -c -o /tmp/bagherlab.test .)

@@ -7903,6 +7903,18 @@ function renderClusterUI(d) {
     clRenderDNS(d.dns || {});
     clRenderHealth(d);
   }
+  const map = _clView === 'map';
+  $('clMapBody').classList.toggle('hidden', !map);
+  $('clViewMap').classList.toggle('on', map);
+  $('clViewMap').setAttribute('aria-pressed', map);
+  $('clViewList').classList.toggle('on', !map);
+  $('clViewList').setAttribute('aria-pressed', !map);
+  if (map) {
+    $('clHubView').classList.add('hidden');
+    $('clSpokeView').classList.add('hidden');
+    clMapRender(d);
+    clInspect(d);
+  }
   clRenderEvents(d.events || []);
 }
 
@@ -8338,19 +8350,21 @@ function clRenderJoined(joined) {
   }).join('');
 }
 
-async function clJoinHub() {
-  const bundle = $('clJoinBundle').value.trim();
+// clJoinHub joins with the form whose ids start with p (the list view's or the map inspector's).
+async function clJoinHub(p) {
+  p = p || 'clJoin';
+  const bundle = $(p + 'Bundle').value.trim();
   if (!bundle) return;
-  const btn = $('clJoinBtn'), out = $('clJoinOut');
+  const btn = $(p + 'Btn'), out = $(p + 'Out');
   btn.disabled = true;
   btn.textContent = tr('', 'Joining… (up to 4 min)');
   out.classList.add('hidden');
   try {
-    const r = await api('/api/cluster/join-hub', { bundle, name: $('clJoinName').value.trim() });
+    const r = await api('/api/cluster/join-hub', { bundle, name: $(p + 'Name').value.trim() });
     toastOk(tr('', 'Hub joined'));
     out.textContent = r.output || '';
     out.classList.toggle('hidden', !r.output);
-    $('clJoinBundle').value = '';
+    $(p + 'Bundle').value = '';
   } catch (e) {
     toastErr(tr('', 'Cannot join the hub'), e.message || String(e));
   } finally {
@@ -8365,6 +8379,562 @@ async function clLeaveHub(id, name) {
   try { await api('/api/cluster/leave-hub', { id }); toastOk(tr('', 'Left the hub')); }
   catch (e) { toastErr(tr('', 'Cannot leave the hub'), e.message || String(e)); }
   loadClusterStatus();
+}
+
+// ---- cluster map ----
+// A picture of the cluster: users and the other Iran hubs on the left, this
+// hub with its pools in the middle, the foreign servers on the right. Line
+// thickness is the share of new connections, color the health. Clicking any
+// part opens it in the inspector next to the map, where everything about it
+// can be changed. The map is redrawn on every poll; the inspector's forms are
+// only rebuilt when the selection changes (or after a save), so a poll never
+// wipes what is being typed.
+
+let _clView = (() => { try { return localStorage.getItem('clView') || 'map'; } catch (e) { return 'map'; } })();
+let _clSel = '', _clInsKey = null, _clInsMode = '';
+
+function clSetView(v) {
+  _clView = v === 'list' ? 'list' : 'map';
+  try { localStorage.setItem('clView', _clView); } catch (e) {}
+  if (_clusterData) renderClusterUI(_clusterData);
+}
+
+function clTrunc(s, n) { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+const CL_MODE_SHORT = { failover: 'Failover', balance: 'Balance', sticky: 'Sticky', latency: 'Latency', least: 'Least conn' };
+const clPoolKind = st => ({ ok: 'ok', degraded: 'warn', forward: 'warn', 'fail-open': 'err', down: 'err' }[st] || 'off');
+const clPoolKey = p => p.port + '/' + p.proto;
+
+// clSelPool / clSelLink find what a selection key points to.
+function clSelParse(key) {
+  const [k, a, b] = String(key || '').split(':');
+  return { k, a, b };
+}
+function clPoolByKey(pk) {
+  const [port, proto] = String(pk || '').split('/');
+  return clPoolFind(port, proto);
+}
+
+// clSelect selects a part of the map ("" = this hub) and fills the inspector.
+function clSelect(key) {
+  const { k } = clSelParse(key);
+  if (k === 'add') {
+    const what = clSelParse(key).a;
+    if (what === 'pool') return clPoolOpen();
+    if (what === 'hub') return clHubAddOpen();
+    if (what === 'server') return goTab('setup');
+  }
+  _clSel = key;
+  _clInsKey = null;
+  if (_clusterData) { clMapRender(_clusterData); clInspect(_clusterData); }
+  const ins = $('clIns');
+  // the inspector sits under the map on narrow screens: bring it into view
+  if (ins && ins.getBoundingClientRect().top >= $('clMap').getBoundingClientRect().bottom) ins.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function clMapWire() {
+  const svg = $('clMap');
+  if (!svg || svg._wired) return;
+  svg._wired = true;
+  svg.addEventListener('click', e => {
+    const g = e.target.closest('[data-sel]');
+    if (g) clSelect(g.getAttribute('data-sel'));
+  });
+  svg.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const g = e.target.closest('[data-sel]');
+    if (g) { e.preventDefault(); clSelect(g.getAttribute('data-sel')); }
+  });
+}
+
+// ---- drawing ----
+
+function clSvgNode(key, x, y, w, h, cls, inner, label) {
+  const sel = _clSel === key ? ' sel' : '';
+  return `<g class="cl-n ${cls}${sel}" data-sel="${esc(key)}" role="button" tabindex="0" aria-label="${esc(label)}"><title>${esc(label)}</title>` +
+    `<rect class="cl-n-bg" x="${x}" y="${y}" width="${w}" height="${h}" rx="12"/>${inner}</g>`;
+}
+
+function clSvgEdge(key, x1, y1, x2, y2, cls, width, flow, label, tag) {
+  const dx = Math.max(40, (x2 - x1) / 2);
+  const p = `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+  const sel = key && _clSel === key ? ' sel' : '';
+  const attrs = key ? ` data-sel="${esc(key)}" role="button" tabindex="0" aria-label="${esc(label)}"` : '';
+  return `<g class="cl-e ${cls}${sel}"${attrs}><title>${esc(label)}</title><path class="cl-e-hit" d="${p}"/>` +
+    `<path class="cl-e-line" d="${p}" stroke-width="${width.toFixed(1)}"/>${flow ? `<path class="cl-e-flow" d="${p}"/>` : ''}` +
+    (tag ? `<text class="cl-t-share" x="${(0.216 * x1 + 0.189 * dx + 0.784 * x2 - 0.441 * dx).toFixed(1)}" y="${(0.216 * y1 + 0.784 * y2 - 6).toFixed(1)}">${esc(tag)}</text>` : '') + `</g>`;
+}
+
+const clDot = (cx, cy, kind) => `<circle class="cl-dot ${kind}" cx="${cx}" cy="${cy}" r="5"/>`;
+const clTxt = (x, y, cls, s) => `<text class="${cls}" x="${x}" y="${y}">${esc(s)}</text>`;
+
+function clMapRender(d) {
+  const svg = $('clMap');
+  if (!svg) return;
+  clMapWire();
+  const links = d.links || [], joined = d.joined_hubs || [];
+  if (links.length === 0 && joined.length > 0) return clMapRenderSpoke(d, svg);
+  const pools = d.pools || [], hubs = d.hubs || [], dns = d.dns || {};
+  const W = 820, SRV_H = 62, SRV_G = 14, POOL_H = 52, POOL_G = 10, SIDE_H = 58, SIDE_G = 16;
+  const nSrv = links.length + 1, nSide = 3 + hubs.length;
+  const hubH = 96 + (pools.length + 1) * (POOL_H + POOL_G);
+  const H = Math.max(nSrv * (SRV_H + SRV_G), hubH + 24, nSide * (SIDE_H + SIDE_G)) + 36;
+  const col = (n, h, g) => (H - (n * (h + g) - g)) / 2;
+  const hubX = 262, hubW = 236, hubY = (H - hubH) / 2;
+  const srvX = 600, srvW = 206, srvY0 = col(nSrv, SRV_H, SRV_G);
+  const sideX = 14, sideW = 190, sideY0 = col(nSide, SIDE_H, SIDE_G);
+  const srvY = i => srvY0 + i * (SRV_H + SRV_G);
+  const sideY = i => sideY0 + i * (SIDE_H + SIDE_G);
+  const poolY = j => hubY + 84 + j * (POOL_H + POOL_G);
+  const linkIdx = new Map(links.map((l, i) => [l.id, i]));
+  let edges = '', nodes = '';
+
+  // traffic and conns per link, over every pool
+  const connsBy = {}, totalConns = { n: 0, known: false };
+  pools.forEach(p => (p.member_status || []).forEach(s => {
+    if (s.conns != null && s.conns >= 0) { connsBy[s.link] = (connsBy[s.link] || 0) + s.conns; totalConns.n += s.conns; totalConns.known = true; }
+  }));
+
+  // left column: users, DNS, linked hubs, + link a hub
+  const uy = sideY(0);
+  nodes += clSvgNode('users', sideX, uy, sideW, SIDE_H, '', clTxt(sideX + 16, uy + 25, 'cl-t1', tr('', 'Users')) +
+    clTxt(sideX + 16, uy + 44, 'cl-t2', totalConns.known ? totalConns.n + ' ' + tr('', 'open connections') : tr('', 'connect to this hub')), tr('', 'Users'));
+  edges += clSvgEdge('', sideX + sideW, uy + SIDE_H / 2, hubX, hubY + 36, 'ok', 3, true, tr('', 'Users'));
+  const dy = sideY(1);
+  const dnsKind = !dns.enabled ? 'off' : dns.error ? 'err' : 'ok';
+  nodes += clSvgNode('dns', sideX, dy, sideW, SIDE_H, dns.enabled ? '' : 'dim', clDot(sideX + 18, dy + 21, dnsKind) +
+    clTxt(sideX + 32, dy + 25, 'cl-t1', tr('', 'DNS Failover')) +
+    clTxt(sideX + 16, dy + 44, 'cl-t2', dns.enabled ? clTrunc(dns.name, 22) : tr('', 'Off')), tr('', 'DNS Failover'));
+  if (dns.enabled) edges += clSvgEdge('', sideX + sideW, dy + SIDE_H / 2, hubX, hubY + 56, dnsKind === 'ok' ? 'standby' : 'err', 2, false, tr('', 'DNS Failover'));
+  hubs.forEach((h, i) => {
+    const y = sideY(2 + i), kind = !h.up ? 'err' : h.healthy ? 'ok' : 'warn';
+    nodes += clSvgNode('peer:' + h.id, sideX, y, sideW, SIDE_H, '', clDot(sideX + 18, y + 21, kind) +
+      clTxt(sideX + 32, y + 25, 'cl-t1', clTrunc(h.name || h.id, 11)) +
+      clTxt(sideX + 16, y + 44, 'cl-t2', (h.public_ip || '') + (h.up ? ' · ' + clMs(h.latency_ms) : '')) +
+      clTxt(sideX + sideW - 12, y + 25, 'cl-t2 cl-tr', tr('', 'Iran hub')), tr('', 'Iran hub') + ' ' + (h.name || h.id));
+    edges += clSvgEdge('peer:' + h.id, sideX + sideW, y + SIDE_H / 2, hubX, hubY + hubH - 30, kind === 'err' ? 'err' : 'standby', 2, false,
+      tr('', 'Linked hub') + ' ' + (h.name || h.id));
+  });
+  const ay = sideY(2 + hubs.length);
+  nodes += clSvgNode('add:hub', sideX, ay, sideW, SIDE_H, 'add', clTxt(sideX + sideW / 2, ay + 34, 'cl-t1 cl-tc', '+ ' + tr('', 'Link a Hub')), tr('', 'Link a Hub'));
+
+  // middle: this hub and its pools
+  const okPools = pools.filter(p => p.state === 'ok').length;
+  nodes += clSvgNode('hub', hubX, hubY, hubW, hubH, 'hubbox', clTxt(hubX + 16, hubY + 24, 'cl-t2', tr('', 'This Iran hub')) +
+    clTxt(hubX + 16, hubY + 46, 'cl-t1', clTrunc(d.name || d.node_id, 24)) +
+    clTxt(hubX + 16, hubY + 66, 'cl-t2', (d.public_ip || '') + (pools.length ? ' · ' + okPools + '/' + pools.length + ' ' + tr('', 'healthy') : '')), tr('', 'This Iran hub'));
+  pools.forEach((p, j) => {
+    const y = poolY(j), pk = clPoolKey(p), kind = clPoolKind(p.state);
+    nodes += clSvgNode('pool:' + pk, hubX + 14, y, hubW - 28, POOL_H, 'pool' + (p.disabled ? ' dim' : ''),
+      clTxt(hubX + 28, y + 33, 'cl-tb', String(p.port)) +
+      clTxt(hubX + 96, y + 22, 'cl-t1', clTrunc(p.name || tr('', CL_MODE_SHORT[p.mode] || p.mode), 11)) +
+      clTxt(hubX + 96, y + 40, 'cl-t2', (CL_PROTO[p.proto] || p.proto) + (p.name ? ' · ' + tr('', CL_MODE_SHORT[p.mode] || p.mode) : '')) +
+      clDot(hubX + hubW - 28, y + 15, kind), tr('', 'Pool') + ' ' + p.port + ' ' + tr('', (CL_STATE[p.state] || CL_STATE.starting)[1]));
+    const status = p.member_status || [];
+    (p.members || []).forEach(m => {
+      const i = linkIdx.get(m.link);
+      if (i === undefined) return;
+      const s = status.find(x => x.link === m.link) || {};
+      const share = s.share || 0;
+      let cls;
+      if (s.missing || !s.listening) cls = 'off';
+      else if (m.drain) cls = 'off';
+      else if (s.check === 'fail' || !s.up) cls = 'err';
+      else if (share > 0) cls = p.state === 'fail-open' ? 'warn' : 'ok';
+      else if (m.backup) cls = 'standby';
+      else cls = 'idle';
+      const w = share > 0 ? 2 + share * 8 : 1.6;
+      const what = cls === 'err' ? tr('', 'Down') : m.drain ? tr('', 'Draining') : m.backup ? tr('', 'Standby') : share > 0 ? Math.round(share * 100) + '%' : tr('', 'idle');
+      edges += clSvgEdge('member:' + pk + ':' + m.link, hubX + hubW - 14, y + POOL_H / 2, srvX, srvY(i) + SRV_H / 2, cls, w, share > 0 && !p.disabled,
+        p.port + ' → ' + (s.name || 'link ' + m.link) + ': ' + what, share > 0 && share < 1 ? Math.round(share * 100) + '%' : '');
+    });
+  });
+  const npy = poolY(pools.length);
+  nodes += clSvgNode('add:pool', hubX + 14, npy, hubW - 28, POOL_H, 'add', clTxt(hubX + hubW / 2, npy + 31, 'cl-t1 cl-tc', '+ ' + tr('', 'New Pool')), tr('', 'New Pool'));
+
+  // right: foreign servers
+  links.forEach((l, i) => {
+    const y = srvY(i), kind = l.up ? 'ok' : 'err';
+    nodes += clSvgNode('link:' + l.id, srvX, y, srvW, SRV_H, l.bound ? '' : 'dim', clDot(srvX + 18, y + 22, kind) +
+      clTxt(srvX + 32, y + 26, 'cl-t1', clTrunc(l.name, 13)) +
+      clTxt(srvX + srvW - 12, y + 26, 'cl-t2 cl-tr', clMs(l.latency_ms)) +
+      clTxt(srvX + 16, y + 46, 'cl-t2', clTrunc((l.remote || '—') + ' · ' + l.engine, 20)) +
+      clTxt(srvX + srvW - 12, y + 46, 'cl-t2 cl-tr', connsBy[l.id] != null ? connsBy[l.id] + ' ' + tr('', 'conn') : ''),
+      tr('', 'Foreign Server') + ' ' + l.name + ': ' + tr('', l.up ? 'Up' : 'Down'));
+  });
+  const ny = srvY(links.length);
+  nodes += clSvgNode('add:server', srvX, ny, srvW, SRV_H, 'add', clTxt(srvX + srvW / 2, ny + 36, 'cl-t1 cl-tc', '+ ' + tr('', 'Add a foreign server')), tr('', 'Add a foreign server') + ' (' + tr('', 'Setup') + ')');
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${Math.round(H)}`);
+  svg.innerHTML = edges + nodes;
+  clMapCenter(svg);
+}
+
+// clMapCenter scrolls a map wider than the screen (phones) to its middle
+// once, so this server and both sides of it show; the user can pan.
+function clMapCenter(svg) {
+  const box = svg.parentElement;
+  if (!box || box._centered || box.scrollWidth <= box.clientWidth) return;
+  box._centered = true;
+  box.scrollLeft = (box.scrollWidth - box.clientWidth) / 2;
+}
+
+function clMapRenderSpoke(d, svg) {
+  const joined = d.joined_hubs || [];
+  const W = 820, NH = 62, NG = 16, n = joined.length + 1;
+  const H = Math.max(n * (NH + NG), 140) + 36;
+  const y0 = (H - (n * (NH + NG) - NG)) / 2, cy = H / 2;
+  const meX = 60, meW = 250, hubX = 520, hubW = 260;
+  let edges = '', nodes = '';
+  nodes += clSvgNode('me', meX, cy - 40, meW, 80, 'hubbox', clTxt(meX + 16, cy - 14, 'cl-t2', tr('', 'This foreign server')) +
+    clTxt(meX + 16, cy + 10, 'cl-t1', clTrunc(d.name || '', 26)) +
+    clTxt(meX + 16, cy + 28, 'cl-t2', joined.length + ' ' + tr('', 'Iran hubs')), tr('', 'This foreign server'));
+  joined.forEach((h, i) => {
+    const y = y0 + i * (NH + NG), kind = !h.active ? 'err' : h.session ? 'ok' : 'warn';
+    edges += clSvgEdge('joined:' + h.id, meX + meW, cy, hubX, y + NH / 2, kind === 'ok' ? 'ok' : kind, kind === 'ok' ? 4 : 2, kind === 'ok', (h.first ? tr('', 'First hub') : h.name) + ' ' + (h.iran_pub || ''));
+    nodes += clSvgNode('joined:' + h.id, hubX, y, hubW, NH, '', clDot(hubX + 18, y + 22, kind) +
+      clTxt(hubX + 32, y + 26, 'cl-t1', clTrunc(h.first ? tr('', 'First hub') : h.name, 20)) +
+      clTxt(hubX + 16, y + 46, 'cl-t2', (h.iran_pub || '—') + ' · ' + (h.svc || '')), tr('', 'Iran hub') + ' ' + (h.name || ''));
+  });
+  const ay = y0 + joined.length * (NH + NG);
+  nodes += clSvgNode('joinnew', hubX, ay, hubW, NH, 'add', clTxt(hubX + hubW / 2, ay + 36, 'cl-t1 cl-tc', '+ ' + tr('', 'Join Another Iran Hub')), tr('', 'Join Another Iran Hub'));
+  svg.setAttribute('viewBox', `0 0 ${W} ${Math.round(H)}`);
+  svg.innerHTML = edges + nodes;
+  clMapCenter(svg);
+}
+
+// ---- inspector ----
+
+// clInspect rebuilds the inspector when the selection changed, else only its
+// live part (state, health, counters).
+function clInspect(d) {
+  const box = $('clIns');
+  if (!box) return;
+  const spoke = (d.links || []).length === 0 && (d.joined_hubs || []).length > 0;
+  let key = _clSel || (spoke ? 'me' : 'hub');
+  // a selection that no longer exists falls back to the hub
+  const { k, a, b } = clSelParse(key);
+  if ((k === 'pool' || k === 'member') && !clPoolByKey(a)) key = 'hub';
+  if (k === 'member' && clPoolByKey(a) && !(clPoolByKey(a).members || []).some(m => String(m.link) === b)) key = 'pool:' + a;
+  if (k === 'link' && !(d.links || []).some(l => String(l.id) === a)) key = 'hub';
+  if (k === 'peer' && !(d.hubs || []).some(h => h.id === a)) key = 'hub';
+  if (k === 'joined' && !(d.joined_hubs || []).some(h => String(h.id) === a)) key = 'me';
+  if (spoke && !['me', 'joined', 'joinnew'].includes(clSelParse(key).k)) key = 'me';
+  if (!spoke && ['me', 'joined', 'joinnew'].includes(clSelParse(key).k)) key = 'hub';
+  _clSel = key;
+  if (_clInsKey !== key) {
+    _clInsKey = key;
+    box.innerHTML = clInsForm(key, d);
+  }
+  const live = $('clInsLive');
+  if (live) live.innerHTML = clInsLive(key, d);
+}
+
+// clInsRefresh rebuilds the inspector's forms on the next render (after a save).
+function clInsRefresh() { _clInsKey = null; loadClusterStatus(); }
+
+const clKV = rows => `<dl>${rows.filter(r => r && r[1] !== undefined && r[1] !== null && r[1] !== '').map(r => `<dt>${esc(tr('', r[0]))}</dt><dd>${r[2] ? r[1] : esc(r[1])}</dd>`).join('')}</dl>`;
+const clIn = (id, label, val, attrs) => `<div class="fg"><label for="${id}">${esc(tr('', label))}</label><input class="hashem-input" id="${id}" value="${esc(val ?? '')}" ${attrs || ''}></div>`;
+
+function clInsLive(key, d) {
+  const { k, a, b } = clSelParse(key);
+  if (k === 'pool') {
+    const p = clPoolByKey(a), st = CL_STATE[p.state] || CL_STATE.starting, status = p.member_status || [];
+    const rows = (p.members || []).map(m => {
+      const s = status.find(x => x.link === m.link) || {};
+      const h = s.missing ? clSt('off', 'Tunnel removed') : m.drain ? clSt('warn', 'Draining') : !s.listening ? clSt('off', 'Not serving this port')
+        : s.check === 'fail' ? clSt('err', 'Service down') : s.up ? clSt('on', 'Up') : clSt('err', 'Down');
+      const tags = (m.backup ? ` <span class="badge dim">${esc(tr('', 'Standby'))}</span>` : '') + (s.full ? ` <span class="badge warn">${esc(tr('', 'Full'))}</span>` : '');
+      return `<button type="button" class="cl-row-btn" onclick="clSelect(${jsArg('member:' + a + ':' + m.link)})">
+        <span><b>${esc(s.name || 'link ' + m.link)}</b>${tags}<br>${h}</span>
+        <span class="u-mono u-ta-r">${s.share ? Math.round(s.share * 100) + '%' : '—'}<br><span class="u-hint-12">${s.conns != null && s.conns >= 0 ? s.conns + ' ' + esc(tr('', 'conn')) : ''}</span></span></button>`;
+    }).join('') || `<div class="ent-empty">${esc(tr('', 'No foreign server in this pool yet.'))}</div>`;
+    return `<div class="u-flex u-gap-8 u-ai-c u-wrap"><span class="badge ${st[0]}">${esc(tr('', st[1]))}</span><span class="u-hint-12">${esc(tr('', 'Click a server to change its settings in this pool.'))}</span></div>
+      <div class="cl-ins-list">${rows}</div>`;
+  }
+  if (k === 'member') {
+    const p = clPoolByKey(a), m = (p.members || []).find(x => String(x.link) === b), s = (p.member_status || []).find(x => String(x.link) === b) || {};
+    const h = s.missing ? clSt('off', 'Tunnel removed') : m.drain ? clSt('warn', 'Draining') : !s.listening ? clSt('off', 'Not serving this port')
+      : s.check === 'fail' ? clSt('err', 'Service down') : s.up ? clSt('on', 'Up') : clSt('err', 'Down');
+    const l = (d.links || []).find(x => String(x.id) === b) || {};
+    return clKV([['Health', h, true], ['Why', s.check === 'fail' ? tr('', s.check_reason || '') : (!s.up && l.reason ? tr('', l.reason) : '')],
+      ['Service check', s.check ? tr('', s.check === 'ok' ? 'passes' : s.check === 'pending' ? 'starting' : 'fails') : ''],
+      ['Share', s.share ? Math.round(s.share * 100) + '%' : '0%'], ['Connections', s.conns != null && s.conns >= 0 ? s.conns + (m.max_conn ? ' / ' + m.max_conn : '') : '—'],
+      ['Latency', clMs(s.latency_ms)]]);
+  }
+  if (k === 'link') {
+    const l = (d.links || []).find(x => String(x.id) === a);
+    return clKV([['Health', (l.up ? clSt('on', 'Up') : clSt('err', 'Down')), true], ['Why', l.reason ? tr('', l.reason) : ''], ['Error', l.bind_error || ''],
+      ['Latency', clMs(l.latency_ms)], ['Ping', clMs(l.icmp_ms)], ['Control session', tr('', l.session ? 'connected' : 'none')], ['Up since', l.since || ''],
+      ['Foreign IP', l.remote || '—'], ['Engine', l.engine + ' · ' + l.svc], ['Ports', (l.ports || []).join(', ') || '—'],
+      ['Private address', l.bound ? l.addr + ' (' + tr('', 'in a pool') + ')' : tr('', 'not used: listens on the public ports')]]);
+  }
+  if (k === 'hub') {
+    const pools = d.pools || [], links = d.links || [];
+    return clKV([['Hub id', d.node_id], ['Pools', pools.filter(p => p.state === 'ok').length + ' / ' + pools.length + ' ' + tr('', 'healthy')],
+      ['Foreign servers up', links.filter(l => l.up).length + ' / ' + links.length], ['Rules applied', d.applied_at || '—'],
+      ['Ping', tr('', d.icmp ? 'works' : 'not available (only the sessions are checked)')], ['Error', d.apply_error || '']]);
+  }
+  if (k === 'peer') {
+    const h = (d.hubs || []).find(x => x.id === a);
+    const st = !h.up ? clSt('err', 'Unreachable') : h.healthy ? clSt('on', 'Up') : clSt('warn', 'Up, no working tunnel');
+    const pools = Object.keys(h.pools || {}).sort().map(x => { const v = h.pools[x], s = CL_STATE[v.state] || CL_STATE.starting; return `<span class="badge ${s[0]}">${esc(x)}</span>`; }).join(' ') || '—';
+    return clKV([['Status', st, true], ['Error', h.error || ''], ['Public IP', h.public_ip || '—'], ['Latency', clMs(h.up ? h.latency_ms : -1)],
+      ['Last seen', h.last_seen || '—'], ['Version', h.version || ''], ['Hub id', h.id], ['Pools There', pools, true]]);
+  }
+  if (k === 'dns') {
+    const dns = d.dns || {};
+    const st = !dns.enabled ? clSt('off', 'Off') : dns.error ? clSt('err', 'Error') : clSt('on', 'On');
+    return clKV([['Status', st, true], ['Points to', (dns.records || []).join(', ') || '—'], ['Working hubs', (dns.want || []).join(', ') || '—'],
+      ['Writer', dns.enabled ? tr('', dns.leader ? 'this hub' : 'another hub (the lowest id)') : ''], ['Last check', dns.last_run || ''], ['Error', dns.error || '']]);
+  }
+  if (k === 'users') {
+    let n = 0, known = false;
+    (d.pools || []).forEach(p => (p.member_status || []).forEach(s => { if (s.conns >= 0) { n += s.conns; known = true; } }));
+    return clKV([['Open connections', known ? String(n) : '—'], ['Connect to', (d.public_ip || '—') + ((d.dns || {}).enabled ? ' · ' + d.dns.name : '')]]);
+  }
+  if (k === 'me') return clKV([['Iran hubs', String((d.joined_hubs || []).length)]]);
+  if (k === 'joined') {
+    const h = (d.joined_hubs || []).find(x => String(x.id) === a);
+    const st = !h.active ? clSt('err', 'Stopped') : h.session ? clSt('on', 'Connected') : clSt('warn', 'Running, not connected');
+    return clKV([['Status', st, true], ['Iran Server', h.iran_pub || '—'], ['Unit', h.svc || ''], ['GRE', h.gre_if && h.gre_if !== 'none' ? h.gre_if : tr('', 'none: dials the public IP')]]);
+  }
+  return '';
+}
+
+function clInsHead(title, sub) {
+  return `<div class="cl-ins-h"><div><b>${esc(title)}</b>${sub ? `<div class="u-hint-12">${esc(sub)}</div>` : ''}</div></div><div id="clInsLive"></div>`;
+}
+
+function clInsForm(key, d) {
+  const { k, a, b } = clSelParse(key);
+  if (k === 'pool') {
+    const p = clPoolByKey(a), P = jsArg(p.port), R = jsArg(p.proto);
+    _clInsMode = p.mode;
+    const inPool = new Set((p.members || []).map(m => m.link));
+    const addable = (d.links || []).filter(l => !inPool.has(l.id));
+    return clInsHead(tr('', 'Pool') + ' ' + p.port, (CL_PROTO[p.proto] || p.proto) + (p.name ? ' · ' + p.name : '')) + `
+      <div class="cl-ins-sec">
+        <span class="ent-label">${esc(tr('', 'Mode'))}</span>
+        <div class="cl-modes" role="group" aria-label="${esc(tr('', 'Mode'))}">${Object.keys(CL_MODE_NAME).map(m =>
+          `<button type="button" class="cl-mode${p.mode === m ? ' on' : ''}" data-mode="${m}" aria-pressed="${p.mode === m}" onclick="clInsModePick('${m}')">${esc(tr('', CL_MODE_NAME[m]))}</button>`).join('')}</div>
+        <div class="ent-help u-m-0" id="clIModeHelp">${esc(tr('', CL_MODE[p.mode] || ''))}</div>
+        <div class="ent-grid-2">
+          ${clIn('clIPort', 'Public port', p.port, 'type="number" min="1" max="65535"')}
+          <div class="fg"><label for="clIProto">${esc(tr('', 'Protocol'))}</label><select class="hashem-input" id="clIProto">
+            ${['both', 'tcp', 'udp'].map(x => `<option value="${x}" ${p.proto === x ? 'selected' : ''}>${esc(tr('', x === 'both' ? 'TCP and UDP' : x.toUpperCase()))}</option>`).join('')}</select></div>
+        </div>
+        ${clIn('clIName', 'Name (optional)', p.name || '', 'maxlength="40"')}
+        <label class="u-check-row"><input type="checkbox" id="clICheck" ${p.check ? 'checked' : ''}> ${esc(tr('', 'Service check: connect through the tunnel to the service'))}</label>
+        ${clIn('clICheckEvery', 'Check every (seconds)', p.check_every || 3, 'type="number" min="1" max="60"')}
+        <label class="u-check-row ${p.mode === 'failover' ? '' : 'hidden'}" id="clIFailbackRow"><input type="checkbox" id="clINoFailback" ${p.no_failback ? 'checked' : ''}> ${esc(tr('', 'Manual failback: stay on the backup until Fail Back Now'))}</label>
+        <div class="u-flex u-gap-8 u-wrap"><button type="button" class="hashem-btn hashem-btn-primary" onclick="clInsPoolSave(${P},${R})">${esc(tr('', 'Save Pool'))}</button></div>
+      </div>
+      <div class="cl-ins-sec">
+        ${addable.length ? `<select class="hashem-input" aria-label="${esc(tr('', 'Add a foreign server'))}" onchange="clMemberAdd(${P},${R},this.value).then(clInsRefresh)">
+          <option value="">${esc(tr('', 'Add a foreign server…'))}</option>${addable.map(l => `<option value="${l.id}">${esc(l.name)} (${esc(l.remote || '')})</option>`).join('')}</select>` : ''}
+        <div class="u-flex u-gap-8 u-wrap">
+          ${p.mode === 'failover' && p.no_failback ? `<button type="button" class="hashem-btn hashem-btn-secondary" onclick="clPoolFailback(${P},${R})">${esc(tr('', 'Fail Back Now'))}</button>` : ''}
+          <button type="button" class="hashem-btn hashem-btn-secondary" onclick="clPoolPatch(${P},${R},{disabled:${!p.disabled}}).then(clInsRefresh)">${esc(tr('', p.disabled ? 'Enable' : 'Disable'))}</button>
+          <button type="button" class="hashem-btn hashem-btn-ghost" onclick="clPoolDelete(${P},${R})">${esc(tr('', 'Delete Pool'))}</button>
+        </div>
+      </div>`;
+  }
+  if (k === 'member') {
+    const p = clPoolByKey(a), m = (p.members || []).find(x => String(x.link) === b);
+    const s = (p.member_status || []).find(x => String(x.link) === b) || {};
+    const P = jsArg(p.port), R = jsArg(p.proto), L = Number(b);
+    return clInsHead((s.name || 'link ' + b) + ' → ' + p.port, tr('', 'Settings of this server in pool') + ' ' + p.port + ' (' + tr('', CL_MODE_NAME[p.mode] || p.mode) + ')') + `
+      <div class="cl-ins-sec">
+        <div class="fg"><label for="clIWeight">${esc(tr('', 'Weight'))} <b id="clIWeightV">${m.weight || 1}</b></label>
+          <input class="cl-range" id="clIWeight" type="range" min="1" max="100" value="${m.weight || 1}" oninput="$('clIWeightV').textContent=this.value"></div>
+        <div class="ent-grid-2">
+          ${clIn('clIPrio', 'Priority', m.priority || 0, 'type="number" min="0" max="1000"')}
+          ${clIn('clIMPort', 'Port', m.port || '', `type="number" min="1" max="65535" placeholder="${p.port}"`)}
+        </div>
+        ${clIn('clIMax', 'Max connections', m.max_conn || '', `type="number" min="0" max="1000000" placeholder="${esc(tr('', 'no limit'))}"`)}
+        <label class="u-check-row"><input type="checkbox" id="clIBackup" ${m.backup ? 'checked' : ''}> ${esc(tr('', 'Standby: traffic only when no other server can take it'))}</label>
+        <label class="u-check-row"><input type="checkbox" id="clIDrain" ${m.drain ? 'checked' : ''}> ${esc(tr('', 'Drain: no new connections, open ones finish'))}</label>
+        <div class="ent-help u-m-0">${esc(tr('', 'Weight counts in balance, sticky and least connections; priority in failover (lower first).'))}</div>
+        <div class="u-flex u-gap-8 u-wrap">
+          <button type="button" class="hashem-btn hashem-btn-primary" onclick="clInsMemberSave(${P},${R},${L})">${esc(tr('', 'Save'))}</button>
+          <button type="button" class="hashem-btn hashem-btn-secondary" onclick="clSelect(${jsArg('pool:' + a)})">${esc(tr('', 'Back to Pool'))}</button>
+          <button type="button" class="hashem-btn hashem-btn-ghost" onclick="clMemberAct(${P},${R},${L},'remove').then(clInsRefresh)">${esc(tr('', 'Remove From Pool'))}</button>
+        </div>
+      </div>`;
+  }
+  if (k === 'link') {
+    const l = (d.links || []).find(x => String(x.id) === a);
+    const pools = (d.pools || []).filter(p => (p.members || []).some(m => m.link === l.id));
+    const others = (d.pools || []).filter(p => !(p.members || []).some(m => m.link === l.id));
+    return clInsHead(l.name, (l.id === 0 ? tr('', 'main tunnel') : tr('', 'peer') + ' ' + l.id) + ' · ' + l.engine) + `
+      <div class="cl-ins-sec">
+        <span class="ent-label">${esc(tr('', 'Pools'))}</span>
+        ${pools.map(p => { const s = (p.member_status || []).find(x => x.link === l.id) || {};
+          return `<button type="button" class="cl-row-btn" onclick="clSelect(${jsArg('member:' + clPoolKey(p) + ':' + l.id)})"><span><b>${p.port}</b> ${esc(CL_PROTO[p.proto] || p.proto)} · ${esc(tr('', CL_MODE_NAME[p.mode] || p.mode))}</span><span class="u-mono">${s.share ? Math.round(s.share * 100) + '%' : '—'}</span></button>`; }).join('')
+          || `<div class="ent-empty">${esc(tr('', 'Not in any pool: it listens on its own public ports.'))}</div>`}
+        ${others.length ? `<select class="hashem-input" aria-label="${esc(tr('', 'Add to a pool'))}" onchange="clInsAddToPool(${l.id},this.value)">
+          <option value="">${esc(tr('', 'Add to a pool…'))}</option>${others.map(p => `<option value="${esc(clPoolKey(p))}">${p.port} ${esc(CL_PROTO[p.proto] || p.proto)}${p.name ? ' · ' + esc(p.name) : ''}</option>`).join('')}</select>` : ''}
+        <div class="ent-help u-m-0">${esc(tr('', 'The tunnel itself (ports, transport, token) is edited in the Tunnel tab.'))}</div>
+        <div><button type="button" class="hashem-btn hashem-btn-secondary" onclick="goTab('tunnel')">${esc(tr('', 'Open Tunnel Tab'))}</button></div>
+      </div>`;
+  }
+  if (k === 'hub') {
+    const h = d.health || {};
+    return clInsHead(tr('', 'This Iran hub'), d.name || d.node_id) + `
+      <div class="cl-ins-sec">
+        <div class="ent-grid-2">
+          ${clIn('clIHubName', 'Hub name', d.name || '', 'maxlength="40"')}
+          ${clIn('clIHubIP', 'Public IP', d.public_ip || '', `placeholder="${esc(tr('', 'detected'))}" inputmode="decimal"`)}
+        </div>
+        <span class="ent-label">${esc(tr('', 'Health Check'))}</span>
+        <div class="ent-grid-2">
+          ${clIn('clIHcInt', 'Check every (ms)', h.interval_ms || 1000, 'type="number" min="500" max="10000" step="100"')}
+          ${clIn('clIHcFall', 'Out after failed checks', h.fall || 3, 'type="number" min="1" max="30"')}
+          ${clIn('clIHcRise', 'Back after good checks', h.rise || 3, 'type="number" min="1" max="60"')}
+        </div>
+        <label class="u-check-row"><input type="checkbox" id="clIHubFwd" ${d.hub_forward ? 'checked' : ''}> ${esc(tr('', 'Forward a pool to another hub when no foreign server here can serve it'))}</label>
+        <div><button type="button" class="hashem-btn hashem-btn-primary" onclick="clInsHubSave()">${esc(tr('', 'Save'))}</button></div>
+      </div>
+      <div class="cl-ins-sec">
+        <div class="u-flex u-gap-8 u-wrap">
+          <button type="button" class="hashem-btn hashem-btn-primary" onclick="clPoolOpen()">${esc(tr('', 'New Pool'))}</button>
+          <button type="button" class="hashem-btn hashem-btn-secondary" onclick="clJoinCodeOpen()">${esc(tr('', 'Show Join Code'))}</button>
+          <button type="button" class="hashem-btn hashem-btn-secondary" onclick="clHubAddOpen()">${esc(tr('', 'Link a Hub'))}</button>
+          <button type="button" class="hashem-btn hashem-btn-ghost" onclick="clInsRules()">${esc(tr('', 'Show Kernel Rules'))}</button>
+        </div>
+        <pre class="ent-code hidden cl-ins-pre" id="clIRules"></pre>
+      </div>`;
+  }
+  if (k === 'peer') {
+    const h = (d.hubs || []).find(x => x.id === a);
+    return clInsHead(h.name || h.id, tr('', 'Linked Iran hub')) + `
+      <div class="cl-ins-sec">
+        <div class="ent-help u-m-0">${esc(tr('', 'When every foreign server of a pool is down here, its port is forwarded to a hub where the same pool works.'))}</div>
+        <div><button type="button" class="hashem-btn hashem-btn-ghost" onclick="clHubRemove(${jsArg(h.id)},${jsArg(h.name || h.id)}).then(clInsRefresh)">${esc(tr('', 'Unlink'))}</button></div>
+      </div>`;
+  }
+  if (k === 'dns') {
+    const dns = d.dns || {}, hook = dns.provider === 'webhook';
+    return clInsHead(tr('', 'DNS Failover'), tr('', 'A domain that always points to the Iran hubs that work.')) + `
+      <div class="cl-ins-sec">
+        <div class="fg"><label for="clIDnsProv">${esc(tr('', 'Provider'))}</label><select class="hashem-input" id="clIDnsProv" onchange="clInsDnsProv()">
+          <option value="cloudflare" ${hook ? '' : 'selected'}>Cloudflare</option><option value="webhook" ${hook ? 'selected' : ''}>${esc(tr('', 'Webhook (any DNS provider or script)'))}</option></select></div>
+        ${clIn('clIDnsName', 'Record name', dns.name || '', 'placeholder="vpn.example.com" autocomplete="off"')}
+        <div class="${hook ? '' : 'hidden'}" id="clIDnsURLRow">${clIn('clIDnsURL', 'Webhook URL', dns.url || '', 'placeholder="https://example.com/hashem-dns" autocomplete="off"')}</div>
+        <div class="ent-grid-2">
+          ${clIn('clIDnsTTL', 'TTL (seconds)', dns.ttl || 60, 'type="number" min="60" max="3600"')}
+          <div class="fg"><label for="clIDnsTok" id="clIDnsTokL">${esc(tr('', hook ? 'Secret (optional, sent as Authorization: Bearer)' : 'Cloudflare API token (Zone, DNS, Edit)'))}</label>
+            <input class="hashem-input" id="clIDnsTok" type="password" autocomplete="off" placeholder="${esc(tr('', dns.has_token ? 'Saved; paste a new one to replace it' : hook ? 'Optional' : 'API token'))}"></div>
+        </div>
+        <label class="u-check-row"><input type="checkbox" id="clIDnsOn" ${dns.enabled ? 'checked' : ''}> ${esc(tr('', 'Keep the record pointed at the working hubs'))}</label>
+        <div class="u-flex u-gap-8 u-wrap">
+          <button type="button" class="hashem-btn hashem-btn-secondary" onclick="clInsDnsSave(true)">${esc(tr('', 'Test'))}</button>
+          <button type="button" class="hashem-btn hashem-btn-primary" onclick="clInsDnsSave(false)">${esc(tr('', 'Save'))}</button>
+        </div>
+      </div>`;
+  }
+  if (k === 'users') {
+    return clInsHead(tr('', 'Users'), tr('', 'Who connects to this hub')) + `
+      <div class="cl-ins-sec"><div class="ent-help u-m-0">${esc(tr('', 'Users connect to this hub\'s public IP, or to the DNS name when DNS failover is on. Each pool sends their new connections to a working foreign server.'))}</div>
+      <div class="u-flex u-gap-8 u-wrap"><button type="button" class="hashem-btn hashem-btn-secondary" onclick="clSelect('dns')">${esc(tr('', 'DNS Failover'))}</button></div></div>`;
+  }
+  if (k === 'me') {
+    return clInsHead(tr('', 'This foreign server'), tr('', 'Serves several Iran hubs: when one Iran server dies, users who connect through the others keep working.')) +
+      `<div class="cl-ins-sec"><div><button type="button" class="hashem-btn hashem-btn-primary" onclick="clSelect('joinnew')">${esc(tr('', 'Join Another Iran Hub'))}</button></div></div>`;
+  }
+  if (k === 'joined') {
+    const h = (d.joined_hubs || []).find(x => String(x.id) === a);
+    return clInsHead(h.first ? tr('', 'First hub') : h.name, h.iran_pub || '') + `<div class="cl-ins-sec">` +
+      (h.first ? `<div class="ent-help u-m-0">${esc(tr('', 'The first hub is set up in Setup.'))}</div>`
+        : `<div><button type="button" class="hashem-btn hashem-btn-ghost" onclick="clLeaveHub(${h.id},${jsArg(h.name)}).then(clInsRefresh)">${esc(tr('', 'Leave'))}</button></div>`) + `</div>`;
+  }
+  if (k === 'joinnew') {
+    return clInsHead(tr('', 'Join Another Iran Hub'), '') + `
+      <div class="cl-ins-sec">
+        <ol class="cl-steps"><li>${esc(tr('', 'On the other Iran server: Setup, add a foreign server with this server\'s IP and the same ports.'))}</li><li>${esc(tr('', 'Copy the bundle it prints and paste it here.'))}</li></ol>
+        <div class="fg"><label for="clIJoinBundle">${esc(tr('', 'Bundle (hsh1_, bh1_ or gh1_)'))}</label><textarea class="hashem-input u-mono u-resize-none" id="clIJoinBundle" rows="3" placeholder="hsh1_…"></textarea></div>
+        ${clIn('clIJoinName', 'Name (optional)', '', 'maxlength="32" placeholder="tehran-2"')}
+        <div><button type="button" class="hashem-btn hashem-btn-primary" id="clIJoinBtn" onclick="clJoinHub('clIJoin')">${esc(tr('', 'Join Hub'))}</button></div>
+        <pre class="ent-code hidden cl-ins-pre" id="clIJoinOut"></pre>
+      </div>`;
+  }
+  return '';
+}
+
+// clInsAddToPool adds the foreign server to the pool picked ("443/tcp").
+async function clInsAddToPool(link, pk) {
+  if (!pk) return;
+  const [port, proto] = pk.split('/');
+  await clMemberAdd(port, proto, link);
+  clInsRefresh();
+}
+
+function clInsModePick(m) {
+  _clInsMode = m;
+  document.querySelectorAll('#clIns .cl-mode').forEach(b => { const on = b.dataset.mode === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  $('clIModeHelp').textContent = tr('', CL_MODE[m] || '');
+  $('clIFailbackRow').classList.toggle('hidden', m !== 'failover');
+}
+
+async function clInsPoolSave(port, proto) {
+  const np = Number($('clIPort').value);
+  if (!(np >= 1 && np <= 65535)) { toastErr(tr('', 'Enter a port from 1 to 65535')); return; }
+  const changes = { port: np, proto: $('clIProto').value, name: $('clIName').value.trim(), mode: _clInsMode,
+    check: $('clICheck').checked ? 'tcp' : '', check_every: Number($('clICheckEvery').value) || 0, no_failback: $('clINoFailback').checked };
+  await clPoolPatch(port, proto, changes);
+  _clSel = 'pool:' + np + '/' + changes.proto;
+  clInsRefresh();
+}
+
+async function clInsMemberSave(port, proto, link) {
+  const p = clPoolFind(port, proto);
+  if (!p) return;
+  const members = (p.members || []).map(m => m.link !== link ? m : Object.assign({}, m, {
+    weight: Number($('clIWeight').value) || 1, priority: Number($('clIPrio').value) || 0, port: Number($('clIMPort').value) || 0,
+    max_conn: Number($('clIMax').value) || 0, backup: $('clIBackup').checked, drain: $('clIDrain').checked,
+  }));
+  await clPoolPatch(port, proto, { members });
+  clInsRefresh();
+}
+
+async function clInsHubSave() {
+  const body = { name: $('clIHubName').value.trim(), public_ip: $('clIHubIP').value.trim(), hub_forward: $('clIHubFwd').checked,
+    health: { interval_ms: Number($('clIHcInt').value), fall: Number($('clIHcFall').value), rise: Number($('clIHcRise').value) } };
+  try {
+    await api('/api/cluster/settings', body);
+    toastOk(tr('', 'Saved'));
+    _clHcFilled = false;
+  } catch (e) { toastErr(tr('', 'Cannot save'), e.message || String(e)); }
+  clInsRefresh();
+}
+
+async function clInsRules() {
+  const box = $('clIRules');
+  try {
+    const r = await fetch(at('/api/cluster/rules'));
+    box.textContent = (await r.text()) || tr('', 'No rules: no pool and no forwarding.');
+  } catch (e) { box.textContent = String(e); }
+  box.classList.remove('hidden');
+}
+
+function clInsDnsProv() {
+  const hook = $('clIDnsProv').value === 'webhook', dns = (_clusterData && _clusterData.dns) || {};
+  $('clIDnsURLRow').classList.toggle('hidden', !hook);
+  $('clIDnsTokL').textContent = tr('', hook ? 'Secret (optional, sent as Authorization: Bearer)' : 'Cloudflare API token (Zone, DNS, Edit)');
+  const saved = dns.has_token && (dns.provider === 'webhook') === hook;
+  $('clIDnsTok').placeholder = tr('', saved ? 'Saved; paste a new one to replace it' : hook ? 'Optional' : 'API token');
+}
+
+async function clInsDnsSave(test) {
+  const provider = $('clIDnsProv').value;
+  const body = { provider, url: $('clIDnsURL').value.trim(), name: $('clIDnsName').value.trim(), ttl: Number($('clIDnsTTL').value) || 60, enabled: $('clIDnsOn').checked, test: !!test };
+  const tok = $('clIDnsTok').value.trim();
+  if (tok) body.token = tok;
+  try {
+    const r = await api('/api/cluster/dns', body);
+    if (test) toastOk(tr('', provider === 'webhook' ? 'The webhook answered' : 'Cloudflare answered'), tr('', provider === 'webhook' ? 'Working hubs sent:' : 'The record points to:') + ' ' + ((r.records || []).join(', ') || '—'));
+    else { toastOk(tr('', 'DNS failover saved')); _clDnsFilled = false; clInsRefresh(); }
+  } catch (e) { toastErr(tr('', test ? 'The test failed' : 'Cannot save'), e.message || String(e)); }
 }
 
 // ---- events ----
