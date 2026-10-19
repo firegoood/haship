@@ -1793,7 +1793,7 @@
             <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-8">
               <div class="u-flex-1 cl-head-txt">
                 <p class="tc-title u-m-0">DNS Failover</p>
-                <div class="ent-help u-m-0">A domain that always points to the Iran hubs that work. Users who connect by name move to a working hub when one dies. Cloudflare, DNS only (grey cloud).</div>
+                <div class="ent-help u-m-0">A domain that always points to the Iran hubs that work. Users who connect by name move to a working hub when one dies. Cloudflare (DNS only, grey cloud), or a webhook for any other DNS provider.</div>
               </div>
               <span class="badge dim" id="clDnsBadge">Off</span>
             </div>
@@ -1801,7 +1801,14 @@
               <div class="fg"><label for="clDnsName">Record name</label><input class="hashem-input u-mono" id="clDnsName" placeholder="vpn.example.com" autocomplete="off"></div>
               <div class="fg"><label for="clDnsTTL">TTL (seconds)</label><input class="hashem-input" id="clDnsTTL" type="number" min="60" max="3600" value="60"></div>
             </div>
-            <div class="fg"><label for="clDnsToken">Cloudflare API token (Zone, DNS, Edit)</label><input class="hashem-input u-mono" id="clDnsToken" type="password" autocomplete="off" placeholder="Saved; paste a new one to replace it"></div>
+            <div class="fg"><label for="clDnsProvider">Provider</label>
+              <select class="hashem-input" id="clDnsProvider" onchange="clDnsProviderChanged()">
+                <option value="cloudflare">Cloudflare</option>
+                <option value="webhook">Webhook (any DNS provider or script)</option>
+              </select></div>
+            <div class="fg hidden" id="clDnsURLRow"><label for="clDnsURL">Webhook URL</label><input class="hashem-input u-mono" id="clDnsURL" autocomplete="off" placeholder="https://example.com/hashem-dns"></div>
+            <div class="ent-help hidden" id="clDnsHookHelp">The hub that leads POSTs JSON {"name", "ips", "ttl", "hub", "at"} whenever the working hubs change, and every 30 seconds. Your script sets the record to exactly "ips". Any 2xx answer counts as done.</div>
+            <div class="fg"><label for="clDnsToken" id="clDnsTokenLabel">Cloudflare API token (Zone, DNS, Edit)</label><input class="hashem-input u-mono" id="clDnsToken" type="password" autocomplete="off" placeholder="Saved; paste a new one to replace it"></div>
             <label class="u-check-row u-mb-8"><input type="checkbox" id="clDnsEnabled"> Keep the record pointed at the working hubs</label>
             <div class="ent-help cl-pre" id="clDnsState"></div>
             <div class="u-flex u-gap-8 u-wrap">
@@ -3677,7 +3684,8 @@
     </div>
     <div class="ent-modal-b">
       <div class="ent-grid-2">
-        <div class="fg"><label for="clPoolPort">Public port</label><input class="hashem-input" id="clPoolPort" type="number" min="1" max="65535" placeholder="443" oninput="clPoolPortChanged()"></div>
+        <div class="fg"><label for="clPoolPort">Public port</label><input class="hashem-input u-mono" id="clPoolPort" inputmode="numeric" autocomplete="off" placeholder="443" oninput="clPoolPortChanged()">
+          <div class="ent-help" id="clPoolPortHelp">Several at once: 443, 8443 or 2000-2005 (one pool each).</div></div>
         <div class="fg"><label for="clPoolProto">Protocol</label>
           <select class="hashem-input" id="clPoolProto">
             <option value="both">TCP and UDP</option>
@@ -3692,13 +3700,28 @@
           <option value="balance">Balance</option>
           <option value="sticky">Sticky per user</option>
           <option value="latency">Lowest latency</option>
+          <option value="least">Least connections</option>
         </select>
         <div class="ent-help" id="clPoolModeHelp"></div>
       </div>
+      <div class="fg" id="clPoolFailbackRow"><label for="clPoolFailback">Failback</label>
+        <select class="hashem-input" id="clPoolFailback">
+          <option value="auto">Automatic: back to the first server</option>
+          <option value="manual">Manual: stay on the backup</option>
+        </select></div>
+      <div class="ent-grid-2">
+        <div class="fg"><label for="clPoolCheck">Service check</label>
+          <select class="hashem-input" id="clPoolCheck" onchange="clPoolModeHelp()">
+            <option value="">Off: tunnel health only</option>
+            <option value="tcp">TCP: connect through the tunnel</option>
+          </select></div>
+        <div class="fg"><label for="clPoolCheckEvery">Check every (seconds)</label><input class="hashem-input" id="clPoolCheckEvery" type="number" min="1" max="60" value="3"></div>
+      </div>
+      <div class="ent-help">The service check opens a connection through each foreign server to the service behind it (for example xray on 443). A server whose tunnel is up but whose service refuses the connection is taken out. TCP pools only.</div>
       <div class="fg">
         <span class="ent-label">Foreign servers in this pool</span>
         <div id="clPoolMembers" class="cl-pick"></div>
-        <div class="ent-help">Tunnels whose ports include this port join by themselves. Each one's relay restarts once (a few seconds) to move behind the pool.</div>
+        <div class="ent-help">Tunnels whose ports include this port join by themselves. Each one's relay restarts once (a few seconds) to move behind the pool. Standby servers get traffic only when no other server can take it; a server at its connection limit takes no new connections until it drops below 90% of it.</div>
       </div>
     </div>
     <div class="ent-modal-f">

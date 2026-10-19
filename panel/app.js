@@ -7828,8 +7828,9 @@ const CL_MODE = {
   balance: 'Each new connection goes to a healthy server, in proportion to its weight.',
   sticky: 'Each user (source IP) always goes to the same server, so their exit IP does not change. Users are spread by weight.',
   latency: 'All traffic on the healthy server with the lowest ping. It moves only when another one is clearly faster for 10 seconds.',
+  least: 'New connections go to the servers with the fewest open connections (per unit of weight). Best for long connections such as VLESS and VMess.',
 };
-const CL_MODE_NAME = { failover: 'Failover', balance: 'Balance', sticky: 'Sticky per user', latency: 'Lowest latency' };
+const CL_MODE_NAME = { failover: 'Failover', balance: 'Balance', sticky: 'Sticky per user', latency: 'Lowest latency', least: 'Least connections' };
 const CL_STATE = {
   ok: ['ok', 'Healthy'], degraded: ['warn', 'Degraded'], 'fail-open': ['err', 'No Healthy Server'],
   forward: ['warn', 'Forwarded to Another Hub'], down: ['err', 'Down'], disabled: ['dim', 'Disabled'], starting: ['dim', 'Starting'],
@@ -7925,22 +7926,29 @@ function clPoolCard(p, links) {
     const s = status.find(x => x.link === t.link) || {};
     return `<span class="cl-c${color(t.link)}" style="width:${(t.share * 100).toFixed(1)}%" title="${esc((s.name || 'link ' + t.link) + ' ' + Math.round(t.share * 100) + '%')}"></span>`;
   }).join('');
-  // Weight matters in balance and sticky, priority in failover; latency uses neither.
-  const cfgCol = p.mode === 'failover' ? 'priority' : (p.mode === 'balance' || p.mode === 'sticky') ? 'weight' : '';
+  // Weight matters in balance, sticky and least connections, priority in failover; latency uses neither.
+  const cfgCol = p.mode === 'failover' ? 'priority' : (p.mode === 'balance' || p.mode === 'sticky' || p.mode === 'least') ? 'weight' : '';
   const rows = (p.members || []).map(m => {
     const s = status.find(x => x.link === m.link) || {};
     let health;
     if (s.missing) health = clSt('off', 'Tunnel removed');
     else if (m.drain) health = clSt('warn', 'Draining');
     else if (!s.listening) health = clSt('off', 'Not serving this port');
+    else if (s.check === 'fail') health = clSt('err', 'Service down');
     else if (s.up) health = clSt('on', 'Up');
     else health = clSt('err', 'Down');
+    if (s.check === 'fail' && s.check_reason) health += `<div class="u-hint-12">${esc(tr('', s.check_reason))}</div>`;
+    else if (s.check === 'ok') health += `<div class="u-hint-12">${esc(tr('', 'service check passes'))}</div>`;
     const L = m.link;
-    const stale = s.stale ? ` <span class="badge warn">${esc(tr('', 'Peer id now another server'))}</span>` : '';
+    let tags = s.stale ? ` <span class="badge warn">${esc(tr('', 'Peer id now another server'))}</span>` : '';
+    if (m.backup) tags += ` <span class="badge dim">${esc(tr('', 'Standby'))}</span>`;
+    if (s.full) tags += ` <span class="badge warn">${esc(tr('', 'Full'))}</span>`;
     const share = s.share ? Math.round(s.share * 100) + '%' : '—';
+    const conns = (s.conns == null || s.conns < 0) ? '—' : String(s.conns) + (m.max_conn ? ' / ' + m.max_conn : '');
     return `<tr>
-      <td><span class="cl-sw cl-c${color(L)}"></span><b>${esc(s.name || ('link ' + L))}</b>${stale}<div class="u-hint-12">${esc(L === 0 ? tr('', 'main tunnel') : tr('', 'peer') + ' ' + L)}${m.port ? ' · ' + tr('', 'port') + ' ' + m.port : ''}</div></td>
-      <td>${health}</td>
+      <td><span class="cl-sw cl-c${color(L)}"></span><b>${esc(s.name || ('link ' + L))}</b>${tags}<div class="u-hint-12">${esc(L === 0 ? tr('', 'main tunnel') : tr('', 'peer') + ' ' + L)}${m.port ? ' · ' + tr('', 'port') + ' ' + m.port : ''}</div></td>
+      <td class="cl-wrap">${health}</td>
+      <td class="num">${conns}</td>
       <td class="num">${clMs(s.latency_ms)}</td>
       <td class="num">${share}</td>
       ${cfgCol === 'weight' ? `<td><input class="hashem-input cl-num" type="number" min="1" max="100" value="${m.weight || 1}" aria-label="${esc(tr('', 'Weight'))}" onchange="clMemberSet(${P},${R},${L},'weight',this.value)"></td>` : ''}
@@ -7965,14 +7973,15 @@ function clPoolCard(p, links) {
         <span class="badge ${st[0]}">${esc(tr('', st[1]))}</span>
       </div>
       <div class="u-flex u-gap-8 u-wrap u-ai-c">${modeSel}
+        ${p.mode === 'failover' && p.no_failback ? `<button class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="clPoolFailback(${P},${R})">${esc(tr('', 'Fail Back Now'))}</button>` : ''}
         <button class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="clPoolOpen(${P},${R})">${esc(tr('', 'Edit'))}</button>
         <button class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="clPoolPatch(${P},${R},{disabled:${!p.disabled}})">${esc(tr('', p.disabled ? 'Enable' : 'Disable'))}</button>
         <button class="hashem-btn hashem-btn-ghost u-btn-xs" onclick="clPoolDelete(${P},${R})">${esc(tr('', 'Delete'))}</button>
       </div>
     </div>
-    <div class="ent-help u-m-0">${esc(tr('', CL_MODE[p.mode] || ''))}</div>
+    <div class="ent-help u-m-0">${esc(tr('', CL_MODE[p.mode] || ''))}${p.check ? ' ' + esc(tr('', 'Service check every')) + ' ' + (p.check_every || 3) + ' s.' : ''}${p.mode === 'failover' && p.no_failback ? ' ' + esc(tr('', 'Failback is manual.')) : ''}</div>
     <div class="cl-bar" role="img" aria-label="${esc(tr('', 'Where new connections go'))}">${bar}</div>
-    ${rows ? `<div class="ent-tbl-wrap"><table class="ent-tbl"><thead><tr><th>${esc(tr('', 'Foreign Server'))}</th><th>${esc(tr('', 'Health'))}</th><th class="num">${esc(tr('', 'Latency'))}</th><th class="num">${esc(tr('', 'Share'))}</th>${cfgCol ? `<th>${esc(tr('', cfgCol === 'weight' ? 'Weight' : 'Priority'))}</th>` : ''}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    ${rows ? `<div class="ent-tbl-wrap"><table class="ent-tbl"><thead><tr><th>${esc(tr('', 'Foreign Server'))}</th><th>${esc(tr('', 'Health'))}</th><th class="num">${esc(tr('', 'Connections'))}</th><th class="num">${esc(tr('', 'Latency'))}</th><th class="num">${esc(tr('', 'Share'))}</th>${cfgCol ? `<th>${esc(tr('', cfgCol === 'weight' ? 'Weight' : 'Priority'))}</th>` : ''}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`
       : `<div class="ent-empty">${esc(tr('', 'No foreign server in this pool yet.'))}</div>`}
     ${addSel}
   </div>`;
@@ -7986,12 +7995,26 @@ function clPoolFind(port, proto) {
 async function clPoolPatch(port, proto, changes) {
   const p = clPoolFind(port, proto);
   if (!p) return;
-  const body = { port: p.port, proto: p.proto, name: p.name || '', mode: p.mode, disabled: !!p.disabled, members: p.members || [], excluded: p.excluded || [], orig_port: p.port, orig_proto: p.proto };
-  Object.assign(body, changes);
+  const body = clPoolBody(p);
+  Object.assign(body, { orig_port: p.port, orig_proto: p.proto }, changes);
   try {
     await api('/api/cluster/pool', body);
     toastOk(tr('', 'Pool saved'));
   } catch (e) { toastErr(tr('', 'Cannot save the pool'), e.message || String(e)); }
+  loadClusterStatus();
+}
+
+// clPoolBody is a pool as the API takes it (the status adds state fields).
+function clPoolBody(p) {
+  return { port: p.port, proto: p.proto, name: p.name || '', mode: p.mode, disabled: !!p.disabled, members: p.members || [], excluded: p.excluded || [],
+    check: p.check || '', check_every: p.check_every || 0, no_failback: !!p.no_failback, failback: p.failback || 0 };
+}
+
+async function clPoolFailback(port, proto) {
+  try {
+    await api('/api/cluster/pool/failback', { port: Number(port), proto });
+    toastOk(tr('', 'Failing back'), tr('', 'New connections go to the first server again; open ones stay where they are.'));
+  } catch (e) { toastErr(tr('', 'Cannot fail back'), e.message || String(e)); }
   loadClusterStatus();
 }
 
@@ -8039,12 +8062,15 @@ function clPoolOpen(port, proto) {
   _clPoolEdit = p ? { port: p.port, proto: p.proto } : null;
   $('clPoolTitle').textContent = tr('', p ? 'Edit Pool' : 'New Pool');
   $('clPoolPort').value = p ? p.port : '';
+  $('clPoolPortHelp').classList.toggle('hidden', !!p);
   $('clPoolProto').value = p ? p.proto : 'both';
   $('clPoolName').value = p ? (p.name || '') : '';
   $('clPoolMode').value = p ? p.mode : 'failover';
-  const sel = new Set((p ? p.members : []).map(m => m.link));
-  $('clPoolMembers').innerHTML = links.length ? links.map(l => `<label class="u-check-row"><input type="checkbox" value="${l.id}" ${sel.has(l.id) ? 'checked' : ''}>
-      <b>${esc(l.name)}</b> <span class="u-mono u-c-mu">${esc(l.remote || '')} · ${esc((l.ports || []).join(', ') || '—')}</span></label>`).join('')
+  $('clPoolCheck').value = p ? (p.check || '') : '';
+  $('clPoolCheckEvery').value = p && p.check_every ? p.check_every : 3;
+  $('clPoolFailback').value = p && p.no_failback ? 'manual' : 'auto';
+  const byLink = new Map((p ? p.members : []).map(m => [m.link, m]));
+  $('clPoolMembers').innerHTML = links.length ? links.map((l, i) => clPoolMemberRow(l, byLink.get(l.id) || { link: l.id, weight: 1, priority: i }, byLink.has(l.id))).join('')
     : `<div class="ent-empty">${esc(tr('', 'No tunnels on this server yet: add the foreign servers in Setup first.'))}</div>`;
   clPoolModeHelp();
   modalShow($('clPoolModal'), clPoolClose);
@@ -8053,40 +8079,91 @@ function clPoolOpen(port, proto) {
 
 function clPoolClose() { modalHide($('clPoolModal')); }
 
+// One tunnel in the pool dialog: in or out, and its settings when in.
+function clPoolMemberRow(l, m, on) {
+  const num = (k, label, v, min, max, ph) => `<label class="cl-pm-f"><span>${esc(tr('', label))}</span><input class="hashem-input cl-num" type="number" min="${min}" max="${max}" data-k="${k}" value="${v === undefined || v === null ? '' : v}" placeholder="${esc(tr('', ph || ''))}"></label>`;
+  return `<div class="cl-pm" data-link="${l.id}">
+    <label class="u-check-row"><input type="checkbox" class="cl-pm-on" value="${l.id}" ${on ? 'checked' : ''} onchange="this.closest('.cl-pm').querySelector('.cl-pm-opts').hidden=!this.checked">
+      <b>${esc(l.name)}</b> <span class="u-mono u-c-mu">${esc(l.remote || '')} · ${esc((l.ports || []).join(', ') || '—')}</span></label>
+    <div class="cl-pm-opts" ${on ? '' : 'hidden'}>
+      ${num('weight', 'Weight', m.weight || 1, 1, 100)}
+      ${num('priority', 'Priority', m.priority || 0, 0, 1000)}
+      ${num('port', 'Port', m.port || '', 1, 65535, 'same')}
+      ${num('max_conn', 'Max connections', m.max_conn || '', 0, 1000000, 'no limit')}
+      <label class="u-check-row cl-pm-f"><input type="checkbox" data-k="backup" ${m.backup ? 'checked' : ''}> ${esc(tr('', 'Standby'))}</label>
+    </div></div>`;
+}
+
 // A new pool picks the tunnels that already serve its port.
 function clPoolPortChanged() {
   if (_clPoolEdit) return;
-  const port = Number($('clPoolPort').value);
+  const port = clParsePorts($('clPoolPort').value)[0];
   const links = (_clusterData && _clusterData.links) || [];
-  $('clPoolMembers').querySelectorAll('input[type=checkbox]').forEach(cb => {
+  $('clPoolMembers').querySelectorAll('.cl-pm-on').forEach(cb => {
     const l = links.find(x => x.id === Number(cb.value));
     cb.checked = !!(l && (l.ports || []).includes(port));
+    cb.closest('.cl-pm').querySelector('.cl-pm-opts').hidden = !cb.checked;
   });
 }
 
-function clPoolModeHelp() { $('clPoolModeHelp').textContent = tr('', CL_MODE[$('clPoolMode').value] || ''); }
+function clPoolModeHelp() {
+  const mode = $('clPoolMode').value;
+  $('clPoolModeHelp').textContent = tr('', CL_MODE[mode] || '');
+  $('clPoolFailbackRow').classList.toggle('hidden', mode !== 'failover');
+  $('clPoolCheckEvery').disabled = !$('clPoolCheck').value;
+}
+
+// clParsePorts reads "443", "443, 8443" or "2000-2005" (at most 50 ports).
+function clParsePorts(s) {
+  const out = [];
+  for (const f of String(s).split(',').map(x => x.trim()).filter(Boolean)) {
+    const m = f.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+    if (!m) return [];
+    const a = Number(m[1]), b = m[2] ? Number(m[2]) : a;
+    if (a < 1 || b > 65535 || b < a || b - a > 50) return [];
+    for (let p = a; p <= b; p++) if (!out.includes(p)) out.push(p);
+  }
+  return out.length <= 50 ? out : [];
+}
 
 async function clPoolSave() {
-  const port = Number($('clPoolPort').value);
-  if (!(port >= 1 && port <= 65535)) { toastErr(tr('', 'Enter a port from 1 to 65535')); return; }
+  const ports = clParsePorts($('clPoolPort').value);
+  if (!ports.length || (_clPoolEdit && ports.length > 1)) {
+    toastErr(tr('', _clPoolEdit ? 'Enter a port from 1 to 65535' : 'Enter a port, a list (443, 8443) or a range (2000-2005), at most 50 ports'));
+    return;
+  }
   const links = (_clusterData && _clusterData.links) || [];
   const prev = _clPoolEdit ? clPoolFind(_clPoolEdit.port, _clPoolEdit.proto) : null;
-  const checked = [...$('clPoolMembers').querySelectorAll('input[type=checkbox]')].filter(cb => cb.checked).map(cb => Number(cb.value));
-  const members = checked.map((id, i) => {
-    const old = prev && (prev.members || []).find(m => m.link === id);
-    return old || { link: id, weight: 1, priority: i };
+  const members = [], checked = [];
+  $('clPoolMembers').querySelectorAll('.cl-pm').forEach(row => {
+    const id = Number(row.dataset.link);
+    if (!row.querySelector('.cl-pm-on').checked) return;
+    checked.push(id);
+    const old = (prev && (prev.members || []).find(m => m.link === id)) || {};
+    const v = k => row.querySelector(`[data-k="${k}"]`);
+    members.push(Object.assign({}, old, {
+      link: id, weight: Number(v('weight').value) || 1, priority: Number(v('priority').value) || 0,
+      port: Number(v('port').value) || 0, max_conn: Number(v('max_conn').value) || 0, backup: v('backup').checked,
+    }));
   });
-  // Tunnels left out that serve the port would join by themselves: keep them out.
-  const excluded = links.filter(l => !checked.includes(l.id) && ((l.ports || []).includes(port) || (prev && (prev.excluded || []).includes(l.id)))).map(l => l.id);
-  const body = { port, proto: $('clPoolProto').value, name: $('clPoolName').value.trim(), mode: $('clPoolMode').value, members, excluded, disabled: prev ? !!prev.disabled : false };
-  if (_clPoolEdit) { body.orig_port = _clPoolEdit.port; body.orig_proto = _clPoolEdit.proto; }
+  const base = { proto: $('clPoolProto').value, name: $('clPoolName').value.trim(), mode: $('clPoolMode').value, members,
+    disabled: prev ? !!prev.disabled : false, check: $('clPoolCheck').value, check_every: Number($('clPoolCheckEvery').value) || 0,
+    no_failback: $('clPoolFailback').value === 'manual', failback: prev ? (prev.failback || 0) : 0 };
   const btn = $('clPoolSave');
   btn.disabled = true;
+  let saved = 0;
   try {
-    await api('/api/cluster/pool', body);
-    toastOk(tr('', 'Pool saved'), tr('', 'The relays of its tunnels restart once to move behind the pool.'));
+    for (const port of ports) {
+      // Tunnels left out that serve the port would join by themselves: keep them out.
+      const excluded = links.filter(l => !checked.includes(l.id) && ((l.ports || []).includes(port) || (prev && (prev.excluded || []).includes(l.id)))).map(l => l.id);
+      const body = Object.assign({ port, excluded }, base);
+      if (_clPoolEdit) { body.orig_port = _clPoolEdit.port; body.orig_proto = _clPoolEdit.proto; }
+      await api('/api/cluster/pool', body);
+      saved++;
+    }
+    toastOk(tr('', ports.length > 1 ? 'Pools saved' : 'Pool saved') + (ports.length > 1 ? ' (' + saved + ')' : ''), tr('', 'The relays of its tunnels restart once to move behind the pool.'));
     clPoolClose();
-  } catch (e) { toastErr(tr('', 'Cannot save the pool'), e.message || String(e)); }
+  } catch (e) { toastErr(tr('', 'Cannot save the pool') + (ports.length > 1 ? ' (' + ports[saved] + ')' : ''), e.message || String(e)); }
   finally { btn.disabled = false; }
   loadClusterStatus();
 }
@@ -8209,7 +8286,10 @@ function clRenderDNS(dns) {
     $('clDnsName').value = dns.name || '';
     $('clDnsTTL').value = dns.ttl || 60;
     $('clDnsEnabled').checked = !!dns.enabled;
-    $('clDnsToken').placeholder = tr('', dns.has_token ? 'Saved; paste a new one to replace it' : 'API token');
+    $('clDnsProvider').value = dns.provider === 'webhook' ? 'webhook' : 'cloudflare';
+    $('clDnsURL').value = dns.url || '';
+    _clDnsSaved = { provider: dns.provider === 'webhook' ? 'webhook' : 'cloudflare', hasToken: !!dns.has_token };
+    clDnsProviderChanged();
   }
   const lines = [];
   if (dns.enabled) {
@@ -8222,13 +8302,25 @@ function clRenderDNS(dns) {
   $('clDnsState').textContent = lines.join('\n');
 }
 
+// The token saved for one provider is never used by the other one.
+let _clDnsSaved = { provider: 'cloudflare', hasToken: false };
+function clDnsProviderChanged() {
+  const prov = $('clDnsProvider').value, hook = prov === 'webhook';
+  $('clDnsURLRow').classList.toggle('hidden', !hook);
+  $('clDnsTokenLabel').textContent = tr('', hook ? 'Secret (optional, sent as Authorization: Bearer)' : 'Cloudflare API token (Zone, DNS, Edit)');
+  $('clDnsHookHelp').classList.toggle('hidden', !hook);
+  const saved = _clDnsSaved.provider === prov && _clDnsSaved.hasToken;
+  $('clDnsToken').placeholder = tr('', saved ? 'Saved; paste a new one to replace it' : hook ? 'Optional' : 'API token');
+}
+
 async function clDnsSave(test) {
-  const body = { name: $('clDnsName').value.trim(), ttl: Number($('clDnsTTL').value) || 60, enabled: $('clDnsEnabled').checked, test: !!test };
+  const provider = $('clDnsProvider').value;
+  const body = { provider, url: $('clDnsURL').value.trim(), name: $('clDnsName').value.trim(), ttl: Number($('clDnsTTL').value) || 60, enabled: $('clDnsEnabled').checked, test: !!test };
   const tok = $('clDnsToken').value.trim();
   if (tok) body.token = tok;
   try {
     const r = await api('/api/cluster/dns', body);
-    if (test) toastOk(tr('', 'Cloudflare answered'), tr('', 'The record points to:') + ' ' + ((r.records || []).join(', ') || '—'));
+    if (test) toastOk(tr('', provider === 'webhook' ? 'The webhook answered' : 'Cloudflare answered'), tr('', provider === 'webhook' ? 'Working hubs sent:' : 'The record points to:') + ' ' + ((r.records || []).join(', ') || '—'));
     else { toastOk(tr('', 'DNS failover saved')); $('clDnsToken').value = ''; _clDnsFilled = false; }
   } catch (e) { toastErr(tr('', test ? 'The test failed' : 'Cannot save'), e.message || String(e)); }
   if (!test) loadClusterStatus();

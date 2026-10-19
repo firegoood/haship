@@ -2,8 +2,9 @@ package main
 
 // DNS failover: a domain whose A records are the public IPs of the Iran hubs
 // that work right now. Users who connect by name move to a working hub when
-// one dies (after the record's TTL). Only Cloudflare is supported; the record
-// must be DNS only (grey cloud), since the proxy would not carry tunnels.
+// one dies (after the record's TTL). Cloudflare is built in (the record must
+// be DNS only, grey cloud, since the proxy would not carry tunnels); any other
+// DNS provider or script can take a webhook with the list of working hubs.
 //
 // Every hub with DNS failover on reports the record name in its heartbeat;
 // the one with the lowest id among the reachable ones writes the records, so
@@ -25,8 +26,9 @@ import (
 
 type DNSConfig struct {
 	Enabled  bool     `json:"enabled"`
-	Provider string   `json:"provider,omitempty"` // "cloudflare"
-	Token    string   `json:"token,omitempty"`    // API token with Zone.DNS edit
+	Provider string   `json:"provider,omitempty"` // "cloudflare" | "webhook"
+	Token    string   `json:"token,omitempty"`    // Cloudflare: API token with Zone.DNS edit; webhook: optional bearer secret
+	URL      string   `json:"url,omitempty"`      // webhook: where the list of working hubs is POSTed
 	Name     string   `json:"name,omitempty"`     // full record name, e.g. vpn.example.com
 	TTL      int      `json:"ttl"`
 	Records  []string `json:"records,omitempty"` // IPs the record had after the last write
@@ -72,7 +74,7 @@ func dnsHealthyIPs(c ClusterConfig) (ips []string, leader bool) {
 // dnsTick reconciles the record when this hub leads and the set changed, or
 // every dnsEvery.
 func dnsTick(c ClusterConfig) {
-	if !c.DNS.Enabled || c.DNS.Token == "" || c.DNS.Name == "" {
+	if !dnsReady(c.DNS) {
 		return
 	}
 	ips, leader := dnsHealthyIPs(c)
@@ -90,7 +92,13 @@ func dnsTick(c ClusterConfig) {
 	for _, h := range c.Hubs {
 		hubIPs[h.PublicIP] = true
 	}
-	got, err := cfSyncA(c.DNS, ips, hubIPs)
+	var got []string
+	var err error
+	if c.DNS.Provider == "webhook" {
+		got, err = dnsWebhook(c, ips, false)
+	} else {
+		got, err = cfSyncA(c.DNS, ips, hubIPs)
+	}
 	dnsMu.Lock()
 	dnsLastRun = time.Now()
 	old := dnsLastErr
@@ -109,6 +117,50 @@ func dnsTick(c ClusterConfig) {
 		clusterEventf("info", "DNS failover: %s now points to %s.", c.DNS.Name, strings.Join(got, ", "))
 		_, _ = updateClusterConfig(func(x *ClusterConfig) error { x.DNS.Records = got; return nil })
 	}
+}
+
+// dnsReady: DNS failover is on and has what its provider needs.
+func dnsReady(d DNSConfig) bool {
+	if !d.Enabled || d.Name == "" {
+		return false
+	}
+	if d.Provider == "webhook" {
+		return d.URL != ""
+	}
+	return d.Token != ""
+}
+
+// ---- webhook ----
+
+// dnsWebhook POSTs {"name","ips","ttl","hub","at"} to the configured URL
+// (with "Authorization: Bearer <token>" when a token is set). Any 2xx answer
+// counts as done. test adds "test": true so the receiver can ignore it.
+func dnsWebhook(c ClusterConfig, ips []string, test bool) ([]string, error) {
+	body := map[string]any{"name": c.DNS.Name, "ips": ips, "ttl": c.DNS.TTL, "hub": c.NodeID,
+		"at": time.Now().UTC().Format(time.RFC3339)}
+	if test {
+		body["test"] = true
+	}
+	b, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", c.DNS.URL, bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("webhook URL: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "hashem-panel/"+panelVersion)
+	if c.DNS.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.DNS.Token)
+	}
+	resp, err := cfClient.Do(req)
+	if err != nil {
+		return nil, redactErr(fmt.Errorf("webhook unreachable: %v", err), c.DNS.Token)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("webhook answered HTTP %d", resp.StatusCode)
+	}
+	return ips, nil
 }
 
 // ---- Cloudflare ----
@@ -239,6 +291,7 @@ func cfSyncA(d DNSConfig, want []string, hubIPs map[string]bool) ([]string, erro
 type dnsViewT struct {
 	Enabled  bool     `json:"enabled"`
 	Provider string   `json:"provider"`
+	URL      string   `json:"url,omitempty"`
 	Name     string   `json:"name"`
 	TTL      int      `json:"ttl"`
 	HasToken bool     `json:"has_token"`
@@ -252,7 +305,7 @@ type dnsViewT struct {
 func dnsView(c ClusterConfig) dnsViewT {
 	dnsMu.Lock()
 	defer dnsMu.Unlock()
-	v := dnsViewT{Enabled: c.DNS.Enabled, Provider: c.DNS.Provider, Name: c.DNS.Name, TTL: c.DNS.TTL,
+	v := dnsViewT{Enabled: c.DNS.Enabled, Provider: c.DNS.Provider, URL: c.DNS.URL, Name: c.DNS.Name, TTL: c.DNS.TTL,
 		HasToken: c.DNS.Token != "", Records: c.DNS.Records, Want: dnsWant, Leader: dnsLeader, Error: dnsLastErr}
 	if !dnsLastRun.IsZero() {
 		v.LastRun = dnsLastRun.Format("2006-01-02 15:04:05")
@@ -284,11 +337,13 @@ func handleClusterDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Enabled *bool   `json:"enabled"`
-		Token   *string `json:"token"`
-		Name    *string `json:"name"`
-		TTL     int     `json:"ttl"`
-		Test    bool    `json:"test"`
+		Enabled  *bool   `json:"enabled"`
+		Provider *string `json:"provider"`
+		Token    *string `json:"token"`
+		URL      *string `json:"url"`
+		Name     *string `json:"name"`
+		TTL      int     `json:"ttl"`
+		Test     bool    `json:"test"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<13)).Decode(&req) != nil {
 		writeAPIError(w, r, "E-CLUSTER-01", "")
@@ -308,13 +363,42 @@ func handleClusterDNS(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		d.Enabled = *req.Enabled
 	}
-	d.Provider = "cloudflare"
+	if req.Provider != nil {
+		if *req.Provider != d.Provider {
+			d.Token = "" // a secret is never carried to another provider
+			if req.Token != nil {
+				d.Token = strings.TrimSpace(*req.Token)
+			}
+		}
+		d.Provider = *req.Provider
+	}
+	if req.URL != nil {
+		d.URL = strings.TrimSpace(*req.URL)
+	}
+	if d.Provider != "webhook" {
+		d.Provider = "cloudflare"
+	}
 	if (d.Enabled || req.Test) && !validDNSName(d.Name) {
 		writeAPIError(w, r, "E-CLUSTER-02", "the record must be a full name such as vpn.example.com")
 		return
 	}
-	if (d.Enabled || req.Test) && d.Token == "" {
+	if d.Provider == "webhook" {
+		if (d.Enabled || req.Test) && (d.URL == "" || !validWebhookURL(d.URL)) {
+			writeAPIError(w, r, "E-CLUSTER-02", "the webhook needs an http(s) URL")
+			return
+		}
+	} else if (d.Enabled || req.Test) && d.Token == "" {
 		writeAPIError(w, r, "E-CLUSTER-02", "a Cloudflare API token is needed (Zone > DNS > Edit)")
+		return
+	}
+	if req.Test && d.Provider == "webhook" {
+		c.DNS = d
+		ips, _ := dnsHealthyIPs(c)
+		if _, err := dnsWebhook(c, ips, true); err != nil {
+			writeAPIError(w, r, "E-CLUSTER-10", err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"status": "ok", "records": ips})
 		return
 	}
 	if req.Test {

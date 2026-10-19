@@ -98,6 +98,14 @@ cli_leave_hub --id 2 >/dev/null
 check "leave-hub removes it" '[3]' "$(python3 -c 'import json,sys; print([h["id"] for h in json.load(open(sys.argv[1]))["hubs"]])' "$HUBS_FILE")"
 check "leave-hub unknown id" 1 "$(cli_leave_hub --id 7 >/dev/null; echo $?)"
 
+# the terminal menu offers every pool feature the panel has
+check "menu: least connections mode" 1 "$(ext cluster_pick_mode | grep -c "printf -v \"\$1\" '%s' least")"
+check "menu: service check" 1 "$(ext menu_cluster | grep -c 'pool set "$a" --check tcp --check-every')"
+check "menu: fail back now" 1 "$(ext menu_cluster | grep -c 'pool failback "$a"')"
+check "menu: standby member" 1 "$(ext menu_cluster | grep -c 'member set "$a" "$b" --backup yes')"
+check "menu: connection limit" 1 "$(ext menu_cluster | grep -c 'member set "$a" "$b" --max-conn')"
+check "menu: several ports at once" 1 "$(ext menu_cluster | grep -c 'Several ports at once')"
+
 # CLI wiring and uninstall
 check "join-hub dispatched" 1 "$(grep -c 'join-hub) shift; cli_join_hub' hashem.sh)"
 check "uninstall removes the cluster rules" 2 "$(grep -c 'cluster reset >/dev/null' hashem.sh)"

@@ -42,11 +42,15 @@ const (
 	lbBalance  = "balance"  // each new connection to a member, by weight
 	lbSticky   = "sticky"   // each user (source IP) always to the same member, by weight
 	lbLatency  = "latency"  // all traffic to the healthy member with the lowest latency
+	lbLeast    = "least"    // new connections to the members with the fewest open ones, by weight
 )
 
 func lbModeOK(m string) bool {
-	return m == lbFailover || m == lbBalance || m == lbSticky || m == lbLatency
+	return m == lbFailover || m == lbBalance || m == lbSticky || m == lbLatency || m == lbLeast
 }
+
+// lbModes lists the modes for messages.
+const lbModes = "failover, balance, sticky, latency or least"
 
 func lbProtoOK(p string) bool { return p == "tcp" || p == "udp" || p == "both" }
 
@@ -204,9 +208,10 @@ type lbMemberState struct {
 	LBMember
 	Name      string
 	Addr      string  // private address of the member's relay ("" = link gone)
-	Up        bool    // link health (debounced)
+	Up        bool    // link health and, with a service check, the service (debounced)
 	Listening bool    // the relay listens on Addr:Port right now
 	LatencyMs float64 // -1 unknown
+	Conns     int     // open TCP connections the relay holds on Addr:Port, -1 unknown
 }
 
 // lbTarget is one DNAT destination with its weight.
@@ -220,9 +225,23 @@ type lbTarget struct {
 
 // lbPoolRT is per-pool state the planner keeps between ticks.
 type lbPoolRT struct {
-	Current int // latency mode: the link now chosen (-1 none)
+	Current int // failover and latency mode: the link now chosen (-1 none)
 	Better  int // a faster candidate
 	Streak  int // ticks the candidate has stayed faster
+	// Full: members at their connection limit; they get new connections
+	// again below 90% of it.
+	Full map[int]bool
+	// least-connections weights, recomputed every lbLeastEvery ticks
+	LeastW    map[int]int
+	LeastTick int
+	// Failback: the pool's failback request last acted on.
+	Failback int
+	// Svc: the service check of each member.
+	Svc map[int]*lbSvcRT
+}
+
+func newPoolRT() *lbPoolRT {
+	return &lbPoolRT{Current: -1, Better: -1, Full: map[int]bool{}, Svc: map[int]*lbSvcRT{}}
 }
 
 // Pool states shown to the user.
@@ -239,36 +258,76 @@ const (
 // latency mode moves to it, so it does not flap between two close members.
 const lbLatencyStreak = 10
 
-// lbPickTargets decides where a pool's new connections go.
+// lbLeastEvery is how many ticks least-connections mode keeps its weights:
+// re-weighting every second would rewrite the rules every second.
+const lbLeastEvery = 5
+
+// lbPickTargets decides where a pool's new connections go. Healthy members
+// with room come first, standby (backup) members only when no primary one
+// has room, and members at their connection limit only when nobody else can
+// take the connection.
 func lbPickTargets(pool LBPool, ms []lbMemberState, rt *lbPoolRT) ([]lbTarget, string) {
 	if pool.Disabled {
 		return nil, poolOff
 	}
+	if rt == nil {
+		rt = newPoolRT()
+	}
+	if rt.Full == nil {
+		rt.Full = map[int]bool{}
+	}
 	var ok, open []lbMemberState
 	for _, m := range ms {
 		if m.Addr == "" || !m.Listening || m.Drain {
+			delete(rt.Full, m.Link)
 			continue
 		}
 		open = append(open, m)
 		if m.Up {
 			ok = append(ok, m)
 		}
+		switch {
+		case m.MaxConn <= 0 || m.Conns < 0:
+			delete(rt.Full, m.Link)
+		case m.Conns >= m.MaxConn:
+			rt.Full[m.Link] = true
+		case m.Conns < m.MaxConn*9/10:
+			delete(rt.Full, m.Link)
+		}
 	}
 	state := poolOK
-	use := ok
+	var use []lbMemberState
 	switch {
 	case len(ok) == 0 && len(open) == 0:
-		if rt != nil {
-			rt.Current = -1
-		}
+		rt.Current = -1
 		return nil, poolDown
 	case len(ok) == 0:
 		// Health says no member works but relays still listen: better to try
 		// them than to refuse every connection (health can be wrong, e.g.
 		// ICMP filtered on the way back).
 		use, state = open, poolFailOpen
-	case len(ok) < countActive(ms):
-		state = poolDegraded
+	default:
+		var prim, back []lbMemberState
+		for _, m := range ok {
+			switch {
+			case rt.Full[m.Link]:
+			case m.Backup:
+				back = append(back, m)
+			default:
+				prim = append(prim, m)
+			}
+		}
+		switch {
+		case len(prim) > 0:
+			use = prim
+		case len(back) > 0:
+			use = back
+		default:
+			use = ok // everyone is full: still better than refusing
+		}
+		if len(ok) < countActive(ms) {
+			state = poolDegraded
+		}
 	}
 	sort.SliceStable(use, func(i, j int) bool {
 		if use[i].Priority != use[j].Priority {
@@ -276,42 +335,62 @@ func lbPickTargets(pool LBPool, ms []lbMemberState, rt *lbPoolRT) ([]lbTarget, s
 		}
 		return use[i].Link < use[j].Link
 	})
-	tgt := func(m lbMemberState) lbTarget {
-		w := m.Weight
+	tgt := func(m lbMemberState, w int) lbTarget {
 		if w <= 0 {
 			w = 1
 		}
 		return lbTarget{Link: m.Link, Addr: m.Addr, Port: memberPort(pool, m.LBMember), Weight: w}
 	}
-	switch pool.Mode {
-	case lbBalance, lbSticky:
+	spread := func(weight func(lbMemberState) int) []lbTarget {
 		out := make([]lbTarget, 0, len(use))
 		sum := 0
 		for _, m := range use {
-			t := tgt(m)
+			t := tgt(m, weight(m))
 			sum += t.Weight
 			out = append(out, t)
 		}
 		for i := range out {
 			out[i].Share = float64(out[i].Weight) / float64(sum)
 		}
-		return out, state
+		return out
+	}
+	one := func(m lbMemberState) []lbTarget {
+		t := tgt(m, m.Weight)
+		t.Share = 1
+		return []lbTarget{t}
+	}
+	switch pool.Mode {
+	case lbBalance, lbSticky:
+		rt.Current = -1
+		return spread(func(m lbMemberState) int { return m.Weight }), state
+	case lbLeast:
+		rt.Current = -1
+		w := lbLeastWeights(use, rt)
+		return spread(func(m lbMemberState) int { return w[m.Link] }), state
 	case lbLatency:
-		pick := lbLatencyPick(use, rt)
-		t := tgt(pick)
-		t.Share = 1
-		return []lbTarget{t}, state
+		return one(lbLatencyPick(use, rt)), state
 	default: // failover
-		t := tgt(use[0])
-		t.Share = 1
-		return []lbTarget{t}, state
+		pick := use[0]
+		if pool.NoFailback && state != poolFailOpen && rt.Failback == pool.Failback {
+			// stay on the member traffic moved to while it is healthy and has room
+			for _, m := range ok {
+				if m.Link == rt.Current && !rt.Full[m.Link] {
+					pick = m
+				}
+			}
+		}
+		rt.Failback = pool.Failback
+		rt.Current = pick.Link
+		return one(pick), state
 	}
 }
 
+// countActive is the number of members that should serve: in the pool, the
+// tunnel still there and not drained.
 func countActive(ms []lbMemberState) int {
 	n := 0
 	for _, m := range ms {
-		if m.Addr != "" && m.Listening && !m.Drain {
+		if m.Addr != "" && !m.Drain {
 			n++
 		}
 	}
@@ -323,6 +402,58 @@ func memberPort(p LBPool, m LBMember) int {
 		return m.Port
 	}
 	return p.Port
+}
+
+// lbLeastWeights keeps least-connections weights for lbLeastEvery ticks, or
+// until the members change.
+func lbLeastWeights(use []lbMemberState, rt *lbPoolRT) map[int]int {
+	rt.LeastTick++
+	same := len(rt.LeastW) == len(use)
+	for _, m := range use {
+		if _, ok := rt.LeastW[m.Link]; !ok {
+			same = false
+		}
+	}
+	if same && rt.LeastTick < lbLeastEvery {
+		return rt.LeastW
+	}
+	rt.LeastTick = 0
+	rt.LeastW = lbLeastShares(use)
+	return rt.LeastW
+}
+
+// lbLeastShares splits the connections expected before the next re-weighting
+// so that open connections per unit of weight even out (water filling): a
+// member far below the others gets most of them, one far above only the
+// minimum (1%). Members whose connections are unknown (UDP) count as empty.
+func lbLeastShares(use []lbMemberState) map[int]int {
+	out := map[int]int{}
+	total := 0
+	for _, m := range use {
+		total += max(m.Conns, 0)
+	}
+	batch := max(8*len(use), total/4)
+	fill := func(level float64) float64 {
+		s := 0.0
+		for _, m := range use {
+			s += math.Max(0, level*float64(max(m.Weight, 1))-float64(max(m.Conns, 0)))
+		}
+		return s
+	}
+	lo, hi := 0.0, float64(total+batch)
+	for i := 0; i < 60; i++ {
+		mid := (lo + hi) / 2
+		if fill(mid) < float64(batch) {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	for _, m := range use {
+		give := math.Max(0, hi*float64(max(m.Weight, 1))-float64(max(m.Conns, 0)))
+		out[m.Link] = max(1, int(math.Round(100*give/float64(batch))))
+	}
+	return out
 }
 
 // lbLatencyPick keeps the current member unless it is gone or another one has
@@ -698,7 +829,10 @@ func lbConntrackForget(addr string) {
 
 const lbUnit = "hashem-lb-net.service"
 
-func lbUnitPath() string { return "/etc/systemd/system/" + lbUnit }
+// lbUnitDir is where the unit goes; lab tests point it elsewhere.
+var lbUnitDir = "/etc/systemd/system"
+
+func lbUnitPath() string { return filepath.Join(lbUnitDir, lbUnit) }
 
 // lbBindsFile tells hashem.sh which relays are bound (one "svc addr" per
 // line), so a peer it rewrites keeps listening on its private address.

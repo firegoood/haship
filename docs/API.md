@@ -51,6 +51,7 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/cluster/member` | session + CSRF | `handleClusterMember` |
 | `POST` | `/api/cluster/pool` | session + CSRF | `handleClusterPool` |
 | `POST` | `/api/cluster/pool/delete` | session + CSRF | `handleClusterPoolDelete` |
+| `POST` | `/api/cluster/pool/failback` | session + CSRF | `handleClusterPoolFailback` |
 | `GET` | `/api/cluster/rules` | session | `handleClusterRules` |
 | `POST` | `/api/cluster/settings` | session + CSRF | `handleClusterSettings` |
 | `GET` | `/api/cluster/status` | session | `handleClusterStatus` |
@@ -139,4 +140,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 115 routes.
+Total: 116 routes.

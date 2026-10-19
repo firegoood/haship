@@ -265,6 +265,8 @@ Three ways to keep users up when a server dies; they combine.
 
 The relays of pool members listen on `169.254.77.N` (interface `hashem-lb`); kernel DNAT in the `HASHEM-LB` chains picks the member, so the real client IP is kept and nothing stops when the panel restarts. `hashem cluster rules` prints the rules.
 
+Pool modes: failover, balance, sticky per user, lowest latency and least connections, with standby members, connection limits, a service check through the tunnel, drain and manual failback. **Every scenario step by step: [Cluster guide](docs/CLUSTER.md)** ([فارسی](docs/CLUSTER.fa.md)).
+
 ---
 
 ## Health model
@@ -395,7 +397,7 @@ It does **not** remove `/var/backups/hashem`. But those archives are encrypted w
 - **Linux + systemd only**, `amd64` and `arm64` builds.
 - **Peer limit** of 10 per hub by default (`GRE_MAX_PEERS`).
 - **Automatic actions are conservative on purpose:** watchdog `auto_restart` is off and the carrier is never switched automatically.
-- **Docs language:** the README and the FRP guide exist in Persian; the other guides are English.
+- **Docs language:** the README, the Cluster guide and the FRP guide exist in Persian; the other guides are English.
 
 Ideas and bug reports are welcome — see [Contributing](#contributing).
 
@@ -404,7 +406,7 @@ Ideas and bug reports are welcome — see [Contributing](#contributing).
 ## Documentation map
 
 - **Start here** — [Quick install](#quick-install) · [Choosing an engine](docs/ENGINES.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
-- **Guides** — [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md) (Persian + English) · [Secure deployment](docs/DEPLOYMENT.md)
+- **Guides** — [Cluster guide](docs/CLUSTER.md) ([فارسی](docs/CLUSTER.fa.md)) · [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md) (Persian + English) · [Secure deployment](docs/DEPLOYMENT.md)
 - **Reference** — [HTTP API](docs/API.md) · [Error codes](docs/ERROR_CODES.md) · [CHANGELOG](CHANGELOG.md) · [Architecture (interactive)](docs/hashem-architecture.html)
 - **Project** — [CONTRIBUTING](CONTRIBUTING.md) · [Development guide](docs/dev/DEVELOPMENT.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [SECURITY](SECURITY.md)
 - **Audits and plans** — [docs/audit/](docs/audit/) · [r24 improvement plan](docs/PLAN_IMPROVEMENTS_R24.md)

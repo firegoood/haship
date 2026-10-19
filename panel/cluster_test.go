@@ -118,7 +118,7 @@ func procV4(ip string, port int) string {
 }
 
 // sockets writes a fake /proc/net/tcp: listeners "addr:port" and sessions
-// "localport>remoteip".
+// "localport>remoteip" (local address 10.0.0.1) or "addr:port>remoteip".
 func (f *clusterFixture) sockets(listen []string, sessions []string) {
 	var b strings.Builder
 	b.WriteString("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n")
@@ -135,8 +135,13 @@ func (f *clusterFixture) sockets(listen []string, sessions []string) {
 	for _, s := range sessions {
 		var lp int
 		parts := strings.SplitN(s, ">", 2)
-		fmt.Sscanf(parts[0], "%d", &lp)
-		fmt.Fprintf(&b, "%4d: %s %s 01 00000000:00000000 00:00000000 00000000     0        0 %d 1\n", n, procV4("10.0.0.1", lp), procV4(parts[1], 40000+n), 1000+n)
+		local := parts[0]
+		if !strings.Contains(local, ":") {
+			local = "10.0.0.1:" + local
+		}
+		i := strings.LastIndex(local, ":")
+		fmt.Sscanf(local[i+1:], "%d", &lp)
+		fmt.Fprintf(&b, "%4d: %s %s 01 00000000:00000000 00:00000000 00000000     0        0 %d 1\n", n, procV4(local[:i], lp), procV4(parts[1], 40000+n), 1000+n)
 		n++
 	}
 	if err := os.WriteFile(filepath.Join(procNetRoot, "tcp"), []byte(b.String()), 0o644); err != nil {
@@ -584,7 +589,7 @@ func TestClusterRemovedMemberStaysOut(t *testing.T) {
 	if n := len(loadClusterConfig().Pools[0].Members); n != 2 {
 		t.Fatalf("members %d", n)
 	}
-	if code, msg := lbMemberChange(443, "tcp", 2, "remove", 0, nil, 0); code != "" {
+	if code, msg := lbMemberChange(lbMemberReq{Port: 443, Proto: "tcp", Link: 2, Action: "remove"}); code != "" {
 		t.Fatal(code, msg)
 	}
 	clusterTick(time.Now().Add(time.Second))
@@ -592,7 +597,7 @@ func TestClusterRemovedMemberStaysOut(t *testing.T) {
 	if len(p.Members) != 1 || !hasInt(p.Excluded, 2) {
 		t.Fatalf("removed member came back: %+v", p)
 	}
-	if code, _ := lbMemberChange(443, "tcp", 2, "add", 2, nil, 0); code != "" {
+	if code, _ := lbMemberChange(lbMemberReq{Port: 443, Proto: "tcp", Link: 2, Action: "add", Weight: 2}); code != "" {
 		t.Fatal(code)
 	}
 	p = loadClusterConfig().Pools[0]

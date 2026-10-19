@@ -8932,12 +8932,14 @@ cluster_pick_mode() { # $1=varname
         "1|Failover|All traffic on the first healthy server; the next takes over in seconds." \
         "2|Balance|Each new connection to a server, by weight." \
         "3|Sticky per user|Each user always on the same server (their exit IP stays the same)." \
-        "4|Lowest latency|All traffic on the server with the lowest ping."
+        "4|Lowest latency|All traffic on the server with the lowest ping." \
+        "5|Least connections|New connections to the servers with the fewest open ones."
     case "$__m" in
         1) printf -v "$1" '%s' failover ;;
         2) printf -v "$1" '%s' balance ;;
         3) printf -v "$1" '%s' sticky ;;
         4) printf -v "$1" '%s' latency ;;
+        5) printf -v "$1" '%s' least ;;
         *) printf -v "$1" '%s' "" ;;
     esac
 }
@@ -8954,8 +8956,8 @@ menu_cluster() {
             "-|Pools" \
             "1|Status|Pools, members and Iran hubs." \
             "2|New pool|A public port served by several foreign servers." \
-            "3|Pool mode|Failover, balance, sticky per user or lowest latency." \
-            "4|Members|Add, remove, drain or resume a foreign server in a pool." \
+            "3|Pool settings|Mode, service check, failback, enable or disable." \
+            "4|Members|Add, remove, drain, standby, weight, priority, connection limit." \
             "5|Remove a pool|Its port goes back to a single tunnel." \
             "-|Iran hubs" \
             "6|Join code|The code another Iran hub pastes to link with this one." \
@@ -8969,9 +8971,10 @@ menu_cluster() {
             2)
                 ui_page "New pool"
                 echo -e " A pool serves one public port from several tunnels. Tunnel ids: 0 is the main"
-                echo -e " tunnel, N is peer N (hashem peer-list). Empty takes every tunnel that has the port.\n"
-                ui_ask a "Public port"
-                [[ "$a" =~ ^[0-9]+$ ]] || { ui_pause; continue; }
+                echo -e " tunnel, N is peer N (hashem peer-list). Empty takes every tunnel that has the port."
+                echo -e " Several ports at once: 443,8443 or 2000-2005 (one pool each).\n"
+                ui_ask a "Public port(s)"
+                [[ "$a" =~ ^[0-9][0-9,\ -]*$ ]] || { ui_pause; continue; }
                 ui_ask b "Protocol (tcp, udp or both)" "both"
                 cluster_pick_mode m
                 [[ -n "$m" ]] || continue
@@ -8981,11 +8984,29 @@ menu_cluster() {
                 ui_pause
                 ;;
             3)
-                ui_page "Pool mode"
+                ui_page "Pool settings"
                 ui_ask a "Pool port"
                 [[ "$a" =~ ^[0-9]+$ ]] || { ui_pause; continue; }
-                cluster_pick_mode m
-                [[ -n "$m" ]] && ui_run "Pool mode" cluster_cmd pool mode "$a" "$m"
+                ui_menu m "Pool $a" "" \
+                    "1|Mode|Failover, balance, sticky, lowest latency or least connections." \
+                    "2|Service check on|Connect through each foreign server to the service behind it." \
+                    "3|Service check off|Tunnel health only." \
+                    "4|Failback automatic|Back to the first server as soon as it works again." \
+                    "5|Failback manual|Stay on the backup until Fail back now." \
+                    "6|Fail back now|New connections go to the first server again." \
+                    "7|Disable|Stop balancing: the port goes to one tunnel (lowest id); nothing restarts." \
+                    "8|Enable|The pool serves its port again."
+                case "$m" in
+                    1) cluster_pick_mode w; [[ -n "$w" ]] && ui_run "Pool mode" cluster_cmd pool mode "$a" "$w" ;;
+                    2) ui_page "Service check"; ui_ask w "Check every (seconds, 1-60)" "3"
+                       cluster_cmd pool set "$a" --check tcp --check-every "$w"; ui_pause ;;
+                    3) ui_run "Service check" cluster_cmd pool set "$a" --check off ;;
+                    4) ui_run "Failback" cluster_cmd pool set "$a" --no-failback no ;;
+                    5) ui_run "Failback" cluster_cmd pool set "$a" --no-failback yes ;;
+                    6) ui_run "Fail back now" cluster_cmd pool failback "$a" ;;
+                    7) ui_run "Disable pool" cluster_cmd pool disable "$a" ;;
+                    8) ui_run "Enable pool" cluster_cmd pool enable "$a" ;;
+                esac
                 ;;
             4)
                 ui_page "Members"
@@ -8998,8 +9019,11 @@ menu_cluster() {
                     "2|Remove|The tunnel leaves the pool (and is not added back by itself)." \
                     "3|Drain|No new connections; open ones finish. For maintenance." \
                     "4|Resume|New connections again." \
-                    "5|Weight|Share of traffic in balance and sticky modes." \
-                    "6|Priority|Order in failover mode (0 first)."
+                    "5|Weight|Share of traffic in balance, sticky and least-connections modes." \
+                    "6|Priority|Order in failover mode (0 first)." \
+                    "7|Standby on|Traffic only when no other member can take it." \
+                    "8|Standby off|A normal member again." \
+                    "9|Connection limit|No new connections above it (0 = no limit)."
                 case "$m" in
                     1) ui_run "Add member" cluster_cmd member add "$a" "$b" ;;
                     2) ui_run "Remove member" cluster_cmd member rm "$a" "$b" ;;
@@ -9007,6 +9031,9 @@ menu_cluster() {
                     4) ui_run "Resume member" cluster_cmd member resume "$a" "$b" ;;
                     5) ui_page "Weight"; ui_ask w "Weight (1-100)" "1"; cluster_cmd member set "$a" "$b" --weight "$w"; ui_pause ;;
                     6) ui_page "Priority"; ui_ask w "Priority (0-1000, lower first)" "0"; cluster_cmd member set "$a" "$b" --priority "$w"; ui_pause ;;
+                    7) ui_run "Standby" cluster_cmd member set "$a" "$b" --backup yes ;;
+                    8) ui_run "Standby" cluster_cmd member set "$a" "$b" --backup no ;;
+                    9) ui_page "Connection limit"; ui_ask w "Open connections (0 = no limit)" "0"; cluster_cmd member set "$a" "$b" --max-conn "$w"; ui_pause ;;
                 esac
                 ;;
             5)

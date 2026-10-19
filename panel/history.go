@@ -234,6 +234,7 @@ func renderPrometheus(s *HubSnapshot) string {
 	fmt.Fprintf(&b, "hashem_local_session %d\n", v)
 	b.WriteString("# HELP hashem_snapshot_age_ms Age of the snapshot these values come from.\n# TYPE hashem_snapshot_age_ms gauge\n")
 	fmt.Fprintf(&b, "hashem_snapshot_age_ms %d\n", s.AgeMs())
+	b.WriteString(clusterPrometheus())
 	return b.String()
 }
 

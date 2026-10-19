@@ -713,6 +713,7 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/cluster/rules", requireAuth(handleClusterRules))
 	mux.HandleFunc("POST "+base+"/api/cluster/pool", requireAuth(requireCSRF(handleClusterPool)))
 	mux.HandleFunc("POST "+base+"/api/cluster/pool/delete", requireAuth(requireCSRF(handleClusterPoolDelete)))
+	mux.HandleFunc("POST "+base+"/api/cluster/pool/failback", requireAuth(requireCSRF(handleClusterPoolFailback)))
 	mux.HandleFunc("POST "+base+"/api/cluster/member", requireAuth(requireCSRF(handleClusterMember)))
 	mux.HandleFunc("POST "+base+"/api/cluster/settings", requireAuth(requireCSRF(handleClusterSettings)))
 	mux.HandleFunc("POST "+base+"/api/cluster/join-code", requireAuth(requireCSRF(handleClusterJoinCode)))

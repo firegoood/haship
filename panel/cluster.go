@@ -3,8 +3,10 @@ package main
 // Cluster: redundancy across several servers.
 //
 //   - Pools (cluster_lb.go): one public port on this Iran hub served by several
-//     foreign servers, with failover, weighted balance, per-user stickiness or
-//     lowest latency, and a one-second health check per link.
+//     foreign servers, with failover, weighted balance, per-user stickiness,
+//     lowest latency or least connections; a one-second health check per
+//     link, an optional service check through each member, standby members
+//     and connection limits.
 //   - Hubs (cluster_mesh.go): other Iran hubs this one trusts. They exchange
 //     signed heartbeats; when every member of a pool here is down, the port is
 //     forwarded to a hub where the same pool is healthy.
@@ -49,9 +51,18 @@ type LBPool struct {
 	Port     int        `json:"port"`
 	Proto    string     `json:"proto"` // tcp | udp | both
 	Name     string     `json:"name,omitempty"`
-	Mode     string     `json:"mode"` // failover | balance | sticky | latency
+	Mode     string     `json:"mode"` // failover | balance | sticky | latency | least
 	Disabled bool       `json:"disabled,omitempty"`
 	Members  []LBMember `json:"members"`
+	// Check "tcp": every CheckEvery seconds a connection is opened through
+	// each member's relay to the service on the foreign server; a member
+	// whose service refuses or drops it at once is taken out.
+	Check      string `json:"check,omitempty"`
+	CheckEvery int    `json:"check_every,omitempty"`
+	// NoFailback (failover mode): traffic stays on the member it moved to
+	// while that one works. Bumping Failback moves it back now.
+	NoFailback bool `json:"no_failback,omitempty"`
+	Failback   int  `json:"failback,omitempty"`
 	// Excluded links were removed by hand: they are not joined back
 	// automatically even though their ports include this one.
 	Excluded []int `json:"excluded,omitempty"`
@@ -65,6 +76,19 @@ type LBMember struct {
 	Weight   int    `json:"weight"`
 	Priority int    `json:"priority"`
 	Drain    bool   `json:"drain,omitempty"`
+	// Backup (standby): new connections only when no primary member is
+	// healthy and has room.
+	Backup bool `json:"backup,omitempty"`
+	// MaxConn: open connections at which it takes no new ones (0 = no limit).
+	MaxConn int `json:"max_conn,omitempty"`
+}
+
+// lbCheckEvery is the pool's service check interval.
+func lbCheckEvery(p LBPool) time.Duration {
+	if p.CheckEvery < 1 || p.CheckEvery > 60 {
+		return 3 * time.Second
+	}
+	return time.Duration(p.CheckEvery) * time.Second
 }
 
 // LBHealth tunes the per-link health check.
@@ -466,6 +490,47 @@ func (rt *lbLinkRT) lbObserve(now time.Time, session bool, icmpMs float64, icmpU
 	return 0
 }
 
+// lbSvcRT is the debounced service check of one pool member.
+type lbSvcRT struct {
+	Known      bool
+	Up         bool
+	okStreak   int
+	failStreak int
+	At         time.Time // last check started
+	Busy       bool
+	Reason     string
+}
+
+// observe feeds one check result: +1 when the service came back, -1 when it
+// was taken out.
+func (s *lbSvcRT) observe(ok bool, reason string, h LBHealth) int {
+	s.Busy, s.Reason = false, reason
+	if ok {
+		s.okStreak, s.failStreak = s.okStreak+1, 0
+	} else {
+		s.okStreak, s.failStreak = 0, s.failStreak+1
+	}
+	switch {
+	case !s.Known:
+		s.Known, s.Up = true, ok
+	case s.Up && s.failStreak >= h.Fall:
+		s.Up = false
+		return -1
+	case !s.Up && s.okStreak >= h.Rise:
+		s.Up = true
+		return 1
+	}
+	return 0
+}
+
+// lbMemberInfo is what the tick learned about one pool member, for the API.
+type lbMemberInfo struct {
+	Conns       int
+	Check       string // "", "ok", "fail", "pending"
+	CheckReason string
+	Full        bool
+}
+
 // lbSessionOf finds the link's control session among the host's sockets.
 // Sessions from loopback (the WSS front relaying to frps) count, but the
 // remote reported is a real one when there is any.
@@ -540,6 +605,7 @@ type clusterRuntime struct {
 	bindAt    time.Time
 	bindErr   map[string]string
 	targeted  map[string]map[int]bool
+	members   map[string]map[int]lbMemberInfo
 	icmpOK    bool
 	ticks     uint64
 }
@@ -548,7 +614,8 @@ var clusterRT = newClusterRuntime()
 
 func newClusterRuntime() *clusterRuntime {
 	return &clusterRuntime{links: map[int]*lbLinkRT{}, pools: map[string]*lbPoolRT{}, plans: map[string]lbPoolPlan{},
-		poolState: map[string]string{}, bindErr: map[string]string{}, targeted: map[string]map[int]bool{}}
+		poolState: map[string]string{}, bindErr: map[string]string{}, targeted: map[string]map[int]bool{},
+		members: map[string]map[int]lbMemberInfo{}}
 }
 
 // lbLinkView is a link as the API shows it.
@@ -608,6 +675,8 @@ var (
 	lbIsBound    = lbRelayBound
 	lbForget     = lbConntrackForget
 	lbHubForward = meshForwardTarget
+	lbProbe      = lbTCPProbe
+	lbGo         = func(f func()) { go f() }
 )
 
 // clusterTick is one pass: health, membership, binding, rules. Without any
@@ -673,6 +742,13 @@ func clusterTick(now time.Time) (idle bool) {
 	}
 	pings, icmpOK := lbPinger(pingList, timeout)
 
+	// Service checks start once the lock is released (they report under it).
+	var jobs []func()
+	defer func() {
+		for _, j := range jobs {
+			lbGo(j)
+		}
+	}()
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
 	rt.ticks++
@@ -698,13 +774,12 @@ func clusterTick(now time.Time) (idle bool) {
 		}
 	}
 
-	// Relays of pool members listen on their private address.
+	// Relays of pool members listen on their private address. A disabled
+	// pool's relays stay there too: its port passes through to one of them
+	// (the lowest link id) instead of every relay restarting to fight for it.
 	want := map[string]string{}
 	member := map[int]bool{}
 	for _, p := range cfg.Pools {
-		if p.Disabled {
-			continue
-		}
 		for _, m := range p.Members {
 			member[m.Link] = true
 		}
@@ -766,15 +841,25 @@ func clusterTick(now time.Time) (idle bool) {
 	plan := lbPlan{}
 	pooled := map[string]bool{}
 	rt.plans = map[string]lbPoolPlan{}
+	rt.members = map[string]map[int]lbMemberInfo{}
+	conns := lbConnCounts(socks)
 	for _, p := range cfg.Pools {
 		if !p.Disabled {
 			for _, proto := range lbProtos(p.Proto) {
 				pooled[proto+"/"+strconv.Itoa(p.Port)] = true
 			}
 		}
+		prt := rt.pools[p.key()]
+		if prt == nil {
+			prt = newPoolRT()
+			rt.pools[p.key()] = prt
+		}
+		checking := p.Check == "tcp" && p.Proto != "udp" && !p.Disabled
+		info := map[int]lbMemberInfo{}
 		var ms []lbMemberState
 		for _, m := range p.Members {
-			st := lbMemberState{LBMember: m, LatencyMs: -1}
+			st := lbMemberState{LBMember: m, LatencyMs: -1, Conns: -1}
+			mi := lbMemberInfo{Conns: -1}
 			if l, ok := byID[m.Link]; ok && bound[m.Link] {
 				st.Name, st.Addr = lbLinkName(l), l.Addr
 				if lr := rt.links[m.Link]; lr != nil {
@@ -783,15 +868,44 @@ func clusterTick(now time.Time) (idle bool) {
 				port := memberPort(p, m)
 				ls := listen[l.Addr]
 				st.Listening = (p.Proto != "udp" && hasInt(ls["tcp"], port)) || (p.Proto == "udp" && hasInt(ls["udp"], port))
+				if p.Proto != "udp" {
+					st.Conns = conns[l.Addr+":"+strconv.Itoa(port)]
+					mi.Conns = st.Conns
+				}
+				if checking && st.Listening {
+					sv := prt.Svc[m.Link]
+					if sv == nil {
+						sv = &lbSvcRT{}
+						prt.Svc[m.Link] = sv
+					}
+					if !sv.Busy && now.Sub(sv.At) >= lbCheckEvery(p) {
+						sv.Busy, sv.At = true, now
+						jobs = append(jobs, lbCheckJob(sv, l.Addr, port, poolLabel(p), lbLinkName(l), h))
+					}
+					switch {
+					case !sv.Known:
+						mi.Check = "pending"
+					case sv.Up:
+						mi.Check = "ok"
+					default:
+						mi.Check, mi.CheckReason = "fail", sv.Reason
+						st.Up = false
+					}
+				}
 			}
 			ms = append(ms, st)
+			info[m.Link] = mi
 		}
-		prt := rt.pools[p.key()]
-		if prt == nil {
-			prt = &lbPoolRT{Current: -1, Better: -1}
-			rt.pools[p.key()] = prt
+		if !checking {
+			prt.Svc = map[int]*lbSvcRT{}
 		}
 		ts, state := lbPickTargets(p, ms, prt)
+		for link := range prt.Full {
+			mi := info[link]
+			mi.Full = true
+			info[link] = mi
+		}
+		rt.members[p.key()] = info
 		if (state == poolDown || state == poolFailOpen) && cfg.HubForward {
 			if to := lbHubForward(cfg, p); to != "" {
 				plan.Forward = append(plan.Forward, lbForward{Port: p.Port, Proto: p.Proto, To: to})
@@ -854,6 +968,39 @@ func clusterTick(now time.Time) (idle bool) {
 		rt.view = append(rt.view, v)
 	}
 	return false
+}
+
+// lbCheckJob runs one service check of a member and feeds the result back.
+func lbCheckJob(sv *lbSvcRT, addr string, port int, pool, name string, h LBHealth) func() {
+	return func() {
+		ok, why := lbProbe(addr, port, 3*time.Second)
+		clusterRT.mu.Lock()
+		change := sv.observe(ok, why, h)
+		clusterRT.mu.Unlock()
+		switch change {
+		case -1:
+			clusterEventf("warn", "%s, %s: the service check failed: %s.", pool, name, why)
+			clusterWake()
+		case 1:
+			clusterEventf("info", "%s, %s: the service check passes again.", pool, name)
+			clusterWake()
+		}
+	}
+}
+
+// lbConnCounts counts the open TCP connections on each private relay
+// address:port ("169.254.77.2:443").
+func lbConnCounts(socks []sockInfo) map[string]int {
+	out := map[string]int{}
+	for _, s := range socks {
+		if s.Proto != "tcp" || s.State != sockEstablished {
+			continue
+		}
+		if a := s.Local.Addr(); a.Is4() && a.As4()[0] == 169 && a.As4()[1] == 254 && a.As4()[2] == 77 {
+			out[s.Local.String()]++
+		}
+	}
+	return out
 }
 
 // lbIdleView lists the links with the snapshot's verdict (no pool runs, so
@@ -1006,14 +1153,18 @@ type clusterPoolView struct {
 }
 
 type memberStatus struct {
-	Link      int     `json:"link"`
-	Name      string  `json:"name"`
-	Up        bool    `json:"up"`
-	Listening bool    `json:"listening"`
-	Share     float64 `json:"share"`
-	LatencyMs float64 `json:"latency_ms"`
-	Stale     bool    `json:"stale"` // the peer id now belongs to another foreign IP
-	Missing   bool    `json:"missing"`
+	Link        int     `json:"link"`
+	Name        string  `json:"name"`
+	Up          bool    `json:"up"`
+	Listening   bool    `json:"listening"`
+	Share       float64 `json:"share"`
+	LatencyMs   float64 `json:"latency_ms"`
+	Conns       int     `json:"conns"` // -1 unknown (UDP)
+	Check       string  `json:"check,omitempty"`
+	CheckReason string  `json:"check_reason,omitempty"`
+	Full        bool    `json:"full,omitempty"`
+	Stale       bool    `json:"stale"` // the peer id now belongs to another foreign IP
+	Missing     bool    `json:"missing"`
 }
 
 func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
@@ -1038,7 +1189,12 @@ func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, m := range p.Members {
 			l, ok := byID[m.Link]
-			ms := memberStatus{Link: m.Link, Name: l.Name, Up: l.Up, LatencyMs: l.LatencyMs, Share: share[m.Link], Missing: !ok}
+			mi, seen := rt.members[p.key()][m.Link]
+			if !seen {
+				mi.Conns = -1
+			}
+			ms := memberStatus{Link: m.Link, Name: l.Name, Up: l.Up && mi.Check != "fail", LatencyMs: l.LatencyMs, Share: share[m.Link], Missing: !ok,
+				Conns: mi.Conns, Check: mi.Check, CheckReason: mi.CheckReason, Full: mi.Full}
 			if ok {
 				port := memberPort(p, m)
 				ms.Listening = (p.Proto != "udp" && hasInt(l.ListenTCP, port)) || (p.Proto == "udp" && hasInt(l.ListenUDP, port))
@@ -1072,6 +1228,73 @@ func handleClusterStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
+// clusterPrometheus adds the pools and linked hubs to /metrics (nothing when
+// the cluster is not used).
+func clusterPrometheus() string {
+	cfg := loadClusterConfig()
+	if len(cfg.Pools) == 0 && len(cfg.Hubs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	rt := clusterRT
+	rt.mu.Lock()
+	up := map[int]bool{}
+	for _, l := range rt.view {
+		up[l.ID] = l.Up
+	}
+	b.WriteString("# HELP hashem_cluster_pool_state Pool state: 2 ok, 1 degraded or forwarded to another hub, 0 down or fail-open.\n# TYPE hashem_cluster_pool_state gauge\n")
+	for _, p := range cfg.Pools {
+		if p.Disabled {
+			continue
+		}
+		v := 0
+		switch rt.plans[p.key()].State {
+		case poolOK:
+			v = 2
+		case poolDegraded, poolForward:
+			v = 1
+		}
+		fmt.Fprintf(&b, "hashem_cluster_pool_state{pool=\"%s\"} %d\n", p.key(), v)
+	}
+	b.WriteString("# HELP hashem_cluster_member_up 1 when the pool member passes its health and service checks.\n# TYPE hashem_cluster_member_up gauge\n")
+	b.WriteString("# HELP hashem_cluster_member_connections Open TCP connections of the pool member.\n# TYPE hashem_cluster_member_connections gauge\n")
+	b.WriteString("# HELP hashem_cluster_member_share Fraction of new connections the member gets now.\n# TYPE hashem_cluster_member_share gauge\n")
+	for _, p := range cfg.Pools {
+		if p.Disabled {
+			continue
+		}
+		share := map[int]float64{}
+		for _, t := range rt.plans[p.key()].Targets {
+			share[t.Link] = t.Share
+		}
+		for _, m := range p.Members {
+			mi, seen := rt.members[p.key()][m.Link]
+			v := 0
+			if up[m.Link] && mi.Check != "fail" {
+				v = 1
+			}
+			lbl := fmt.Sprintf("pool=\"%s\",link=\"%d\"", p.key(), m.Link)
+			fmt.Fprintf(&b, "hashem_cluster_member_up{%s} %d\n", lbl, v)
+			if seen && mi.Conns >= 0 {
+				fmt.Fprintf(&b, "hashem_cluster_member_connections{%s} %d\n", lbl, mi.Conns)
+			}
+			fmt.Fprintf(&b, "hashem_cluster_member_share{%s} %g\n", lbl, share[m.Link])
+		}
+	}
+	rt.mu.Unlock()
+	if len(cfg.Hubs) > 0 {
+		b.WriteString("# HELP hashem_cluster_hub_up 1 when the linked Iran hub answers its heartbeat.\n# TYPE hashem_cluster_hub_up gauge\n")
+		for _, h := range meshView(cfg) {
+			v := 0
+			if h.Up {
+				v = 1
+			}
+			fmt.Fprintf(&b, "hashem_cluster_hub_up{hub=\"%s\"} %d\n", promEsc(h.Name), v)
+		}
+	}
+	return b.String()
+}
+
 // handleClusterRules shows the kernel rules the cluster keeps (read only).
 func handleClusterRules(w http.ResponseWriter, r *http.Request) {
 	clusterRT.mu.Lock()
@@ -1090,7 +1313,13 @@ func validatePool(c ClusterConfig, p LBPool, skip int) (string, string) {
 		return "E-CLUSTER-02", "protocol must be tcp, udp or both"
 	}
 	if !lbModeOK(p.Mode) {
-		return "E-CLUSTER-02", "mode must be failover, balance, sticky or latency"
+		return "E-CLUSTER-02", "mode must be " + lbModes
+	}
+	if p.Check != "" && p.Check != "tcp" {
+		return "E-CLUSTER-02", "the service check is tcp or off"
+	}
+	if p.CheckEvery < 0 || p.CheckEvery > 60 {
+		return "E-CLUSTER-02", "check every 1-60 seconds"
 	}
 	for i, q := range c.Pools {
 		if i != skip && q.overlaps(p) {
@@ -1111,8 +1340,8 @@ func validatePool(c ClusterConfig, p LBPool, skip int) (string, string) {
 			return "E-CLUSTER-02", fmt.Sprintf("link %d is listed twice", m.Link)
 		}
 		seen[m.Link] = true
-		if m.Port < 0 || m.Port > 65535 || m.Weight < 0 || m.Weight > 100 || m.Priority < 0 || m.Priority > 1000 {
-			return "E-CLUSTER-02", "member port 1-65535, weight 1-100, priority 0-1000"
+		if m.Port < 0 || m.Port > 65535 || m.Weight < 0 || m.Weight > 100 || m.Priority < 0 || m.Priority > 1000 || m.MaxConn < 0 || m.MaxConn > 1000000 {
+			return "E-CLUSTER-02", "member port 1-65535, weight 1-100, priority 0-1000, connection limit 0-1000000"
 		}
 	}
 	return "", ""
@@ -1161,6 +1390,10 @@ func handleClusterPool(w http.ResponseWriter, r *http.Request) {
 	p.Name = strings.TrimSpace(p.Name)
 	if len(p.Name) > 40 {
 		p.Name = p.Name[:40]
+	}
+	p.Check = strings.ToLower(strings.TrimSpace(p.Check))
+	if p.Check == "off" || p.Check == "none" {
+		p.Check = ""
 	}
 	links := lbLinksFrom(lbSnapshot())
 	known := map[int]bool{}
@@ -1250,26 +1483,53 @@ func handleClusterPoolDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "ok"})
 }
 
+// handleClusterPoolFailback moves a no-failback pool back to its first member.
+func handleClusterPoolFailback(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, "cluster", "Cluster") {
+		return
+	}
+	var req struct {
+		Port  int    `json:"port"`
+		Proto string `json:"proto"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&req) != nil {
+		writeAPIError(w, r, "E-CLUSTER-01", "")
+		return
+	}
+	found := false
+	_, err := updateClusterConfig(func(c *ClusterConfig) error {
+		for i := range c.Pools {
+			if c.Pools[i].Port == req.Port && (req.Proto == "" || c.Pools[i].Proto == req.Proto) {
+				c.Pools[i].Failback++
+				found = true
+				clusterEventf("info", "%s: failback asked.", poolLabel(c.Pools[i]))
+			}
+		}
+		return nil
+	})
+	if !found {
+		writeAPIError(w, r, "E-CLUSTER-05", "")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, r, "E-CLUSTER-06", err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"status": "ok"})
+}
+
 // handleClusterMember changes one member: add, remove, drain, resume or set
 // (weight, priority, port).
 func handleClusterMember(w http.ResponseWriter, r *http.Request) {
 	if proRequired(w, r, "cluster", "Cluster") {
 		return
 	}
-	var req struct {
-		Port     int    `json:"port"`
-		Proto    string `json:"proto"`
-		Link     int    `json:"link"`
-		Action   string `json:"action"`
-		Weight   int    `json:"weight"`
-		Priority *int   `json:"priority"`
-		LinkPort int    `json:"link_port"`
-	}
+	var req lbMemberReq
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&req) != nil {
 		writeAPIError(w, r, "E-CLUSTER-01", "")
 		return
 	}
-	code, msg := lbMemberChange(req.Port, req.Proto, req.Link, req.Action, req.Weight, req.Priority, req.LinkPort)
+	code, msg := lbMemberChange(req)
 	if code != "" {
 		writeAPIError(w, r, code, msg)
 		return
@@ -1277,8 +1537,22 @@ func handleClusterMember(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "ok"})
 }
 
+// lbMemberReq is one member change: add, remove, drain, resume or set.
+type lbMemberReq struct {
+	Port     int    `json:"port"`
+	Proto    string `json:"proto"`
+	Link     int    `json:"link"`
+	Action   string `json:"action"`
+	Weight   int    `json:"weight"`
+	Priority *int   `json:"priority"`
+	LinkPort int    `json:"link_port"`
+	Backup   *bool  `json:"backup"`
+	MaxConn  *int   `json:"max_conn"`
+}
+
 // lbMemberChange is shared by the API and the CLI.
-func lbMemberChange(port int, proto string, link int, action string, weight int, prio *int, linkPort int) (string, string) {
+func lbMemberChange(q lbMemberReq) (string, string) {
+	port, proto, link, action, weight, prio, linkPort := q.Port, q.Proto, q.Link, q.Action, q.Weight, q.Priority, q.LinkPort
 	links := lbLinksFrom(lbSnapshot())
 	var ln *lbLink
 	for i := range links {
@@ -1315,6 +1589,12 @@ func lbMemberChange(port int, proto string, link int, action string, weight int,
 			nm := LBMember{Link: link, Remote: ln.Remote, Weight: max(weight, 1), Priority: nextPriority(*p), Port: linkPort}
 			if prio != nil {
 				nm.Priority = *prio
+			}
+			if q.Backup != nil {
+				nm.Backup = *q.Backup
+			}
+			if q.MaxConn != nil && *q.MaxConn >= 0 {
+				nm.MaxConn = *q.MaxConn
 			}
 			p.Members = append(p.Members, nm)
 			ex := p.Excluded[:0]
@@ -1356,9 +1636,16 @@ func lbMemberChange(port int, proto string, link int, action string, weight int,
 				code, msg = "E-CLUSTER-04", name+" is not in this pool"
 				return fmt.Errorf("%s", msg)
 			}
-			if weight < 0 || weight > 100 || linkPort < 0 || linkPort > 65535 || (prio != nil && (*prio < 0 || *prio > 1000)) {
-				code, msg = "E-CLUSTER-02", "weight 1-100, priority 0-1000, port 1-65535"
+			if weight < 0 || weight > 100 || linkPort < 0 || linkPort > 65535 || (prio != nil && (*prio < 0 || *prio > 1000)) ||
+				(q.MaxConn != nil && (*q.MaxConn < 0 || *q.MaxConn > 1000000)) {
+				code, msg = "E-CLUSTER-02", "weight 1-100, priority 0-1000, port 1-65535, connection limit 0-1000000"
 				return fmt.Errorf("%s", msg)
+			}
+			if q.Backup != nil {
+				m.Backup = *q.Backup
+			}
+			if q.MaxConn != nil {
+				m.MaxConn = *q.MaxConn
 			}
 			if weight > 0 {
 				m.Weight = weight
@@ -1459,11 +1746,23 @@ func cliCluster(args []string) int {
 			if p.Disabled {
 				state = " [disabled]"
 			}
+			if p.Check != "" {
+				state += fmt.Sprintf(" [service check %s every %s]", p.Check, lbCheckEvery(p))
+			}
+			if p.NoFailback && p.Mode == lbFailover {
+				state += " [no automatic failback]"
+			}
 			fmt.Printf("%s: %s%s\n", poolLabel(p), p.Mode, state)
 			for _, m := range p.Members {
 				extra := ""
 				if m.Drain {
-					extra = " drained"
+					extra += " drained"
+				}
+				if m.Backup {
+					extra += " backup"
+				}
+				if m.MaxConn > 0 {
+					extra += fmt.Sprintf(" max %d connections", m.MaxConn)
 				}
 				fmt.Printf("  - link %d  weight %d  priority %d  port %d%s\n", m.Link, max(m.Weight, 1), m.Priority, memberPort(p, m), extra)
 			}
@@ -1526,7 +1825,7 @@ func cliCluster(args []string) int {
 		fmt.Println("[OK] Hub removed.")
 		return 0
 	}
-	fmt.Println("Usage: gre-panel cluster [status | pool add|rm|mode|enable|disable | member add|rm|drain|resume|set | rules | events | join-code | add-hub CODE | remove-hub ID | reset]")
+	fmt.Println("Usage: gre-panel cluster [status | pool add|set|rm|mode|enable|disable|failback | member add|rm|drain|resume|set | rules | events | join-code | add-hub CODE | remove-hub ID | reset]")
 	return 1
 }
 
@@ -1549,105 +1848,206 @@ func cliFlags(args []string) (pos []string, flags map[string]string) {
 	return pos, flags
 }
 
+// lbParsePorts reads "443", "443,8443" or "2000-2005" (at most 50 ports).
+func lbParsePorts(s string) ([]int, error) {
+	var out []int
+	for _, f := range strings.Split(s, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		lo, hi, isRange := strings.Cut(f, "-")
+		a, err1 := strconv.Atoi(strings.TrimSpace(lo))
+		b := a
+		var err2 error
+		if isRange {
+			b, err2 = strconv.Atoi(strings.TrimSpace(hi))
+		}
+		if err1 != nil || err2 != nil || a < 1 || b > 65535 || b < a {
+			return nil, fmt.Errorf("%q is not a port or a range of ports", f)
+		}
+		for p := a; p <= b; p++ {
+			if !hasInt(out, p) {
+				out = append(out, p)
+			}
+		}
+		if len(out) > 50 {
+			return nil, fmt.Errorf("at most 50 ports at once")
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no port given")
+	}
+	return out, nil
+}
+
+// cliYes reads yes/no flags.
+func cliYes(s string) (bool, bool) {
+	switch strings.ToLower(s) {
+	case "yes", "y", "on", "true", "1":
+		return true, true
+	case "no", "n", "off", "false", "0":
+		return false, true
+	}
+	return false, false
+}
+
+// cliPoolOptions applies --mode --name --check --check-every --no-failback.
+func cliPoolOptions(p *LBPool, fl map[string]string) error {
+	if v, ok := fl["mode"]; ok {
+		p.Mode = v
+	}
+	if v, ok := fl["name"]; ok {
+		p.Name = v
+	}
+	if v, ok := fl["check"]; ok {
+		p.Check = strings.ToLower(v)
+		if p.Check == "off" || p.Check == "none" {
+			p.Check = ""
+		}
+	}
+	if v, ok := fl["check-every"]; ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("--check-every takes seconds")
+		}
+		p.CheckEvery = n
+	}
+	if v, ok := fl["no-failback"]; ok {
+		b, valid := cliYes(v)
+		if !valid {
+			return fmt.Errorf("--no-failback takes yes or no")
+		}
+		p.NoFailback = b
+	}
+	return nil
+}
+
 func cliClusterPool(args []string) int {
-	usage := "Usage: gre-panel cluster pool add PORT [--proto tcp|udp|both] [--mode failover|balance|sticky|latency] [--links 0,2,3] [--name N]\n" +
-		"       gre-panel cluster pool rm|enable|disable PORT [--proto P]\n" +
+	usage := "Usage: gre-panel cluster pool add PORTS [--proto tcp|udp|both] [--mode " + strings.ReplaceAll(lbModes, ", ", "|") + "]\n" +
+		"            [--links 0,2,3] [--name N] [--check tcp|off] [--check-every SEC] [--no-failback yes|no]\n" +
+		"         PORTS: 443, or 443,8443, or 2000-2005 (one pool per port)\n" +
+		"       gre-panel cluster pool set PORT [--mode M] [--name N] [--check tcp|off] [--check-every SEC] [--no-failback yes|no]\n" +
+		"       gre-panel cluster pool rm|enable|disable|failback PORT [--proto P]\n" +
 		"       gre-panel cluster pool mode PORT MODE [--proto P]"
 	pos, fl := cliFlags(args)
 	if len(pos) < 2 {
 		fmt.Println(usage)
 		return 1
 	}
-	port, err := strconv.Atoi(pos[1])
-	if err != nil {
-		fmt.Println(usage)
-		return 1
-	}
 	proto := fl["proto"]
-	switch pos[0] {
-	case "add":
-		p := LBPool{Port: port, Proto: proto, Mode: fl["mode"], Name: fl["name"]}
-		if p.Proto == "" {
-			p.Proto = "tcp"
-		}
-		if p.Mode == "" {
-			p.Mode = lbFailover
-		}
-		links := lbLinksFrom(directSnapshot())
-		if s := fl["links"]; s != "" {
-			for _, f := range strings.Split(s, ",") {
-				id, err := strconv.Atoi(strings.TrimSpace(f))
-				if err != nil {
-					fmt.Println("[!] --links takes link ids: 0 is the main tunnel, N is peer N")
-					return 1
-				}
-				p.Members = append(p.Members, LBMember{Link: id, Weight: 1, Priority: len(p.Members)})
-			}
-		} else {
-			for _, l := range links {
-				if hasInt(l.Ports, port) {
-					p.Members = append(p.Members, LBMember{Link: l.ID, Weight: 1, Priority: len(p.Members)})
-				}
-			}
-		}
-		normMembers(&p, links)
-		c := loadClusterConfig()
-		lbSnapshotOverride(links)
-		code, msg := validatePool(c, p, -1)
-		if code != "" {
-			fmt.Println("[!]", msg)
+	if pos[0] == "add" {
+		ports, err := lbParsePorts(pos[1])
+		if err != nil {
+			fmt.Println("[!]", err)
 			return 1
 		}
-		c.Pools = append(c.Pools, p)
+		links := lbLinksFrom(directSnapshot())
+		lbSnapshotOverride(links)
+		c := loadClusterConfig()
+		for _, port := range ports {
+			p := LBPool{Port: port, Proto: proto, Mode: lbFailover}
+			if p.Proto == "" {
+				p.Proto = "tcp"
+			}
+			if err := cliPoolOptions(&p, fl); err != nil {
+				fmt.Println("[!]", err)
+				return 1
+			}
+			if s := fl["links"]; s != "" {
+				for _, f := range strings.Split(s, ",") {
+					id, err := strconv.Atoi(strings.TrimSpace(f))
+					if err != nil {
+						fmt.Println("[!] --links takes link ids: 0 is the main tunnel, N is peer N")
+						return 1
+					}
+					p.Members = append(p.Members, LBMember{Link: id, Weight: 1, Priority: len(p.Members)})
+				}
+			} else {
+				for _, l := range links {
+					if hasInt(l.Ports, port) {
+						p.Members = append(p.Members, LBMember{Link: l.ID, Weight: 1, Priority: len(p.Members)})
+					}
+				}
+			}
+			normMembers(&p, links)
+			if code, msg := validatePool(c, p, -1); code != "" {
+				fmt.Printf("[!] port %d: %s\n", port, msg)
+				return 1
+			}
+			c.Pools = append(c.Pools, p)
+			fmt.Printf("[OK] %s: %s, %d members.\n", poolLabel(p), p.Mode, len(p.Members))
+		}
 		sort.Slice(c.Pools, func(i, j int) bool { return c.Pools[i].Port < c.Pools[j].Port })
 		if err := saveClusterConfig(c); err != nil {
 			fmt.Println("[!]", err)
 			return 1
 		}
-		fmt.Printf("[OK] %s created with %d members. The panel applies it within a second.\n", poolLabel(p), len(p.Members))
+		fmt.Println("The panel applies it within a second.")
 		return 0
-	case "rm", "enable", "disable", "mode":
-		c := loadClusterConfig()
-		found := false
-		out := c.Pools[:0]
-		for _, p := range c.Pools {
-			if p.Port != port || (proto != "" && p.Proto != proto) {
-				out = append(out, p)
-				continue
-			}
-			found = true
-			switch pos[0] {
-			case "rm":
-				continue
-			case "enable", "disable":
-				p.Disabled = pos[0] == "disable"
-			case "mode":
-				if len(pos) < 3 || !lbModeOK(pos[2]) {
-					fmt.Println("[!] Mode must be failover, balance, sticky or latency.")
-					return 1
-				}
-				p.Mode = pos[2]
-			}
-			out = append(out, p)
-		}
-		if !found {
-			fmt.Println("[!] No pool on port", port)
+	}
+	port, err := strconv.Atoi(pos[1])
+	if err != nil {
+		fmt.Println(usage)
+		return 1
+	}
+	switch pos[0] {
+	case "rm", "enable", "disable", "mode", "set", "failback":
+	default:
+		fmt.Println(usage)
+		return 1
+	}
+	if pos[0] == "mode" {
+		if len(pos) < 3 || !lbModeOK(pos[2]) {
+			fmt.Println("[!] Mode must be " + lbModes + ".")
 			return 1
 		}
-		c.Pools = out
-		if err := saveClusterConfig(c); err != nil {
+		fl["mode"] = pos[2]
+	}
+	lbSnapshotOverride(lbLinksFrom(directSnapshot()))
+	c := loadClusterConfig()
+	idx := -1
+	for i, p := range c.Pools {
+		if p.Port == port && (proto == "" || p.Proto == proto) {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		fmt.Println("[!] No pool on port", port)
+		return 1
+	}
+	p := c.Pools[idx]
+	switch pos[0] {
+	case "rm":
+		c.Pools = append(c.Pools[:idx], c.Pools[idx+1:]...)
+		clusterEventf("info", "%s deleted (CLI).", poolLabel(p))
+	case "enable", "disable":
+		c.Pools[idx].Disabled = pos[0] == "disable"
+	case "failback":
+		c.Pools[idx].Failback++
+		clusterEventf("info", "%s: failback asked (CLI).", poolLabel(p))
+	case "mode", "set":
+		if err := cliPoolOptions(&p, fl); err != nil {
 			fmt.Println("[!]", err)
 			return 1
 		}
-		fmt.Println("[OK] Saved.")
-		return 0
+		if code, msg := validatePool(c, p, idx); code != "" {
+			fmt.Println("[!]", msg)
+			return 1
+		}
+		c.Pools[idx] = p
 	}
-	fmt.Println(usage)
-	return 1
+	if err := saveClusterConfig(c); err != nil {
+		fmt.Println("[!]", err)
+		return 1
+	}
+	fmt.Println("[OK] Saved.")
+	return 0
 }
 
 func cliClusterMember(args []string) int {
-	usage := "Usage: gre-panel cluster member add|rm|drain|resume|set PORT LINK [--weight N] [--priority N] [--port N] [--proto P]"
+	usage := "Usage: gre-panel cluster member add|rm|drain|resume|set PORT LINK [--weight N] [--priority N] [--port N]\n" +
+		"            [--backup yes|no] [--max-conn N] [--proto P]"
 	pos, fl := cliFlags(args)
 	if len(pos) < 3 {
 		fmt.Println(usage)
@@ -1663,19 +2063,35 @@ func cliClusterMember(args []string) int {
 	if action == "" {
 		action = pos[0]
 	}
-	weight, _ := strconv.Atoi(fl["weight"])
-	lport, _ := strconv.Atoi(fl["port"])
-	var prio *int
-	if s, ok := fl["priority"]; ok {
+	q := lbMemberReq{Port: port, Proto: fl["proto"], Link: link, Action: action}
+	q.Weight, _ = strconv.Atoi(fl["weight"])
+	q.LinkPort, _ = strconv.Atoi(fl["port"])
+	for _, k := range []string{"priority", "max-conn"} {
+		s, ok := fl[k]
+		if !ok {
+			continue
+		}
 		n, err := strconv.Atoi(s)
 		if err != nil {
 			fmt.Println(usage)
 			return 1
 		}
-		prio = &n
+		if k == "priority" {
+			q.Priority = &n
+		} else {
+			q.MaxConn = &n
+		}
+	}
+	if s, ok := fl["backup"]; ok {
+		b, valid := cliYes(s)
+		if !valid {
+			fmt.Println(usage)
+			return 1
+		}
+		q.Backup = &b
 	}
 	lbSnapshotOverride(lbLinksFrom(directSnapshot()))
-	if code, msg := lbMemberChange(port, fl["proto"], link, action, weight, prio, lport); code != "" {
+	if code, msg := lbMemberChange(q); code != "" {
 		if msg == "" {
 			msg = errCatalog[code].Msg
 		}

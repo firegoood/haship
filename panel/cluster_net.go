@@ -7,10 +7,13 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
+	"io"
 	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -180,4 +183,33 @@ func icmpChecksum(b []byte) uint16 {
 		s = s&0xffff + s>>16
 	}
 	return ^uint16(s)
+}
+
+// lbProbeHold is how long the service check waits on an open connection: one
+// that is still open (the service waits for the client, as TLS does) or that
+// answered by then works.
+const lbProbeHold = 1500 * time.Millisecond
+
+// lbTCPProbe opens a connection through a member's relay (its private
+// address) to the service on the foreign server. When the service is down,
+// the foreign client cannot reach it and the relay closes the connection at
+// once; that, a refusal or a reset fails the check.
+func lbTCPProbe(addr string, port int, timeout time.Duration) (bool, string) {
+	c, err := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(port)), timeout)
+	if err != nil {
+		return false, "the relay did not take the connection"
+	}
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(lbProbeHold))
+	n, err := c.Read(make([]byte, 1))
+	var ne net.Error
+	switch {
+	case n > 0:
+		return true, ""
+	case errors.As(err, &ne) && ne.Timeout():
+		return true, ""
+	case errors.Is(err, io.EOF):
+		return false, "the connection was closed at once: the service on the foreign server did not take it"
+	}
+	return false, "the connection was reset: the service on the foreign server did not take it"
 }
