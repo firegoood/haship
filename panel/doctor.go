@@ -150,6 +150,9 @@ func doctorRefresh() *doctorReport {
 }
 
 func handleDoctorGet(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proDiagnostics, "Diagnostics") {
+		return
+	}
 	lastDoctorMu.RLock()
 	rep := lastDoctorReport
 	lastDoctorMu.RUnlock()
@@ -160,6 +163,9 @@ func handleDoctorGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDoctorPost(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proDiagnostics, "Diagnostics") {
+		return
+	}
 	var req doctorPostRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		req.Action = "run"

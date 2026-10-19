@@ -2318,5 +2318,15 @@ window.FA_TEXT = {
 "Waiting for the foreign server. Paste the code on its Benchmark tab.": "در انتظار سرور خارج. کد را در تب Benchmark آن بچسبانید.",
 "{n} of {m} work": "{n} از {m} کار می‌کنند",
 "Fastest: {x}": "سریع‌ترین: {x}",
-"still testing": "تست ادامه دارد"
+"still testing": "تست ادامه دارد",
+"Bagher Tunnel — Hashem Pro": "تونل باقر — هاشم Pro",
+"Bagher is a Hashem Pro feature. An active license is needed on both servers.": "باقر یکی از قابلیت‌های هاشم Pro است و روی هر دو سرور لایسنس فعال لازم دارد.",
+"Backhaul — Hashem Pro": "Backhaul — هاشم Pro",
+"Setting up a Backhaul tunnel is a Hashem Pro feature, on both servers. Backhaul tunnels that already run keep running without it.": "ساختن تونل Backhaul یکی از قابلیت‌های هاشم Pro است و روی هر دو سرور لایسنس لازم دارد. تونل‌های Backhaul که الان کار می‌کنند بدون لایسنس هم به کارشان ادامه می‌دهند.",
+"Path Test — Hashem Pro": "تست مسیر — هاشم Pro",
+"The path test is a Hashem Pro feature, on both servers.": "تست مسیر یکی از قابلیت‌های هاشم Pro است و روی هر دو سرور لایسنس لازم دارد.",
+"Diagnostics — Hashem Pro": "عیب‌یابی — هاشم Pro",
+"Diagnostics is a Hashem Pro feature.": "عیب‌یابی یکی از قابلیت‌های هاشم Pro است.",
+"Any Hashem Pro license includes it: no new key is needed.": "هر لایسنس هاشم Pro شامل آن است و کلید جدید لازم نیست.",
+"Backhaul needs a Hashem Pro license on both servers. Backhaul tunnels that already run keep running.": "Backhaul روی هر دو سرور لایسنس هاشم Pro لازم دارد. تونل‌های Backhaul که الان کار می‌کنند به کارشان ادامه می‌دهند."
 };

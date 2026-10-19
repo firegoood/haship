@@ -1289,6 +1289,9 @@ func handlePathTestPost(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, "E-ACTION-02", "invalid json")
 		return
 	}
+	if (req.Action == "start" || req.Action == "join") && proRequired(w, r, proPathTest, "The path test") {
+		return
+	}
 	var s *ptSession
 	var err error
 	switch req.Action {
@@ -1322,6 +1325,15 @@ func cliPathTest(args []string) int {
 	}
 	if len(args) == 0 {
 		return usage()
+	}
+	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
+		configDir = v
+	}
+	loadOrInit()
+	loadLicenseFromDisk()
+	if !hasPro(proPathTest) {
+		fmt.Fprintln(os.Stderr, "pathtest: the path test is a Hashem Pro feature; activate a license (hashem license activate KEY). Machine: "+getMachineHash())
+		return 1
 	}
 	if d, err := time.ParseDuration(os.Getenv("HASHEM_PT_GRACE")); err == nil && d > 0 {
 		ptGrace = d // labs: settle sooner on blocked transports

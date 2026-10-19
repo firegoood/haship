@@ -493,6 +493,9 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		body.OrigBundle = body.Token
 		applyBundle(&body, b)
 	}
+	if (body.Engine == "backhaul" || body.Engine == "gre-backhaul") && proRequired(w, r, proBackhaul, "Backhaul") {
+		return
+	}
 
 	// validation (mirrors hashem.sh prompt_* / validate_setup_common rules)
 	if body.Role != "iran" && body.Role != "foreign" && body.Role != "add-peer" {

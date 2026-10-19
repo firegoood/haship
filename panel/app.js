@@ -239,12 +239,42 @@ function isBagherLicensed() {
   return false;
 }
 
+// Hashem Pro: the server unlocks a Pro feature for every Bagher (Pro) key, so
+// pro_features lists what this key opens without a new key.
+function isProLicensed(f) {
+  if (isBagherLicensed()) return true;
+  return !!(_licenseData && _licenseData.is_valid && (_licenseData.pro_features || []).includes(f));
+}
+const PRO_TXT = {
+  bagher: ['pro_t_bagher', 'Bagher Tunnel — Hashem Pro', 'pro_b_bagher', 'Bagher is a Hashem Pro feature. An active license is needed on both servers.'],
+  backhaul: ['pro_t_backhaul', 'Backhaul — Hashem Pro', 'pro_b_backhaul', 'Setting up a Backhaul tunnel is a Hashem Pro feature, on both servers. Backhaul tunnels that already run keep running without it.'],
+  pathtest: ['pro_t_pathtest', 'Path Test — Hashem Pro', 'pro_b_pathtest', 'The path test is a Hashem Pro feature, on both servers.'],
+  diagnostics: ['pro_t_diag', 'Diagnostics — Hashem Pro', 'pro_b_diag', 'Diagnostics is a Hashem Pro feature.'],
+};
+// PRO tags and notes follow the license.
+function proSync() {
+  const tag = (id, f) => { const el = $(id); if (el) el.classList.toggle('hidden', isProLicensed(f)); };
+  tag('engBhPro', 'backhaul');
+  tag('navDoctorPro', 'diagnostics');
+  tag('ptPro', 'pathtest');
+  const bh = $('sEngine') && /backhaul/.test($('sEngine').value) && $('sRole') && $('sRole').value !== 'foreign';
+  if ($('bhLicWarn')) $('bhLicWarn').classList.toggle('hidden', !bh || isProLicensed('backhaul'));
+}
+
 function goTab(name) {
   if (name === 'terminal' && !$('termNav').classList.contains('hidden') && $('tab-terminal').hidden && !termState.ready) { /* allowed: overlay shows connect */ }
   if (name === 'terminal' && $('termNav').classList.contains('hidden')) return; // flag off: tab doesn't exist
   if (name === 'add-peer') { goTab('setup'); const c = $('setupAddPeerStep'); if (c && c.scrollIntoView) c.scrollIntoView({behavior: 'smooth', block: 'start'}); return; }
   // Bagher lives in Setup (create) and Tunnel (run) like every other tunnel.
   if (name === 'sshfwd' || name === 'bagher') { openBagherSetup(); return; }
+  if (name === 'doctor' && !isProLicensed('diagnostics')) {
+    if (_licenseData === null) {
+      loadLicense().then(() => { if (isProLicensed('diagnostics')) goTab('doctor'); else openBagherLicModal('diagnostics'); });
+      return;
+    }
+    openBagherLicModal('diagnostics');
+    return;
+  }
   if (name === 'cluster' && !isBagherLicensed()) {
     if (_licenseData === null) {
       loadLicense().then(() => {
@@ -278,7 +308,7 @@ function goTab(name) {
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
   if (name === 'terminal') termOnShow();
-  if (name === 'settings' || name === 'setup') loadLicense();
+  if (name === 'settings' || name === 'setup' || name === 'benchmark') loadLicense();
   if (name === 'dashboard') {
     // tab was hidden: the rAF loop stopped itself; resume it without replaying
     // the draw-in animation (refreshDash() also redraws within 5s anyway).
@@ -603,6 +633,16 @@ const I18N = {
     bench_failover_save: "Save Failover Policy",
     bench_leaderboard_title: "Carrier Performance Leaderboard",
     bench_run_btn: "Run Carrier Benchmark",
+    pro_t_bagher: "Bagher Tunnel — Hashem Pro",
+    pro_b_bagher: "Bagher is a Hashem Pro feature. An active license is needed on both servers.",
+    pro_t_backhaul: "Backhaul — Hashem Pro",
+    pro_b_backhaul: "Setting up a Backhaul tunnel is a Hashem Pro feature, on both servers. Backhaul tunnels that already run keep running without it.",
+    pro_t_pathtest: "Path Test — Hashem Pro",
+    pro_b_pathtest: "The path test is a Hashem Pro feature, on both servers.",
+    pro_t_diag: "Diagnostics — Hashem Pro",
+    pro_b_diag: "Diagnostics is a Hashem Pro feature.",
+    pro_any_key: "Any Hashem Pro license includes it: no new key is needed.",
+    setup_bh_lic: "Backhaul needs a Hashem Pro license on both servers. Backhaul tunnels that already run keep running.",
     pt_title: "Path Test Before Any Tunnel",
     pt_sub: "Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed. Safe next to a running tunnel: the test uses its own free ports and its own GRE interface and never touches the tunnel.",
     pt_idle: "Not running",
@@ -2672,6 +2712,7 @@ async function loadSetupDefaults() {
 async function doSetup() {
   if ($('sRole').value === 'foreign') return;
   if ($('sEngine') && $('sEngine').value === 'bagher') { await bagherIranApplyClick(); return; }
+  if ($('sEngine') && /backhaul/.test($('sEngine').value) && !isProLicensed('backhaul')) { openBagherLicModal('backhaul'); return; }
   if (setupExists && !setupUnlocked) { toastWarn(tr('', 'The form is locked'), tr('', 'Unlock it to replace the tunnel.')); return; }
   const btn = $('setupBtn');
   btn.disabled = true;
@@ -2815,6 +2856,7 @@ function setIranEngine(eng) {
     : tr('', 'Token is auto-generated. After setup, copy the bundle below to the Foreign side — one paste fills everything there.');
   if (isBagher) bagherSetupSync();
   else if ($('bagherManual')) $('bagherManual').classList.add('hidden');
+  proSync();
   renderSetupLock();
 }
 // Backhaul forwards UDP only on the tcp transport (accept_udp).
@@ -2830,6 +2872,7 @@ if ($('engBagher')) $('engBagher').onclick = () => setIranEngine('bagher');
 if ($('bhGreOn')) $('bhGreOn').onclick = () => { _bhGre = true; setIranEngine('backhaul'); };
 if ($('bhGreOff')) $('bhGreOff').onclick = () => { _bhGre = false; setIranEngine('backhaul'); };
 if ($('bagherLicOpenBtn')) $('bagherLicOpenBtn').onclick = () => openBagherLicModal();
+if ($('bhLicOpenBtn')) $('bhLicOpenBtn').onclick = () => openBagherLicModal('backhaul');
 
 // Bagher in Setup: license note, saved values, headless-foreign commands.
 function bagherSetupSync() {
@@ -2837,6 +2880,7 @@ function bagherSetupSync() {
   const lic = isBagherLicensed();
   if ($('engBagherPro')) $('engBagherPro').classList.toggle('hidden', lic);
   if ($('bagherLicWarn')) $('bagherLicWarn').classList.toggle('hidden', lic);
+  proSync();
   const fill = (id, v) => { const el = $(id); if (el && !el.value && v) el.value = v; };
   fill('sshfwdRemoteHost', d.remote_host);
   fill('sshfwdPorts', Array.isArray(d.ports) ? d.ports.join(', ') : '');
@@ -2990,6 +3034,11 @@ $('joinBtn').onclick = async () => {
     await bagherForeignConnectClick($('jToken').value.trim());
     b.disabled = false;
     b.textContent = oldTxt;
+    return;
+  }
+  if (/^(bh1_|gh1_)/.test($('jToken').value.trim()) && !isProLicensed('backhaul')) {
+    openBagherLicModal('backhaul');
+    b.disabled = false;
     return;
   }
   // A join replaces whatever tunnel this server has: ask first.
@@ -5108,6 +5157,7 @@ let doctorData = null;
 let doctorRunning = false;
 
 async function loadDoctor(forceRun = false) {
+  if (!isProLicensed('diagnostics')) return;
   try {
     let rep;
     if (forceRun) {
@@ -5484,6 +5534,7 @@ async function loadUsage() {
 
 async function runDoctor() {
   if (doctorRunning) return;
+  if (!isProLicensed('diagnostics')) { openBagherLicModal('diagnostics'); return; }
   doctorRunning = true;
   const btn = $('docRunBtn');
   const label = btn && btn.querySelector('span');
@@ -7100,6 +7151,7 @@ async function ptPost(body, btnId) {
     _pt = await api('/api/pathtest', body);
     renderPathTest();
   } catch (e) {
+    if (e.code === 'E-LIC-01') openBagherLicModal('pathtest');
     ptWarn(e.message || String(e));
   } finally {
     if (b) b.disabled = false;
@@ -7110,7 +7162,7 @@ async function ptPost(body, btnId) {
   function on(id, ev, fn) { const el = $(id); if (el) el.addEventListener(ev, fn); }
   on('ptRoleIran', 'click', () => ptSetRole('iran'));
   on('ptRoleForeign', 'click', () => ptSetRole('foreign'));
-  on('ptStartBtn', 'click', () => ptPost({
+  on('ptStartBtn', 'click', () => !isProLicensed('pathtest') ? openBagherLicModal('pathtest') : ptPost({
     action: 'start', foreign_ip: $('ptForeign').value.trim(), iran_ip: $('ptIranIp').value.trim(),
     base_port: parseInt($('ptBase').value, 10) || 0, ssh_port: parseInt($('ptSsh').value, 10) || 22,
     minutes: parseInt($('ptMinutes').value, 10) || 10,
@@ -7118,6 +7170,7 @@ async function ptPost(body, btnId) {
   on('ptJoinBtn', 'click', () => {
     const code = $('ptCode').value.trim();
     if (!code) { ptWarn(tr('pt_need_code', 'Paste the test code from the Iran server first.')); return; }
+    if (!isProLicensed('pathtest')) { openBagherLicModal('pathtest'); return; }
     ptPost({ action: 'join', code }, 'ptJoinBtn');
   });
   on('ptStopBtn', 'click', () => ptPost({ action: 'stop' }, 'ptStopBtn'));
@@ -7206,8 +7259,11 @@ function copyTextSafe(text, title, msg) {
 
 let _bagherModalDismissed = false;
 
-function openBagherLicModal() {
+function openBagherLicModal(feature) {
   _bagherModalDismissed = false;
+  const t = PRO_TXT[feature] || PRO_TXT.bagher;
+  if ($('proModalTitle')) $('proModalTitle').textContent = tr(t[0], t[1]);
+  if ($('proModalBody')) $('proModalBody').textContent = tr(t[2], t[3]) + (feature && feature !== 'bagher' ? ' ' + tr('pro_any_key', 'Any Hashem Pro license includes it: no new key is needed.') : '');
   const m = $('bagherLicModal');
   modalShow(m, closeBagherLicModal);
   const hashEl = $('bagherLicMachineHash');
@@ -7506,7 +7562,8 @@ function renderLicense(d) {
       $('licExpiresRow').textContent = 'Expires: ' + expStr + daysStr;
     }
     if ($('licFeaturesRow')) {
-      $('licFeaturesRow').textContent = 'Unlocked Features: ' + (d.features && d.features.length ? d.features.join(', ') : 'All');
+      const feats = [...new Set([...(d.features || []), ...(d.pro_features || [])])];
+      $('licFeaturesRow').textContent = 'Unlocked Features: ' + ((d.features && d.features.length) ? feats.join(', ') : 'All');
     }
   } else {
     setBrandTier(false);

@@ -267,6 +267,38 @@ func HasFeature(feature string) bool {
 	return false
 }
 
+// Hashem Pro features. Every license that unlocks Bagher (the first Pro
+// feature: "bagher", "frp_ssh", "*", "all" or no feature list) unlocks each Pro
+// feature added after it, so a key issued before a feature existed keeps
+// working after an update: nobody has to enter a new key. A key may also name
+// one of these alone. Sentinel and Cluster stay separate add-ons.
+const (
+	proPathTest    = "pathtest"
+	proBackhaul    = "backhaul"
+	proDiagnostics = "diagnostics"
+)
+
+var proFeatures = []string{proPathTest, proBackhaul, proDiagnostics}
+
+func hasPro(feature string) bool {
+	if HasFeature(feature) || HasFeature("bagher") || HasFeature("frp_ssh") {
+		return true
+	}
+	activeLicenseMu.RLock()
+	lic := activeLicense
+	activeLicenseMu.RUnlock()
+	return lic != nil && len(lic.Features) == 0 && (lic.ExpiresAt <= 0 || time.Now().Unix() <= lic.ExpiresAt)
+}
+
+// proRequired answers E-LIC-01 and returns true when feature is locked.
+func proRequired(w http.ResponseWriter, r *http.Request, feature, what string) bool {
+	if hasPro(feature) {
+		return false
+	}
+	writeAPIError(w, r, "E-LIC-01", what+" is a Hashem Pro feature: activate a license in Settings (Machine: "+getMachineHash()+")")
+	return true
+}
+
 // handleLicenseGet handles GET /api/license.
 func handleLicenseGet(w http.ResponseWriter, r *http.Request) {
 	activeLicenseMu.RLock()
@@ -300,6 +332,13 @@ func handleLicenseGet(w http.ResponseWriter, r *http.Request) {
 				res["days_remaining"] = -1
 			}
 			res["features"] = lic.Features
+			var pro []string
+			for _, f := range proFeatures {
+				if hasPro(f) {
+					pro = append(pro, f)
+				}
+			}
+			res["pro_features"] = pro
 		} else {
 			res["error"] = "License expired"
 		}
@@ -324,6 +363,12 @@ func cliLicense(args []string) int {
 		deactivateLicense()
 		fmt.Println("license removed")
 		return 0
+	case "check": // exit 0 when the Pro feature in args[1] is unlocked (hashem.sh uses it)
+		loadLicenseFromDisk()
+		if len(args) > 1 && hasPro(args[1]) {
+			return 0
+		}
+		return 1
 	case "status":
 		loadLicenseFromDisk()
 		rr := &licenseStatusWriter{header: http.Header{}}
@@ -331,7 +376,7 @@ func cliLicense(args []string) int {
 		fmt.Println(strings.TrimSpace(rr.body.String()))
 		return 0
 	}
-	fmt.Fprintln(os.Stderr, "Usage: gre-panel license [status|deactivate]")
+	fmt.Fprintln(os.Stderr, "Usage: gre-panel license [status|deactivate|check FEATURE]")
 	return 2
 }
 

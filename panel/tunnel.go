@@ -171,6 +171,9 @@ func handleAction(w http.ResponseWriter, r *http.Request) {
 		if eng == "" {
 			eng, trans = body.TargetEngine, body.TargetTransport
 		}
+		if backhaulLocked(eng) && proRequired(w, r, proBackhaul, "Backhaul") {
+			return
+		}
 		out, err := switchTunnelEngine(eng, trans)
 		if err != nil {
 			writeAPIError(w, r, "E-ACTION-03", err.Error())
@@ -918,6 +921,17 @@ func preflightEngineSwitch(engine string, isIran bool) error {
 }
 
 // switchTunnelEngine changes the active tunnel engine live without reinstalling from scratch.
+// backhaulLocked: moving this server onto Backhaul needs Pro. A tunnel that
+// already runs Backhaul keeps working (and may switch between its GRE modes)
+// without a license, so an update never takes a running tunnel away.
+func backhaulLocked(target string) bool {
+	t := strings.ToLower(strings.TrimSpace(target))
+	if (t != "backhaul" && t != "gre-backhaul") || hasPro(proBackhaul) {
+		return false
+	}
+	return !strings.HasPrefix(localStatus().FrpSvc, "backhaul")
+}
+
 func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 	targetEngine = strings.ToLower(strings.TrimSpace(targetEngine))
 	if targetEngine != "frp" && targetEngine != "backhaul" && targetEngine != "gre-backhaul" {

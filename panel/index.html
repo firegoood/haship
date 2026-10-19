@@ -1359,7 +1359,7 @@
       <div class="nav-sec" role="presentation" data-i18n="sec_system">System</div>
       <button role="tab" aria-selected="false" aria-controls="tab-perf" tabindex="-1" class="nav-item" data-tab="perf" id="perfNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span data-i18n="nav_perf">Performance</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-watchdog" tabindex="-1" class="nav-item" data-tab="watchdog" id="watchdogNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span data-i18n="nav_watchdog">Watchdog</span></button>
-      <button role="tab" aria-selected="false" aria-controls="tab-doctor" tabindex="-1" class="nav-item" data-tab="doctor" id="doctorNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span data-i18n="nav_doctor">Diagnostics</span><span class="nav-badge hidden u-ml-auto"></span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-doctor" tabindex="-1" class="nav-item" data-tab="doctor" id="doctorNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span data-i18n="nav_doctor">Diagnostics</span><span class="eng-pro hidden" id="navDoctorPro" data-no-i18n>PRO</span><span class="nav-badge hidden u-ml-auto"></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-benchmark" tabindex="-1" class="nav-item" data-tab="benchmark" id="benchmarkNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span data-i18n="nav_benchmark">Benchmark</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-update" tabindex="-1" class="nav-item" data-tab="update"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg><span data-i18n="nav_update">Update</span><span class="badge info hidden u-ml-auto" id="updBadge" >new</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" class="nav-item" data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2z"/></svg><span data-i18n="nav_settings">Settings</span></button>
@@ -1798,7 +1798,7 @@
               <label class="qs-label" data-i18n="setup_step2_engine">Tunnel Engine</label>
               <div class="qs-seg" role="group" aria-label="Tunnel Engine" id="iranEngineSeg">
                 <button type="button" id="engGreFrp" aria-pressed="true" data-i18n="setup_eng_frp">GRE + FRP</button>
-                <button type="button" id="engBh" aria-pressed="false" data-i18n="setup_eng_bh">Backhaul</button>
+                <button type="button" id="engBh" aria-pressed="false"><span data-i18n="setup_eng_bh">Backhaul</span> <span class="eng-pro hidden" id="engBhPro" data-no-i18n>PRO</span></button>
                 <button type="button" id="engBagher" aria-pressed="false"><span data-i18n="setup_eng_bagher">Bagher</span> <span class="eng-pro hidden" id="engBagherPro" data-no-i18n>PRO</span></button>
               </div>
               <input type="hidden" id="sEngine" value="frp">
@@ -1810,6 +1810,10 @@
                   <button type="button" id="bhGreOff" aria-pressed="false" data-i18n="setup_bh_gre_off">Without GRE</button>
                 </div>
                 <div class="qs-hint" id="bhGreHint"></div>
+              </div>
+              <div id="bhLicWarn" class="warnbox hidden u-mt-8">
+                <span data-i18n="setup_bh_lic">Backhaul needs a Hashem Pro license on both servers. Backhaul tunnels that already run keep running.</span>
+                <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="bhLicOpenBtn" data-i18n="setup_bagher_lic_btn">Activate License</button>
               </div>
             </div></div>
             <div class="qs-step"><span class="qs-num">3</span><div class="qs-body">
@@ -2577,7 +2581,7 @@
         <div class="tunnel-card u-mb-20" id="ptCard">
           <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
             <div>
-              <span class="tc-title u-fs-18 u-fw-700" data-i18n="pt_title">Path Test Before Any Tunnel</span>
+              <span class="tc-title u-fs-18 u-fw-700" data-i18n="pt_title">Path Test Before Any Tunnel</span> <span class="eng-pro hidden" id="ptPro" data-no-i18n>PRO</span>
               <div class="qs-hint u-mt-4" data-i18n="pt_sub">Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed. Safe next to a running tunnel: the test uses its own free ports and its own GRE interface and never touches the tunnel.</div>
             </div>
             <span class="badge dim" id="ptBadge" data-i18n="pt_idle">Not running</span>
@@ -3389,16 +3393,14 @@
     <div class="ent-modal-h u-bb-wr u-tint-wr">
       <b id="bagherLicModalTitle" class="u-flex u-ai-c u-gap-8 u-c-wr u-fs-16 u-fw-700">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#fbbf24" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-        Bagher Tunnel — Premium Feature
+        <span id="proModalTitle">Bagher Tunnel — Hashem Pro</span>
       </b>
       <button class="ent-x" id="bagherLicModalClose" onclick="closeBagherLicModal()" aria-label="Close">&#xD7;</button>
     </div>
     <div class="ent-modal-b u-gap-16 u-p-20">
       <div class="u-tint-wr u-bd-wr u-r-8 u-p-12x16 u-flex u-ai-s u-gap-12">
         <span class="u-fs-20 u-lh-1"><svg class="i" aria-hidden="true"><use href="#i-star"/></svg></span>
-        <div class="u-fs-13 u-lh-15 u-c-wr">
-          <b>Bagher Stealth Tunnel</b> is an exclusive <b>Hashem Pro</b> feature. To configure and operate stealth tunnels, an active license is required.
-        </div>
+        <div class="u-fs-13 u-lh-15 u-c-wr" id="proModalBody">Bagher is a Hashem Pro feature. An active license is needed on both servers.</div>
       </div>
       <div class="fg">
         <label for="bagherLicMachineHash" class="u-fs-12 u-fw-600 u-mb-8 u-block u-c-mu">

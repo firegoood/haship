@@ -13,7 +13,11 @@
 #     the tunnel carries data every half second during the test without a miss.
 #  4. nothing is left behind: no hpt0 interface, no core process, no temp dir.
 #
-# Needs: PANEL_BIN (linux gre-panel), ip, iptables, ping, python3, the cores in
+# The path test is Hashem Pro: PT_LICENSE is a license for it, and PANEL_BIN is
+# built to trust its signing key (see TestWriteLabLicense in panel/). Without a
+# license the command must refuse.
+#
+# Needs: PANEL_BIN (linux gre-panel), PT_LICENSE, ip, iptables, ping, python3, the cores in
 # FRP_DIR and BACKHAUL_BIN, CAP_NET_ADMIN. Skips cleanly otherwise.
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -22,6 +26,8 @@ PANEL=${PANEL_BIN:-}
 BIN=${BACKHAUL_BIN:-/tmp/backhaul-rel/backhaul}
 FRP_DIR=${FRP_DIR:-/tmp/frp-rel}
 [[ -n $PANEL && -x $PANEL ]] || { echo "SKIP test_pathtest_lab (PANEL_BIN not set)"; exit 0; }
+LIC=${PT_LICENSE:-}
+[[ -n $LIC && -f $LIC ]] || { echo "SKIP test_pathtest_lab (PT_LICENSE not set)"; exit 0; }
 [[ -x $BIN && -x $FRP_DIR/frps && -x $FRP_DIR/frpc ]] || { echo "SKIP test_pathtest_lab (cores missing)"; exit 0; }
 for c in ip iptables ping python3 timeout; do
     command -v "$c" >/dev/null 2>&1 || { echo "SKIP test_pathtest_lab ($c missing)"; exit 0; }
@@ -38,6 +44,8 @@ cleanup() {
     ip netns pids "$HUB" 2>/dev/null | xargs -r kill -9 2>/dev/null
     ip netns pids "$SPOKE" 2>/dev/null | xargs -r kill -9 2>/dev/null
     ip netns del "$HUB" 2>/dev/null; ip netns del "$SPOKE" 2>/dev/null
+    # the panel copies a valid key to /etc/hashem; take the lab's key back out
+    cmp -s /etc/hashem/license.key "$LIC" 2>/dev/null && rm -f /etc/hashem/license.key
     rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -70,11 +78,11 @@ check() { if [[ "$2" != "$3" ]]; then echo "FAIL: $1 (want [$2] got [$3])"; fail
 run_test() {
     : > "$TMP/hub.out"
     local port=(-port "$1"); [[ $1 == auto ]] && port=()
-    $H "$PANEL" pathtest serve "${port[@]}" -ip 192.0.2.1 -foreign 192.0.2.2 -ssh 2222 -minutes 3 > "$TMP/hub.out" 2>&1 &
+    $H env GRE_PANEL_DIR="$TMP/cfg-hub" "$PANEL" pathtest serve "${port[@]}" -ip 192.0.2.1 -foreign 192.0.2.2 -ssh 2222 -minutes 3 > "$TMP/hub.out" 2>&1 &
     local hp=$! i code=""
     for i in $(seq 1 50); do code=$(awk '/^CODE /{print $2}' "$TMP/hub.out"); [[ -n $code ]] && break; sleep 0.2; done
     [[ -n $code ]] || { echo "FAIL: no code from serve"; cat "$TMP/hub.out"; fail=1; kill $hp; return; }
-    $S "$PANEL" pathtest join "$code" > "$TMP/spoke.out" 2>&1 &
+    $S env GRE_PANEL_DIR="$TMP/cfg-spoke" "$PANEL" pathtest join "$code" > "$TMP/spoke.out" 2>&1 &
     local sp=$!
     for i in $(seq 1 150); do kill -0 $hp 2>/dev/null || break; sleep 1; done
     kill $hp 2>/dev/null; wait $hp 2>/dev/null
@@ -87,6 +95,14 @@ run_test() {
 # status_of FILE ID -> status ; field FILE ID KEY -> value
 status_of() { python3 -c 'import json,sys; d={c["id"]:c for c in json.load(open(sys.argv[1]))}; print(d.get(sys.argv[2],{}).get("status","missing"))' "$1" "$2" 2>/dev/null || echo none; }
 has_num()   { python3 -c 'import json,sys; d={c["id"]:c for c in json.load(open(sys.argv[1]))}; print("yes" if d.get(sys.argv[2],{}).get(sys.argv[3],0)>0 else "no")' "$1" "$2" "$3" 2>/dev/null || echo none; }
+
+# ---- 0. no license: the command refuses, before it opens anything ----
+mkdir -p "$TMP/cfg-none" "$TMP/cfg-hub" "$TMP/cfg-spoke"
+$H env GRE_PANEL_DIR="$TMP/cfg-none" "$PANEL" pathtest serve -ip 192.0.2.1 -minutes 1 > "$TMP/nolic.out" 2>&1; rc=$?
+check "no license: serve refuses" 1 "$rc"
+check "no license: says it is Hashem Pro" yes "$(grep -q 'Hashem Pro feature' "$TMP/nolic.out" && echo yes)"
+check "no license: nothing listening" "" "$($H ss -Htln 'sport = :41000' 2>/dev/null)"
+cp "$LIC" "$TMP/cfg-hub/license.key"; cp "$LIC" "$TMP/cfg-spoke/license.key"
 
 ALL="tcp udp gre ssh frp-tcp frp-websocket frp-wss frp-kcp frp-quic bh-tcp bh-tcpmux bh-ws bh-wss bh-wsmux bh-wssmux bh-udp"
 

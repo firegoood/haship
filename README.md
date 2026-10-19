@@ -230,10 +230,10 @@ The panel is one page with these tabs:
 - **Dashboard** — a banner with one big word (Healthy / Degraded / Down) and one line per tunnel; KPIs; the Fleet Health card with hub latency, the topology graph and per-server cards.
 - **Tunnel** — every tunnel on this server: the main tunnel, the foreign-server peer cards and the Bagher card (start, stop, copy bundle, quick edit, remove); per-tunnel PASS/FAIL checks, the dial-route card.
 - **Performance** — Auto Pool, encryption / compression, and TCP multiplexing.
-- **Diagnostics** — latency, jitter, MTU and speed tests; the same engine as `hashem doctor`.
+- **Diagnostics** [PRO] — latency, jitter, MTU and speed tests; the same engine as `hashem doctor`.
 - **Setup** — create any tunnel: GRE + FRP, Backhaul (with or without GRE) or Bagher; bundles and peers.
 - **Watchdog** — monitoring, backups and alerts.
-- **Benchmark** — the Path Test (which transports get through between the two servers, before any tunnel: plain TCP/UDP, GRE, SSH, FRP x 5, Backhaul x 7, with latency and speed), carrier probing and the optional auto-pilot.
+- **Benchmark** — the Path Test [PRO] (which transports get through between the two servers, before any tunnel: plain TCP/UDP, GRE, SSH, FRP x 5, Backhaul x 7, with latency and speed), carrier probing and the optional auto-pilot.
 - **Update** — channels, install any tag, rollback state.
 - **Logs, Settings, Terminal** — redacted logs with error codes; password, 2FA, idle timeout, alerts, TLS, metrics token; the audited shell (off by default).
 
@@ -244,9 +244,11 @@ The panel is one page with these tabs:
 ## Tunnel types
 
 - **GRE+FRP** (`frp`) — a GRE Layer-3 link between the two servers with FRP running over it. FRP transports: `tcp`, `kcp`, `quic`, `websocket`, `wss`. `wss` needs a TLS front: a `frps-wss*.service` unit running `gre-panel tls-proxy` on `control_port+2`. Guide: [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md).
-- **Backhaul with GRE** (`gre-backhaul`) — the same GRE link, with Backhaul as the relay. Bundle prefix `gh1_`.
-- **Backhaul without GRE** (`backhaul`) — Backhaul only, no GRE interface at all. Bundle prefix `bh1_`.
+- **Backhaul with GRE** (`gre-backhaul`) [PRO] — the same GRE link, with Backhaul as the relay. Bundle prefix `gh1_`.
+- **Backhaul without GRE** (`backhaul`) [PRO] — Backhaul only, no GRE interface at all. Bundle prefix `bh1_`.
 - **Bagher** [PRO] — an SSH connection pool from Iran to the foreign server carrying FRP. Bundle prefix `BAGHER:`.
+
+**Hashem Pro** features: Bagher, setting up Backhaul (with or without GRE), the Path Test and Diagnostics. Every Pro license unlocks all of them, including features that became Pro after the key was issued, so an update never asks for a new key. Pro is checked on both servers. A Backhaul tunnel that already runs keeps running, restarting and being repaired without a license; only setting up a new one needs it. GRE + FRP stays free.
 - **Carriers for the GRE layer** — **Direct GRE** (IP protocol 47) and **WSS** (TLS WebSocket, default `:8443`). The FOU carrier was removed.
 
 ---

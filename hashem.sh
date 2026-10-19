@@ -3351,6 +3351,7 @@ EOF
 }
 
 setup_backhaul_iran_server_noninteractive() {
+    pro_ok backhaul Backhaul || return 1
     local IP_IRAN=$1 IP_FOREIGN=$2 BIND_PORT=$3 TOKEN=$4 TRANSPORT=${5:-tcpmux} PORTS=${6:-}
     backhaul_setup_guard "$TRANSPORT" "$PORTS" || return 1
     PORTS=$BH_PORTS_NORM
@@ -3443,6 +3444,7 @@ setup_backhaul_iran_server_noninteractive() {
 }
 
 setup_backhaul_foreign_server_noninteractive() {
+    pro_ok backhaul Backhaul || return 1
     local IP_FOREIGN=$1 IP_IRAN=$2 SERVER_PORT=$3 TOKEN=$4 TRANSPORT=${5:-tcpmux}
     backhaul_setup_guard "$TRANSPORT" || return 1
 
@@ -3536,6 +3538,7 @@ setup_backhaul_foreign_server_noninteractive() {
 }
 
 setup_gre_backhaul_iran_server_noninteractive() {
+    pro_ok backhaul Backhaul || return 1
     local IP_IRAN=$1 IP_FOREIGN=$2 BIND_PORT=$3 TOKEN=$4
     local LOCAL_GRE=${5:-$IRAN_GRE_IP} PEER_GRE=${6:-$FOREIGN_GRE_IP}
     local TRANSPORT=${7:-tcpmux} PORTS=${8:-}
@@ -3651,6 +3654,7 @@ setup_gre_backhaul_iran_server_noninteractive() {
 }
 
 setup_gre_backhaul_foreign_server_noninteractive() {
+    pro_ok backhaul Backhaul || return 1
     local IP_FOREIGN=$1 IP_IRAN=$2 SERVER_PORT=$3 TOKEN=$4
     local LOCAL_GRE=${5:-$FOREIGN_GRE_IP} PEER_GRE=${6:-$IRAN_GRE_IP}
     local TRANSPORT=${7:-tcpmux}
@@ -4115,6 +4119,7 @@ cli_remove_peer() {
 }
 
 cli_add_backhaul_peer() {
+    pro_ok backhaul Backhaul || return 1
     local NAME="" LOCAL_PUB="" REMOTE_PUB="" PORT="" TOKEN="" LOCAL_GRE="" PEER_GRE="" PORTS="" TRANSPORT="" NO_GRE=0 FORCE=0 BUNDLE=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -8219,8 +8224,8 @@ menu_backhaul() {
         echo -e "${CYAN}=== BACKHAUL TUNNEL ===${NC}"
         backhaul_status
         echo ""
-        echo "  1) Setup Iran server (asks whether to use GRE)"
-        echo "  2) Setup foreign server from a bundle (bh1_ / gh1_)"
+        echo "  1) Setup Iran server [PRO] (asks whether to use GRE)"
+        echo "  2) Setup foreign server from a bundle (bh1_ / gh1_) [PRO]"
         echo "  3) Show the bundle for the foreign server"
         echo "  4) Show Backhaul logs"
         echo "  5) Restart Backhaul services"
@@ -8260,6 +8265,7 @@ menu_backhaul() {
 # without GRE it dials the public IP and no GRE interface is made.
 # $1 = yes / no skips the question.
 setup_backhaul_iran_interactive() {
+    pro_ok backhaul Backhaul || return 1
     local use_gre="${1:-}" MYIP REMOTE_PUB PORT TOKEN TRANSPORT PORTS __in
     if [[ -z "$use_gre" ]]; then
         echo "Run Backhaul over a GRE tunnel?"
@@ -8353,7 +8359,7 @@ menu_tunnel() {
             1)
                 echo "Select the tunnel engine for Iran:"
                 echo "  1) GRE + FRP (recommended)"
-                echo "  2) Backhaul (with or without GRE)"
+                echo "  2) Backhaul [PRO] (with or without GRE)"
                 echo "  3) Bagher [PRO]"
                 echo "  4) Backhaul menu (status, logs, bundle, old tunnels)"
                 echo "  0) Cancel"
@@ -9764,6 +9770,16 @@ EOF
 }
 
 cli_sshfwd() { cli_bagher "$@"; }
+
+# pro_ok FEATURE NAME: Hashem Pro check through the panel binary, the same key
+# and rules as the panel (a Bagher key unlocks every Pro feature). Only new
+# setups ask; running tunnels, status, logs and restarts never do.
+pro_ok() {
+    local bin="${PANEL_BIN:-/usr/local/bin/gre-panel}"
+    [[ -x "$bin" ]] && "$bin" license check "$1" >/dev/null 2>&1 && return 0
+    echo -e "${RED}[!] $2 is a Hashem Pro feature. Activate the license first: hashem license activate <KEY>${NC}"
+    return 1
+}
 
 cli_license() {
     local SUB="${1:-status}"

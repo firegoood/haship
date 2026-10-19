@@ -396,6 +396,9 @@ func handlePeerApplyEngine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if backhaulLocked(engine) && proRequired(w, r, proBackhaul, "Backhaul") {
+		return
+	}
 	log.Printf("[PeerSync] Received remote engine apply command: %s (%s)", engine, req.Transport)
 	out, err := switchTunnelEngine(engine, req.Transport)
 	if err != nil {

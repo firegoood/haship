@@ -9,6 +9,7 @@ import (
 )
 
 func TestDoctorEndpoints(t *testing.T) {
+	withPro(t)
 	prev := applyFixesFn
 	applyFixesFn = func() map[string]any { return map[string]any{"applied": []string{}} }
 	defer func() { applyFixesFn = prev }()
