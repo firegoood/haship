@@ -115,7 +115,13 @@ func isV4(s string) bool {
 
 // peerPortClash reports "PORT (peer NAME)" for the first requested port that
 // another registered tunnel already serves. excludeID skips one peer (<0 = none).
+// A port a cluster pool covers may be served by several tunnels: that is what
+// the pool is for.
 func peerPortClash(want []int, excludeID int) string {
+	pooled := map[int]bool{}
+	for _, p := range loadClusterConfig().Pools {
+		pooled[p.Port] = true
+	}
 	claimed := map[int]string{}
 	for _, p := range loadPeers() {
 		if p.ID == excludeID {
@@ -126,6 +132,9 @@ func peerPortClash(want []int, excludeID int) string {
 		}
 	}
 	for _, port := range want {
+		if pooled[port] {
+			continue
+		}
 		if name, ok := claimed[port]; ok {
 			return fmt.Sprintf("%d (peer %s)", port, name)
 		}

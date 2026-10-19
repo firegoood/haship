@@ -3,9 +3,19 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
-## Unreleased
+## v2.5.0 — 2026-10-19
+
+The cluster (several foreign servers behind one Iran port, several Iran hubs, DNS failover) with a live, clickable map; a path test before any tunnel; every tunnel engine in Setup; `hashem` as a terminal app. Update every server: the cluster needs the same version on all of them.
+
+**Upgrade notes**
+- `cluster.json` from the first cluster is upgraded by itself: the hub id and linked hubs stay, the old foreign-server list goes (it sent users outside the tunnel). Make pools instead: add the first foreign server, New Pool on its port, then add the others with the same port.
+- Tunnels from the old `hashem-backhaul.sh` ("Modified Backhaul") move into Hashem by themselves at the first panel start.
+- Performance, Watchdog, Benchmark, the Path Test, Backhaul setup and Diagnostics are Hashem Pro. Every existing Pro key opens them; settings and tunnels that already run keep running without a license.
+- Bagher has no tab of its own any more: it is an engine in Setup and a card in Tunnel.
 
 ### Cluster: any scenario, and the guide
+- **A second foreign server on a pooled port can be added from Setup.** The panel's port check refused it (only the script knew about pools), so the main way to grow a pool failed in the panel.
+- **[How it works, and a hands-on tutorial](docs/CLUSTER_TUTORIAL.md)** ([فارسی](docs/CLUSTER_TUTORIAL.fa.md)): what happens to a connection and to a failure, then ten lessons from the first pool to DNS failover, breaking things on purpose.
 - **Cluster map.** The Cluster tab opens on a live picture of the cluster: users, DNS and the linked Iran hubs, this hub with its pools, the foreign servers. Lines are as thick as the share of new connections they carry and colored by health (moving dashes show traffic). Click any box or line: an inspector edits it in place (pool mode with one click, port, protocol, service check, failback, enable, delete; a member's weight slider, priority, port, connection limit, standby, drain, remove; hub settings and health check; DNS; unlink a hub; join or leave a hub on a foreign server). Polls never wipe what is being typed; List keeps the tables. Phones get a pannable map centered on the hub, with the inspector below.
 - **Service check.** A pool can connect through each foreign server to the service behind it (xray, sing-box, SSH…) every 1-60 seconds. A server whose tunnel is up but whose service refuses or drops the connection is taken out (Fall/Rise apply), with the reason in the tab and an event.
 - **Standby members and connection limits.** A standby member gets traffic only when no other member is healthy and has room, in every mode. A member at its connection limit takes no new connections until it drops below 90% of it; the overflow goes to the others, then to standby members, and when every member is full the pool still serves.

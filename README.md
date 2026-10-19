@@ -26,6 +26,7 @@
 
 ## Table of contents
 
+- [What's new in v2.5.0](#whats-new-in-v250)
 - [What is Hashem?](#what-is-hashem)
 - [Why Hashem?](#why-hashem)
 - [Features](#features)
@@ -47,6 +48,21 @@
 - [Security notes](#security-notes)
 - [Contributing](#contributing)
 - [License](#license)
+
+---
+
+## What's new in v2.5.0
+
+- 🕸️ **Cluster: no single point of failure.** One Iran port served by several foreign servers (failover, balance, sticky per user, lowest latency, least connections), a one-second health check plus a **service check through the tunnel** (catches a dead xray behind a live tunnel), standby servers and connection limits, drain for maintenance, manual failback. Several Iran servers can share the same foreign servers, Iran hubs back each other up, and DNS failover (Cloudflare or any provider by webhook) keeps a domain on the working hubs. Everything runs in the kernel: no speed loss, the real client IP is kept, and a panel restart drops nothing.
+- 🗺️ **Cluster map.** A live picture of the whole cluster. Line thickness is each server's share of traffic and color is its health. Click any server, pool, line, hub or DNS to change it in place.
+- 🧪 **Path test before any tunnel.** Benchmark tab: every transport between your two servers (TCP/UDP, GRE, SSH, FRP x 5, Backhaul x 7) with latency and speed, so you know what gets through before you build anything.
+- 🧩 **Every tunnel in Setup.** GRE + FRP, Backhaul (with or without GRE, now one engine with UDP support) and Bagher, all from the same Setup and Tunnel tabs. Old "Modified Backhaul" tunnels move in by themselves.
+- 🔁 **Back to GRE by itself.** A foreign server that fell back to the hub's public IP returns to GRE once GRE carries the tunnel again.
+- 💻 **`hashem` is a terminal app** with arrow-key menus that follow the panel tabs; everything the panel does works from SSH too (TLS, settings, cluster, performance).
+- ⚙️ **FRP options where they apply:** PROXY protocol (v1/v2), bandwidth limit per port, health check, TCP multiplexing; Backhaul connection pool. Let's Encrypt in Settings fixed.
+- 🔐 **Hashem Pro** now covers Cluster, Path Test, Backhaul setup, Diagnostics, Performance, Watchdog and Benchmark. Every existing Pro key opens all of them, and running tunnels are never taken away.
+
+Full list: [CHANGELOG](CHANGELOG.md). Cluster: [guide](docs/CLUSTER.md) · [how it works and tutorial](docs/CLUSTER_TUTORIAL.md).
 
 ---
 
@@ -83,7 +99,9 @@ If you need one relay on one server pair and are happy editing TOML, plain frp o
 ## Features
 
 - 🚀 **One-line install** — prebuilt standalone Go binary from official GitHub releases.
-- 🧩 **Three tunnel engines** — `GRE+FRP`, `GRE+Backhaul`, and `Backhaul` standalone (no GRE). See [Choosing an engine](#choosing-an-engine).
+- 🧩 **Three tunnel engines** — `GRE + FRP`, `Backhaul` (with or without GRE, TCP and UDP) and `Bagher` (SSH pool + FRP), all from the Setup tab. See [Choosing an engine](#choosing-an-engine).
+- 🕸️ **Cluster** [PRO] — pools of foreign servers behind one Iran port (failover, balance, sticky, latency, least connections), service check through the tunnel, standby servers, connection limits, several Iran hubs, hub-to-hub forwarding and DNS failover, on an interactive map. See [Cluster](#cluster).
+- 🧪 **Path test** [PRO] — which transports get through between two servers, before any tunnel exists.
 - 🛰️ **Two GRE carriers** — Direct GRE (IP protocol 47) and WSS (TLS WebSocket, port `8443` by default).
 - 🔌 **FRP transports** — `tcp`, `kcp`, `quic`, `websocket`, `wss`, with payload encryption, compression and PROXY Protocol v2. See the [FRP Transports Guide](docs/FRP_TUNNELS_GUIDE.md).
 - 📦 **Setup bundles** — one string carries keys, IPs, transport and ports: `hsh1_…` (FRP), `bh1_…` (Backhaul), `gh1_…` (GRE+Backhaul). Paste it on the foreign server and the form fills itself.
@@ -94,6 +112,7 @@ If you need one relay on one server pair and are happy editing TOML, plain frp o
 - 🐕 **Watchdog** — runs every minute from a systemd timer; optional Telegram alerts.
 - 🔄 **Safe updates** — stable / dev channels, install any of the last 20 releases (upgrade or downgrade), SHA-256 verification, config backup, automatic rollback.
 - 🎯 **Carrier benchmark** and **diagnostics** (`hashem doctor`).
+- 🖥️ **Terminal app** — `hashem` opens arrow-key menus that mirror the panel tabs.
 - 💻 **In-browser terminal** — disabled by default, audited.
 - ⚙️ **Auto Pool** — frpc `poolCount` / frps `maxPoolCount` sized automatically from pool-full errors, load and RAM (on by default).
 - 🔔 **External alerts** — webhook and/or Telegram message only when a tunnel changes state (with a per-link minimum gap), plus host alerts for disk, RAM and panel TLS-certificate expiry. Set up in Settings.
@@ -234,7 +253,7 @@ The panel is one page with these tabs:
 - **Diagnostics** [PRO] — latency, jitter, MTU and speed tests; the same engine as `hashem doctor`.
 - **Setup** — create any tunnel: GRE + FRP, Backhaul (with or without GRE) or Bagher; bundles and peers.
 - **Watchdog** [PRO] — monitoring, backups and alerts.
-- **Cluster** [PRO] — pools (one Iran port served by several foreign servers: failover, balance, sticky per user or lowest latency, one-second health check), linked Iran hubs that take over each other's ports, DNS failover on Cloudflare, and on a foreign server, serving several Iran hubs. See [Cluster](#cluster).
+- **Cluster** [PRO] — opens on a live map of the cluster; click anything to change it. Pools (one Iran port served by several foreign servers: failover, balance, sticky per user, lowest latency or least connections; one-second health check, service check, standby servers, connection limits, drain, manual failback), linked Iran hubs that take over each other's ports, DNS failover (Cloudflare or webhook), and on a foreign server, serving several Iran hubs. See [Cluster](#cluster).
 - **Benchmark** [PRO] — the Path Test (which transports get through between the two servers, before any tunnel: plain TCP/UDP, GRE, SSH, FRP x 5, Backhaul x 7, with latency and speed), carrier probing and the optional auto-pilot.
 - **Update** — channels, install any tag, rollback state.
 - **Logs, Settings, Terminal** — redacted logs with error codes; password, 2FA, idle timeout, alerts, TLS, metrics token; the audited shell (off by default).
@@ -259,13 +278,18 @@ The panel is one page with these tabs:
 
 Three ways to keep users up when a server dies; they combine.
 
-- **One Iran server, several foreign servers (pool).** Add each foreign server in Setup with the same port, then make a pool on that port. Each new connection goes to a foreign server that works, chosen by the pool's mode. A failed server is out within about three seconds.
+- **One Iran server, several foreign servers (pool).** Add the first foreign server in Setup, make a pool on its port, then add the other foreign servers in Setup with the same port: they join the pool by themselves. Each new connection goes to a foreign server that works, chosen by the pool's mode. A failed server is out within about three seconds.
 - **Several Iran servers, one foreign server.** On the second Iran server add the foreign server as a peer; on the foreign server run `hashem join-hub --bundle <its bundle>` (or Cluster in its panel). The foreign server then serves both, so either Iran server works on its own.
 - **Iran servers backing each other up.** Link the hubs with a join code. A pool with no working foreign server is forwarded to a hub where it works; with DNS failover, a domain points only at hubs that work.
 
 The relays of pool members listen on `169.254.77.N` (interface `hashem-lb`); kernel DNAT in the `HASHEM-LB` chains picks the member, so the real client IP is kept and nothing stops when the panel restarts. `hashem cluster rules` prints the rules.
 
-Pool modes: failover, balance, sticky per user, lowest latency and least connections, with standby members, connection limits, a service check through the tunnel, drain and manual failback. **Every scenario step by step: [Cluster guide](docs/CLUSTER.md)** ([فارسی](docs/CLUSTER.fa.md)).
+Pool modes: failover, balance, sticky per user, lowest latency and least connections, with standby members, connection limits, a service check through the tunnel, drain and manual failback. The Cluster tab shows it all on a live map where every part can be clicked and changed.
+
+![Cluster map](docs/img/cluster-map.png)
+
+- **[How it works, and a hands-on tutorial](docs/CLUSTER_TUTORIAL.md)** ([فارسی](docs/CLUSTER_TUTORIAL.fa.md)): build a cluster lesson by lesson, break it on purpose and watch it recover.
+- **[Cluster guide](docs/CLUSTER.md)** ([فارسی](docs/CLUSTER.fa.md)): every scenario, setting, command, the API and troubleshooting.
 
 ---
 
@@ -327,7 +351,11 @@ hashem password <p>   # set the panel password non-interactively
 hashem tls issue <domain> [email]   # HTTPS for the panel (Let's Encrypt; also: status, renew, remove, ip, custom)
 hashem settings show  # panel settings; also: 2fa off, terminal on|off, idle N
 hashem license activate <key>
-hashem cluster status | pool add 443 --mode sticky | member drain 443 2 | join-code | add-hub <code>
+hashem cluster status | events | rules              # the cluster (Pro to change it)
+hashem cluster pool add 443,8443 --mode least --check tcp
+hashem cluster pool set 443 --no-failback yes | pool failback 443
+hashem cluster member set 443 2 --weight 2 --max-conn 500 --backup no | member drain 443 2
+hashem cluster join-code | add-hub <code>          # link two Iran hubs
 hashem join-hub --bundle <bundle>   # foreign side: also serve another Iran hub (hubs, leave-hub --id N)
 hashem logs           # relay logs
 hashem optimize       # BBR / MTU / sysctl tuning
@@ -406,7 +434,7 @@ Ideas and bug reports are welcome — see [Contributing](#contributing).
 ## Documentation map
 
 - **Start here** — [Quick install](#quick-install) · [Choosing an engine](docs/ENGINES.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
-- **Guides** — [Cluster guide](docs/CLUSTER.md) ([فارسی](docs/CLUSTER.fa.md)) · [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md) (Persian + English) · [Secure deployment](docs/DEPLOYMENT.md)
+- **Guides** — [Cluster: how it works and tutorial](docs/CLUSTER_TUTORIAL.md) ([فارسی](docs/CLUSTER_TUTORIAL.fa.md)) · [Cluster guide](docs/CLUSTER.md) ([فارسی](docs/CLUSTER.fa.md)) · [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md) (Persian + English) · [Secure deployment](docs/DEPLOYMENT.md)
 - **Reference** — [HTTP API](docs/API.md) · [Error codes](docs/ERROR_CODES.md) · [CHANGELOG](CHANGELOG.md) · [Architecture (interactive)](docs/hashem-architecture.html)
 - **Project** — [CONTRIBUTING](CONTRIBUTING.md) · [Development guide](docs/dev/DEVELOPMENT.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [SECURITY](SECURITY.md)
 - **Audits and plans** — [docs/audit/](docs/audit/) · [r24 improvement plan](docs/PLAN_IMPROVEMENTS_R24.md)

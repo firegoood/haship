@@ -78,7 +78,7 @@ What a pool gives you:
 
 - **License:** Hashem Pro on every server that runs a pool, links hubs or joins extra hubs. Pools that already run keep running if a license expires, but nothing can be changed until it is renewed.
 - **Same version** of Hashem on every server of the cluster.
-- **Foreign servers added on the hub** in Setup (or with `hashem add-peer` / `hashem add-backhaul-peer`), with the port the pool will serve (for example 443) in their port list. Two peers may share a port once a pool covers it.
+- **Foreign servers added on the hub** in Setup (or with `hashem add-peer` / `hashem add-backhaul-peer`), with the port the pool will serve (for example 443) in their port list. **Order matters:** add the first foreign server, make the pool on its port, then add the others with the same port. A port without a pool belongs to one tunnel, so a second tunnel on it is refused until the pool exists.
 - **For linked hubs:** each hub's panel port (the plain HTTP one, also when HTTPS is on: the heartbeat is signed, not secret) must be reachable from the other hub, and both clocks must be right (within 90 seconds). Enable NTP: `timedatectl set-ntp true`. A panel reachable only through a reverse proxy cannot be linked.
 - **For DNS failover:** a Cloudflare API token with *Zone → DNS → Edit*, and a DNS-only (grey cloud) record; or your own webhook.
 - **For the service check:** a TCP service behind the tunnel (xray, sing-box, SSH, a web server…).
@@ -95,9 +95,10 @@ Every step can be done in the panel (**Cluster** tab), in the terminal menu (`ha
 
 Goal: everything goes through foreign server A. If A dies, B takes over within seconds.
 
-1. On the hub, add A and B as foreign servers in **Setup**, both with port 443.
-2. **Cluster → New Pool** → port `443`, protocol TCP (or TCP and UDP), mode **Failover**. A and B are already ticked because they carry port 443. Give A priority `0` and B priority `1`.
-3. Save. Both relays restart once, then the pool shows **Healthy**, with 100% on A.
+1. On the hub, add A as a foreign server in **Setup** with port 443 (or use the main tunnel).
+2. **Cluster → New Pool** → port `443`, protocol TCP (or TCP and UDP), mode **Failover**. A is already ticked because it carries port 443. Save: A's relay restarts once to move behind the pool.
+3. Add B in **Setup**, also with port 443. A port without a pool belongs to one tunnel only, so B is accepted only now that the pool covers 443. B joins the pool by itself, already behind it.
+4. Give A priority `0` and B priority `1` (click B's line on the map, or Edit). The pool shows **Healthy**, with 100% on A.
 
 ```bash
 hashem cluster pool add 443 --mode failover        # picks every tunnel that has port 443

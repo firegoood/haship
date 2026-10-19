@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -386,5 +387,27 @@ func TestClusterDisabledPoolPassesThrough(t *testing.T) {
 	}
 	if strings.Contains(r, "HLB-T443") || !strings.Contains(r, "--dport 443 -j DNAT --to-destination 169.254.77.2\n") {
 		t.Fatalf("disabled pool must pass through to link 1:\n%s", r)
+	}
+}
+
+// A second tunnel may take a port a pool covers (Setup and Edit Peer use the
+// same check); a port with no pool stays one tunnel's.
+func TestPeerPortClashAllowsPooledPorts(t *testing.T) {
+	newClusterFixture(t, true)
+	peers := `{"peers": [{"id": 1, "name": "de", "ports": [443, 2083]}]}`
+	if err := os.WriteFile(peersFile(), []byte(peers), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c := peerPortClash([]int{443}, -1); c != "443 (peer de)" {
+		t.Fatalf("no pool yet: %q", c)
+	}
+	c := defaultClusterConfig()
+	c.Pools = []LBPool{{Port: 443, Proto: "tcp", Mode: lbFailover, Members: []LBMember{{Link: 1, Weight: 1}}}}
+	_ = saveClusterConfig(c)
+	if c := peerPortClash([]int{443}, -1); c != "" {
+		t.Fatalf("pooled port refused: %q", c)
+	}
+	if c := peerPortClash([]int{443, 2083}, -1); c != "2083 (peer de)" {
+		t.Fatalf("a port with no pool must still clash: %q", c)
 	}
 }

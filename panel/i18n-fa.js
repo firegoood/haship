@@ -2451,7 +2451,7 @@ window.FA_TEXT = {
 "DNS failover": "جابه‌جایی DNS",
 "The kernel rules could not be applied:": "قوانین کرنل اعمال نشد:",
 "No Hashem Pro license: pools that run keep running, but nothing can be changed.": "لایسنس Hashem Pro ندارید: استخرهایی که کار می‌کنند ادامه می‌دهند، اما چیزی قابل تغییر نیست.",
-"No pools yet. Add the foreign servers in Setup with the same port (for example 443), then press New Pool.": "هنوز استخری نیست. سرورهای خارج را در راه‌اندازی با پورت یکسان (مثلاً 443) اضافه کنید و بعد «استخر جدید» را بزنید.",
+"No pools yet. Add a foreign server in Setup, press New Pool on its port (for example 443), then add more foreign servers in Setup with the same port: they join the pool by themselves.": "هنوز استخری نیست. یک سرور خارج را در راه‌اندازی اضافه کنید، روی پورتش (مثلاً 443) استخر جدید بسازید، بعد سرورهای خارجِ دیگر را با همان پورت در راه‌اندازی اضافه کنید: خودشان به استخر می‌پیوندند.",
 "Draining": "در حال تخلیه",
 "Not serving this port": "این پورت را سرویس نمی‌دهد",
 "Peer id now another server": "شناسه‌ی همتا حالا مال سرور دیگری است",

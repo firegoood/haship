@@ -7923,7 +7923,7 @@ function renderClusterUI(d) {
 function clRenderPools(pools, links) {
   const box = $('clPools');
   if (!pools.length) {
-    box.innerHTML = `<div class="ent-empty">${esc(tr('', 'No pools yet. Add the foreign servers in Setup with the same port (for example 443), then press New Pool.'))}</div>`;
+    box.innerHTML = `<div class="ent-empty">${esc(tr('', 'No pools yet. Add a foreign server in Setup, press New Pool on its port (for example 443), then add more foreign servers in Setup with the same port: they join the pool by themselves.'))}</div>`;
     return;
   }
   box.innerHTML = pools.map(p => clPoolCard(p, links)).join('');
