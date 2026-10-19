@@ -1165,7 +1165,8 @@ carrier_apply() {
     else
         local dev
         for dev in $(ip -o link show type gre 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1); do
-            [[ "$dev" == "gre0" || "$dev" == "gretap0" ]] && continue
+            # hpt0: the panel's path test, never a tunnel (keyed GRE, removed after the test)
+            [[ "$dev" == "gre0" || "$dev" == "gretap0" || "$dev" == hpt* ]] && continue
             IFS_TO_APPLY+=("$dev")
         done
         if [[ ${#IFS_TO_APPLY[@]} -eq 0 ]]; then
@@ -4738,7 +4739,7 @@ doctor_diagnostics() {
         TARGET_IP="$IRAN_GRE_IP"
     else
         local IFACE
-        IFACE=$(ip -o link show type gre 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | head -n1)
+        IFACE=$(ip -o link show type gre 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -v '^hpt' | head -n1)
         if [[ -n "$IFACE" ]]; then
             LOCAL_IP=$(ip -o -4 addr show dev "$IFACE" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)
             if [[ "$LOCAL_IP" =~ \.1$ ]]; then

@@ -2578,7 +2578,7 @@
           <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
             <div>
               <span class="tc-title u-fs-18 u-fw-700" data-i18n="pt_title">Path Test Before Any Tunnel</span>
-              <div class="qs-hint u-mt-4" data-i18n="pt_sub">Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed.</div>
+              <div class="qs-hint u-mt-4" data-i18n="pt_sub">Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed. Safe next to a running tunnel: the test uses its own free ports and its own GRE interface and never touches the tunnel.</div>
             </div>
             <span class="badge dim" id="ptBadge" data-i18n="pt_idle">Not running</span>
           </div>
@@ -2596,7 +2596,7 @@
                 <div class="qs-row u-mt-8">
                   <div>
                     <label class="qs-label" for="ptBase" data-i18n="pt_base_lbl">First port</label>
-                    <input class="hashem-input u-mono" id="ptBase" type="number" min="1024" max="65504" value="41000">
+                    <input class="hashem-input u-mono" id="ptBase" type="number" min="1024" max="65504" data-i18n-ph="pt_ip_ph" placeholder="Auto">
                   </div>
                   <div>
                     <label class="qs-label" for="ptMinutes" data-i18n="pt_min_lbl">Minutes</label>
@@ -2611,7 +2611,7 @@
                     <input class="hashem-input u-ltr u-mono" id="ptIranIp" data-i18n-ph="pt_ip_ph" placeholder="Auto" inputmode="decimal" autocomplete="off">
                   </div>
                 </div>
-                <div class="qs-hint u-mt-4" data-i18n="pt_base_hint">The test listens on the first port and the next 10 (TCP and UDP). Pick ports your real tunnel would use if you want to test those.</div>
+                <div class="qs-hint u-mt-4" data-i18n="pt_base_hint">Empty: the first free ports from 41000 are used, never the ports of a running tunnel. The test listens on the first port and the next 10 (TCP and UDP); enter a port to test that one.</div>
               </details>
               <div class="qs-actions u-mt-12">
                 <button type="button" class="hashem-btn hashem-btn-primary" id="ptStartBtn" data-i18n="pt_start">Start Test</button>

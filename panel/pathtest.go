@@ -518,7 +518,8 @@ func (s *ptSession) ptUfwOpen() {
 	}
 	rng := fmt.Sprintf("%d:%d", s.base, s.base+ptOffBH+len(ptBHTransports)-1)
 	for _, r := range []string{rng + "/tcp", rng + "/udp"} {
-		if _, err := runCmdTimeout(10*time.Second, "ufw", "allow", r); err == nil {
+		// "Skipping adding existing rule": it was there before, so it stays after.
+		if out, err := runCmdTimeout(10*time.Second, "ufw", "allow", r); err == nil && !strings.Contains(string(out), "Skipping") {
 			s.ufw = append(s.ufw, r)
 		}
 	}
@@ -689,11 +690,42 @@ func ptNewSession(role string, base, minutes int) *ptSession {
 		ctx: ctx, cancel: cancel, done: make(chan struct{})}
 }
 
-func ptStartHub(req ptHubRequest) (*ptSession, error) {
-	if req.BasePort == 0 {
-		req.BasePort = ptDefBase
+// ptHubPortsFree checks every port a hub on first port b binds.
+func ptHubPortsFree(b int) error {
+	ports := []int{}
+	for p := b; p <= b+ptOffBH+len(ptBHTransports)-1; p++ {
+		ports = append(ports, p)
 	}
-	if req.BasePort < 1024 || req.BasePort > 65535-ptSpan {
+	if err := ptPortsFree("", ports...); err != nil {
+		return err
+	}
+	fwd := []int{}
+	for p := b + ptOffFwd; p <= b+ptSpan; p++ {
+		fwd = append(fwd, p)
+	}
+	return ptPortsFree("127.0.0.1", fwd...)
+}
+
+// ptPickBase returns the first port block to use. A port the admin chose must
+// be free; with none chosen the first free block from 41000 is taken, so a test
+// next to a running tunnel never touches the tunnel's ports.
+func ptPickBase(want int) (int, error) {
+	if want != 0 {
+		if err := ptHubPortsFree(want); err != nil {
+			return 0, fmt.Errorf("%v (a running tunnel or another service uses it); leave the first port empty to pick free ports automatically", err)
+		}
+		return want, nil
+	}
+	for b := ptDefBase; b <= 65535-ptSpan; b += ptSpan + 9 {
+		if ptHubPortsFree(b) == nil {
+			return b, nil
+		}
+	}
+	return 0, fmt.Errorf("no free block of %d ports found from %d", ptSpan+1, ptDefBase)
+}
+
+func ptStartHub(req ptHubRequest) (*ptSession, error) {
+	if req.BasePort != 0 && (req.BasePort < 1024 || req.BasePort > 65535-ptSpan) {
 		return nil, fmt.Errorf("first port must be 1024-%d", 65535-ptSpan)
 	}
 	if req.SSHPort == 0 {
@@ -726,19 +758,8 @@ func ptStartHub(req ptHubRequest) (*ptSession, error) {
 		return nil, fmt.Errorf("enter this server's public IP (it could not be detected)")
 	}
 	ptStop()
-	b := req.BasePort
-	ports := []int{}
-	for p := b; p <= b+ptOffBH+len(ptBHTransports)-1; p++ {
-		ports = append(ports, p)
-	}
-	if err := ptPortsFree("", ports...); err != nil {
-		return nil, err
-	}
-	fwd := []int{}
-	for p := b + ptOffFwd; p <= b+ptSpan; p++ {
-		fwd = append(fwd, p)
-	}
-	if err := ptPortsFree("127.0.0.1", fwd...); err != nil {
+	b, err := ptPickBase(req.BasePort)
+	if err != nil {
 		return nil, err
 	}
 
@@ -746,6 +767,9 @@ func ptStartHub(req ptHubRequest) (*ptSession, error) {
 	s.iranIP, s.foreignIP, s.sshPort, s.token = iranIP, foreign, req.SSHPort, ptRandToken()
 	s.code = ptEncodeCode(ptCode{Host: iranIP, Base: b, Token: s.token, Minutes: req.Minutes})
 	s.checks = ptChecks(b, req.SSHPort)
+	if b != ptDefBase && req.BasePort == 0 {
+		s.notes = append(s.notes, fmt.Sprintf("ports from %d are in use on this server, so the test uses %d-%d", ptDefBase, b, b+ptOffBH+len(ptBHTransports)-1))
+	}
 	dir, err := os.MkdirTemp("", "hashem-pathtest-")
 	if err != nil {
 		s.cancel()
@@ -1240,7 +1264,16 @@ func handlePathTestGet(w http.ResponseWriter, r *http.Request) {
 		v = s.view()
 	}
 	if !v.Active {
-		v.RoleHint = localStatus().Role
+		st := localStatus()
+		v.RoleHint = st.Role
+		if strings.HasPrefix(st.Role, "iran") {
+			v.IPHint = st.GrePeer
+			for _, p := range loadPeers() {
+				if v.IPHint == "" && p.RemotePub != "" {
+					v.IPHint = p.RemotePub
+				}
+			}
+		}
 	}
 	writeJSON(w, v)
 }
@@ -1299,7 +1332,7 @@ func cliPathTest(args []string) int {
 	case "serve":
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 		var req ptHubRequest
-		fs.IntVar(&req.BasePort, "port", ptDefBase, "first port")
+		fs.IntVar(&req.BasePort, "port", 0, "first port (default: first free block from 41000)")
 		fs.StringVar(&req.ForeignIP, "foreign", "", "foreign server IP (GRE and SSH checks)")
 		fs.StringVar(&req.IranIP, "ip", "", "this server's public IP")
 		fs.IntVar(&req.SSHPort, "ssh", 22, "SSH port on the foreign server")
@@ -1354,6 +1387,9 @@ wait:
 		out = v.Remote.Checks
 	}
 	ptPrint(out)
+	for _, n := range v.Notes {
+		fmt.Println("NOTE " + n)
+	}
 	b, _ := json.Marshal(out)
 	fmt.Println("JSON " + string(b))
 	return 0

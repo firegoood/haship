@@ -203,3 +203,23 @@ func TestPathTestHubControl(t *testing.T) {
 		t.Errorf("tcp rtt %v", r.Checks[0].RTTMs)
 	}
 }
+
+// A running tunnel holding the default ports: the test moves to the next free
+// block by itself, and a port the admin chose that is taken is refused.
+func TestPathTestPicksFreePorts(t *testing.T) {
+	busy, err := net.Listen("tcp", ":"+strconv.Itoa(ptDefBase))
+	if err != nil {
+		t.Skip("port 41000 not available here")
+	}
+	defer busy.Close()
+	b, err := ptPickBase(0)
+	if err != nil || b == ptDefBase || (b-ptDefBase)%(ptSpan+9) != 0 {
+		t.Fatalf("auto base %d %v", b, err)
+	}
+	if ptHubPortsFree(b) != nil {
+		t.Fatalf("picked block %d is not free", b)
+	}
+	if _, err := ptPickBase(ptDefBase); err == nil || !strings.Contains(err.Error(), "leave the first port empty") {
+		t.Fatalf("taken explicit port: %v", err)
+	}
+}

@@ -88,7 +88,7 @@ jobs:
           command -v sshd || sudo apt-get install -y -qq openssh-server
       - name: Tunnel combinations lab (Backhaul x 7 transports with/without GRE, GRE <-> public route for Backhaul and FRP)
         run: sudo env "PATH=$PATH" bash tests/test_tunnel_combos_lab.sh
-      - name: Path test lab (Benchmark tab, all transports between two servers without a tunnel, blocked ones detected)
+      - name: Path test lab (Benchmark tab, all transports between two servers, blocked ones detected, safe next to a live tunnel)
         run: |
           (cd panel && CGO_ENABLED=0 go build -o /tmp/gre-panel-lab .)
           sudo env "PATH=$PATH" PANEL_BIN=/tmp/gre-panel-lab FRP_DIR=/tmp/frp-rel bash tests/test_pathtest_lab.sh

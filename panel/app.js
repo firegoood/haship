@@ -604,7 +604,7 @@ const I18N = {
     bench_leaderboard_title: "Carrier Performance Leaderboard",
     bench_run_btn: "Run Carrier Benchmark",
     pt_title: "Path Test Before Any Tunnel",
-    pt_sub: "Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed.",
+    pt_sub: "Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed. Safe next to a running tunnel: the test uses its own free ports and its own GRE interface and never touches the tunnel.",
     pt_idle: "Not running",
     pt_running: "Running",
     pt_cores: "Downloading cores",
@@ -620,7 +620,7 @@ const I18N = {
     pt_ssh_lbl: "Foreign SSH port",
     pt_ip_lbl: "This server's IP",
     pt_ip_ph: "Auto",
-    pt_base_hint: "The test listens on the first port and the next 10 (TCP and UDP). Pick ports your real tunnel would use if you want to test those.",
+    pt_base_hint: "Empty: the first free ports from 41000 are used, never the ports of a running tunnel. The test listens on the first port and the next 10 (TCP and UDP); enter a port to test that one.",
     pt_start: "Start Test",
     pt_stop: "Stop Test",
     pt_code_lbl: "Test code from the Iran server",
@@ -6996,7 +6996,7 @@ let _pt = null, _ptRole = null, _ptTimer = null;
 const PT_STATUS = { ok: ['ok', 'pt_ok', 'Works'], fail: ['err', 'pt_fail', 'Blocked'], waiting: ['dim', 'pt_wait', 'Waiting'], skip: ['warn', 'pt_skip', 'Not tested'] };
 
 function ptSetRole(role) {
-  _ptRole = role === 'foreign' ? 'foreign' : 'iran';
+  _ptRole = /foreign/.test(role || '') ? 'foreign' : 'iran'; // role_hint is e.g. "foreign (client)"
   const iran = _ptRole === 'iran';
   [['ptRoleIran', iran], ['ptRoleForeign', !iran]].forEach(([id, on]) => {
     const b = $(id);
@@ -7036,6 +7036,7 @@ function ptRowName(c) {
 function renderPathTest() {
   const v = _pt || {};
   if (_ptRole === null) ptSetRole(v.role || v.role_hint);
+  if (v.ip_hint && !$('ptForeign').value) $('ptForeign').value = v.ip_hint; // the running tunnel's foreign server
   const checks = v.checks || [];
   const remote = v.remote && v.remote.checks && v.remote.checks.length ? v.remote : null;
   const rows = remote ? remote.checks : checks;
@@ -7111,7 +7112,7 @@ async function ptPost(body, btnId) {
   on('ptRoleForeign', 'click', () => ptSetRole('foreign'));
   on('ptStartBtn', 'click', () => ptPost({
     action: 'start', foreign_ip: $('ptForeign').value.trim(), iran_ip: $('ptIranIp').value.trim(),
-    base_port: parseInt($('ptBase').value, 10) || 41000, ssh_port: parseInt($('ptSsh').value, 10) || 22,
+    base_port: parseInt($('ptBase').value, 10) || 0, ssh_port: parseInt($('ptSsh').value, 10) || 22,
     minutes: parseInt($('ptMinutes').value, 10) || 10,
   }, 'ptStartBtn'));
   on('ptJoinBtn', 'click', () => {
