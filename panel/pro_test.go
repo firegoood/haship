@@ -105,6 +105,16 @@ func TestProGatesAPIs(t *testing.T) {
 			handleDoctorPost(rr, httptest.NewRequest("POST", "/api/doctor", strings.NewReader(`{"action":"nope"}`)))
 			return rr
 		}},
+		{"performance read", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handlePerfGet(rr, httptest.NewRequest("GET", "/api/perf", nil))
+			return rr
+		}},
+		{"performance change", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handlePerfPost(rr, httptest.NewRequest("POST", "/api/perf", strings.NewReader(`{"action":"nope"}`)))
+			return rr
+		}},
 		{"Backhaul setup", func() *httptest.ResponseRecorder {
 			rr := httptest.NewRecorder()
 			handleSetupPost(rr, httptest.NewRequest("POST", "/api/setup", strings.NewReader(`{"role":"iran","engine":"backhaul","local_public":"bad"}`)))

@@ -152,6 +152,9 @@
   .qs-seg button:hover { color:var(--tx2); }
   .eng-pro { font-size:12px; font-weight:700; padding:1px 6px; border-radius:6px; margin-inline-start:4px;
     color:var(--wr); border:1px solid color-mix(in srgb, var(--wr) 45%, transparent); }
+  /* licensed tab: a lock at the end of the nav row (the sidebar has no room for a PRO label) */
+  .nav-lock { display:inline-flex; flex:none; margin-inline-start:auto; color:var(--wr); }
+  .nav-item .nav-lock svg { width:14px; height:14px; }
   .qs-seg button[aria-pressed="true"] { background:var(--ac-fill); color:var(--ac-on);
     box-shadow:0 2px 10px color-mix(in srgb, var(--ac) 40%, transparent); }
   .qs-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
@@ -1352,14 +1355,14 @@
       <button role="tab" aria-selected="true" aria-controls="tab-dashboard" tabindex="0" class="nav-item on" data-tab="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span data-i18n="nav_dashboard">Dashboard</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_tunnel">Tunnel</div>
       <button role="tab" aria-selected="false" aria-controls="tab-tunnel" tabindex="-1" class="nav-item" data-tab="tunnel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg><span data-i18n="nav_tunnel">Tunnel</span><span class="nav-badge hidden u-ml-auto" aria-hidden="false"></span></button>
-      <button role="tab" aria-selected="false" class="nav-item" id="sentinelNav" onclick="openSentinelModal()" title="Sentinel VLESS &amp; Node Health Monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Sentinel</span><span class="nav-badge hidden u-ml-auto u-fs-12 u-p-2x4 u-r-4 u-tint-info u-c-info u-bd-info" id="sentinelNavBadge">LIVE ↗</span></button>
-      <button role="tab" aria-selected="false" aria-controls="tab-cluster" tabindex="-1" class="nav-item" data-tab="cluster" id="clusterNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span data-i18n="nav_cluster">Cluster</span></button>
+      <button role="tab" aria-selected="false" class="nav-item" id="sentinelNav" onclick="openSentinelModal()" title="Sentinel VLESS &amp; Node Health Monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Sentinel</span><span class="nav-lock hidden" id="navSentinelPro" role="img" title="Add-on license" aria-label="Add-on license"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span><span class="nav-badge hidden u-ml-auto u-fs-12 u-p-2x4 u-r-4 u-tint-info u-c-info u-bd-info" id="sentinelNavBadge">LIVE ↗</span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-cluster" tabindex="-1" class="nav-item" data-tab="cluster" id="clusterNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span data-i18n="nav_cluster">Cluster</span><span class="nav-lock hidden" id="navClusterPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-setup" tabindex="-1" class="nav-item" data-tab="setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span data-i18n="nav_setup">Setup</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" class="nav-item" data-tab="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span data-i18n="nav_logs">Logs</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_system">System</div>
-      <button role="tab" aria-selected="false" aria-controls="tab-perf" tabindex="-1" class="nav-item" data-tab="perf" id="perfNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span data-i18n="nav_perf">Performance</span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-perf" tabindex="-1" class="nav-item" data-tab="perf" id="perfNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span data-i18n="nav_perf">Performance</span><span class="nav-lock hidden" id="navPerfPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-watchdog" tabindex="-1" class="nav-item" data-tab="watchdog" id="watchdogNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span data-i18n="nav_watchdog">Watchdog</span></button>
-      <button role="tab" aria-selected="false" aria-controls="tab-doctor" tabindex="-1" class="nav-item" data-tab="doctor" id="doctorNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span data-i18n="nav_doctor">Diagnostics</span><span class="eng-pro hidden" id="navDoctorPro" data-no-i18n>PRO</span><span class="nav-badge hidden u-ml-auto"></span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-doctor" tabindex="-1" class="nav-item" data-tab="doctor" id="doctorNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span data-i18n="nav_doctor">Diagnostics</span><span class="nav-lock hidden" id="navDoctorPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span><span class="nav-badge hidden u-ml-auto"></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-benchmark" tabindex="-1" class="nav-item" data-tab="benchmark" id="benchmarkNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span data-i18n="nav_benchmark">Benchmark</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-update" tabindex="-1" class="nav-item" data-tab="update"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg><span data-i18n="nav_update">Update</span><span class="badge info hidden u-ml-auto" id="updBadge" >new</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" class="nav-item" data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2z"/></svg><span data-i18n="nav_settings">Settings</span></button>
@@ -1677,6 +1680,56 @@
           <div class="u-flex u-ai-c u-gap-12 u-wrap">
             <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn">Switch Engine</button>
             <span class="u-hint-12" id="liveEngineStatusTxt"></span>
+          </div>
+        </div>
+        <!-- Carrier: direct GRE or GRE inside WSS -->
+        <div class="tunnel-card" id="carrierCard">
+          <div class="tc-header">
+            <div>
+              <p class="tc-title">Carrier</p>
+              <div class="qs-hint">How GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47).</div>
+            </div>
+            <span class="badge info" id="carrierActiveBadge">Direct GRE</span>
+          </div>
+          <div class="wd-hero-grid u-mt-12">
+            <div class="wd-stat-box">
+              <span class="wd-stat-label">Active carrier</span>
+              <div class="wd-stat-val u-fs-18" id="carrierActiveVal">—</div>
+              <span class="wd-stat-sub" id="carrierActiveSub">—</span>
+            </div>
+            <div class="wd-stat-box">
+              <span class="wd-stat-label">Link to other server</span>
+              <div class="wd-stat-val u-fs-18" id="carrierLinkVal">—</div>
+              <span class="wd-stat-sub" id="carrierLinkSub">—</span>
+            </div>
+            <div class="wd-stat-box">
+              <span class="wd-stat-label">WSS carrier</span>
+              <div class="wd-stat-val u-fs-18" id="carrierWSSVal">—</div>
+              <span class="wd-stat-sub" id="carrierWSSTxt">—</span>
+            </div>
+          </div>
+
+          <div class="fg u-mt-16">
+            <label for="carrierModeSelect">Carrier</label>
+            <div class="u-flex-center-wrap10">
+              <select class="hashem-input u-max-w-260" id="carrierModeSelect">
+                <option value="direct" selected>Direct GRE (Protocol 47)</option>
+                <option value="wss:8443">WSS (TLS 8443)</option>
+              </select>
+              <button class="hashem-btn hashem-btn-secondary" id="carrierSaveModeBtn" disabled>Switch Carrier</button>
+              <button class="hashem-btn hashem-btn-ghost" id="carrierApplyBtn">Re-apply</button>
+            </div>
+            <div class="ent-help">Switching reconnects the tunnel for a few seconds. Re-apply sets up the current carrier again, which can fix a stuck link.</div>
+          </div>
+
+          <div class="fg u-mt-16">
+            <label for="carrierWSSPortInput">WSS port</label>
+            <div class="u-flex-center-wrap10">
+              <input type="number" class="hashem-input u-max-w-140" id="carrierWSSPortInput" min="1" max="65535" value="8443" inputmode="numeric">
+              <input type="text" class="hashem-input u-max-w-180" id="carrierWSSSNIInput" aria-label="SNI (optional)" placeholder="SNI (optional)" autocomplete="off" spellcheck="false">
+              <button class="hashem-btn hashem-btn-secondary" id="carrierSaveWSSBtn">Save WSS Settings</button>
+            </div>
+            <div class="ent-help">Use the same port on both servers. The SNI is the host name shown in the TLS handshake; leave it empty to send none.</div>
           </div>
         </div>
       </section>
@@ -2061,12 +2114,12 @@
           <div class="perf-note" id="perfEngineNote" role="status" hidden></div>
           <div class="wd-hero-grid">
             <div class="wd-stat-box">
-              <span class="wd-stat-label">FRP transport</span>
+              <span class="wd-stat-label" id="perfEngLabel">FRP transport</span>
               <div class="wd-stat-val" id="perfCryptoVal">—</div>
               <span class="wd-stat-sub" id="perfCryptoSub">—</span>
             </div>
             <div class="wd-stat-box">
-              <span class="wd-stat-label" data-i18n="perf_status_pool">Work-conn pool (frpc / frps)</span>
+              <span class="wd-stat-label" id="perfPoolLabel">Work-conn pool (frpc / frps)</span>
               <div class="wd-stat-val" id="perfPoolVal">—</div>
               <span class="wd-stat-sub" id="perfPoolSub">—</span>
             </div>
@@ -2084,7 +2137,7 @@
             <p class="tc-title">FRP Transport</p>
             <span class="badge" id="perfRoleBadge">—</span>
           </div>
-          <div class="qs-hint">Extra encryption, compression and multiplexing between frpc and frps. Leave all three off for VLESS, Reality and Trojan: their traffic is already encrypted, so these only cost CPU and speed.</div>
+          <div class="qs-hint">Extra encryption and multiplexing between frpc and frps. Leave both off for VLESS, Reality and Trojan: their traffic is already encrypted, so these only cost CPU and speed.</div>
           <fieldset class="perf-fs" id="perfFrpSet">
             <legend class="sr-only">FRP transport options</legend>
             <div class="u-flex-col-gap14 u-mt-12">
@@ -2095,11 +2148,11 @@
                   <div class="qs-hint u-mt-2">Encrypts traffic between frpc and frps with AES-128. Only worth it for plain, unencrypted services.</div>
                 </div>
               </label>
-              <label class="wd-radio-opt u-items-start">
+              <label class="wd-radio-opt u-items-start" id="perfCompRow" hidden>
                 <input type="checkbox" id="perfCompCheck" class="u-checkbox-ac">
                 <div>
                   <b class="u-color-tx">Proxy Compression <span class="perf-key" data-no-i18n>transport.useCompression</span></b>
-                  <div class="qs-hint u-mt-2">Snappy compression per proxy. Encrypted traffic does not compress, so this only uses CPU.</div>
+                  <div class="qs-hint u-mt-2">Snappy compression per proxy. Encrypted traffic does not compress, so this only uses CPU. Shown only while it is on: turn it off and apply.</div>
                 </div>
               </label>
               <label class="wd-radio-opt u-items-start">
@@ -2114,7 +2167,6 @@
             <div class="qs-hint u-mt-12" id="perfRoleHint" hidden></div>
             <div class="qs-actions u-mt-16 u-ai-c">
               <button class="hashem-btn hashem-btn-primary" id="perfApplyBtn">Apply &amp; Restart Tunnels</button>
-              <button class="hashem-btn hashem-btn-secondary" id="perfSaveOnlyBtn">Save Without Restart</button>
               <button class="hashem-btn hashem-btn-danger" id="perfResetBtn">Reset to Defaults</button>
               <span class="badge warn" id="perfDirty" hidden>Unsaved changes</span>
             </div>
@@ -2180,6 +2232,28 @@
           </fieldset>
         </div>
 
+        <!-- Backhaul connection pool -->
+        <div class="tunnel-card" id="perfBhCard" hidden>
+          <div class="tc-header">
+            <div>
+              <p class="tc-title">Backhaul Connection Pool</p>
+              <div class="qs-hint">Connections the foreign server keeps open to the Iran server, ready for new users. Raise it when many users connect at once and new connections are slow to start; lower it to keep fewer idle connections. Applying restarts backhaul-client, so connections drop for a few seconds.</div>
+            </div>
+            <span class="badge" id="perfBhBadge">—</span>
+          </div>
+          <div class="qs-row u-mt-12">
+            <div class="fg">
+              <label for="perfBhPool">Connection Pool</label>
+              <input type="number" id="perfBhPool" class="hashem-input" min="1" max="64" step="1" value="8" inputmode="numeric" aria-describedby="perfBhHint">
+              <div class="tc-sub" id="perfBhHint">From 1 to 64. The default is 8.</div>
+            </div>
+          </div>
+          <div class="qs-actions u-mt-12 u-ai-c">
+            <button class="hashem-btn hashem-btn-primary" id="perfBhSaveBtn" type="button">Save &amp; Apply Pool</button>
+            <span class="u-hint-12" id="perfBhStatus" aria-live="polite"></span>
+          </div>
+        </div>
+
         <!-- Kernel network stack -->
         <div class="tunnel-card" id="netStackCard">
           <div class="tc-header">
@@ -2196,56 +2270,6 @@
           </div>
         </div>
 
-        <!-- Carrier: direct GRE or GRE inside WSS -->
-        <div class="tunnel-card" id="carrierCard">
-          <div class="tc-header">
-            <div>
-              <p class="tc-title">Carrier</p>
-              <div class="qs-hint">How GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47).</div>
-            </div>
-            <span class="badge info" id="carrierActiveBadge">Direct GRE</span>
-          </div>
-          <div class="wd-hero-grid u-mt-12">
-            <div class="wd-stat-box">
-              <span class="wd-stat-label">Active carrier</span>
-              <div class="wd-stat-val u-fs-18" id="carrierActiveVal">—</div>
-              <span class="wd-stat-sub" id="carrierActiveSub">—</span>
-            </div>
-            <div class="wd-stat-box">
-              <span class="wd-stat-label">Link to other server</span>
-              <div class="wd-stat-val u-fs-18" id="carrierLinkVal">—</div>
-              <span class="wd-stat-sub" id="carrierLinkSub">—</span>
-            </div>
-            <div class="wd-stat-box">
-              <span class="wd-stat-label">WSS carrier</span>
-              <div class="wd-stat-val u-fs-18" id="carrierWSSVal">—</div>
-              <span class="wd-stat-sub" id="carrierWSSTxt">—</span>
-            </div>
-          </div>
-
-          <div class="fg u-mt-16">
-            <label for="carrierModeSelect">Carrier</label>
-            <div class="u-flex-center-wrap10">
-              <select class="hashem-input u-max-w-260" id="carrierModeSelect">
-                <option value="direct" selected>Direct GRE (Protocol 47)</option>
-                <option value="wss:8443">WSS (TLS 8443)</option>
-              </select>
-              <button class="hashem-btn hashem-btn-secondary" id="carrierSaveModeBtn" disabled>Switch Carrier</button>
-              <button class="hashem-btn hashem-btn-ghost" id="carrierApplyBtn">Re-apply</button>
-            </div>
-            <div class="ent-help">Switching reconnects the tunnel for a few seconds. Re-apply sets up the current carrier again, which can fix a stuck link.</div>
-          </div>
-
-          <div class="fg u-mt-16">
-            <label for="carrierWSSPortInput">WSS port</label>
-            <div class="u-flex-center-wrap10">
-              <input type="number" class="hashem-input u-max-w-140" id="carrierWSSPortInput" min="1" max="65535" value="8443" inputmode="numeric">
-              <input type="text" class="hashem-input u-max-w-180" id="carrierWSSSNIInput" aria-label="SNI (optional)" placeholder="SNI (optional)" autocomplete="off" spellcheck="false">
-              <button class="hashem-btn hashem-btn-secondary" id="carrierSaveWSSBtn">Save WSS Settings</button>
-            </div>
-            <div class="ent-help">Use the same port on both servers. The SNI is the host name shown in the TLS handshake; leave it empty to send none.</div>
-          </div>
-        </div>
       </section>
       <section id="tab-watchdog" role="tabpanel" hidden>
         <!-- Status hero card -->

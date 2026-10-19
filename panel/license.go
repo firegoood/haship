@@ -271,14 +271,15 @@ func HasFeature(feature string) bool {
 // feature: "bagher", "frp_ssh", "*", "all" or no feature list) unlocks each Pro
 // feature added after it, so a key issued before a feature existed keeps
 // working after an update: nobody has to enter a new key. A key may also name
-// one of these alone. Sentinel and Cluster stay separate add-ons.
+// one of these alone. Sentinel stays a separate add-on.
 const (
 	proPathTest    = "pathtest"
 	proBackhaul    = "backhaul"
 	proDiagnostics = "diagnostics"
+	proPerformance = "performance"
 )
 
-var proFeatures = []string{proPathTest, proBackhaul, proDiagnostics}
+var proFeatures = []string{proPathTest, proBackhaul, proDiagnostics, proPerformance}
 
 func hasPro(feature string) bool {
 	if HasFeature(feature) || HasFeature("bagher") || HasFeature("frp_ssh") {

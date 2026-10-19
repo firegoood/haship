@@ -192,7 +192,7 @@ async function api(path, body, method) {
   return data;
 }
 function showLogin() { $('login').classList.remove('hidden'); $('app').classList.add('hidden'); }
-function showApp() { $('login').classList.add('hidden'); $('app').classList.remove('hidden'); }
+function showApp() { $('login').classList.add('hidden'); $('app').classList.remove('hidden'); loadLicense(); }
 // Enterprise confirm modal (replaces native confirm(); same approve/cancel contract).
 // confirmYes: danger button label; returns a Promise<boolean>.
 let _entModalCleanup = null;
@@ -250,13 +250,27 @@ const PRO_TXT = {
   backhaul: ['pro_t_backhaul', 'Backhaul — Hashem Pro', 'pro_b_backhaul', 'Setting up a Backhaul tunnel is a Hashem Pro feature, on both servers. Backhaul tunnels that already run keep running without it.'],
   pathtest: ['pro_t_pathtest', 'Path Test — Hashem Pro', 'pro_b_pathtest', 'The path test is a Hashem Pro feature, on both servers.'],
   diagnostics: ['pro_t_diag', 'Diagnostics — Hashem Pro', 'pro_b_diag', 'Diagnostics is a Hashem Pro feature.'],
+  performance: ['pro_t_perf', 'Performance — Hashem Pro', 'pro_b_perf', 'Performance tuning is a Hashem Pro feature. Running tunnels keep the settings they have.'],
 };
+function isSentinelLicensed() {
+  const f = (_licenseData && _licenseData.is_valid && _licenseData.features) || [];
+  return f.some(x => /^(sentinel|\*|all)$/i.test(String(x)));
+}
 // PRO tags and notes follow the license.
 function proSync() {
   const tag = (id, f) => { const el = $(id); if (el) el.classList.toggle('hidden', isProLicensed(f)); };
   tag('engBhPro', 'backhaul');
   tag('navDoctorPro', 'diagnostics');
   tag('ptPro', 'pathtest');
+  tag('navPerfPro', 'performance');
+  if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', isBagherLicensed());
+  if ($('navSentinelPro')) $('navSentinelPro').classList.toggle('hidden', isSentinelLicensed());
+  ['navPerfPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
+    const el = $(id); if (!el) return;
+    const t = id === 'navSentinelPro' ? tr('pro_addon', 'Add-on license') : 'Hashem Pro';
+    el.title = t; el.setAttribute('aria-label', t);
+  });
+  if (typeof drawerSync === 'function') drawerSync();
   const bh = $('sEngine') && /backhaul/.test($('sEngine').value) && $('sRole') && $('sRole').value !== 'foreign';
   if ($('bhLicWarn')) $('bhLicWarn').classList.toggle('hidden', !bh || isProLicensed('backhaul'));
 }
@@ -273,6 +287,14 @@ function goTab(name) {
       return;
     }
     openBagherLicModal('diagnostics');
+    return;
+  }
+  if (name === 'perf' && !isProLicensed('performance')) {
+    if (_licenseData === null) {
+      loadLicense().then(() => { if (isProLicensed('performance')) goTab('perf'); else openBagherLicModal('performance'); });
+      return;
+    }
+    openBagherLicModal('performance');
     return;
   }
   if (name === 'cluster' && !isBagherLicensed()) {
@@ -300,7 +322,7 @@ function goTab(name) {
   if (name === 'cluster') {
     loadClusterStatus();
   }
-  if (name === 'perf') { loadPerf(); loadCarrier(); }
+  if (name === 'perf') loadPerf();
   if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); }
   if (name === 'watchdog') loadWatchdog();
   if (name === 'doctor') loadDoctor();
@@ -633,6 +655,9 @@ const I18N = {
     bench_failover_save: "Save Failover Policy",
     bench_leaderboard_title: "Carrier Performance Leaderboard",
     bench_run_btn: "Run Carrier Benchmark",
+    pro_t_perf: "Performance — Hashem Pro",
+    pro_b_perf: "Performance tuning is a Hashem Pro feature. Running tunnels keep the settings they have.",
+    pro_addon: "Add-on license",
     pro_t_bagher: "Bagher Tunnel — Hashem Pro",
     pro_b_bagher: "Bagher is a Hashem Pro feature. An active license is needed on both servers.",
     pro_t_backhaul: "Backhaul — Hashem Pro",
@@ -4102,7 +4127,6 @@ function perfDirty() {
 function perfSyncDirty() {
   const dirty = perfDirty();
   $('perfDirty').hidden = !dirty;
-  $('perfSaveOnlyBtn').disabled = !dirty;
 }
 ['perfEncCheck', 'perfCompCheck', 'perfMuxCheck'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', perfSyncDirty); });
 
@@ -4160,6 +4184,7 @@ function renderNetStack(n) {
 }
 
 async function loadPerf() {
+  if (!isProLicensed('performance')) return;
   let s;
   try {
     s = await api('/api/perf');
@@ -4169,21 +4194,22 @@ async function loadPerf() {
   }
   perfState = s;
   const ap = s.auto_pool_state || {};
-  const isFrp = s.engine === 'frp';
+  const isFrp = s.engine === 'frp', isBh = s.engine === 'backhaul';
 
-  // What this server runs decides which cards apply.
+  // What this server runs decides which cards show.
   const note = $('perfEngineNote');
-  note.hidden = isFrp;
-  if (!s.engine) note.textContent = tr('', 'No tunnel is set up on this server yet. The FRP settings take effect once an FRP tunnel exists; the network stack can be optimized now.');
-  else if (!isFrp) note.textContent = tr('', 'This server runs Backhaul, so the FRP settings below do not apply. The network stack and carrier settings still do.');
-  $('perfFrpSet').disabled = !isFrp;
-  $('perfPoolSet').disabled = !isFrp;
+  note.hidden = !!s.engine;
+  if (!s.engine) note.textContent = tr('', 'No tunnel is set up on this server yet. The settings for its engine show here once a tunnel exists; the network stack can be optimized now.');
+  $('perfFrpCard').hidden = !isFrp;
+  $('autoPoolCard').hidden = !isFrp;
+  $('perfBhCard').hidden = !isBh;
+  renderBhPool(s);
 
   // Sync status
   const ind = $('perfSyncInd');
   if (!isFrp) {
     ind.className = 'status-indicator offline';
-    perfSetText('perfSyncTxt', tr('', s.engine ? 'FRP not used' : 'No tunnel'));
+    perfSetText('perfSyncTxt', isBh ? 'Backhaul' : tr('', 'No tunnel'));
     ind.title = '';
   } else {
     ind.className = 'status-indicator ' + (s.in_sync ? 'ok' : 'warn');
@@ -4194,15 +4220,28 @@ async function loadPerf() {
 
   // Overview
   const speedFirst = !s.proxy_encryption && !s.proxy_compression && !s.tcp_mux;
-  perfSetText('perfCryptoVal', isFrp ? tr('', speedFirst ? 'Speed-first' : 'Custom') : tr('', 'Not used'));
-  perfSetText('perfCryptoSub', docTpl('Encryption {0} · Compression {1} · Multiplexing {2}', [onOff(s.proxy_encryption), onOff(s.proxy_compression), onOff(s.tcp_mux)]));
-  perfSetLtr('perfPoolVal', isFrp ? `${s.effective_pool_count} / ${s.effective_max_pool}` : '—');
-  perfSetText('perfPoolSub', s.auto_pool ? tr('perf_mode_auto', 'Auto Pool') : tr('perf_mode_manual', 'Manual'));
+  perfSetText('perfEngLabel', isBh ? tr('', 'Tunnel engine') : tr('', 'FRP transport'));
+  perfSetText('perfPoolLabel', isBh ? tr('', 'Connection pool') : tr('perf_status_pool', 'Work-conn pool (frpc / frps)'));
+  if (isBh) {
+    perfSetText('perfCryptoVal', 'Backhaul');
+    perfSetText('perfCryptoSub', tr('', s.backhaul_role === 'foreign' ? 'Foreign server (dials)' : 'Iran server (listens)'));
+    perfSetLtr('perfPoolVal', String(s.backhaul_pool_live || s.backhaul_pool || 8));
+    perfSetText('perfPoolSub', tr('', s.backhaul_role === 'foreign' ? 'Open to the Iran server' : 'Set on the foreign server'));
+  } else {
+    perfSetText('perfCryptoVal', isFrp ? tr('', speedFirst ? 'Speed-first' : 'Custom') : tr('', 'Not used'));
+    perfSetText('perfCryptoSub', s.proxy_compression
+      ? docTpl('Encryption {0} · Compression {1} · Multiplexing {2}', [onOff(s.proxy_encryption), onOff(true), onOff(s.tcp_mux)])
+      : docTpl('Encryption {0} · Multiplexing {1}', [onOff(s.proxy_encryption), onOff(s.tcp_mux)]));
+    perfSetLtr('perfPoolVal', isFrp ? `${s.effective_pool_count} / ${s.effective_max_pool}` : '—');
+    perfSetText('perfPoolSub', s.auto_pool ? tr('perf_mode_auto', 'Auto Pool') : tr('perf_mode_manual', 'Manual'));
+  }
   renderNetStack(s.net);
 
   // FRP transport
   $('perfEncCheck').checked = !!s.proxy_encryption;
   $('perfCompCheck').checked = !!s.proxy_compression;
+  // compression never helps encrypted traffic: it shows only to be turned off
+  $('perfCompRow').hidden = !s.proxy_compression;
   $('perfMuxCheck').checked = !!s.tcp_mux;
   const mux = $('perfMuxLive');
   const live = s.tcp_mux_live;
@@ -4245,6 +4284,45 @@ async function loadPerf() {
   perfSetText('perfMaxHint', s.role === 'foreign' ? tr('', 'Used by the Iran server, not by this one.') : tr('perf_max_sub', 'Server-side maximum work connection headroom (always at least 1.5 × poolCount).'));
   updateAutoPoolUI(!!s.auto_pool);
 }
+
+// Backhaul connection pool: set on the foreign server (it dials).
+function renderBhPool(s) {
+  const foreign = s.backhaul_role === 'foreign';
+  const inp = $('perfBhPool');
+  if (document.activeElement !== inp) inp.value = s.backhaul_pool || 8;
+  inp.disabled = !foreign;
+  $('perfBhSaveBtn').disabled = !foreign;
+  const badge = $('perfBhBadge');
+  badge.className = 'badge ' + (foreign ? 'info' : '');
+  badge.textContent = tr('', foreign ? 'Foreign server' : 'Iran server');
+  perfSetText('perfBhStatus', !foreign ? tr('', 'This server listens: set the pool on each foreign server.')
+    : s.backhaul_pool_live ? docTpl('Running tunnel: {0}', [s.backhaul_pool_live]) : '');
+  perfBhCheck();
+}
+function perfBhCheck() {
+  const n = Number($('perfBhPool').value), ok = Number.isInteger(n) && n >= 1 && n <= 64;
+  $('perfBhHint').classList.toggle('perf-err', !ok);
+  if (perfState.backhaul_role === 'foreign') $('perfBhSaveBtn').disabled = !ok;
+  return ok ? n : null;
+}
+$('perfBhPool').addEventListener('input', perfBhCheck);
+$('perfBhSaveBtn').onclick = async () => {
+  const n = perfBhCheck();
+  if (n === null) return;
+  if (perfState.backhaul_pool_live && n !== perfState.backhaul_pool_live &&
+      !await entConfirm(tr('', 'Apply the Backhaul Pool?'), docTpl('backhaul-client restarts with a pool of {0}. Connections drop for a few seconds.', [n]), tr('', 'Save & Apply Pool'))) return;
+  const b = $('perfBhSaveBtn');
+  b.disabled = true;
+  try {
+    const r = await api('/api/perf', { action: 'backhaul-pool', backhaul_pool: n });
+    toastOk(tr('', 'Backhaul pool saved'), tr('', r.restarted ? 'backhaul-client restarted with the new pool.' : 'The running tunnel already uses it.'));
+  } catch (e) {
+    toastErr(tr('', 'Could not set the Backhaul pool'), e.message);
+  } finally {
+    b.disabled = false;
+    await loadPerf();
+  }
+};
 
 function updateAutoPoolUI(isAuto) {
   const badge = $('perfAutoPoolBadge');
@@ -4308,7 +4386,7 @@ $('perfSaveTuningBtn').onclick = async () => {
 
 async function doPerfApply(btnEl) {
   const orig = btnEl.textContent;
-  const buttons = [$('perfApplyBtn'), $('perfApplyTopBtn'), $('perfSaveOnlyBtn'), $('perfResetBtn')];
+  const buttons = [$('perfApplyBtn'), $('perfApplyTopBtn'), $('perfResetBtn')];
   buttons.forEach(b => { b.disabled = true; });
   btnEl.textContent = tr('', 'Applying…');
   const msgEl = $('perfApplyMsg');
@@ -4329,15 +4407,6 @@ async function doPerfApply(btnEl) {
 
 $('perfApplyBtn').onclick = () => doPerfApply($('perfApplyBtn'));
 $('perfApplyTopBtn').onclick = () => doPerfApply($('perfApplyTopBtn'));
-$('perfSaveOnlyBtn').onclick = async () => {
-  try {
-    await api('/api/perf', Object.assign({ action: 'update' }, perfForm()));
-    toastOk(tr('', 'Settings saved'), tr('', 'They take effect after Apply & Restart Tunnels.'));
-    await loadPerf();
-  } catch (e) {
-    toastErr(tr('', 'Could not save settings'), e.message);
-  }
-};
 $('perfResetBtn').onclick = async () => {
   const ok = await entConfirm(tr('', 'Reset to Defaults?'), tr('', 'Turns Auto Pool on and encryption, compression and multiplexing off, then restarts the tunnel. Connections drop for a few seconds.'), tr('', 'Reset to Defaults'));
   if (!ok) return;
@@ -7525,6 +7594,7 @@ async function loadLicense() {
     }
     _licenseData = d;
     renderLicense(d);
+    proSync(); // PRO tags on the tabs follow the license
   } catch (err) {
     console.warn('Failed loading license:', err);
   }

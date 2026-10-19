@@ -134,7 +134,7 @@ func backhaulServerConfigV2(bindAddr, transport, token string, ports []string) s
 func backhaulClientConfigV2(remoteAddr, transport, token string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "[dialer]\nremote_addr = %q\ndial_timeout = 10\nretry_interval = 3\n\n", remoteAddr)
-	fmt.Fprintf(&sb, "[transport]\ntype = %q\nconnection_pool = 8\nnodelay = true\nkeepalive_period = 75\n\n", transport)
+	fmt.Fprintf(&sb, "[transport]\ntype = %q\nconnection_pool = %d\nnodelay = true\nkeepalive_period = 75\n\n", transport, backhaulPoolSize())
 	fmt.Fprintf(&sb, "[security]\ntoken = %q\n\n", token)
 	if strings.HasSuffix(transport, "mux") {
 		sb.WriteString("[mux]\nmux_version = 1\n\n")
@@ -168,7 +168,7 @@ func writeBackhaulClientConfig(path string, remoteAddr string, transport string,
 	if token != "" {
 		sb.WriteString(fmt.Sprintf("token = %q\n", token))
 	}
-	sb.WriteString("connection_pool = 8\n")
+	fmt.Fprintf(&sb, "connection_pool = %d\n", backhaulPoolSize())
 	sb.WriteString("nodelay = true\n")
 	sb.WriteString("retry_interval = 3\n")
 	sb.WriteString("keepalive_period = 75\n")

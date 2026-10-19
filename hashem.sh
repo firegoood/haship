@@ -2098,11 +2098,19 @@ EOF
     echo "]" >> "$CONF_FILE"
 }
 
+# connection_pool for a Backhaul client: perf.json backhaul_pool (Performance
+# tab), 8 when unset. Every writer of a client config uses it.
+backhaul_pool_size() {
+    pool_clamp "$(perf_get_int backhaul_pool 8)" 1 64
+}
+
 backhaul_write_client_conf_v1() {
     local CONF_FILE="$1"
     local REMOTE_ADDR="$2"
     local TRANSPORT="${3:-tcpmux}"
     local TOKEN="$4"
+    local POOL
+    POOL=$(backhaul_pool_size 2>/dev/null); [[ "$POOL" =~ ^[0-9]+$ ]] || POOL=8
 
     mkdir -p "$(dirname "$CONF_FILE")"
     cat <<EOF > "$CONF_FILE"
@@ -2110,7 +2118,7 @@ backhaul_write_client_conf_v1() {
 remote_addr = "${REMOTE_ADDR}"
 transport = "${TRANSPORT}"
 token = "${TOKEN}"
-connection_pool = 8
+connection_pool = ${POOL}
 nodelay = true
 retry_interval = 3
 keepalive_period = 75
@@ -2213,11 +2221,12 @@ backhaul_write_server_conf_v2() {
 }
 
 backhaul_write_client_conf_v2() {
-    local CONF_FILE="$1" REMOTE_ADDR="$2" TRANSPORT="${3:-tcpmux}" TOKEN="$4"
+    local CONF_FILE="$1" REMOTE_ADDR="$2" TRANSPORT="${3:-tcpmux}" TOKEN="$4" POOL
+    POOL=$(backhaul_pool_size 2>/dev/null); [[ "$POOL" =~ ^[0-9]+$ ]] || POOL=8
     mkdir -p "$(dirname "$CONF_FILE")"
     {
         printf '[dialer]\nremote_addr = "%s"\ndial_timeout = 10\nretry_interval = 3\n\n' "$REMOTE_ADDR"
-        printf '[transport]\ntype = "%s"\nconnection_pool = 8\nnodelay = true\nkeepalive_period = 75\n\n' "$TRANSPORT"
+        printf '[transport]\ntype = "%s"\nconnection_pool = %s\nnodelay = true\nkeepalive_period = 75\n\n' "$TRANSPORT" "$POOL"
         printf '[security]\ntoken = "%s"\n\n' "$TOKEN"
         if [[ "$TRANSPORT" == *mux ]]; then
             printf '[mux]\nmux_version = 1\n\n'

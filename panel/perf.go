@@ -26,6 +26,8 @@ type perfConfig struct {
 	// TCPMux: nil = never configured (live tomls are left untouched on apply);
 	// false = speed-first (default for new tunnels); true = frp tcpMux on.
 	TCPMux *bool `json:"tcp_mux,omitempty"`
+	// BackhaulPool: connection_pool of the Backhaul client; 0 = default (8).
+	BackhaulPool int `json:"backhaul_pool,omitempty"`
 }
 
 // autoPoolState mirrors the auto_pool.json that hashem.sh autopool_tick maintains.
@@ -62,6 +64,9 @@ type perfStatusResponse struct {
 	Engine           string          `json:"engine"` // "frp", "backhaul" or "" (no tunnel)
 	Overridden       map[string]bool `json:"overridden,omitempty"`
 	Net              netStackStatus  `json:"net"`
+	BackhaulPool     int             `json:"backhaul_pool"`      // saved (or default) pool
+	BackhaulPoolLive int             `json:"backhaul_pool_live"` // in the running client config, 0 = none
+	BackhaulRole     string          `json:"backhaul_role"`      // "foreign", "iran" or ""
 }
 
 // netStackStatus is the kernel side of throughput: what Optimize Network sets.
@@ -94,6 +99,7 @@ type perfPostRequest struct {
 	FRPPoolCount     *int   `json:"frp_pool_count,omitempty"`
 	FRPMaxPool       *int   `json:"frp_max_pool,omitempty"`
 	TCPMux           *bool  `json:"tcp_mux,omitempty"`
+	BackhaulPool     *int   `json:"backhaul_pool,omitempty"`
 }
 
 func perfConfigPath() string {
@@ -124,6 +130,7 @@ func loadPerfConfig() perfConfig {
 		FRPPoolCount     *int  `json:"frp_pool_count"`
 		FRPMaxPool       *int  `json:"frp_max_pool"`
 		TCPMux           *bool `json:"tcp_mux"`
+		BackhaulPool     *int  `json:"backhaul_pool"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return def
@@ -147,6 +154,9 @@ func loadPerfConfig() perfConfig {
 	if raw.TCPMux != nil {
 		v := *raw.TCPMux
 		c.TCPMux = &v
+	}
+	if raw.BackhaulPool != nil && *raw.BackhaulPool >= bhPoolMin && *raw.BackhaulPool <= bhPoolMax {
+		c.BackhaulPool = *raw.BackhaulPool
 	}
 	return c
 }
@@ -383,6 +393,9 @@ func runPerfCmd(args ...string) (string, error) {
 }
 
 func handlePerfGet(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proPerformance, "Performance") {
+		return
+	}
 	c, over := effectivePerfConfig()
 	inSync, details, role := checkLiveTomlSync(c)
 	ePool, eMax := effectivePoolValues()
@@ -405,6 +418,9 @@ func handlePerfGet(w http.ResponseWriter, r *http.Request) {
 		Engine:           perfEngine(),
 		Overridden:       over,
 		Net:              readNetStack(),
+		BackhaulPool:     backhaulPoolSize(),
+		BackhaulPoolLive: liveBackhaulPool(),
+		BackhaulRole:     backhaulRole(),
 	}
 	writeJSON(w, resp)
 }
@@ -479,6 +495,9 @@ func validPoolValues(pool, maxPool *int) error {
 }
 
 func handlePerfPost(w http.ResponseWriter, r *http.Request) {
+	if proRequired(w, r, proPerformance, "Performance") {
+		return
+	}
 	var body perfPostRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-PERF-01", "invalid request body")
@@ -582,8 +601,35 @@ func handlePerfPost(w http.ResponseWriter, r *http.Request) {
 		recordError("E-PERF-00", "perf", "Performance settings applied and tunnels restarted")
 		writeJSON(w, map[string]string{"status": "ok", "detail": out})
 
+	case "backhaul-pool":
+		if body.BackhaulPool == nil || *body.BackhaulPool < bhPoolMin || *body.BackhaulPool > bhPoolMax {
+			writeAPIError(w, r, "E-PERF-01", fmt.Sprintf("the Backhaul pool must be a whole number from %d to %d", bhPoolMin, bhPoolMax))
+			return
+		}
+		c.BackhaulPool = *body.BackhaulPool
+		if err := savePerfConfig(c); err != nil {
+			writeAPIError(w, r, "E-PERF-02", "failed to save config: "+err.Error())
+			return
+		}
+		changed, err := applyBackhaulPool(c.BackhaulPool)
+		if err != nil {
+			recordError("E-PERF-03", "perf", "Backhaul pool: "+err.Error())
+			writeAPIError(w, r, "E-PERF-03", err.Error())
+			return
+		}
+		detail := "Saved: a Backhaul tunnel set up on this server will use it."
+		if changed {
+			detail = "Saved and applied: backhaul-client restarted."
+		} else if backhaulRole() == "foreign" {
+			detail = "Saved: the running tunnel already uses it."
+		}
+		recordError("E-PERF-00", "perf", fmt.Sprintf("Backhaul pool set to %d", c.BackhaulPool))
+		writeJSON(w, map[string]any{"status": "ok", "detail": detail, "restarted": changed})
+
 	case "reset":
+		bhPool := c.BackhaulPool // the FRP reset leaves the Backhaul pool alone
 		c = defaultPerfConfig()
+		c.BackhaulPool = bhPool
 		c.TCPMux = boolPtr(false) // safe/speed-first defaults pin tcpMux off explicitly
 		if err := savePerfConfig(c); err != nil {
 			writeAPIError(w, r, "E-PERF-02", "failed to save config: "+err.Error())

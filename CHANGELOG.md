@@ -5,6 +5,14 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
 ## Unreleased
 
+### Performance tab
+- **Performance is Hashem Pro** (`performance`; every Bagher / Pro key opens it, no new key). Locked: the tab and `/api/perf`. Settings already applied keep working without a license: Auto Pool keeps sizing the pool from the watchdog, and an update still re-applies perf.json.
+- **A lock marks every tab that needs a license** in the sidebar and the phone menu: Performance, Diagnostics and Cluster (Hashem Pro), and Sentinel (its own add-on). It hides once the key opens the tab. The license is now read right after sign-in, so the locks are right from the first page.
+- **Backhaul connection pool.** A Backhaul server had nothing to tune here. The new card sets `connection_pool` on the foreign server (1 to 64, default 8): the panel rewrites that one line in the running client config and restarts `backhaul-client` only when it changed. The value is kept in perf.json (`backhaul_pool`), so a Backhaul tunnel set up later, from the panel or `hashem.sh`, is written with it. On the Iran server the card says to set it on the foreign server.
+- **Only the cards of this server's engine show**: FRP Transport and Auto Pool on FRP servers, the Backhaul pool on Backhaul servers, neither before a tunnel exists. The overview follows the engine too.
+- **Carrier moved to the Tunnel tab.** Direct GRE or WSS is how the tunnel gets through, not a speed setting, so it stays free and sits with the tunnel.
+- **Removed:** the Proxy Compression switch (encrypted traffic such as VLESS, Reality and Trojan does not compress, so it only cost CPU; it still shows while it is on, so it can be turned off) and the Save Without Restart button (Apply & Restart Tunnels does the job; the change waits marked Unsaved until then).
+
 ### Hashem Pro
 - **The Path Test, Backhaul and Diagnostics are Hashem Pro**, next to Bagher. Locked: starting or joining a path test (panel and `gre-panel pathtest`), setting up a Backhaul tunnel with or without GRE (Setup, switching the engine to Backhaul, and `hashem backhaul` / `setup-backhaul-*` / `setup-gre-backhaul-*` / `add-backhaul-peer` from the shell, which ask the panel binary: `gre-panel license check backhaul`), and the Diagnostics tab and `/api/doctor`. Each shows PRO and opens the license window naming the feature. GRE + FRP stays free.
 - **No new key for existing customers.** Every license that unlocks Bagher (`bagher`, `frp_ssh`, `*`, `all`, or no feature list) unlocks every Pro feature, including ones added after it was issued; a key may also name `pathtest`, `backhaul` or `diagnostics` alone. Sentinel and Cluster keys stay separate add-ons. `/api/license` lists what the key opens (`pro_features`), and Settings shows it.

@@ -183,6 +183,7 @@ func TestPerfEnvOverrides(t *testing.T) {
 }
 
 func TestPerfAPIEndpoints(t *testing.T) {
+	withPro(t)
 	tmpDir, err := os.MkdirTemp("", "perf-api-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -268,6 +269,7 @@ func TestAutoPoolStatePersistence(t *testing.T) {
 
 // Out-of-range pool sizes are refused instead of silently ignored.
 func TestPerfRejectsBadPoolValues(t *testing.T) {
+	withPro(t)
 	oldConfigDir := configDir
 	configDir = t.TempDir()
 	defer func() { configDir = oldConfigDir }()
@@ -319,5 +321,65 @@ func TestPerfEngineFromConfigs(t *testing.T) {
 	// A hub with only numbered frps tomls is still the Iran role.
 	if _, _, role := checkLiveTomlSync(loadPerfConfig()); role != "iran" {
 		t.Fatalf("frps-2.toml only: want role iran, got %q", role)
+	}
+}
+
+// The Backhaul pool is saved in perf.json, rewritten in the running client
+// config (both schemas), and used by new client configs.
+func TestBackhaulPool(t *testing.T) {
+	withPro(t)
+	calls := recordSystemctl(t, "")
+	oldFrp, oldBh, oldCfg := frpDir, backhaulDir, configDir
+	frpDir, backhaulDir, configDir = t.TempDir(), t.TempDir(), t.TempDir()
+	defer func() { frpDir, backhaulDir, configDir = oldFrp, oldBh, oldCfg }()
+	post := func(body string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		handlePerfPost(rr, httptest.NewRequest("POST", "/api/perf", strings.NewReader(body)))
+		return rr
+	}
+
+	if n := backhaulPoolSize(); n != 8 || backhaulRole() != "" {
+		t.Fatalf("default: pool %d role %q", n, backhaulRole())
+	}
+	for _, b := range []string{`{"action":"backhaul-pool"}`, `{"action":"backhaul-pool","backhaul_pool":0}`, `{"action":"backhaul-pool","backhaul_pool":65}`} {
+		if rr := post(b); rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s: want 400, got %d", b, rr.Code)
+		}
+	}
+	// no tunnel yet: saved for the next setup
+	if rr := post(`{"action":"backhaul-pool","backhaul_pool":16}`); rr.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rr.Code, rr.Body.String())
+	}
+	cli := filepath.Join(backhaulDir, "client.toml")
+	if err := writeBackhaulClientConfig(cli, "1.2.3.4:3080", "tcpmux", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if backhaulRole() != "foreign" || liveBackhaulPool() != 16 {
+		t.Fatalf("new config: role %q pool %d", backhaulRole(), liveBackhaulPool())
+	}
+	if !strings.Contains(backhaulClientConfigV2("1.2.3.4:3080", "tcpmux", "tok"), "connection_pool = 16\n") {
+		t.Fatal("v2 client config ignores the saved pool")
+	}
+	// running tunnel: the line is rewritten, nothing else changes
+	before, _ := os.ReadFile(cli)
+	if rr := post(`{"action":"backhaul-pool","backhaul_pool":32}`); rr.Code != http.StatusOK {
+		t.Fatalf("apply: %d %s", rr.Code, rr.Body.String())
+	}
+	after, _ := os.ReadFile(cli)
+	if liveBackhaulPool() != 32 || strings.Replace(string(before), "connection_pool = 16", "connection_pool = 32", 1) != string(after) {
+		t.Fatalf("rewrite:\n%s", after)
+	}
+	if strings.Join(*calls, ";") != "restart backhaul-client" {
+		t.Fatalf("restarts: %v", *calls)
+	}
+	// same value again: nothing restarts
+	_ = post(`{"action":"backhaul-pool","backhaul_pool":32}`)
+	if len(*calls) != 1 {
+		t.Fatalf("unchanged pool restarted: %v", *calls)
+	}
+	// the FRP reset keeps it
+	_ = post(`{"action":"reset"}`)
+	if backhaulPoolSize() != 32 {
+		t.Fatalf("reset dropped the Backhaul pool: %d", backhaulPoolSize())
 	}
 }
