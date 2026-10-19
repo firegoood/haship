@@ -139,6 +139,7 @@ func tlsInstallCustom(src *tlsCustomSource) (map[string]any, string) {
 		IssuedAt: time.Now().Format("2006-01-02 15:04:05"),
 		Expiry:   expiry,
 		Issuer:   issuer,
+		Source:   tlsSourceCustom,
 	}
 	_ = os.WriteFile(tlsMetaFile(), mustJSON(meta), 0600)
 	clearTLSBackups()

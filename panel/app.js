@@ -783,7 +783,7 @@ const I18N = {
     pal_open: "Search and commands", pal_search: "Search", pal_title: "Command palette", pal_ph: "Search pages and actions…",
     pal_nav: "navigate", pal_run: "run", pal_close: "close", pal_none: "Nothing matches", pal_go: "Go to", pal_act: "Actions", pal_look: "Appearance",
     pal_refresh: "Refresh data", pal_theme: "Toggle dark / light theme", pal_lang: "Switch language", pal_stream: "Show / hide Live Activity Stream",
-    pal_sidebar: "Collapse / expand sidebar", pal_density: "Toggle table density", pal_diag: "Run diagnostics", pal_donate: "Support Hashem", pal_logout: "Log out",
+    pal_sidebar: "Collapse / expand sidebar", pal_density: "Toggle table density", pal_diag: "Run diagnostics", pal_buy: "Buy a Hashem Pro license", pal_logout: "Log out",
     pal_accent: "Accent colour",
     sb_collapse: "Collapse sidebar", sb_expand: "Expand sidebar",
     tbl_filter: "Filter errors…", tbl_shown: "{n} of {t} shown",
@@ -823,14 +823,14 @@ const I18N = {
     rs_restore_hint: "Side panel with the latest events. Wide screens (1200px+) only.",
     rs_btn_hide: "Hide",
     rs_btn_show: "Show",
-    sup_title: "Enjoying a stable tunnel?",
-    sup_body: "Hashem is free and built by one developer. If it keeps your connection alive, a small donation helps keep it improving.",
-    sup_donate: "Donate",
+    sup_title: "Get more from your tunnel",
+    sup_body: "Hashem Pro adds Bagher, Backhaul, Performance tuning, Watchdog alerts, Benchmark and Diagnostics. One license covers them all.",
+    sup_buy: "Buy License",
     sup_title_new: "Thanks for installing Hashem",
     sup_later: "Maybe Later",
     sup_snooze: "Don't Remind Me for 30 Days",
-    sup_card_title: "Support Hashem",
-    sup_card_hint: "Hashem is free. If it helps you, you can support its development any time.",
+    sup_card_title: "Hashem Pro License",
+    sup_card_hint: "One license unlocks every Pro feature: Bagher, Backhaul, Performance, Watchdog, Benchmark, Diagnostics and the path test.",
     appear_title: "Appearance",
     appear_hint: "Pick an accent colour. Every preset is contrast-checked for both dark and light themes.",
     appear_aria: "Accent colour",
@@ -5066,27 +5066,31 @@ async function tlsRefresh() {
     const s = await api('/api/tls');
     const dot = $('tlsDot');
     if (dot) {
-      dot.className = 'status-indicator ' + (s.enabled ? 'active' : (s.days_left != null && s.days_left < 15 ? 'offline' : ''));
+      dot.className = 'status-indicator ' + (!s.enabled ? '' : (s.days_left != null && s.days_left < 15 ? 'offline' : 'active'));
       $('tlsDotTxt').textContent = s.enabled ? (s.days_left != null ? s.days_left + ' days left' : 'enabled') : 'no certificate';
     }
     const info = $('tlsInfo');
     if (info) {
       if (s.enabled) {
-        let txt = 'Domain <b>' + esc(s.domain || '') + '</b> · expires <b>' + esc(s.expiry || '') + '</b>' + (s.days_left != null ? ' (' + esc(String(s.days_left)) + ' days)' : '') + '<br>HTTPS: <b>' + esc(s.https_url || '') + '</b><br>HTTP IP access: ' + esc(s.http_url || '');
+        const src = { letsencrypt: "Let's Encrypt", custom: 'your own certificate', ip: 'self-signed IP certificate' }[s.source] || (s.issuer || '');
+        let txt = (s.source === 'ip' ? 'IP' : 'Domain') + ' <b>' + esc(s.domain || '—') + '</b> · ' + esc(src) + ' · expires <b>' + esc(s.expiry || '') + '</b>' + (s.days_left != null ? ' (' + esc(String(s.days_left)) + ' days)' : '') + '<br>HTTPS: <b>' + esc(s.https_url || '') + '</b><br>HTTP IP access: ' + esc(s.http_url || '');
         if (s.port_conflict) {
           txt += '<br><span class="u-c-er">Port conflict: ' + esc(s.port_conflict_detail || '') + '</span>';
         }
         info.innerHTML = txt;
       } else {
-        info.innerHTML = 'No certificate installed yet. Enter the domain above — it must resolve to this server and port 80 must be reachable (or use Reverse Proxy mode below).';
+        info.innerHTML = 'No certificate installed yet. Enter the domain above: its A record must point to this server and port 80 must be reachable from the internet. certbot is installed automatically when missing.';
       }
     }
     const msg = $('tlsMsg');
-    if (msg) msg.textContent = s.enabled ? ('HTTPS serves on port ' + (s.https_port || 7443) + ' alongside HTTP on ' + (s.http_port || 7777) + '.') : 'HTTPS appears on port 7443 after the first certificate.';
+    if (msg) msg.textContent = s.enabled ? ('HTTPS serves on port ' + (s.https_port || 7443) + ' alongside HTTP on ' + (s.http_port || 7777) + '.') : ('HTTPS appears on port ' + (s.https_port || 7443) + ' after the first certificate.');
     const remBtn = $('tlsRemoveBtn');
     if (remBtn) remBtn.style.display = s.enabled ? 'inline-block' : 'none';
+    // Renew works the way the certificate was made; a custom one is renewed by its owner
+    const renBtn = $('tlsRenewBtn');
+    if (renBtn) renBtn.style.display = s.enabled && s.source !== 'custom' ? '' : 'none';
     if (s.enabled && s.expiring_soon) toastWarn('certificate expiring soon', (s.expiry || '') + ' — Renew now or wait for certbot auto-renew.');
-    if (s.domain && !$('tlsDomain').value) $('tlsDomain').value = s.domain;
+    if (s.domain && s.source !== 'ip' && !$('tlsDomain').value) $('tlsDomain').value = s.domain;
   } catch(e) { /* leave placeholder text */ }
 }
 
@@ -5096,25 +5100,32 @@ $('tlsIssueBtn').onclick = async () => {
 
   const b = $('tlsIssueBtn');
   b.disabled = true; b.textContent = 'Checking…';
+  let skipDNS = false;
   try {
     const chk = await api('/api/tls/check', { domain });
+    if (chk.valid_domain === false) {
+      toastErr('Invalid domain', 'Enter only the name, e.g. panel.example.com.');
+      b.disabled = false; b.textContent = 'Get Certificate';
+      return;
+    }
     if (chk.port_conflict) {
-      toastErr('Port Conflict', chk.port_conflict_error || 'Port conflict with active tunnel detected.');
+      toastErr('Port conflict', chk.port_conflict_error || 'Port conflict with active tunnel detected.');
       b.disabled = false; b.textContent = 'Get Certificate';
       return;
     }
     if (chk.dns_ok === false) {
-      toastErr('DNS Mismatch', chk.dns_error || 'Domain DNS does not point to this server.');
       b.disabled = false; b.textContent = 'Get Certificate';
-      return;
+      // a CDN or NAT can make the lookup differ while Let's Encrypt still reaches this server
+      if (!await entConfirm('DNS Does Not Match', (chk.dns_error || 'The domain does not point to this server.') + ' Let\'s Encrypt will fail unless the domain reaches this server on port 80. Try anyway?', 'Try Anyway')) return;
+      skipDNS = true;
     }
   } catch(e) { /* proceed if check endpoint unreachable */ }
   b.disabled = false; b.textContent = 'Get Certificate';
 
-  if (!await entConfirm('Get HTTPS Certificate?', 'Certbot will issue a Let\'s Encrypt certificate for ' + domain + '. HTTP and active tunnels continue running without interruption.', 'Get Certificate')) return;
-  b.disabled = true; b.textContent = 'Issuing… (up to 60s)';
+  if (!skipDNS && !await entConfirm('Get HTTPS Certificate?', 'Certbot will issue a Let\'s Encrypt certificate for ' + domain + '. HTTP and active tunnels continue running without interruption.', 'Get Certificate')) return;
+  b.disabled = true; b.textContent = 'Issuing… (up to 2 min)';
   try {
-    const r = await api('/api/tls', {domain, email: $('tlsEmail').value.trim()});
+    const r = await api('/api/tls', {domain, email: $('tlsEmail').value.trim(), skip_dns_check: skipDNS});
     toastOk('certificate installed', 'HTTPS: ' + (r.https_url || ''));
     tlsRefresh();
   } catch(e) { toastErr('certificate failed', e.message); }
@@ -5125,7 +5136,8 @@ $('tlsRenewBtn').onclick = async () => {
   const b = $('tlsRenewBtn'); b.disabled = true; b.textContent = 'Renewing…';
   try {
     const r = await api('/api/tls/renew', {});
-    toastOk('certificate renewed', 'Expires: ' + (r.expiry || ''));
+    if (r.renewed === false) toastOk('certificate is current', 'Not due for renewal yet (Let\'s Encrypt renews in the last 30 days). Expires: ' + (r.expiry || ''));
+    else toastOk('certificate renewed', 'Expires: ' + (r.expiry || ''));
     tlsRefresh();
   } catch(e) { toastErr('renew failed', e.message); }
   b.disabled = false; b.textContent = 'Renew Now';
@@ -5879,12 +5891,13 @@ $('accGrid').addEventListener('keydown', e => {
 accRender();
 
 // ============================================================
-// Support (donate) nudge: rare, calm, and coordinated by the server.
+// Hashem Pro (Buy License) nudge: rare, calm, and coordinated by the server.
+// Never shown once a Pro license is active.
 // First visit after install (server says fresh): shown SUP_FIRST_DELAY_MS
 // into the session. After that only once the tunnel has been healthy for
 // SUP_DELAY_MS while the user is actively on a visible panel tab. The
 // server's claim() hands the popup to exactly one tab/device per window
-// (7 days; 30 after "don't remind", 90 after Donate) so it cannot spam.
+// (7 days; 30 after "don't remind", 90 after Buy License) so it cannot spam.
 // ============================================================
 const SUP_DELAY_MS = 30000, SUP_FIRST_DELAY_MS = 8000;
 const SUP = { since: 0, shown: false, busy: false, fresh: null, openAt: 0 };
@@ -5902,6 +5915,7 @@ function supBlocked() {
   if (document.querySelector('.ent-modal-ov:not([hidden])')) return true;
   if ($('drawer') && $('drawer').classList.contains('open')) return true;
   if ($('tab-terminal') && !$('tab-terminal').hidden) return true;      // never interrupt a shell
+  if (_licenseData === null || isProLicensed('performance')) return true; // licensed (or not known yet): nothing to sell
   const a = document.activeElement;
   if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return true;    // never interrupt typing
   return false;
@@ -5930,7 +5944,7 @@ async function supTick() {
 }
 function supShow(fresh) {
   const c = $('supCard'); SUP.shown = true;
-  $('supTitle').textContent = fresh ? tr('sup_title_new', 'Thanks for installing Hashem') : tr('sup_title', 'Enjoying a stable tunnel?');
+  $('supTitle').textContent = fresh ? tr('sup_title_new', 'Thanks for installing Hashem') : tr('sup_title', 'Get more from your tunnel');
   c.hidden = false; document.body.classList.add('sup-open'); c.classList.remove('out'); void c.offsetWidth; c.classList.add('in');
   document.body.style.setProperty('--sup-h', c.offsetHeight + 'px');
   if (window.ResizeObserver && !c._ro) { c._ro = new ResizeObserver(() => document.body.style.setProperty('--sup-h', c.offsetHeight + 'px')); c._ro.observe(c); }
@@ -5944,7 +5958,7 @@ function supHide(action) {
 $('supX').onclick = () => supHide('close');
 $('supLater').onclick = () => supHide('close');
 $('supSnooze').onclick = () => supHide('snooze');
-$('supGo').addEventListener('click', () => { supHide('donate'); });
+$('supGo').addEventListener('click', () => { supHide('buy'); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('supCard').hidden && !document.querySelector('.ent-modal-ov:not([hidden])')) supHide('close'); });
 setInterval(supTick, 5000);
 
@@ -6296,7 +6310,7 @@ function palItems() {
   it.push({ g: act, t: tr('pal_refresh', 'Refresh data'), k: 'refresh reload', run: () => $('refreshBtn').click() });
   it.push({ g: act, t: tr('pal_diag', 'Run diagnostics'), k: 'doctor health check diagnostics', run: () => { goTab('doctor'); loadDoctor(true); } });
   it.push({ g: act, t: tr('pal_stream', 'Show / hide Live Activity Stream'), k: 'stream logs live activity', run: () => rsSet(!rsIsHidden(), true) });
-  it.push({ g: act, t: tr('pal_donate', 'Support Hashem'), k: 'donate support pdnczone', run: () => window.open('https://pdnczone.com', '_blank', 'noopener,noreferrer') });
+  it.push({ g: act, t: tr('pal_buy', 'Buy a Hashem Pro license'), k: 'buy license pro pdnczone', run: () => window.open('https://pdnczone.com', '_blank', 'noopener,noreferrer') });
   it.push({ g: act, t: tr('pal_logout', 'Log out'), k: 'logout sign out exit', run: () => $('logoutBtn').click() });
   it.push({ g: look, t: tr('pal_theme', 'Toggle dark / light theme'), k: 'theme dark light mode', run: () => $('themeBtn').click() });
   it.push({ g: look, t: tr('pal_lang', 'Switch language'), k: 'language persian farsi english', run: () => toggleLang() });

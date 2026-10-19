@@ -134,7 +134,7 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | Code | HTTP | Meaning | What to do |
 | --- | --- | --- | --- |
 | `E-SUPPORT-01` | 400 | bad support request (invalid JSON) | Reload the page and try again. |
-| `E-SUPPORT-02` | 400 | unknown support action | Use claim, close, snooze or donate. |
+| `E-SUPPORT-02` | 400 | unknown support action | Use claim, close, snooze or buy. |
 
 ## E-RESCUE-xx — Connectivity rescue
 
@@ -174,8 +174,8 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-TLS-01` | 400 | bad TLS request (invalid JSON) | Reload the page and resubmit the form. |
 | `E-TLS-02` | 400 | invalid domain name | Enter the panel domain exactly (e.g. panel.example.com) — it must point to this server. |
 | `E-TLS-03` | 400 | https port must be 1-65535 | Use 7443 (default) or another free port. |
-| `E-TLS-04` | 500 | certbot not installed | Install certbot on this server first (apt install certbot), then retry. |
-| `E-TLS-05` | 502 | certificate issue/renew failed | Port 80 must be reachable and the domain must resolve to this server. |
+| `E-TLS-04` | 500 | certbot not available | The panel tried to install certbot and failed. Install it by hand (apt install certbot), then retry. |
+| `E-TLS-05` | 502 | Let's Encrypt refused the certificate | Port 80 must be reachable from the internet (provider firewall too) and the domain's A record must point to this server. With Cloudflare, use DNS only (grey cloud). |
 | `E-TLS-06` | 500 | cannot install certificate | Disk write failed — check /etc/gre-panel permissions. |
 | `E-TLS-07` | 400 | no certificate to renew | Issue a certificate first from the Settings tab. |
 | `E-TLS-08` | 500 | HTTPS listener failed | Port in use or bad cert — HTTP still works; check the error detail. |
@@ -184,6 +184,7 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-TLS-11` | 200 | domain removed successfully | TLS configuration removed. Panel reverted to HTTP IP access without interrupting tunnels. |
 | `E-TLS-12` | 400 | bad custom certificate | Paste a matching cert+key PEM pair, upload both files, or give readable server paths. |
 | `E-TLS-13` | 400 | bad IP certificate request | Send {"ip":"1.2.3.4"} with a valid IPv4/IPv6 address of this server. |
+| `E-TLS-14` | 400 | a custom certificate cannot be renewed here | Renew it where you got it, then install the new pair under Use your own certificate. |
 
 ## E-PERF-xx — Performance tuning
 
@@ -256,4 +257,4 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
 | `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
 
-Total: 135 codes.
+Total: 136 codes.

@@ -17,6 +17,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
+BOLD='\033[1m'
+DIM='\033[2m'
 
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/frp"
@@ -243,7 +245,7 @@ ensure_dependencies_smart() {
     if [[ ${#missing_pkgs[@]} -eq 0 ]]; then
         mkdir -p /etc/gre-panel
         touch "$DEPS_MARKER" 2>/dev/null || true
-        echo -e "${GREEN}[✔️] All system dependencies are satisfied.${NC}"
+        echo -e "${GREEN}[OK] All system dependencies are satisfied.${NC}"
         return 0
     fi
     
@@ -273,7 +275,7 @@ ensure_dependencies_smart() {
     fi
     mkdir -p /etc/gre-panel
     touch "$DEPS_MARKER" 2>/dev/null || true
-    echo -e "${GREEN}[✔️] System dependencies installed and cached.${NC}"
+    echo -e "${GREEN}[OK] System dependencies installed and cached.${NC}"
 }
 
 is_port_in_use() {
@@ -895,14 +897,21 @@ is_valid_port() {
     [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535))
 }
 
-panel_tls_issue() { # $1=domain [$2=email] — certbot standalone on :80 + install to /etc/gre-panel/tls
+panel_tls_issue() { # $1=domain [$2=email, "-" = none] — Let's Encrypt for the panel
     local DOMAIN=${1:-} EMAIL=${2:-}
-    [[ -z "$DOMAIN" ]] && read -p "Panel domain (e.g. panel.example.com, must point to this server): " DOMAIN
+    [[ -z "$DOMAIN" ]] && read -r -p "Panel domain (e.g. panel.example.com, must point to this server): " DOMAIN
     [[ -z "$DOMAIN" ]] && { echo -e "${RED}[!] Domain is required.${NC}"; return 1; }
     # Clean domain from scheme or port
     DOMAIN=$(echo "$DOMAIN" | sed -e 's|^[^/]*//||' -e 's|/.*$||' -e 's|:.*$||' | tr '[:upper:]' '[:lower:]')
-    read -p "Email for expiry notices [Enter to skip]: " EMAIL_IN
-    EMAIL=${EMAIL:-$EMAIL_IN}
+    [[ -z "$EMAIL" && -t 0 ]] && read -r -p "Email for expiry notices [Enter to skip]: " EMAIL
+    [[ "$EMAIL" == "-" ]] && EMAIL=""
+    # The panel binary installs certbot, opens the firewall, checks DNS and
+    # port 80, and names the certificate after the domain (Settings tab code).
+    if panel_supports "tls \["; then
+        "$PANEL_BIN" tls issue "$DOMAIN" ${EMAIL:+"$EMAIL"} || return 1
+        panel_restart_quiet
+        return 0
+    fi
 
     # Pre-flight 1: Port 80 check
     if ss -tulpn 2>/dev/null | grep -q ":80 " || lsof -i :80 >/dev/null 2>&1; then
@@ -921,7 +930,11 @@ panel_tls_issue() { # $1=domain [$2=email] — certbot standalone on :80 + insta
 
     if ! command -v certbot >/dev/null 2>&1; then
         echo -e "${CYAN}[*] Installing certbot...${NC}"
-        apt-get update -qq && apt-get install -y -qq certbot || { echo -e "${RED}[!] certbot install failed.${NC}"; return 1; }
+        { apt-get update -qq && apt-get install -y -qq certbot; } || dnf install -y certbot || yum install -y certbot \
+            || { echo -e "${RED}[!] certbot install failed.${NC}"; return 1; }
+    fi
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow 80/tcp >/dev/null 2>&1 || true
     fi
 
     # Atomic backup of previous certs
@@ -931,7 +944,7 @@ panel_tls_issue() { # $1=domain [$2=email] — certbot standalone on :80 + insta
     [[ -f /etc/gre-panel/tls/meta.json ]] && cp -f /etc/gre-panel/tls/meta.json /etc/gre-panel/tls/meta.json.bak
 
     echo -e "${CYAN}[*] Issuing Let's Encrypt certificate for ${DOMAIN}...${NC}"
-    local ARGS=(certonly --standalone --non-interactive --agree-tos --preferred-challenges http --http-01-port 80 -d "$DOMAIN")
+    local ARGS=(certonly --standalone --non-interactive --agree-tos --preferred-challenges http --http-01-port 80 --cert-name "$DOMAIN" -d "$DOMAIN")
     if [[ -n "$EMAIL" ]]; then ARGS+=(-m "$EMAIL"); else ARGS+=(--register-unsafely-without-email); fi
     if ! certbot "${ARGS[@]}"; then
         echo -e "${RED}[!] certbot failed — check DNS and port 80 accessibility.${NC}"
@@ -956,20 +969,51 @@ panel_tls_issue() { # $1=domain [$2=email] — certbot standalone on :80 + insta
     PORT=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); PORT=${PORT:-7777}
     BASE=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
     TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); TPORT=${TPORT:-7443}
-    echo -e "${GREEN}[✔️] HTTPS ready: ${CYAN}https://${DOMAIN}:${TPORT}/${BASE}${NC}"
+    echo -e "${GREEN}[OK] HTTPS ready: ${CYAN}https://${DOMAIN}:${TPORT}/${BASE}${NC}"
     echo -e "${GREEN}    HTTP still works: ${CYAN}http://<this-server-ip>:${PORT}/${BASE}${NC}"
     echo -e "${GREEN}    Tunnel infrastructure continues running without interruption.${NC}"
 }
 
 panel_tls_remove() {
+    if panel_supports "tls \["; then
+        "$PANEL_BIN" tls remove || return 1
+        panel_restart_quiet
+        return 0
+    fi
     echo -e "${CYAN}[*] Removing custom domain and HTTPS certificates...${NC}"
     rm -f /etc/gre-panel/tls/server.crt /etc/gre-panel/tls/server.key /etc/gre-panel/tls/meta.json /etc/gre-panel/tls/*.bak
     systemctl restart gre-panel 2>/dev/null || true
     local PORT BASE
     PORT=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); PORT=${PORT:-7777}
     BASE=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
-    echo -e "${GREEN}[✔️] Domain removed. Panel reverted to HTTP: ${CYAN}http://<this-server-ip>:${PORT}/${BASE}${NC}"
+    echo -e "${GREEN}[OK] Domain removed. Panel reverted to HTTP: ${CYAN}http://<this-server-ip>:${PORT}/${BASE}${NC}"
     echo -e "${GREEN}    Active tunnels remain fully operational.${NC}"
+}
+
+# panel_tls_renew: renew the panel certificate the way it was made.
+panel_tls_renew() {
+    if panel_supports "tls \["; then
+        "$PANEL_BIN" tls renew || return 1
+        panel_restart_quiet
+        return 0
+    fi
+    local D
+    D=$(grep -o '"domain": *"[^"]*"' /etc/gre-panel/tls/meta.json 2>/dev/null | cut -d'"' -f4)
+    [[ -n "$D" ]] || { echo -e "${RED}[!] No certificate to renew.${NC}"; return 1; }
+    certbot renew --cert-name "$D" --non-interactive || return 1
+    cp -f "/etc/letsencrypt/live/${D}/fullchain.pem" /etc/gre-panel/tls/server.crt
+    cp -f "/etc/letsencrypt/live/${D}/privkey.pem" /etc/gre-panel/tls/server.key
+    chmod 600 /etc/gre-panel/tls/server.key
+    panel_restart_quiet
+}
+
+panel_tls_status() {
+    if panel_supports "tls \["; then "$PANEL_BIN" tls status; return; fi
+    if [[ -f /etc/gre-panel/tls/server.crt ]]; then
+        openssl x509 -in /etc/gre-panel/tls/server.crt -noout -subject -enddate 2>/dev/null
+    else
+        echo "HTTPS: off (no certificate)"
+    fi
 }
 
 gen_token32() { # 32-char alphanumeric secret (FRP auth token)
@@ -1817,7 +1861,7 @@ cli_dial() {
             if [[ "$r" == changed:* ]]; then
                 systemctl restart "$(dial_service "$(dial_env_get DIAL_KIND)")" >/dev/null 2>&1 || true
             fi
-            echo -e "${GREEN}[✔️] Dial route: ${sub} (${r#*:})${NC}"
+            echo -e "${GREEN}[OK] Dial route: ${sub} (${r#*:})${NC}"
             ;;
         *) echo "Usage: hashem dial [status|auto|gre|public]"; return 1 ;;
     esac
@@ -1828,22 +1872,19 @@ menu_dial_route() {
         echo -e "${YELLOW}[!] No route to choose: this is not a foreign server with GRE (GRE + FRP or Backhaul with GRE).${NC}"
         return 0
     fi
-    local kind cur gre pub mode __in
+    local kind cur gre pub mode c
     kind=$(dial_env_get DIAL_KIND); gre=$(dial_env_get DIAL_GRE); pub=$(dial_env_get DIAL_PUBLIC)
     mode=$(dial_env_get DIAL_MODE); cur=$(dial_current_addr "$kind")
-    echo -e "Route now: ${CYAN}${mode:-auto}${NC}, dialling ${cur} (GRE ${gre}, public ${pub})"
-    echo "  1) Auto: GRE when it works, the public IP when it does not (recommended)"
-    echo "  2) GRE only"
-    echo "  3) Public IP only"
-    echo "  0) Keep"
-    read -p "Select [0-3]: " __in
-    case "$__in" in
-        1) cli_dial auto ;;
-        2) cli_dial gre ;;
-        3) cli_dial public ;;
+    ui_menu c "Tunnel / Route to Iran" "Now: ${mode:-auto}, dialling ${cur} (GRE ${gre}, public ${pub})" \
+        "1|Auto (recommended)|GRE when it works, the public IP while GRE is blocked." \
+        "2|GRE only|Always the GRE address." \
+        "3|Public IP only|Always the Iran server's public IP."
+    case "$c" in
+        1) ui_run "Route to Iran" cli_dial auto ;;
+        2) ui_run "Route to Iran" cli_dial gre ;;
+        3) ui_run "Route to Iran" cli_dial public ;;
     esac
 }
-
 check_root() {
     [[ "${HASHEM_NO_ROOT_CHECK:-0}" == "1" ]] && return 0
     if [[ ${EUID:-$(id -u 2>/dev/null || echo 1)} -ne 0 ]]; then
@@ -1940,7 +1981,7 @@ download_with_fallback() {
         for M in "${MIRRORS[@]}"; do
             rm -f "$DEST" 2>/dev/null
             if curl -fsSL --connect-timeout 6 --max-time "$TIMEOUT" "${STALL[@]}" -o "$DEST" "$M" 2>/dev/null && is_valid_download "$DEST"; then
-                echo -e "${GREEN}[✔️] Download succeeded via mirror: ${M%/*}${NC}"
+                echo -e "${GREEN}[OK] Download succeeded via mirror: ${M%/*}${NC}"
                 return 0
             fi
             rm -f "$DEST" 2>/dev/null
@@ -2009,7 +2050,7 @@ install_frp_binaries() {
         echo -e "${RED}[!] FRP binaries not found or not executable after installation.${NC}"
         return 1
     fi
-    echo -e "${GREEN}[✔️] FRP installed to ${INSTALL_DIR}.${NC}"
+    echo -e "${GREEN}[OK] FRP installed to ${INSTALL_DIR}.${NC}"
 }
 
 BACKHAUL_CONFIG_DIR="/etc/backhaul"
@@ -2054,7 +2095,7 @@ install_backhaul_binaries() {
 
     rm -rf "$TMP_DIR"
     if [[ -x "${INSTALL_DIR}/backhaul" ]]; then
-        echo -e "${GREEN}[✔️] Backhaul ${BH_VER} installed to ${INSTALL_DIR}/backhaul.${NC}"
+        echo -e "${GREEN}[OK] Backhaul ${BH_VER} installed to ${INSTALL_DIR}/backhaul.${NC}"
         return 0
     else
         echo -e "${RED}[!] Backhaul binary extraction failed.${NC}"
@@ -2131,6 +2172,28 @@ EOF
 # tab), 8 when unset. Every writer of a client config uses it.
 backhaul_pool_size() {
     pool_clamp "$(perf_get_int backhaul_pool 8)" 1 64
+}
+
+# backhaul_pool_apply N: write connection_pool into the running client config
+# and restart backhaul-client, only when it changed (same as the panel).
+backhaul_pool_apply() {
+    local N="$1" F CHANGED=0 FOUND=0
+    for F in "${BACKHAUL_CONF_DIR:-/etc/backhaul}/client.toml" "${PANEL_CONFIG_DIR}/client.toml"; do
+        [[ -f "$F" ]] || continue
+        FOUND=1
+        grep -Eq '^[[:space:]]*connection_pool[[:space:]]*=' "$F" || { echo -e "${YELLOW}[!] $F has no connection_pool line: set the tunnel up again.${NC}"; continue; }
+        grep -Eq "^[[:space:]]*connection_pool[[:space:]]*=[[:space:]]*${N}[[:space:]]*$" "$F" && continue
+        sed -i -E "s/^([[:space:]]*connection_pool[[:space:]]*=[[:space:]]*)[0-9]+/\1${N}/" "$F"
+        CHANGED=1
+    done
+    if (( ! FOUND )); then
+        echo -e "${GREEN}[OK] Backhaul pool saved: ${N}. New Backhaul client setups use it (this server has none).${NC}"
+    elif (( CHANGED )); then
+        systemctl restart backhaul-client 2>/dev/null || true
+        echo -e "${GREEN}[OK] Backhaul pool set to ${N}; backhaul-client restarted.${NC}"
+    else
+        echo -e "${GREEN}[OK] Backhaul pool already ${N}.${NC}"
+    fi
 }
 
 backhaul_write_client_conf_v1() {
@@ -2543,7 +2606,7 @@ EOF
     iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu >/dev/null 2>&1 || true
     mss_clamp_set POSTROUTING
 
-    echo -e "${GREEN}[✔️] GRE Tunnel service active with IP ${CLEAN_GRE_IP} (MTU $(gre_mtu_for 1380), MSS $(gre_mss)).${NC}"
+    echo -e "${GREEN}[OK] GRE Tunnel service active with IP ${CLEAN_GRE_IP} (MTU $(gre_mtu_for 1380), MSS $(gre_mss)).${NC}"
 }
 
 # Retire features removed from this release (chaff pinger, DPI shield). Older installs may still
@@ -2685,9 +2748,9 @@ with open(path, "w") as f:
             systemctl daemon-reload >/dev/null 2>&1 || true
             systemctl restart frpc
             autopool_state_set applied_pool="$EFF_POOL" last_restart="$(date +%s)"
-            echo -e "${GREEN}[✔️] frpc.toml updated & frpc service restarted.${NC}"
+            echo -e "${GREEN}[OK] frpc.toml updated & frpc service restarted.${NC}"
         else
-            echo -e "${GREEN}[✔️] frpc.toml already up to date — frpc not restarted.${NC}"
+            echo -e "${GREEN}[OK] frpc.toml already up to date — frpc not restarted.${NC}"
         fi
     fi
 
@@ -2750,13 +2813,13 @@ with open(path, "w") as f:
                 systemctl restart "$sname" >/dev/null 2>&1 || true
             done
             autopool_state_set frps_restart_needed=false
-            echo -e "${GREEN}[✔️] Updated & restarted: ${CHANGED_SVCS[*]}.${NC}"
+            echo -e "${GREEN}[OK] Updated & restarted: ${CHANGED_SVCS[*]}.${NC}"
         else
-            echo -e "${GREEN}[✔️] frps toml(s) already up to date — nothing restarted.${NC}"
+            echo -e "${GREEN}[OK] frps toml(s) already up to date — nothing restarted.${NC}"
         fi
     fi
 
-    echo -e "${GREEN}[✔️] Performance settings successfully applied.${NC}"
+    echo -e "${GREEN}[OK] Performance settings successfully applied.${NC}"
     return 0
 }
 
@@ -2779,6 +2842,13 @@ cli_perf() {
             local EP EM
             read -r EP EM <<< "$(pool_effective_values)"
             echo -e "  Auto Pool:         $([[ "$(perf_get_auto_pool)" == "1" ]] && echo -e "${GREEN}on${NC}" || echo -e "${YELLOW}off (manual)${NC}") — poolCount ${EP}, maxPoolCount ${EM}"
+            local PP_CFG BW_CFG
+            PP_CFG=$(perf_get_str proxy_protocol "")
+            BW_CFG=$(perf_get_int bandwidth_limit_mb 0)
+            echo -e "  PROXY protocol:    ${PP_CFG:-not set (setup value kept)}"
+            echo -e "  Bandwidth limit:   $([[ "$BW_CFG" =~ ^[0-9]+$ && "$BW_CFG" -gt 0 ]] && echo "${BW_CFG} MB/s per proxy" || echo "none")"
+            echo -e "  Health check:      $(grep -q '"health_check"[[:space:]]*:[[:space:]]*true' "$PERF_FILE" 2>/dev/null && echo on || echo off)"
+            echo -e "  Backhaul pool:     $(backhaul_pool_size) (connection_pool of the Backhaul client)"
 
             if [[ -n "${PERF_ENC:-}" || -n "${PERF_COMP:-}" ]]; then
                 echo -e "${YELLOW}[!] Env overrides active: PERF_ENC=${PERF_ENC:-unset} PERF_COMP=${PERF_COMP:-unset}${NC}"
@@ -2837,7 +2907,7 @@ cli_perf() {
 
             echo ""
             if [[ "$MATCH" -eq 1 ]]; then
-                echo -e "${GREEN}[✔️] Live configuration matches effective settings.${NC}"
+                echo -e "${GREEN}[OK] Live configuration matches effective settings.${NC}"
             else
                 echo -e "${RED}[!] Live configuration does NOT match settings. Run 'hashem perf apply' to sync.${NC}"
             fi
@@ -2845,32 +2915,32 @@ cli_perf() {
         enc)
             local VAL="${2:-}"
             case "$VAL" in
-                on)  perf_set_val "proxy_encryption" "true" 1; echo -e "${GREEN}[✔️] Proxy encryption set to 'on'. Run 'hashem perf apply' to apply and restart tunnels.${NC}" ;;
-                off) perf_set_val "proxy_encryption" "false" 1; echo -e "${GREEN}[✔️] Proxy encryption set to 'off'. Run 'hashem perf apply' to apply and restart tunnels.${NC}" ;;
+                on)  perf_set_val "proxy_encryption" "true" 1; echo -e "${GREEN}[OK] Proxy encryption set to 'on'. Run 'hashem perf apply' to apply and restart tunnels.${NC}" ;;
+                off) perf_set_val "proxy_encryption" "false" 1; echo -e "${GREEN}[OK] Proxy encryption set to 'off'. Run 'hashem perf apply' to apply and restart tunnels.${NC}" ;;
                 *)   echo -e "${RED}[!] Usage: hashem perf enc on|off${NC}"; return 1 ;;
             esac
             ;;
         comp)
             local VAL="${2:-}"
             case "$VAL" in
-                on)  perf_set_val "proxy_compression" "true" 1; echo -e "${GREEN}[✔️] Proxy compression set to 'on'. Run 'hashem perf apply' to apply and restart tunnels.${NC}" ;;
-                off) perf_set_val "proxy_compression" "false" 1; echo -e "${GREEN}[✔️] Proxy compression set to 'off'. Run 'hashem perf apply' to apply and restart tunnels.${NC}" ;;
+                on)  perf_set_val "proxy_compression" "true" 1; echo -e "${GREEN}[OK] Proxy compression set to 'on'. Run 'hashem perf apply' to apply and restart tunnels.${NC}" ;;
+                off) perf_set_val "proxy_compression" "false" 1; echo -e "${GREEN}[OK] Proxy compression set to 'off'. Run 'hashem perf apply' to apply and restart tunnels.${NC}" ;;
                 *)   echo -e "${RED}[!] Usage: hashem perf comp on|off${NC}"; return 1 ;;
             esac
             ;;
         tcpmux|mux)
             local VAL="${2:-}"
             case "$VAL" in
-                on)  perf_set_val "tcp_mux" "true" 1; echo -e "${GREEN}[✔️] TCP multiplexing set to 'on'. It MUST match on the Iran hub and every foreign spoke. Run 'hashem perf apply' on each server.${NC}" ;;
-                off) perf_set_val "tcp_mux" "false" 1; echo -e "${GREEN}[✔️] TCP multiplexing set to 'off' (speed-first). It MUST match on the Iran hub and every foreign spoke. Run 'hashem perf apply' on each server.${NC}" ;;
+                on)  perf_set_val "tcp_mux" "true" 1; echo -e "${GREEN}[OK] TCP multiplexing set to 'on'. It MUST match on the Iran hub and every foreign spoke. Run 'hashem perf apply' on each server.${NC}" ;;
+                off) perf_set_val "tcp_mux" "false" 1; echo -e "${GREEN}[OK] TCP multiplexing set to 'off' (speed-first). It MUST match on the Iran hub and every foreign spoke. Run 'hashem perf apply' on each server.${NC}" ;;
                 *)   echo -e "${RED}[!] Usage: hashem perf tcpmux on|off${NC}"; return 1 ;;
             esac
             ;;
         autopool|auto-pool)
             local VAL="${2:-status}"
             case "$VAL" in
-                on)  perf_set_val "auto_pool" "true" 1; echo -e "${GREEN}[✔️] Auto Pool set to 'on'. The 1-min timer (watchdog) resizes frpc poolCount; no restart now.${NC}" ;;
-                off) perf_set_val "auto_pool" "false" 1; echo -e "${GREEN}[✔️] Auto Pool set to 'off' (manual frp_pool_count / frp_max_pool). Run 'hashem perf apply' to apply.${NC}" ;;
+                on)  perf_set_val "auto_pool" "true" 1; echo -e "${GREEN}[OK] Auto Pool set to 'on'. The 1-min timer (watchdog) resizes frpc poolCount; no restart now.${NC}" ;;
+                off) perf_set_val "auto_pool" "false" 1; echo -e "${GREEN}[OK] Auto Pool set to 'off' (manual frp_pool_count / frp_max_pool). Run 'hashem perf apply' to apply.${NC}" ;;
                 tick) autopool_tick ;;
                 status)
                     local EP EM
@@ -2881,6 +2951,39 @@ cli_perf() {
                     ;;
                 *)   echo -e "${RED}[!] Usage: hashem perf autopool on|off|status|tick${NC}"; return 1 ;;
             esac
+            ;;
+        proxy-protocol|pp)
+            case "${2:-}" in
+                off|v1|v2)
+                    perf_set_val proxy_protocol "$2"
+                    echo -e "${GREEN}[OK] PROXY protocol: $2. Run 'hashem perf apply' on this foreign server to apply.${NC}"
+                    [[ "$2" != off ]] && echo -e "${YELLOW}    The service behind each port must expect it (Xray: acceptProxyProtocol), or its connections fail.${NC}"
+                    ;;
+                *) echo -e "${RED}[!] Usage: hashem perf proxy-protocol off|v1|v2${NC}"; return 1 ;;
+            esac
+            ;;
+        bandwidth|bw)
+            local BW="${2:-}"
+            if [[ ! "$BW" =~ ^[0-9]+$ ]] || (( BW > 10000 )); then
+                echo -e "${RED}[!] Usage: hashem perf bandwidth MB   (MB/s per proxy, 0 = no limit, max 10000)${NC}"; return 1
+            fi
+            perf_set_val bandwidth_limit_mb "$BW" 1
+            echo -e "${GREEN}[OK] Bandwidth limit: $([[ "$BW" -gt 0 ]] && echo "${BW} MB/s per proxy" || echo none). Run 'hashem perf apply' to apply.${NC}"
+            ;;
+        health-check|hc)
+            case "${2:-}" in
+                on)  perf_set_val health_check true 1; echo -e "${GREEN}[OK] Health check on. Run 'hashem perf apply' to apply.${NC}" ;;
+                off) perf_set_val health_check false 1; echo -e "${GREEN}[OK] Health check off. Run 'hashem perf apply' to apply.${NC}" ;;
+                *)   echo -e "${RED}[!] Usage: hashem perf health-check on|off${NC}"; return 1 ;;
+            esac
+            ;;
+        backhaul-pool|bh-pool)
+            local N="${2:-}"
+            if [[ ! "$N" =~ ^[0-9]+$ ]] || (( N < 1 || N > 64 )); then
+                echo -e "${RED}[!] Usage: hashem perf backhaul-pool N   (1-64, default 8)${NC}"; return 1
+            fi
+            perf_set_val backhaul_pool "$N" 1
+            backhaul_pool_apply "$N"
             ;;
         pool)
             pool_effective_values
@@ -2895,61 +2998,72 @@ cli_perf() {
             perf_set_val "tcp_mux" "false" 1
             perf_set_val "auto_pool" "true" 1
             perf_apply
-            echo -e "${GREEN}[✔️] Performance RESET to safe defaults (encryption: off, compression: off, tcpMux: off, Auto Pool: on).${NC}"
+            echo -e "${GREEN}[OK] Performance RESET to safe defaults (encryption: off, compression: off, tcpMux: off, Auto Pool: on).${NC}"
             ;;
         -h|--help|help)
-            echo "Usage: hashem perf status|enc on|off|comp on|off|tcpmux on|off|autopool on|off|status|tick|pool|apply|reset"
+            echo "Usage: hashem perf status|apply|reset|enc on|off|comp on|off|tcpmux on|off|autopool on|off|status|tick|proxy-protocol off|v1|v2|bandwidth MB|health-check on|off|backhaul-pool N|pool"
             ;;
         *)
             echo -e "${RED}[!] Unknown subcommand: $SUB${NC}"
-            echo "Usage: hashem perf status|enc on|off|comp on|off|tcpmux on|off|autopool on|off|status|tick|pool|apply|reset"
+            echo "Usage: hashem perf status|apply|reset|enc on|off|comp on|off|tcpmux on|off|autopool on|off|status|tick|proxy-protocol off|v1|v2|bandwidth MB|health-check on|off|backhaul-pool N|pool"
             return 1
             ;;
     esac
 }
 
 menu_perf() {
+    local c v
     while true; do
-        cli_perf status
-        echo ""
-        echo "  1) Toggle Proxy Encryption (enc on/off)"
-        echo "  2) Toggle Proxy Compression (comp on/off)"
-        echo "  3) Toggle Auto Pool (autopool on/off)"
-        echo "  4) Apply settings & restart tunnels"
-        echo "  5) Toggle TCP Multiplexing (tcpmux on/off - must match on hub AND spokes)"
-        echo "  0) Back to main menu"
-        echo ""
-        read -p "Select an option [0-5]: " P_OPT
-        case "$P_OPT" in
-            1)
-                local cur=$(perf_get_enc)
-                if [[ "$cur" == "1" ]]; then cli_perf enc off; else cli_perf enc on; fi
-                ;;
-            2)
-                local cur=$(perf_get_comp)
-                if [[ "$cur" == "1" ]]; then cli_perf comp off; else cli_perf comp on; fi
-                ;;
+        local pp bw
+        pp=$(perf_get_str proxy_protocol "")
+        bw=$(perf_get_int bandwidth_limit_mb 0)
+        [[ "$bw" =~ ^[0-9]+$ && "$bw" -gt 0 ]] && bw="${bw} MB/s" || bw="none"
+        ui_menu c "Performance" "$(cli_perf status 2>&1 | tail -n 1)" \
+            "-|FRP (set on the foreign server)" \
+            "1|Proxy encryption: $(ui_onoff "$(perf_get_enc)")|Encrypts proxy traffic inside FRP. Costs CPU; the tunnel is private already." \
+            "2|Proxy compression: $(ui_onoff "$(perf_get_comp)")|Helps text-heavy traffic, slows already-compressed traffic." \
+            "3|PROXY protocol: ${pp:-setup value}|Passes the real client IP. The service behind each port must expect it." \
+            "4|Bandwidth limit: ${bw}|A cap per proxy, in MB/s (0 = none)." \
+            "5|Health check: $(grep -q '"health_check"[[:space:]]*:[[:space:]]*true' "$PERF_FILE" 2>/dev/null && echo on || echo off)|FRP stops a proxy whose local service does not answer." \
+            "-|Pools and multiplexing" \
+            "6|TCP multiplexing: $(ui_onoff "$(perf_get_tcpmux)")|Must match on the Iran server and every foreign server." \
+            "7|Auto pool: $(ui_onoff "$(perf_get_auto_pool)")|Resizes the FRP connection pool to the load." \
+            "8|Backhaul pool: $(backhaul_pool_size)|connection_pool of the Backhaul client (1-64)." \
+            "-|Apply" \
+            "9|Apply now|Writes the settings into the tunnel configs and restarts the tunnel." \
+            "10|Reset to safe defaults|Encryption, compression and TCP mux off, auto pool on." \
+            "-|System" \
+            "11|Network tuning|BBR, TCP buffers and MSS clamp." \
+            "12|Undo network tuning|Back to the default sysctl values." \
+            "13|Free memory|Cap journald, drop caches, add a 1 GB swap file."
+        case "$c" in
+            1) if [[ "$(perf_get_enc)" == "1" ]]; then cli_perf enc off >/dev/null; else cli_perf enc on >/dev/null; fi ;;
+            2) if [[ "$(perf_get_comp)" == "1" ]]; then cli_perf comp off >/dev/null; else cli_perf comp on >/dev/null; fi ;;
             3)
-                local cur=$(perf_get_auto_pool)
-                if [[ "$cur" == "1" ]]; then cli_perf autopool off; else cli_perf autopool on; fi
+                ui_menu v "PROXY protocol" "The local service behind each port must expect it (Xray: acceptProxyProtocol), or its connections fail." \
+                    "1|Off|Recommended unless the service needs the client IP." \
+                    "2|v2|Binary header; most services that support it read v2." \
+                    "3|v1|Text header, for older services."
+                case "$v" in
+                    1) cli_perf proxy-protocol off >/dev/null ;;
+                    2) cli_perf proxy-protocol v2 >/dev/null ;;
+                    3) cli_perf proxy-protocol v1 >/dev/null ;;
+                esac
                 ;;
-            4)
-                cli_perf apply
-                ;;
-            5)
-                local cur=$(perf_get_tcpmux)
-                if [[ "$cur" == "1" ]]; then cli_perf tcpmux off; else cli_perf tcpmux on; fi
-                ;;
-            0)
-                return 0
-                ;;
-            *)
-                echo -e "${RED}[!] Invalid option.${NC}"
-                ;;
+            4) ui_page "Bandwidth limit"; ui_ask v "MB/s per proxy (0 = no limit)" "0"; cli_perf bandwidth "$v"; ui_pause ;;
+            5) if grep -q '"health_check"[[:space:]]*:[[:space:]]*true' "$PERF_FILE" 2>/dev/null; then cli_perf health-check off >/dev/null; else cli_perf health-check on >/dev/null; fi ;;
+            6) if [[ "$(perf_get_tcpmux)" == "1" ]]; then cli_perf tcpmux off >/dev/null; else cli_perf tcpmux on >/dev/null; fi ;;
+            7) if [[ "$(perf_get_auto_pool)" == "1" ]]; then cli_perf autopool off >/dev/null; else cli_perf autopool on >/dev/null; fi ;;
+            8) ui_page "Backhaul pool"; ui_ask v "Connections (1-64)" "$(backhaul_pool_size)"; cli_perf backhaul-pool "$v"; ui_pause ;;
+            9) ui_run "Apply performance settings" cli_perf apply ;;
+            10) ui_page "Reset"; ui_confirm "Reset performance settings and restart the tunnel?" && cli_perf reset; ui_pause ;;
+            11) ui_run "Network tuning" tune_apply ;;
+            12) ui_run "Undo network tuning" tune_restore ;;
+            13) ui_run "Free memory" free_ram ;;
+            0) return 0 ;;
         esac
     done
 }
-
 
 # ---- SINGLE SOURCE OF TRUTH for install logic ----
 # setup_iran_server_noninteractive / setup_foreign_server_noninteractive do the
@@ -3000,7 +3114,7 @@ UNIT
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
         ufw allow "${FPORT}/tcp" >/dev/null 2>&1 || true
     fi
-    echo -e "${GREEN}[✔️] WSS TLS front listening on :${FPORT} (-> frps :${CPORT})${NC}"
+    echo -e "${GREEN}[OK] WSS TLS front listening on :${FPORT} (-> frps :${CPORT})${NC}"
 }
 
 # frps_wss_front_remove <suffix>
@@ -3219,7 +3333,7 @@ _setup_foreign_full() {
 
     echo -e "${CYAN}[*] Testing GRE internal ping to Iran (${PEER_GRE})...${NC}"
     if ping -c 3 -W 2 "$PEER_GRE" >/dev/null 2>&1; then
-        echo -e "${GREEN}[✔️] GRE Tunnel link is UP and reachable!${NC}"
+        echo -e "${GREEN}[OK] GRE Tunnel link is UP and reachable!${NC}"
     else
         STATUS_PING="WARN"
         PING_ERR="Ping to peer GRE IP ${PEER_GRE} timed out (may need Iran side up)"
@@ -3749,7 +3863,7 @@ setup_gre_backhaul_foreign_server_noninteractive() {
 
     echo -e "${CYAN}[*] Testing GRE internal ping to Iran (${PEER_GRE})...${NC}"
     if ping -c 3 -W 2 "$PEER_GRE" >/dev/null 2>&1; then
-        echo -e "${GREEN}[✔️] GRE Tunnel link is UP and reachable!${NC}"
+        echo -e "${GREEN}[OK] GRE Tunnel link is UP and reachable!${NC}"
     else
         STATUS_PING="WARN"
         PING_ERR="Ping to peer GRE IP ${PEER_GRE} timed out (may need Iran side up)"
@@ -4139,7 +4253,7 @@ if os.environ.get("FRP_TRANS", "tcp") != "tcp":
 d.setdefault("peers", []).append(rec)
 json.dump(d, open(f, "w"), indent=2)
 PYEOF
-    echo -e "${GREEN}[✔️] Peer '${NAME}' (id ${ID}) added: GRE ${LOCAL_PUB} <-> ${REMOTE_PUB} (${LOCAL_GRE} peer ${PEER_GRE} on ${GRE_IF}), ${FRPS_SVC} :${FRP_PORT}${NC}"
+    echo -e "${GREEN}[OK] Peer '${NAME}' (id ${ID}) added: GRE ${LOCAL_PUB} <-> ${REMOTE_PUB} (${LOCAL_GRE} peer ${PEER_GRE} on ${GRE_IF}), ${FRPS_SVC} :${FRP_PORT}${NC}"
     echo -e "${YELLOW}Token for '${NAME}': ${TOKEN} (enter it on the FOREIGN side with ports: ${CLEANED})${NC}"
     echo -e "BUNDLE:$(bundle_make "$LOCAL_PUB" "$FRP_PORT" "$LOCAL_GRE" "$PEER_GRE" "$TOKEN" "$CLEANED")"
     echo -e "${CYAN}Foreign side: frpc server ${LOCAL_GRE}:${FRP_PORT}${NC}"
@@ -4182,7 +4296,7 @@ cli_remove_peer() {
     PEERS_F="$PEERS_FILE" PEER_ID="$ID" python3 -c \
 'import json,os; f=os.environ["PEERS_F"]; d=json.load(open(f)); d["peers"]=[p for p in d.get("peers",[]) if p["id"]!=int(os.environ["PEER_ID"])]; json.dump(d,open(f,"w"),indent=2)' \
         || echo -e "${YELLOW}[!] peers registry already gone — nothing left to clean.${NC}"
-    echo -e "${GREEN}[✔️] Peer '${NAME}' (id ${ID}) removed.${NC}"
+    echo -e "${GREEN}[OK] Peer '${NAME}' (id ${ID}) removed.${NC}"
 }
 
 cli_add_backhaul_peer() {
@@ -4313,7 +4427,7 @@ d.setdefault("peers", []).append({
 json.dump(d, open(f, "w"), indent=2)
 PYEOF
 
-    echo -e "${GREEN}[✔️] Backhaul Peer '${NAME}' (id ${ID}) added [Engine: ${ENGINE}, Transport: ${TRANSPORT}]!${NC}"
+    echo -e "${GREEN}[OK] Backhaul Peer '${NAME}' (id ${ID}) added [Engine: ${ENGINE}, Transport: ${TRANSPORT}]!${NC}"
     if [[ "$NO_GRE" -eq 1 ]]; then
         echo -e "BUNDLE:$(bundle_make_backhaul "$LOCAL_PUB" "$PORT" "$TRANSPORT" "$TOKEN" "$PORTS")"
     else
@@ -4494,7 +4608,7 @@ json.dump(d, open(f, "w"), indent=2)
 PYEOF
 
     local FINAL_NAME="${NAME:-$CUR_NAME}"
-    echo -e "${GREEN}[✔️] Peer '${FINAL_NAME}' (id ${ID}) updated successfully.${NC}"
+    echo -e "${GREEN}[OK] Peer '${FINAL_NAME}' (id ${ID}) updated successfully.${NC}"
 }
 
 # edit forwarded ports of one peer ($1=id, --ports "443, 2083")
@@ -4706,7 +4820,7 @@ check_status() {
     echo -e "\n${CYAN}[1] GRE Tunnel Interface:${NC}"
     if ip link show "$TUNNEL_NAME" >/dev/null 2>&1; then
         ip addr show dev "$TUNNEL_NAME"
-        echo -e "${GREEN}[✔️] Interface ${TUNNEL_NAME} exists and is UP.${NC}"
+        echo -e "${GREEN}[OK] Interface ${TUNNEL_NAME} exists and is UP.${NC}"
     else
         echo -e "${YELLOW}[*] Interface ${TUNNEL_NAME} not found (may be running in No-GRE Backhaul mode).${NC}"
     fi
@@ -4721,53 +4835,39 @@ check_status() {
             TARGET_PING="$IRAN_GRE_IP"
             echo "Testing ping to Iran GRE IP ($TARGET_PING)..."
         fi
-        ping -c 3 -W 2 "$TARGET_PING" && echo -e "${GREEN}[✔️] Ping OK.${NC}" || echo -e "${YELLOW}[!] Remote peer did not answer ping.${NC}"
+        ping -c 3 -W 2 "$TARGET_PING" && echo -e "${GREEN}[OK] Ping OK.${NC}" || echo -e "${YELLOW}[!] Remote peer did not answer ping.${NC}"
     fi
 
     # 3. Service Status
     echo -e "\n${CYAN}[3] Reverse Tunnel Service Status:${NC}"
     if systemctl is-active --quiet frps; then
-        echo -e "${GREEN}[✔️] frps (FRP Server on IRAN) is ACTIVE and RUNNING.${NC}"
+        echo -e "${GREEN}[OK] frps (FRP Server on IRAN) is ACTIVE and RUNNING.${NC}"
         systemctl status frps --no-pager -l
     elif systemctl is-active --quiet backhaul-server; then
-        echo -e "${GREEN}[✔️] backhaul-server (Backhaul Server on IRAN) is ACTIVE and RUNNING.${NC}"
+        echo -e "${GREEN}[OK] backhaul-server (Backhaul Server on IRAN) is ACTIVE and RUNNING.${NC}"
         systemctl status backhaul-server --no-pager -l
     elif systemctl is-active --quiet frpc; then
-        echo -e "${GREEN}[✔️] frpc (FRP Client on FOREIGN) is ACTIVE and RUNNING.${NC}"
+        echo -e "${GREEN}[OK] frpc (FRP Client on FOREIGN) is ACTIVE and RUNNING.${NC}"
         systemctl status frpc --no-pager -l
         local MUX_HINT
         MUX_HINT=$(tcpmux_eof_hint) && echo -e "${YELLOW}[!] ${MUX_HINT}${NC}"
     elif systemctl is-active --quiet backhaul-client; then
-        echo -e "${GREEN}[✔️] backhaul-client (Backhaul Client on FOREIGN) is ACTIVE and RUNNING.${NC}"
+        echo -e "${GREEN}[OK] backhaul-client (Backhaul Client on FOREIGN) is ACTIVE and RUNNING.${NC}"
         systemctl status backhaul-client --no-pager -l
     else
         echo -e "${RED}[!] Neither FRP nor Backhaul service is active.${NC}"
     fi
 }
 
-show_logs() {
-    echo -e "\n${YELLOW}=== Live Service Logs (Ctrl+C to exit) ===${NC}"
-    if systemctl list-unit-files | grep -q "backhaul-server.service"; then
-        journalctl -u backhaul-server -n 50 -f
-    elif systemctl list-unit-files | grep -q "backhaul-client.service"; then
-        journalctl -u backhaul-client -n 50 -f
-    elif systemctl list-unit-files | grep -q "frps.service"; then
-        journalctl -u frps -n 50 -f
-    elif systemctl list-unit-files | grep -q "frpc.service"; then
-        journalctl -u frpc -n 50 -f
-    else
-        echo -e "${RED}[!] No tunnel service found.${NC}"
-    fi
-}
 
 restart_all() {
     echo -e "\n${CYAN}[*] Restarting GRE and FRP/Backhaul services (all tunnels)...${NC}"
     local u
     for u in /etc/systemd/system/gre-t*.service /etc/systemd/system/gre-tunnel.service /etc/systemd/system/frps*.service /etc/systemd/system/frpc.service /etc/systemd/system/backhaul*.service; do
         [[ -f "$u" ]] || continue
-        systemctl restart "$(basename "$u")" >/dev/null 2>&1 && echo -e "${GREEN}[✔️] $(basename "$u") restarted.${NC}"
+        systemctl restart "$(basename "$u")" >/dev/null 2>&1 && echo -e "${GREEN}[OK] $(basename "$u") restarted.${NC}"
     done
-    echo -e "${GREEN}[✔️] All services restarted.${NC}"
+    echo -e "${GREEN}[OK] All services restarted.${NC}"
 }
 
 ensure_doctor_tools() {
@@ -4863,9 +4963,9 @@ doctor_diagnostics() {
     echo -e "  • Jitter (mdev):${JITTER} ms"
 
     if [[ "$LOSS_INT" -eq 0 ]]; then
-        echo -e "  ${GREEN}[✔️] Ping test passed with zero packet loss.${NC}\n"
+        echo -e "  ${GREEN}[OK] Ping test passed with zero packet loss.${NC}\n"
     elif [[ "$LOSS_INT" -le 10 ]]; then
-        echo -e "  ${YELLOW}[⚠️] Mild packet loss (${LOSS}%).${NC}\n"
+        echo -e "  ${YELLOW}[!] Mild packet loss (${LOSS}%).${NC}\n"
     else
         echo -e "  ${RED}[!] High packet loss detected (${LOSS}%).${NC}\n"
     fi
@@ -4897,7 +4997,7 @@ doctor_diagnostics() {
         echo -e "  • MTU 1360: ${RED}FAILED${NC}"
     fi
 
-    echo -e "  ${GREEN}[✔️] Optimal Recommended MTU: ${OPTIMAL_MTU:-1400} bytes.${NC}\n"
+    echo -e "  ${GREEN}[OK] Optimal Recommended MTU: ${OPTIMAL_MTU:-1400} bytes.${NC}\n"
 
     # 4. Kernel TCP Stack Audit
     echo -e "${CYAN}[3/4] Auditing Kernel TCP Stack & Forwarding...${NC}"
@@ -4937,7 +5037,7 @@ doctor_diagnostics() {
             BPS=$(echo "$IPERF_OUT" | awk -F'"bits_per_second":' '/"bits_per_second"/ {print $2}' | tr -dc '0-9.' | head -n1)
             local MBPS
             MBPS=$(awk -v b="$BPS" 'BEGIN { if (b > 0) printf "%.2f", b / 1000000; else print "0" }')
-            echo -e "  ${GREEN}[✔️] Throughput Speed: ${MBPS} Mbps${NC}\n"
+            echo -e "  ${GREEN}[OK] Throughput Speed: ${MBPS} Mbps${NC}\n"
         else
             echo -e "  ${YELLOW}[i] Remote iperf3 server not running on ${TARGET_IP}:5201.${NC}"
             echo -e "      (Run 'hashem doctor server' on the remote server to enable direct speed tests).\n"
@@ -4990,7 +5090,7 @@ doctor_diagnostics() {
 doctor_apply_fixes() {
     echo -e "\n${CYAN}[*] Applying automated optimizations...${NC}"
     tune_apply
-    echo -e "${GREEN}[✔️] Optimizations applied successfully.${NC}\n"
+    echo -e "${GREEN}[OK] Optimizations applied successfully.${NC}\n"
 }
 
 doctor_start_server() {
@@ -4999,13 +5099,13 @@ doctor_start_server() {
         echo -e "${YELLOW}[i] iperf3 server is already running.${NC}"
     else
         iperf3 -s -D
-        echo -e "${GREEN}[✔️] iperf3 server started in background on port 5201.${NC}"
+        echo -e "${GREEN}[OK] iperf3 server started in background on port 5201.${NC}"
     fi
 }
 
 doctor_stop_server() {
     pkill -f "iperf3 -s" >/dev/null 2>&1 || true
-    echo -e "${GREEN}[✔️] iperf3 server stopped.${NC}"
+    echo -e "${GREEN}[OK] iperf3 server stopped.${NC}"
 }
 
 doctor_health_check() {
@@ -5254,7 +5354,7 @@ if dropped > 0:
     local RET=$?
     echo -e "${CYAN}==============================================================${NC}"
     if [[ $RET -eq 0 ]]; then
-        echo -e "${GREEN}[✔️] PASS: Zero connection drops detected under high concurrency!${NC}"
+        echo -e "${GREEN}[OK] PASS: Zero connection drops detected under high concurrency!${NC}"
         echo -e "${GREEN}High Concurrent Connections -> No Unexpected Drops -> Stable FRP -> Stable Tunnel${NC}"
     else
         echo -e "${RED}[!] FAIL: Some connections dropped under load. Check /var/log/hashem/errors.log${NC}"
@@ -5338,7 +5438,7 @@ uninstall_all_force() {
         # 9. Remove entrypoints last
         rm -f /usr/local/bin/hashem /usr/local/bin/hashem.sh /usr/local/bin/gre.sh
 
-        echo -e "${GREEN}[✔️] Complete uninstallation finished: all tunnels, services, panel, and files removed.${NC}"
+        echo -e "${GREEN}[OK] Complete uninstallation finished: all tunnels, services, panel, and files removed.${NC}"
 }
 
 remove_tunnel() {
@@ -5393,7 +5493,7 @@ remove_tunnel_force() {
         rm -f /usr/local/bin/hashem-backhaul.sh
         rm -f "$PEERS_FILE"
 
-        echo -e "${GREEN}[✔️] Tunnel removed — GRE interface, FRP/Backhaul services, binaries and configs gone. Panel still running.${NC}"
+        echo -e "${GREEN}[OK] Tunnel removed — GRE interface, FRP/Backhaul services, binaries and configs gone. Panel still running.${NC}"
 }
 
 PANEL_DIR="/usr/local/gre-panel"
@@ -5506,7 +5606,7 @@ tune_apply() {
     modprobe tcp_bbr >/dev/null 2>&1 || true
     sysctl -w net.core.default_qdisc=fq >/dev/null 2>&1 || true
     if sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1; then
-        echo -e "${GREEN}[✔️] TCP congestion control → bbr + fq${NC}"
+        echo -e "${GREEN}[OK] TCP congestion control → bbr + fq${NC}"
     else
         echo -e "${YELLOW}[!] bbr unavailable — keeping current CC.${NC}"
     fi
@@ -5519,13 +5619,13 @@ tune_apply() {
     sysctl -w net.ipv4.tcp_rmem="$TUNE_TCP_RMEM" >/dev/null 2>&1
     sysctl -w net.ipv4.tcp_wmem="$TUNE_TCP_WMEM" >/dev/null 2>&1
     sysctl -w net.ipv4.tcp_window_scaling=1 >/dev/null 2>&1
-    echo -e "${GREEN}[✔️] Socket buffers → max 16MB, default ${TUNE_RMEM_DEFAULT}/tcp 131072 (RAM ${TUNE_MEM_MB}MB)${NC}"
+    echo -e "${GREEN}[OK] Socket buffers → max 16MB, default ${TUNE_RMEM_DEFAULT}/tcp 131072 (RAM ${TUNE_MEM_MB}MB)${NC}"
 
     # 3. Deeper NIC queue and high connection backlog
     sysctl -w net.core.netdev_max_backlog=65535 >/dev/null 2>&1
     sysctl -w net.core.somaxconn=65535 >/dev/null 2>&1
     sysctl -w net.ipv4.tcp_max_syn_backlog=65535 >/dev/null 2>&1
-    echo -e "${GREEN}[✔️] Network backlog → 65535 / 65535${NC}"
+    echo -e "${GREEN}[OK] Network backlog → 65535 / 65535${NC}"
 
     # 4. Anti-stall, keepalive, TIME_WAIT reuse, and fast connection tuning
     sysctl -w net.ipv4.tcp_slow_start_after_idle=0 >/dev/null 2>&1
@@ -5562,7 +5662,7 @@ tune_apply() {
     sysctl -w net.netfilter.nf_conntrack_tcp_timeout_close_wait=60 >/dev/null 2>&1 || true
     sysctl -w net.netfilter.nf_conntrack_tcp_timeout_fin_wait=60 >/dev/null 2>&1 || true
     sysctl -w net.netfilter.nf_conntrack_tcp_timeout_time_wait=60 >/dev/null 2>&1 || true
-    echo -e "${GREEN}[✔️] TCP keepalive (30s) + Fast Open + TW reuse + Conntrack (${TUNE_CT_MAX}) + port range 1024-65535${NC}"
+    echo -e "${GREEN}[OK] TCP keepalive (30s) + Fast Open + TW reuse + Conntrack (${TUNE_CT_MAX}) + port range 1024-65535${NC}"
 
     # OS limits configuration for high concurrency
     mkdir -p /etc/security/limits.d
@@ -5582,7 +5682,7 @@ EOF
         ip link set dev "$iface" mtu "$GMTU" >/dev/null 2>&1 || true
     done
     if ip link show "$TUNNEL_NAME" >/dev/null 2>&1; then
-        ip link set dev "$TUNNEL_NAME" mtu "$GMTU" >/dev/null 2>&1 && echo -e "${GREEN}[✔️] ${TUNNEL_NAME} MTU → ${GMTU}${NC}" || echo -e "${YELLOW}[!] Could not set GRE MTU.${NC}"
+        ip link set dev "$TUNNEL_NAME" mtu "$GMTU" >/dev/null 2>&1 && echo -e "${GREEN}[OK] ${TUNNEL_NAME} MTU → ${GMTU}${NC}" || echo -e "${YELLOW}[!] Could not set GRE MTU.${NC}"
     else
         echo -e "${YELLOW}[*] No ${TUNNEL_NAME} interface yet — MTU will apply on next setup.${NC}"
     fi
@@ -5596,7 +5696,7 @@ EOF
     for gre_iface in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -E '^(gre-t|gre-tunnel)'); do
         mss_clamp_set FORWARD -o "$gre_iface"
     done
-    echo -e "${GREEN}[✔️] TCP MSS clamp → $(gre_mss) (POSTROUTING + FORWARD per GRE iface)${NC}"
+    echo -e "${GREEN}[OK] TCP MSS clamp → $(gre_mss) (POSTROUTING + FORWARD per GRE iface)${NC}"
 
     # 7. Persist across reboots
     mkdir -p /etc/sysctl.d
@@ -5634,8 +5734,8 @@ net.netfilter.nf_conntrack_tcp_timeout_close_wait = 60
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 60
 net.netfilter.nf_conntrack_tcp_timeout_time_wait = 60
 EOF
-    echo -e "${GREEN}[✔️] Settings persisted in /etc/sysctl.d/99-gre-tune.conf${NC}"
-    echo -e "${GREEN}[✔️] Optimization done — run Restore if anything feels worse.${NC}"
+    echo -e "${GREEN}[OK] Settings persisted in /etc/sysctl.d/99-gre-tune.conf${NC}"
+    echo -e "${GREEN}[OK] Optimization done — run Restore if anything feels worse.${NC}"
 }
 
 tune_restore() {
@@ -5647,11 +5747,11 @@ tune_restore() {
     local k v
     while IFS='=' read -r k v; do
         case "$k" in
-            net.*) [[ -n "$v" ]] && sysctl -w "$k=$v" >/dev/null 2>&1 && echo -e "${GREEN}[✔️] $k → $v${NC}" ;;
+            net.*) [[ -n "$v" ]] && sysctl -w "$k=$v" >/dev/null 2>&1 && echo -e "${GREEN}[OK] $k → $v${NC}" ;;
             gre_mtu)
                 if [[ -n "$v" ]] && ip link show "$TUNNEL_NAME" >/dev/null 2>&1; then
                     v=$(gre_mtu_for "$v")
-                    ip link set dev "$TUNNEL_NAME" mtu "$v" >/dev/null 2>&1 && echo -e "${GREEN}[✔️] ${TUNNEL_NAME} MTU → $v${NC}"
+                    ip link set dev "$TUNNEL_NAME" mtu "$v" >/dev/null 2>&1 && echo -e "${GREEN}[OK] ${TUNNEL_NAME} MTU → $v${NC}"
                 fi ;;
             mss_clamp)
                 if [[ "$v" == "absent" ]]; then
@@ -5662,12 +5762,12 @@ tune_restore() {
                     for gri in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -E '^(gre-t|gre-tunnel)'); do
                         mss_clamp_drop FORWARD -o "$gri"
                     done
-                    echo -e "${GREEN}[✔️] MSS clamp removed (POSTROUTING + FORWARD)${NC}"
+                    echo -e "${GREEN}[OK] MSS clamp removed (POSTROUTING + FORWARD)${NC}"
                 fi ;;
         esac
     done < "$TUNE_BACKUP"
     rm -f /etc/sysctl.d/99-gre-tune.conf
-    echo -e "${GREEN}[✔️] Restored — backup kept at ${TUNE_BACKUP} (deleted on next optimize run).${NC}"
+    echo -e "${GREEN}[OK] Restored — backup kept at ${TUNE_BACKUP} (deleted on next optimize run).${NC}"
     rm -f "$TUNE_BACKUP"
 }
 
@@ -5709,13 +5809,13 @@ free_ram() {
         grep -q '^RuntimeMaxUse=16M' /etc/systemd/journald.conf || echo 'RuntimeMaxUse=16M' >> /etc/systemd/journald.conf
         journalctl --vacuum-size=16M >/dev/null 2>&1
         systemctl restart systemd-journald >/dev/null 2>&1
-        echo -e "${GREEN}[✔️] journald capped at 16M (was the main RAM eater)${NC}"
+        echo -e "${GREEN}[OK] journald capped at 16M (was the main RAM eater)${NC}"
     fi
     # 2. drop page caches + compact
     sync
     echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
     echo 1 > /proc/sys/vm/compact_memory 2>/dev/null
-    echo -e "${GREEN}[✔️] page cache dropped + memory compacted${NC}"
+    echo -e "${GREEN}[OK] page cache dropped + memory compacted${NC}"
     # 3. ensure 1G swap (safety net for 1GB VPS)
     if ! swapon --show 2>/dev/null | grep -q '/swapfile'; then
         echo -e "${CYAN}[*] Creating 1G swapfile...${NC}"
@@ -5724,18 +5824,18 @@ free_ram() {
             mkswap /swapfile >/dev/null 2>&1
             swapon /swapfile >/dev/null 2>&1
             grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-            echo -e "${GREEN}[✔️] 1G swap created${NC}"
+            echo -e "${GREEN}[OK] 1G swap created${NC}"
         else
             echo -e "${YELLOW}[!] Could not create swapfile (disk full?)${NC}"
         fi
     else
-        echo -e "${GREEN}[✔️] swap already active${NC}"
+        echo -e "${GREEN}[OK] swap already active${NC}"
     fi
     sysctl -w vm.swappiness=15 >/dev/null 2>&1
     echo 'vm.swappiness=15' > /etc/sysctl.d/99-swappiness.conf 2>/dev/null
     local after
     after=$(free -m | awk '/^Mem:/{print $7}')
-    echo -e "${GREEN}[✔️] Available RAM: ${before}M → ${after}M${NC}"
+    echo -e "${GREEN}[OK] Available RAM: ${before}M → ${after}M${NC}"
     free -m | head -2
 }
 
@@ -5744,7 +5844,7 @@ install_panel_smart() {
     status=$(get_component_status panel)
     case "$status" in
         RUNNING)
-            echo -e "${GREEN}[✔️] Web Panel is already installed and running.${NC}"
+            echo -e "${GREEN}[OK] Web Panel is already installed and running.${NC}"
             echo -e "${CYAN}[*] Skipping redundant reinstallation to preserve system state.${NC}"
             show_panel_url
             return 0
@@ -5762,7 +5862,7 @@ install_panel_smart() {
                     systemctl start gre-panel
                     sleep 2
                     if systemctl is-active --quiet gre-panel; then
-                        echo -e "${GREEN}[✔️] Web Panel started successfully.${NC}"
+                        echo -e "${GREEN}[OK] Web Panel started successfully.${NC}"
                         show_panel_url
                         return 0
                     else
@@ -5798,7 +5898,7 @@ install_panel_smart() {
                         systemctl restart gre-panel >/dev/null 2>&1 || true
                         sleep 2
                         if systemctl is-active --quiet gre-panel; then
-                            echo -e "${GREEN}[✔️] Web Panel repaired and running!${NC}"
+                            echo -e "${GREEN}[OK] Web Panel repaired and running!${NC}"
                             show_panel_url
                             return 0
                         else
@@ -5903,7 +6003,7 @@ cli_update_channel() {
         echo -e "${RED}[!] Channel must be 'stable' or 'dev'.${NC}"
         return 1
     fi
-    echo -e "${GREEN}[✔️] Update channel set to ${CH}.${NC}"
+    echo -e "${GREEN}[OK] Update channel set to ${CH}.${NC}"
     [[ "$CH" == "dev" ]] && echo -e "${YELLOW}[!] Dev builds are test builds and may break.${NC}"
     return 0
 }
@@ -6055,7 +6155,7 @@ cli_panel_limits() { # [--apply] [--mem MB]: print (default) or apply panel limi
     apply_panel_unit_limits "$unit" "$lim"
     systemctl daemon-reload 2>/dev/null || true
     systemctl restart gre-panel 2>/dev/null || true
-    echo -e "${GREEN}[✔️] Panel limits applied (RAM ${mem}MB -> ${high}/${max}).${NC}"
+    echo -e "${GREEN}[OK] Panel limits applied (RAM ${mem}MB -> ${high}/${max}).${NC}"
 }
 
 # Release integrity (H12): checksums.txt is fetched from GitHub only, never via
@@ -6162,7 +6262,7 @@ install_panel() {
         fi
         if head -c 4 "$TMP_PANEL/gre-panel" 2>/dev/null | grep -q "ELF"; then
             DL_OK=1
-            echo -e "${GREEN}[✔️] Downloaded and verified prebuilt panel ($(du -h "$TMP_PANEL/gre-panel" | cut -f1)).${NC}"
+            echo -e "${GREEN}[OK] Downloaded and verified prebuilt panel ($(du -h "$TMP_PANEL/gre-panel" | cut -f1)).${NC}"
         else
             echo -e "${YELLOW}[!] Downloaded file is not a binary — falling back to source build.${NC}"
             rm -f "$TMP_PANEL/gre-panel"
@@ -6283,7 +6383,7 @@ EOF
     sleep 2
 
     if systemctl is-active --quiet gre-panel; then
-        echo -e "${GREEN}[✔️] Panel installed and running.${NC}"
+        echo -e "${GREEN}[OK] Panel installed and running.${NC}"
         # full credentials right here — no need to open another menu
         echo ""
         echo -e "${CYAN}=== Panel credentials ===${NC}"
@@ -6401,7 +6501,7 @@ except Exception:
 PYEOF
 
     echo ""
-    echo -e "${GREEN}[✔️] Web panel password successfully updated!${NC}"
+    echo -e "${GREEN}[OK] Web panel password successfully updated!${NC}"
     echo -e "${GREEN}Username:     ${CYAN}admin${NC}"
     echo -e "${GREEN}New Password: ${CYAN}${PASS}${NC}"
     echo -e "${YELLOW}Please save this password securely.${NC}"
@@ -6445,7 +6545,7 @@ cli_panel_port() {
     [[ -n "$TPORT" && "$PORT" == "$TPORT" ]] && { echo -e "${RED}[!] Port $PORT is already the panel HTTPS port.${NC}"; return 1; }
     panel_cfg_set port "$PORT" || return 1
     systemctl restart gre-panel 2>/dev/null || true
-    echo -e "${GREEN}[✔️] Panel HTTP port set to ${CYAN}${PORT}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    echo -e "${GREEN}[OK] Panel HTTP port set to ${CYAN}${PORT}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
     show_panel_url
 }
 
@@ -6457,7 +6557,7 @@ cli_panel_user() {
     [[ "$USER" =~ ^[A-Za-z0-9._-]{3,64}$ ]] || { echo -e "${RED}[!] Invalid username (3-64 chars: letters, digits, . _ -).${NC}"; return 1; }
     panel_cfg_set username "$USER" || return 1
     systemctl restart gre-panel 2>/dev/null || true
-    echo -e "${GREEN}[✔️] Panel username set to ${CYAN}${USER}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    echo -e "${GREEN}[OK] Panel username set to ${CYAN}${USER}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
     show_panel_url
 }
 
@@ -6469,7 +6569,7 @@ cli_panel_path() {
     [[ "$BASE" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{2,62}[A-Za-z0-9]$ ]] || { echo -e "${RED}[!] Invalid path (4-64 chars, letters/digits/_/-, cannot start/end with -).${NC}"; return 1; }
     panel_cfg_set base_path "$BASE" || return 1
     systemctl restart gre-panel 2>/dev/null || true
-    echo -e "${GREEN}[✔️] Panel path set to ${CYAN}${BASE}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
+    echo -e "${GREEN}[OK] Panel path set to ${CYAN}${BASE}${GREEN} (gre-panel restarted; tunnels unaffected).${NC}"
     show_panel_url
 }
 
@@ -6481,6 +6581,11 @@ panel_tls_custom() {
     [[ -z "$KEY" ]] && read -p "Private key file (PEM, .key/.pem): " KEY
     [[ -f "$CERT" ]] || { echo -e "${RED}[!] Certificate file not found: $CERT${NC}"; return 1; }
     [[ -f "$KEY" ]] || { echo -e "${RED}[!] Key file not found: $KEY${NC}"; return 1; }
+    if panel_supports "tls \["; then
+        "$PANEL_BIN" tls custom "$CERT" "$KEY" || return 1
+        panel_restart_quiet
+        return 0
+    fi
     command -v python3 >/dev/null 2>&1 || { echo -e "${RED}[!] python3 is required (keypair check).${NC}"; return 1; }
     python3 - "$CERT" "$KEY" <<'PYEOF' || return 1
 import ssl, sys
@@ -6509,7 +6614,7 @@ PYEOF
     PORT=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); PORT=${PORT:-7777}
     BASE=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
     TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); TPORT=${TPORT:-7443}
-    echo -e "${GREEN}[✔️] Custom certificate installed: ${CYAN}https://<this-server-ip>:${TPORT}/${BASE}${NC}"
+    echo -e "${GREEN}[OK] Custom certificate installed: ${CYAN}https://<this-server-ip>:${TPORT}/${BASE}${NC}"
     echo -e "${GREEN}    HTTP still works: ${CYAN}http://<this-server-ip>:${PORT}/${BASE}${NC}"
     echo -e "${GREEN}    Tunnel infrastructure continues running without interruption.${NC}"
 }
@@ -6518,6 +6623,11 @@ PYEOF
 # panel-tls-ip [IP] — CA kept 10y in /etc/gre-panel/tls, server cert 825d, restarts only gre-panel.
 panel_tls_ip() {
     local IP="${1:-}"
+    if panel_supports "tls \["; then
+        "$PANEL_BIN" tls ip ${IP:+"$IP"} || return 1
+        panel_restart_quiet
+        return 0
+    fi
     if [[ -z "$IP" ]]; then
         IP=$(ip route get 1.1.1.1 2>/dev/null | awk "/src/ {for (i=1; i<=NF; i++) if (\$i==\"src\") {print \$(i+1); exit}}")
         [[ -z "$IP" ]] && read -p "Server IP for the certificate: " IP
@@ -6553,7 +6663,7 @@ panel_tls_ip() {
     local BASE TPORT
     BASE=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
     TPORT=$(grep -o '"tls_port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*'); TPORT=${TPORT:-7443}
-    echo -e "${GREEN}[✔️] Self-signed HTTPS ready: ${CYAN}https://${IP}:${TPORT}/${BASE}${NC}"
+    echo -e "${GREEN}[OK] Self-signed HTTPS ready: ${CYAN}https://${IP}:${TPORT}/${BASE}${NC}"
     echo -e "${GREEN}    Install once to remove the browser warning: ${CYAN}/etc/gre-panel/tls/hashem-ca.crt${NC}"
     echo -e "${GREEN}    Tunnel infrastructure continues running without interruption.${NC}"
 }
@@ -6614,7 +6724,7 @@ ensure_panel_pass() {
         /usr/local/bin/gre-panel password "$NEWPASS" >/dev/null 2>&1 || true
         PANEL_PASS="$NEWPASS"
         systemctl restart gre-panel 2>/dev/null || true
-        echo -e "${GREEN}[✔️] Initial password configured: ${CYAN}${NEWPASS}${NC}"
+        echo -e "${GREEN}[OK] Initial password configured: ${CYAN}${NEWPASS}${NC}"
         echo -e "${YELLOW}[!] NOTE: Passwords are not saved in plaintext on disk (CWE-256). Record it now!${NC}"
         return 0
     fi
@@ -6656,7 +6766,7 @@ PYEOF
     chmod 600 /etc/gre-panel/panel.json
     systemctl restart gre-panel 2>/dev/null || true
     PANEL_PASS="$NEWPASS"
-    echo -e "${GREEN}[✔️] Initial password generated: ${CYAN}${NEWPASS}${NC}"
+    echo -e "${GREEN}[OK] Initial password generated: ${CYAN}${NEWPASS}${NC}"
     echo -e "${YELLOW}[!] NOTE: Passwords are not saved in plaintext on disk (CWE-256). Record it now!${NC}"
     return 0
 }
@@ -6917,7 +7027,7 @@ except Exception:
 watchdog_test() {
     echo -e "${CYAN}[*] Testing Telegram alerts...${NC}"
     if watchdog_send "✅ Hashem watchdog test OK"; then
-        echo -e "${GREEN}[✔️] Telegram test message sent successfully.${NC}"
+        echo -e "${GREEN}[OK] Telegram test message sent successfully.${NC}"
         return 0
     else
         echo -e "${RED}[!] Telegram test message failed. Check token, chat ID, and route.${NC}"
@@ -7211,7 +7321,7 @@ backup_now() {
     HSIZE=$(du -h "$OUT_FILE" 2>/dev/null | cut -f1)
 
     echo "BACKUP path=${OUT_FILE} size=${SIZE}"
-    echo -e "${GREEN}[✔️] Backup created: ${OUT_FILE} (${HSIZE})${NC}"
+    echo -e "${GREEN}[OK] Backup created: ${OUT_FILE} (${HSIZE})${NC}"
 
     if [[ "$KEEP" -gt 0 ]]; then
         local OLD_FILES
@@ -7270,21 +7380,21 @@ backup_restore() {
     fi
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo -e "${GREEN}[✔️] Archive verified OK. Files inside:${NC}"
+        echo -e "${GREEN}[OK] Archive verified OK. Files inside:${NC}"
         cat "$TMP_D/list.txt"
         return 0
     fi
 
     echo -e "${CYAN}[*] Saving a safety backup of the current configuration first...${NC}"
     backup_now --keep 5 "${BACKUP_DIR}/pre-restore" >/dev/null 2>&1 \
-        && echo -e "${GREEN}[✔️] Current state saved in ${BACKUP_DIR}/pre-restore (roll back with: hashem backup restore <file>).${NC}" \
+        && echo -e "${GREEN}[OK] Current state saved in ${BACKUP_DIR}/pre-restore (roll back with: hashem backup restore <file>).${NC}" \
         || echo -e "${YELLOW}[!] Could not save a safety backup; continuing.${NC}"
 
     echo -e "${CYAN}[*] Restoring configuration files and systemd units...${NC}"
     tar -xzf "$TMP_D/backup.tar.gz" -C /
     chmod 600 /etc/gre-panel/*.json 2>/dev/null || true
     chmod 600 /etc/gre-panel/*.pass 2>/dev/null || true
-    echo -e "${GREEN}[✔️] Files restored:${NC}"
+    echo -e "${GREEN}[OK] Files restored:${NC}"
     cat "$TMP_D/list.txt"
 
     echo -e "${CYAN}[*] Reloading systemd daemon...${NC}"
@@ -7293,7 +7403,7 @@ backup_restore() {
     echo -e "${CYAN}[*] Restarting tunnel services...${NC}"
     restart_all
 
-    echo -e "${GREEN}[✔️] Restore completed successfully.${NC}"
+    echo -e "${GREEN}[OK] Restore completed successfully.${NC}"
     return 0
 }
 
@@ -7345,7 +7455,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null || true
-    echo -e "${GREEN}[✔️] Watchdog enabled (systemd timer active, checks every 1 min).${NC}"
+    echo -e "${GREEN}[OK] Watchdog enabled (systemd timer active, checks every 1 min).${NC}"
 }
 
 # watchdog_timer_ensure installs and starts the 1-minute timer. It drives more
@@ -7492,11 +7602,6 @@ except Exception:
 
 menu_watchdog() {
     while true; do
-        clear
-        echo -e "${CYAN}==========================================================${NC}"
-        echo -e "${CYAN}              Watchdog & Encrypted Backup                 ${NC}"
-        echo -e "${CYAN}==========================================================${NC}"
-        echo ""
         init_watchdog_json
         local W_EN
         W_EN=$(python3 -c '
@@ -7507,23 +7612,22 @@ try:
 except Exception:
     print("DISABLED")
 ' 2>/dev/null)
+        local W_INFO SUBOPT
         if [[ "$W_EN" == "ENABLED" ]]; then
-            echo -e "Watchdog Status: ${GREEN}● ENABLED${NC} (checks every 1 min)"
+            W_INFO="Watchdog: ${GREEN}on${NC} (checks every minute)"
         else
-            echo -e "Watchdog Status: ${RED}○ DISABLED${NC}"
+            W_INFO="Watchdog: off"
         fi
-        echo ""
-        echo "  1) Enable / Disable Watchdog"
-        echo "  2) Set Telegram (Bot Token & Chat ID)"
-        echo "  3) Test Telegram Alert"
-        echo "  4) Route Direct vs Tunnel (+pick tunnel socks port)"
-        echo "  5) Backup Now (OpenSSL AES-256-CBC Encrypted)"
-        echo "  6) Schedule Backup (Every-N-Hours OR Daily at HH:MM)"
-        echo "  7) Restore from Encrypted Backup"
-        echo "  8) View Full Status & Stored Backups"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-8]: " SUBOPT
+        ui_menu SUBOPT "Watchdog" "$W_INFO" \
+            "1|Turn $([[ "$W_EN" == "ENABLED" ]] && echo off || echo on)|Checks the tunnel every minute and repairs it." \
+            "2|Telegram bot|Bot token and chat id for alerts." \
+            "3|Send a test alert|Checks the Telegram settings." \
+            "4|Alert route|Send alerts directly or through the tunnel (SOCKS port)." \
+            "5|Back up now|Encrypted snapshot of the configs." \
+            "6|Backup schedule|Every N hours or daily at a time." \
+            "7|Restore a backup|Pick a stored snapshot." \
+            "8|Full status|Watchdog state and stored backups."
+        [[ "$SUBOPT" != "0" ]] && ui_page "Watchdog"
         case "$SUBOPT" in
             1)
                 if [[ "$W_EN" == "ENABLED" ]]; then
@@ -7531,7 +7635,7 @@ except Exception:
                 else
                     watchdog_on
                 fi
-                read -p "Press Enter to continue..." _
+                ui_pause
                 ;;
             2)
                 echo -e "\n${CYAN}── Configure Telegram Alerts ──${NC}"
@@ -7558,15 +7662,15 @@ try:
 except Exception as e:
     print(e)
 ' 2>/dev/null
-                    echo -e "${GREEN}[✔️] Telegram settings saved.${NC}"
+                    echo -e "${GREEN}[OK] Telegram settings saved.${NC}"
                 else
                     echo -e "${YELLOW}[*] No changes made.${NC}"
                 fi
-                read -p "Press Enter to continue..." _
+                ui_pause
                 ;;
             3)
                 watchdog_test
-                read -p "Press Enter to continue..." _
+                ui_pause
                 ;;
             4)
                 echo -e "\n${CYAN}── Telegram Delivery Route ──${NC}"
@@ -7589,7 +7693,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null
-                    echo -e "${GREEN}[✔️] Route set to Direct.${NC}"
+                    echo -e "${GREEN}[OK] Route set to Direct.${NC}"
                 elif [[ "$ROUTE_CHOICE" == "2" ]]; then
                     local PORTS=()
                     mapfile -t PORTS < <(find_live_proxy_ports)
@@ -7628,17 +7732,17 @@ try:
 except Exception:
     pass
 ' 2>/dev/null
-                        echo -e "${GREEN}[✔️] Route set to Tunnel (127.0.0.1:${CHOSEN_PORT}).${NC}"
+                        echo -e "${GREEN}[OK] Route set to Tunnel (127.0.0.1:${CHOSEN_PORT}).${NC}"
                     else
                         echo -e "${RED}[!] Invalid port number.${NC}"
                     fi
                 fi
-                read -p "Press Enter to continue..." _
+                ui_pause
                 ;;
             5)
                 echo -e "\n${CYAN}── Creating Encrypted Backup ──${NC}"
                 backup_now
-                read -p "Press Enter to continue..." _
+                ui_pause
                 ;;
             6)
                 echo -e "\n${CYAN}── Schedule Encrypted Backup ──${NC}"
@@ -7666,7 +7770,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null
-                            echo -e "${GREEN}[✔️] Backup scheduled every ${N_HOURS} hours.${NC}"
+                            echo -e "${GREEN}[OK] Backup scheduled every ${N_HOURS} hours.${NC}"
                         else
                             echo -e "${RED}[!] Invalid hours (must be 1-168).${NC}"
                         fi
@@ -7690,7 +7794,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null
-                            echo -e "${GREEN}[✔️] Backup scheduled daily at ${DAILY_T}.${NC}"
+                            echo -e "${GREEN}[OK] Backup scheduled daily at ${DAILY_T}.${NC}"
                         else
                             echo -e "${RED}[!] Invalid time format (use HH:MM e.g. 03:00).${NC}"
                         fi
@@ -7712,13 +7816,13 @@ try:
 except Exception:
     pass
 ' 2>/dev/null
-                        echo -e "${GREEN}[✔️] Scheduled backups disabled.${NC}"
+                        echo -e "${GREEN}[OK] Scheduled backups disabled.${NC}"
                         ;;
                     *)
                         echo -e "${RED}[!] Invalid option.${NC}"
                         ;;
                 esac
-                read -p "Press Enter to continue..." _
+                ui_pause
                 ;;
             7)
                 echo -e "\n${CYAN}── Restore Backup ──${NC}"
@@ -7754,11 +7858,11 @@ except Exception:
                         echo -e "${RED}[!] Invalid choice.${NC}"
                     fi
                 fi
-                read -p "Press Enter to continue..." _
+                ui_pause
                 ;;
             8)
                 watchdog_status_full
-                read -p "Press Enter to continue..." _
+                ui_pause
                 ;;
             0)
                 return 0
@@ -7839,7 +7943,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null
-                    echo -e "${GREEN}[✔️] Backup scheduled every ${HOURS} hours.${NC}"
+                    echo -e "${GREEN}[OK] Backup scheduled every ${HOURS} hours.${NC}"
                 else
                     echo -e "${RED}[!] Invalid interval hours: '$HOURS' (1-168)${NC}"; return 1
                 fi
@@ -7861,7 +7965,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null
-                    echo -e "${GREEN}[✔️] Backup scheduled daily at ${DAILY}.${NC}"
+                    echo -e "${GREEN}[OK] Backup scheduled daily at ${DAILY}.${NC}"
                 else
                     echo -e "${RED}[!] Invalid daily time format: '$DAILY' (HH:MM e.g. 03:00)${NC}"; return 1
                 fi
@@ -7882,7 +7986,7 @@ try:
 except Exception:
     pass
 ' 2>/dev/null
-                echo -e "${GREEN}[✔️] Scheduled backups disabled.${NC}"
+                echo -e "${GREEN}[OK] Scheduled backups disabled.${NC}"
             else
                 echo -e "${RED}[!] Usage: hashem backup schedule [--every N | --daily HH:MM | --off]${NC}"; return 1
             fi
@@ -7909,7 +8013,7 @@ remove_legacy_units() {
         systemctl disable "${name}.service" >/dev/null 2>&1 || true
         rm -f "$unit" "${dir}/multi-user.target.wants/${name}.service"
         systemctl reset-failed "${name}.service" >/dev/null 2>&1 || true
-        echo -e "${GREEN}[✔️] Removed obsolete unit ${name}.service${NC}"
+        echo -e "${GREEN}[OK] Removed obsolete unit ${name}.service${NC}"
         removed=1
     done
     if [[ -L "${dir}/multi-user.target.wants/gre-panel.service" && ! -f "${dir}/gre-panel.service" ]]; then
@@ -7952,9 +8056,9 @@ update_all() {
     fi
     bash -n "$TMP_U/hashem.sh" || { echo -e "${RED}[!] Downloaded script failed syntax check — nothing changed.${NC}"; return 1; }
     if cmp -s "$TMP_U/hashem.sh" "$0" 2>/dev/null || cmp -s "$TMP_U/hashem.sh" ./hashem.sh 2>/dev/null; then
-        echo -e "${GREEN}[✔️] hashem.sh is already the latest version.${NC}"
+        echo -e "${GREEN}[OK] hashem.sh is already the latest version.${NC}"
     else
-        echo -e "${GREEN}[✔️] New hashem.sh downloaded and syntax-checked.${NC}"
+        echo -e "${GREEN}[OK] New hashem.sh downloaded and syntax-checked.${NC}"
     fi
     remove_legacy_units
     # 2. reinstall panel binary from latest release (downloads prebuilt, restarts service)
@@ -8000,7 +8104,7 @@ update_all() {
     # restarts and Auto-Pool depend on it (M6).
     watchdog_timer_ensure >/dev/null 2>&1 || true
     PANEL_VER=$("$PANEL_BIN" --version 2>/dev/null || echo "unknown")
-    echo -e "${GREEN}[✔️] Update complete — script + panel are latest (panel: ${PANEL_VER}). Re-run the script to use the new menu.${NC}"
+    echo -e "${GREEN}[OK] Update complete — script + panel are latest (panel: ${PANEL_VER}). Re-run the script to use the new menu.${NC}"
 }
 
 cli_carrier() {
@@ -8050,25 +8154,25 @@ except Exception:
             local TARGET="${2:-direct}"
             [[ "$TARGET" == "auto" ]] && TARGET="direct"
             carrier_set_mode "$TARGET"
-            echo -e "${GREEN}[✔️] Carrier mode set to: ${TARGET}${NC}"
+            echo -e "${GREEN}[OK] Carrier mode set to: ${TARGET}${NC}"
             carrier_apply "$TARGET"
-            echo -e "${GREEN}[✔️] Active carrier applied: ${TARGET}${NC}"
+            echo -e "${GREEN}[OK] Active carrier applied: ${TARGET}${NC}"
             ;;
         set|set-active|apply)
             local TARGET="${2:-direct}"
             carrier_apply "$TARGET"
-            echo -e "${GREEN}[✔️] Switched active carrier to: ${TARGET}${NC}"
+            echo -e "${GREEN}[OK] Switched active carrier to: ${TARGET}${NC}"
             ;;
         next|cycle)
             local NEW_C
             NEW_C=$(carrier_cycle_next)
-            echo -e "${GREEN}[✔️] Cycled carrier to: ${NEW_C}${NC}"
+            echo -e "${GREEN}[OK] Cycled carrier to: ${NEW_C}${NC}"
             ;;
         set-ports)
             local P1="${2:-443}" P2="${3:-55555}"
             carrier_set_fou_ports "$P1" "$P2"
             carrier_init_kernel
-            echo -e "${GREEN}[✔️] FOU ports updated: ${P1} and ${P2}${NC}"
+            echo -e "${GREEN}[OK] FOU ports updated: ${P1} and ${P2}${NC}"
             ;;
         kernel-init)
             carrier_init_kernel
@@ -8081,27 +8185,21 @@ except Exception:
 }
 
 menu_carrier() {
-    cli_carrier status
-    echo -e "${YELLOW}Select an action:${NC}"
-    echo "  1) Force Direct GRE (Raw Protocol 47)"
-    echo "  2) Force WSS Obfuscated Carrier (WebSocket over TLS / Port 8443)"
-    echo "  3) Cycle to Next Candidate Now"
-    echo "  0) Back to Main Menu"
-    echo ""
-    read -p "Select an option [0-3]: " C_OPT
-    case "$C_OPT" in
-        1) cli_carrier set direct ;;
-        2) cli_carrier set wss:8443 ;;
-        3) cli_carrier next ;;
-        0) return 0 ;;
-        *) echo -e "${RED}[!] Invalid option.${NC}" ;;
-    esac
-    read -p "Press Enter to return to menu..."
-}
-
-pause_prompt() {
-    echo ""
-    read -p "Press Enter to return to menu..." _dummy
+    local c
+    while true; do
+        ui_menu c "Tunnel / Carrier" "$(cli_carrier status 2>&1)" \
+            "1|Direct GRE|Plain GRE (IP protocol 47). Fastest when it is not blocked." \
+            "2|WSS (port 8443)|GRE inside WebSocket over TLS; looks like HTTPS." \
+            "3|Next candidate|Try the next carrier in the list now." \
+            "4|Automatic|Switch carriers by itself when one stops working."
+        case "$c" in
+            1) ui_run "Carrier" cli_carrier set direct ;;
+            2) ui_run "Carrier" cli_carrier set wss:8443 ;;
+            3) ui_run "Carrier" cli_carrier next ;;
+            4) ui_run "Carrier" cli_carrier mode auto ;;
+            0) return 0 ;;
+        esac
+    done
 }
 
 prompt_backhaul_transport() { # $1=varname
@@ -8191,7 +8289,7 @@ cli_backhaul_migrate() {
     local units u name kind conf bin ver tr tok addr ports port moved=0 kept=0
     units=$(backhaul_legacy_units)
     if [[ -z "$units" ]]; then
-        echo -e "${GREEN}[✔️] No old Modified Backhaul tunnels found.${NC}"
+        echo -e "${GREEN}[OK] No old Modified Backhaul tunnels found.${NC}"
         rm -f /usr/local/bin/hashem-backhaul.sh 2>/dev/null
         return 0
     fi
@@ -8238,7 +8336,7 @@ cli_backhaul_migrate() {
             backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "$addr" "$tr" "$tok"
             setup_backhaul_client_systemd "backhaul-client" "${BACKHAUL_CONFIG_DIR}/client.toml"
         fi
-        echo -e "${GREEN}[✔️] Moved into Hashem as backhaul-$([[ "$kind" == iran ]] && echo server || echo client) (port ${port}, ${tr}).${NC}"
+        echo -e "${GREEN}[OK] Moved into Hashem as backhaul-$([[ "$kind" == iran ]] && echo server || echo client) (port ${port}, ${tr}).${NC}"
         moved=$((moved + 1))
     done
     systemctl daemon-reload >/dev/null 2>&1 || true
@@ -8294,47 +8392,42 @@ backhaul_show_bundle() {
 }
 
 menu_backhaul() {
+    local c b
     while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}=== BACKHAUL TUNNEL ===${NC}"
-        backhaul_status
-        echo ""
-        echo "  1) Setup Iran server [PRO] (asks whether to use GRE)"
-        echo "  2) Setup foreign server from a bundle (bh1_ / gh1_) [PRO]"
-        echo "  3) Show the bundle for the foreign server"
-        echo "  4) Show Backhaul logs"
-        echo "  5) Restart Backhaul services"
-        echo "  6) Route to Iran (foreign side): GRE / public IP / auto"
-        [[ -n "$(backhaul_legacy_units)" ]] && echo "  7) Move old Modified Backhaul tunnels into Hashem"
-        echo "  0) Back"
-        echo ""
-        local B_OPT BUNDLE_IN
-        read -p "Select an option: " B_OPT
-        case "$B_OPT" in
-            1) setup_backhaul_iran_interactive; pause_prompt ;;
+        local -a extra=()
+        [[ -n "$(backhaul_legacy_units)" ]] && extra=("7|Move old Backhaul tunnels in|Tunnels made by the old Modified Backhaul script.")
+        ui_menu c "Backhaul" "$(backhaul_status 2>&1)" \
+            "1|Set up the Iran server [PRO]|Asks whether to run it over GRE." \
+            "2|Set up the foreign server [PRO]|From the bh1_ / gh1_ bundle." \
+            "3|Bundle for the foreign server|Print it again." \
+            "4|Logs|Last 60 lines of the Backhaul services." \
+            "5|Restart Backhaul|Server and client services on this machine." \
+            "6|Route to Iran|Foreign side: GRE, public IP or auto." \
+            "${extra[@]}"
+        case "$c" in
+            1) ui_run "Backhaul: Iran server" setup_backhaul_iran_interactive ;;
             2)
-                read -p "Paste the bundle from the Iran server: " BUNDLE_IN
-                [[ -n "$BUNDLE_IN" ]] && cli_setup_foreign --bundle "$BUNDLE_IN"
-                pause_prompt
+                ui_page "Backhaul: foreign server"
+                ui_ask b "Paste the bundle from the Iran server"
+                [[ -n "$b" ]] && cli_setup_foreign --bundle "$b"
+                ui_pause
                 ;;
-            3) backhaul_show_bundle; pause_prompt ;;
-            4) journalctl -u 'backhaul-*' -n 60 --no-pager -o cat 2>/dev/null | sed -E 's/(invalid security token received: ).*/\1[hidden]/'; pause_prompt ;;
+            3) ui_run "Backhaul bundle" backhaul_show_bundle ;;
+            4) ui_page "Backhaul logs"; journalctl -u 'backhaul-*' -n 60 --no-pager -o cat 2>/dev/null | sed -E 's/(invalid security token received: ).*/\1[hidden]/'; ui_pause ;;
             5)
+                ui_page "Restart Backhaul"
                 local u
                 for u in /etc/systemd/system/backhaul-server.service /etc/systemd/system/backhaul-server-[0-9]*.service /etc/systemd/system/backhaul-client.service; do
-                    [[ -f "$u" ]] && systemctl restart "$(basename "$u")" && echo -e "${GREEN}[✔️] Restarted $(basename "$u" .service)${NC}"
+                    [[ -f "$u" ]] && systemctl restart "$(basename "$u")" && echo -e "${GREEN}[OK] Restarted $(basename "$u" .service)${NC}"
                 done
-                pause_prompt
+                ui_pause
                 ;;
-            6) menu_dial_route; pause_prompt ;;
-            7) cli_backhaul_migrate; pause_prompt ;;
-            0|q) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
+            6) menu_dial_route ;;
+            7) [[ ${#extra[@]} -gt 0 ]] && ui_run "Move old Backhaul tunnels" cli_backhaul_migrate ;;
+            0) return 0 ;;
         esac
     done
 }
-
 # One Backhaul setup for the Iran server. GRE underneath is a question, not a
 # separate engine: with GRE the foreign side dials the GRE address and falls
 # back to the public IP when GRE is blocked (and returns once it works again);
@@ -8375,374 +8468,737 @@ setup_backhaul_iran_interactive() {
 
 setup_gre_backhaul_iran_interactive() { setup_backhaul_iran_interactive yes; }
 
-show_banner() {
-    echo -e "${CYAN}"
-    cat << 'EOF'
-  _    _           _____ _    _ ______ __  __ 
- | |  | |   /\    / ____| |  | |  ____|  \/  |
- | |__| |  /  \  | (___ | |__| | |__  | \  / |
- |  __  | / /\ \  \___ \|  __  |  __| | |\/| |
- | |  | |/ ____ \ ____) | |  | | |____| |  | |
- |_|  |_/_/    \_|_____/|_|  |_|______|_|  |_|
-EOF
-    echo -e "${NC}"
-    echo -e "${CYAN}==============================================================${NC}"
-    echo -e "${GREEN}${BOLD}     HASHEM REVERSE TUNNEL & WEB PANEL MANAGER (Iran <-> Int)${NC}"
-    echo -e "${CYAN}     Layer 3 GRE / FRP / Backhaul Reverse Relay & Web Panel${NC}"
-    echo -e "${CYAN}==============================================================${NC}"
+# ============================================================================
+# Terminal app (hashem with no arguments). Arrow keys or the item number move
+# and choose, Enter runs, Esc / q / Left goes back. Without a terminal (pipe,
+# TERM=dumb, HASHEM_PLAIN=1) the same menus are plain numbered prompts.
+# Every item runs the same function as the matching CLI command and panel tab.
+# ============================================================================
 
-    local ROLE="Unconfigured"
-    if [[ -f "/etc/frp/frps.toml" || -f "/etc/frp/frps.ini" || -f "/etc/backhaul/config.toml" ]]; then
-        ROLE="IRAN HUB"
-    elif [[ -f "/etc/frp/frpc.toml" || -f "/etc/frp/frpc.ini" ]]; then
-        ROLE="FOREIGN SPOKE"
+UI_TTY=0
+UI_STATUS_AT=0
+declare -A UI_LAST=() # last chosen row per menu title
+UI_HLINE="-"
+UI_PTR=">"
+UI_ARROWS="Up/Down"
+
+ui_init() {
+    UI_TTY=0
+    [[ -t 0 && -t 1 && "${TERM:-dumb}" != "dumb" && -z "${HASHEM_PLAIN:-}" ]] && UI_TTY=1
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *UTF-8*|*utf8*|*UTF8*|*utf-8*) UI_HLINE="─"; UI_PTR="›"; UI_ARROWS="↑↓" ;;
+    esac
+}
+
+ui_cols() {
+    local c
+    c=$(tput cols 2>/dev/null || echo 80)
+    [[ "$c" =~ ^[0-9]+$ ]] || c=80
+    (( c > 100 )) && c=100
+    (( c < 40 )) && c=40
+    echo "$c"
+}
+
+ui_rule() { # a full-width line
+    local n w; w=$(ui_cols)
+    printf '%b' "$DIM"
+    for ((n = 0; n < w; n++)); do printf '%s' "$UI_HLINE"; done
+    printf '%b\n' "$NC"
+}
+
+ui_cursor() { # show | hide
+    (( UI_TTY )) || return 0
+    if [[ "$1" == "hide" ]]; then tput civis 2>/dev/null; else tput cnorm 2>/dev/null; fi
+}
+
+ui_cleanup() { ui_cursor show; printf '%b' "$NC"; }
+
+# ui_status_refresh: the facts the header shows, read at most every 15 s so
+# moving through a menu stays instant (no network calls here).
+ui_status_refresh() {
+    local now; now=$(date +%s)
+    (( now - UI_STATUS_AT < 15 )) && return 0
+    UI_STATUS_AT=$now
+    UI_ROLE="Not set up"
+    if [[ -f "${CONFIG_DIR}/frps.toml" || -f "${CONFIG_DIR}/frps.ini" || -f /etc/backhaul/config.toml || -f /etc/backhaul/server.toml ]] \
+        || [[ -f /etc/systemd/system/hashem-bagher.service ]]; then
+        UI_ROLE="Iran server"
+    elif [[ -f "${CONFIG_DIR}/frpc.toml" || -f "${CONFIG_DIR}/frpc.ini" || -f /etc/backhaul/client.toml ]]; then
+        UI_ROLE="Foreign server"
     fi
-    local TUN_STAT="${RED}Inactive${NC}"
+    UI_TUN="${DIM}none${NC}"
     if tunnel_present 2>/dev/null; then
-        TUN_STAT="${GREEN}Active${NC}"
+        local up=0 u
+        for u in frps frpc backhaul-server backhaul-client gre-tunnel; do
+            systemctl is-active --quiet "$u" 2>/dev/null && up=1
+        done
+        if (( up )); then UI_TUN="${GREEN}up${NC}"; else UI_TUN="${RED}down${NC}"; fi
     fi
-    local PNL_STAT="${RED}Stopped${NC}"
+    UI_PANEL="${RED}stopped${NC}"
+    UI_URL=""
     if systemctl is-active --quiet gre-panel 2>/dev/null; then
-        local P_PORT P_PATH PUB_IP
-        P_PORT=$(grep -o '"port": *[0-9]*' /etc/gre-panel/panel.json 2>/dev/null | grep -o '[0-9]*' || echo "7777")
-        P_PATH=$(grep -o '"base_path": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4 || echo "")
-        PUB_IP=$(get_public_ip 2>/dev/null || echo "127.0.0.1")
-        PNL_STAT="${GREEN}Running${NC} (${CYAN}http://${PUB_IP}:${P_PORT}${P_PATH}/${NC})"
+        UI_PANEL="${GREEN}running${NC}"
+        local port base ip
+        port=$(grep -o '"port": *[0-9]*' "${PANEL_CONFIG_DIR}/panel.json" 2>/dev/null | grep -o '[0-9]*' | head -n1)
+        base=$(grep -o '"base_path": *"[^"]*"' "${PANEL_CONFIG_DIR}/panel.json" 2>/dev/null | cut -d'"' -f4)
+        ip=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
+        UI_URL="http://${ip:-<server-ip>}:${port:-7777}/${base}${base:+/}"
     fi
-    echo -e " ${BOLD}Role:${NC} ${YELLOW}${ROLE}${NC} | ${BOLD}Tunnel:${NC} ${TUN_STAT} | ${BOLD}Panel:${NC} ${PNL_STAT}"
-    echo -e "${CYAN}==============================================================${NC}"
+    UI_LIC="Free"
+    [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" license check performance >/dev/null 2>&1 && UI_LIC="${GREEN}Pro${NC}"
+    UI_VER=$("$PANEL_BIN" --version 2>/dev/null | head -n1)
+}
+
+# ui_header TITLE [BREADCRUMB]: clears the screen and draws the app bar.
+ui_header() {
+    ui_status_refresh
+    if (( UI_TTY )); then printf '\033[H\033[2J'; else echo; fi
+    printf '%b %s%b  %b%s%b\n' "${BOLD}${CYAN}" "HASHEM" "$NC" "$DIM" "Tunnel Manager ${UI_VER}" "$NC"
+    printf ' Role: %b%s%b   Tunnel: %b   Panel: %b   License: %b\n' "$BOLD" "$UI_ROLE" "$NC" "$UI_TUN" "$UI_PANEL" "$UI_LIC"
+    [[ -n "$UI_URL" ]] && printf ' Panel address: %b%s%b\n' "$CYAN" "$UI_URL" "$NC"
+    ui_rule
+    printf ' %b%s%b\n\n' "$BOLD" "$1" "$NC"
+}
+
+# ui_menu VAR "Title" "INFO" ITEM... -> VAR = the chosen item's key, "0" = back.
+# ITEM is "key|Label|Description"; "-|Group" starts a group. INFO (may be "")
+# is printed under the title, e.g. the current state of the page.
+ui_menu() {
+    local __var="$1" title="$2" info="$3"; shift 3
+    local -a keys=() labels=() descs=() groups=()
+    local it k l d g=""
+    for it in "$@"; do
+        IFS='|' read -r k l d <<< "$it"
+        if [[ "$k" == "-" ]]; then g="$l"; continue; fi
+        keys+=("$k"); labels+=("$l"); descs+=("$d"); groups+=("$g"); g=""
+    done
+    local n=${#keys[@]} sel=${UI_LAST[$title]:-0} i key rest back="Back"
+    [[ "$title" == "Main menu" ]] && back="Exit"
+    (( sel < n )) || sel=0
+    if (( ! UI_TTY )); then
+        ui_header "$title"
+        [[ -n "$info" ]] && printf '%b\n\n' "$info"
+        for ((i = 0; i < n; i++)); do
+            [[ -n "${groups[$i]}" ]] && printf ' %b%s%b\n' "$DIM" "${groups[$i]}" "$NC"
+            printf '  %3s) %s\n' "${keys[$i]}" "${labels[$i]}"
+        done
+        printf '    0) %s\n\n' "$back"
+        read -r -p "Select: " key || key=0
+        key="${key//[[:space:]]/}"
+        printf -v "$__var" '%s' "${key:-0}"
+        return 0
+    fi
+    ui_cursor hide
+    while true; do
+        ui_header "$title"
+        [[ -n "$info" ]] && printf '%b\n\n' "$info" | sed 's/^/ /'
+        for ((i = 0; i < n; i++)); do
+            [[ -n "${groups[$i]}" ]] && printf '  %b%s%b\n' "$DIM" "${groups[$i]}" "$NC"
+            if (( i == sel )); then
+                printf ' %b%s %2s  %-30s%b\n' "${CYAN}${BOLD}" "$UI_PTR" "${keys[$i]}" "${labels[$i]}" "$NC"
+            else
+                printf '   %b%2s%b  %s\n' "$DIM" "${keys[$i]}" "$NC" "${labels[$i]}"
+            fi
+        done
+        echo
+        [[ -n "${descs[$sel]}" ]] && printf ' %b%s%b\n' "$DIM" "${descs[$sel]}" "$NC"
+        printf '\n %b%s move   Enter open   number jump   Esc/q %s%b' "$DIM" "$UI_ARROWS" "${back,,}" "$NC"
+        IFS= read -rsn1 key || key=q
+        case "$key" in
+            $'\e')
+                rest=""; IFS= read -rsn2 -t 0.05 rest || true
+                case "$rest" in
+                    '[A'|'OA') (( sel = (sel - 1 + n) % n )) ;;
+                    '[B'|'OB') (( sel = (sel + 1) % n )) ;;
+                    '[C'|'OC') break ;;
+                    '[D'|'OD'|'') printf -v "$__var" '0'; ui_cursor show; echo; return 0 ;;
+                    '[H') sel=0 ;;
+                    '[F') sel=$((n - 1)) ;;
+                esac
+                IFS= read -rsn5 -t 0.01 rest || true # drop the rest of a long sequence
+                ;;
+            ''|' ') break ;;
+            k|K) (( sel = (sel - 1 + n) % n )) ;;
+            j|J) (( sel = (sel + 1) % n )) ;;
+            q|Q|$'\x7f'|$'\b') printf -v "$__var" '0'; ui_cursor show; echo; return 0 ;;
+            [0-9])
+                local num="$key" more="" hit=-1
+                # a second digit for items 10 and up
+                for ((i = 0; i < n; i++)); do [[ "${keys[$i]}" == "$num"? ]] && { IFS= read -rsn1 -t 0.6 more || true; break; }; done
+                [[ "$more" =~ ^[0-9]$ ]] && num="$num$more"
+                [[ "$num" == "0" ]] && { printf -v "$__var" '0'; ui_cursor show; echo; return 0; }
+                for ((i = 0; i < n; i++)); do [[ "${keys[$i]}" == "$num" ]] && hit=$i; done
+                if (( hit >= 0 )); then sel=$hit; break; fi
+                ;;
+        esac
+    done
+    ui_cursor show
+    UI_LAST[$title]=$sel
+    printf -v "$__var" '%s' "${keys[$sel]}"
+    echo
+}
+
+# ui_page TITLE: a clean screen for an action's output.
+ui_page() { ui_header "$1"; }
+
+# ui_pause: wait for one key before going back to the menu.
+ui_pause() {
+    echo
+    if (( UI_TTY )); then
+        printf ' %bPress any key to go back%b' "$DIM" "$NC"
+        IFS= read -rsn1 _ || true
+        IFS= read -rsn5 -t 0.01 _ || true
+        echo
+    else
+        read -r -p "Press Enter to go back..." _ || true
+    fi
+    UI_STATUS_AT=0 # the action may have changed what the header shows
+}
+pause_prompt() { ui_pause; }
+
+# ui_ask VAR "Prompt" [default]: one line of input, default on Enter.
+ui_ask() {
+    local __var="$1" __p="$2" __d="${3:-}" __v
+    if [[ -n "$__d" ]]; then
+        read -r -p " $__p [$__d]: " __v || __v=""
+        __v="${__v:-$__d}"
+    else
+        read -r -p " $__p: " __v || __v=""
+    fi
+    printf -v "$__var" '%s' "$__v"
+}
+
+# ui_confirm "Question": yes only on y / Y.
+ui_confirm() {
+    local __a
+    read -r -p " $1 [y/N]: " __a || __a=""
+    [[ "$__a" =~ ^[Yy]$ ]]
+}
+
+# ui_run TITLE CMD...: run an action on its own page, then wait for a key.
+ui_run() {
+    local t="$1"; shift
+    ui_page "$t"
+    "$@"
+    ui_pause
+}
+
+ui_onoff() { if [[ "$1" == "1" || "$1" == "true" || "$1" == "on" ]]; then printf '%bon%b' "$GREEN" "$NC"; else printf 'off'; fi; }
+
+# panel_restart_quiet: restart only the panel (tunnels keep running).
+panel_restart_quiet() {
+    systemctl restart gre-panel 2>/dev/null || true
+    echo -e "${GREEN}[OK] Panel restarted. Tunnels were not touched.${NC}"
+}
+
+# panel_supports SUBCOMMAND: the installed panel binary knows "gre-panel SUB".
+panel_supports() {
+    [[ -x "$PANEL_BIN" ]] || return 1
+    "$PANEL_BIN" --help 2>/dev/null | grep -q "$1"
+}
+
+# ---------------------------------------------------------------- Status ----
+page_status() {
+    ui_page "Status"
+    check_status
+    echo
+    show_panel_url
+    ui_pause
+}
+
+# ----------------------------------------------------------------- Setup ----
+menu_setup() {
+    local c b
+    while true; do
+        ui_menu c "Setup" "Set this server up once; the other side takes the bundle it prints." \
+            "-|Iran server" \
+            "1|GRE + FRP (recommended)|The Iran server listens; foreign servers connect with a bundle." \
+            "2|Backhaul [PRO]|Backhaul, with or without GRE underneath." \
+            "3|Bagher [PRO]|Stealth hybrid tunnel over SSH." \
+            "-|Foreign server" \
+            "4|From a bundle (recommended)|Paste the hsh1_ / bh1_ / gh1_ bundle the Iran server printed." \
+            "5|Step by step|Answer each question yourself (bundle or manual values)." \
+            "-|Tools" \
+            "6|Backhaul tools|Status, logs, bundle, moving old Backhaul tunnels in."
+        case "$c" in
+            1) ui_run "Setup: Iran server (GRE + FRP)" setup_iran_server ;;
+            2) ui_run "Setup: Iran server (Backhaul)" setup_backhaul_iran_interactive ;;
+            3) menu_bagher ;;
+            4)
+                ui_page "Setup: foreign server from a bundle"
+                ui_ask b "Paste the bundle (hsh1_... / bh1_... / gh1_...)"
+                [[ -n "$b" ]] && cli_setup_foreign --bundle "$b"
+                ui_pause
+                ;;
+            5) ui_run "Setup: foreign server" setup_foreign_server ;;
+            6) menu_backhaul ;;
+            0) return 0 ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------- Tunnel ----
+show_iran_bundle() {
+    peer_list_pretty
+    local IP_IRAN BIND_PORT TOKEN
+    IP_IRAN=$(grep -o '"local_public": *"[^"]*"' "${PANEL_CONFIG_DIR}/panel.json" 2>/dev/null | cut -d'"' -f4)
+    [[ -z "$IP_IRAN" ]] && IP_IRAN=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
+    BIND_PORT=$(awk -F'=' '/bindPort/{gsub(/[ "]/,"",$2); print $2}' "${CONFIG_DIR}/frps.toml" 2>/dev/null)
+    TOKEN=$(awk -F'=' '/auth\.token/{gsub(/[ "]/,"",$2); print $2}' "${CONFIG_DIR}/frps.toml" 2>/dev/null)
+    if [[ -n "$IP_IRAN" && -n "$BIND_PORT" && -n "$TOKEN" ]]; then
+        echo -e "\n${GREEN}Bundle for a foreign server:${NC}"
+        echo -e "${CYAN}$(bundle_make "$IP_IRAN" "$BIND_PORT" "$IRAN_GRE_IP" "$FOREIGN_GRE_IP" "$TOKEN")${NC}"
+    elif [[ -f /etc/backhaul/config.toml || -f /etc/backhaul/server.toml ]]; then
+        backhaul_show_bundle
+    else
+        echo -e "${YELLOW}No Iran-side tunnel here, so there is no bundle to show.${NC}"
+    fi
 }
 
 menu_tunnel() {
+    local c
     while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}--- [1] TUNNEL MANAGEMENT ---${NC}"
-        echo "  1) Setup IRAN Tunnel (GRE + FRPS / Backhaul Server)"
-        echo "  2) Setup FOREIGN Tunnel (via Bundle string or Manual)"
-        echo "  3) Add Peer Tunnel (Multi-foreign servers on Iran)"
-        echo "  4) List Peers & Show Setup Bundle"
-        echo "  5) Edit Peer Tunnel Configuration (Ports, IP, Carrier, Name)"
-        echo "  6) Remove a Specific Peer Tunnel"
-        echo "  7) Tunnel Health Status & GRE Ping Test"
-        echo "  8) Restart All Tunnel Services"
-        echo "  9) Teardown All Tunnels (Panel remains active)"
-        echo "  10) Bagher Engine [PRO] (Hybrid Stealth Tunnel)"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-10]: " T_OPT
-        case "$T_OPT" in
-            1)
-                echo "Select the tunnel engine for Iran:"
-                echo "  1) GRE + FRP (recommended)"
-                echo "  2) Backhaul [PRO] (with or without GRE)"
-                echo "  3) Bagher [PRO]"
-                echo "  4) Backhaul menu (status, logs, bundle, old tunnels)"
-                echo "  0) Cancel"
-                read -p "Select [0-4]: " IR_PROTO
-                case "$IR_PROTO" in
-                    1) setup_iran_server ;;
-                    2) setup_backhaul_iran_interactive ;;
-                    3) menu_bagher ;;
-                    4) menu_backhaul ;;
-                    *) ;;
-                esac
-                pause_prompt
-                ;;
-            2)
-                echo "Select setup method for Foreign:"
-                echo "  1) Fast Setup via Bundle String (Recommended)"
-                echo "  2) Guided Setup (Bundle or Manual GRE/FRP/Backhaul)"
-                echo "  0) Cancel"
-                read -p "Select [0-2]: " FO_PROTO
-                case "$FO_PROTO" in
-                    1)
-                        read -p "Paste Bundle string (hsh1_... / bh1_... / gh1_...): " BUNDLE_IN
-                        if [[ -n "$BUNDLE_IN" ]]; then
-                            cli_setup_foreign --bundle "$BUNDLE_IN"
-                        fi
-                        ;;
-                    2) setup_foreign_server ;;
-                    *) ;;
-                esac
-                pause_prompt
-                ;;
-            3) menu_add_peer; pause_prompt ;;
-            4)
-                peer_list_pretty
-                local IP_IRAN BIND_PORT TOKEN
-                IP_IRAN=$(grep -o '"local_public": *"[^"]*"' /etc/gre-panel/panel.json 2>/dev/null | cut -d'"' -f4)
-                [[ -z "$IP_IRAN" ]] && IP_IRAN=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-                BIND_PORT=$(awk -F'=' '/bindPort/{gsub(/[ "]/,"",$2); print $2}' /etc/frp/frps.toml 2>/dev/null)
-                TOKEN=$(awk -F'=' '/auth\.token/{gsub(/[ "]/,"",$2); print $2}' /etc/frp/frps.toml 2>/dev/null)
-                if [[ -n "$IP_IRAN" && -n "$BIND_PORT" && -n "$TOKEN" ]]; then
-                    echo -e "\n${GREEN}=== Iran Server Setup Bundle ===${NC}"
-                    echo -e "BUNDLE: ${CYAN}$(bundle_make "$IP_IRAN" "$BIND_PORT" "$IRAN_GRE_IP" "$FOREIGN_GRE_IP" "$TOKEN")${NC}\n"
-                fi
-                pause_prompt
-                ;;
-            5) menu_edit_peer; pause_prompt ;;
-            6) menu_remove_peer; pause_prompt ;;
-            7) check_status; pause_prompt ;;
-            8) restart_all; pause_prompt ;;
-            9) remove_tunnel; pause_prompt ;;
-            10) menu_sshfwd; pause_prompt ;;
+        ui_menu c "Tunnel" "" \
+            "-|Overview" \
+            "1|Status and GRE ping|Services, GRE link, ping to the other side." \
+            "2|Peers and bundle|Foreign servers on this Iran server, and the bundle for a new one." \
+            "-|Peers (Iran server)" \
+            "3|Add a peer|Another foreign server on this Iran server." \
+            "4|Edit a peer|Ports, IP, carrier or name." \
+            "5|Remove a peer|One foreign server; the others keep running." \
+            "-|Link" \
+            "6|Carrier|Direct GRE, FOU (UDP) or WSS (TLS) under the tunnel." \
+            "7|Route to Iran|Foreign side: dial the Iran server over GRE, its public IP, or auto." \
+            "8|Restart tunnel services|GRE, FRP and Backhaul; the panel keeps running." \
+            "9|Tear down all tunnels|Removes every tunnel on this server; the panel stays."
+        case "$c" in
+            1) ui_run "Tunnel status" check_status ;;
+            2) ui_run "Peers and bundle" show_iran_bundle ;;
+            3) ui_run "Add a peer" menu_add_peer ;;
+            4) ui_run "Edit a peer" menu_edit_peer ;;
+            5) ui_run "Remove a peer" menu_remove_peer ;;
+            6) menu_carrier ;;
+            7) ui_run "Route to Iran" menu_dial_route ;;
+            8) ui_run "Restart tunnel services" restart_all ;;
+            9) ui_run "Tear down all tunnels" remove_tunnel ;;
             0) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
         esac
     done
 }
 
+# ---------------------------------------------------------------- Bagher ----
 menu_bagher() {
+    local c R_IP R_PORT R_PORTS R_POOL m
     while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}--- BAGHER ENGINE [PRO] (Hybrid Stealth Tunnel) ---${NC}"
-        cli_bagher status
-        echo ""
-        echo "  1) Enable Bagher Engine (Stealth Hybrid Pool)"
-        echo "  2) Disable Bagher Engine"
-        echo "  3) Start Bagher Engine Service"
-        echo "  4) Stop Bagher Engine Service"
-        echo "  5) Restart Bagher Engine Service"
-        echo "  6) View Bagher Service Logs"
-        echo "  7) Generate Key & Show Foreign authorized_keys Line"
-        echo "  8) Clear Conflicting DNAT Rules"
-        echo "  0) Back"
-        echo ""
-        read -p "Select an option [0-8]: " SF_OPT
-        case "$SF_OPT" in
+        ui_menu c "Bagher [PRO]" "$(cli_bagher status 2>&1)" \
+            "1|Turn on|Forward ports to the foreign server over SSH (Bagher pool or direct SSH)." \
+            "2|Turn off|Stop and remove Bagher." \
+            "3|Start|Start the Bagher service." \
+            "4|Stop|Stop the Bagher service." \
+            "5|Restart|Restart the Bagher service." \
+            "6|Logs|Last lines of the Bagher service log." \
+            "7|Key for the foreign server|Create the key and print the authorized_keys line." \
+            "8|Clear conflicting DNAT rules|Remove old port redirects that block Bagher."
+        case "$c" in
             1)
-                local R_IP R_PORTS R_PORT R_POOL R_MODE
-                read -p "Enter Remote Host (Foreign IP): " R_IP
-                read -p "Enter Remote SSH Port [22]: " R_PORT
-                R_PORT=${R_PORT:-22}
-                read -p "Enter Ports to forward [443, 8443, 1020, 1030, 1040]: " R_PORTS
-                R_PORTS=${R_PORTS:-"443, 8443, 1020, 1030, 1040"}
-                read -p "Mode (1: Bagher Hybrid Pool [PRO], 2: Direct SSH [Free]) [1]: " R_MODE
-                if [[ "$R_MODE" == "2" ]]; then
+                ui_page "Bagher: turn on"
+                ui_ask R_IP "Foreign server IP"
+                [[ -z "$R_IP" ]] && { ui_pause; continue; }
+                ui_ask R_PORT "Foreign SSH port" "22"
+                ui_ask R_PORTS "Ports to forward" "443, 8443"
+                ui_ask m "Mode: 1 = Bagher pool [PRO], 2 = direct SSH" "1"
+                if [[ "$m" == "2" ]]; then
                     cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode direct
                 else
-                    read -p "Enter Pool Count [5]: " R_POOL
-                    R_POOL=${R_POOL:-5}
+                    ui_ask R_POOL "Pool size" "5"
                     cli_bagher enable --remote-host "$R_IP" --ssh-port "$R_PORT" --ports "$R_PORTS" --mode bagher --pool-count "$R_POOL"
                 fi
-                pause_prompt
+                ui_pause
                 ;;
-            2) cli_bagher disable; pause_prompt ;;
-            3) cli_bagher start; pause_prompt ;;
-            4) cli_bagher stop; pause_prompt ;;
-            5) cli_bagher restart; pause_prompt ;;
-            6) cli_bagher logs; pause_prompt ;;
-            7) cli_bagher gen-key; pause_prompt ;;
-            8) cli_bagher clear-dnat; pause_prompt ;;
+            2) ui_run "Bagher: turn off" cli_bagher disable ;;
+            3) ui_run "Bagher: start" cli_bagher start ;;
+            4) ui_run "Bagher: stop" cli_bagher stop ;;
+            5) ui_run "Bagher: restart" cli_bagher restart ;;
+            6) ui_run "Bagher: logs" cli_bagher logs ;;
+            7) ui_run "Bagher: key" cli_bagher gen-key ;;
+            8) ui_run "Bagher: clear DNAT rules" cli_bagher clear-dnat ;;
             0) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
         esac
     done
 }
-
 menu_sshfwd() { menu_bagher "$@"; }
 
-menu_panel() {
-    while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}--- [2] WEB PANEL & DOMAIN ---${NC}"
-        echo "  1) Show Web Panel URL & Credentials"
-        echo "  2) Reset / Change Web Panel Password"
-        echo "  3) Setup Domain & Free SSL Certificate (Let's Encrypt)"
-        echo "  4) Remove Domain & Reset to Direct IP Access"
-        echo "  5) Restart Web Panel Service"
-        echo "  6) Reinstall / Repair Web Panel"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-6]: " P_OPT
-        case "$P_OPT" in
-            1) show_panel_url; pause_prompt ;;
-            2) reset_panel_password; pause_prompt ;;
-            3) panel_tls_issue; pause_prompt ;;
-            4) panel_tls_remove; pause_prompt ;;
-            5)
-                echo -e "${CYAN}[*] Restarting Web Panel...${NC}"
-                systemctl restart gre-panel 2>/dev/null || true
-                show_panel_url
-                pause_prompt
-                ;;
-            6) install_panel_smart; pause_prompt ;;
-            0) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
-        esac
-    done
+# --------------------------------------------------------------- Cluster ----
+cluster_cmd() { # the panel owns the cluster; without it fall back to the script
+    if [[ -x "$PANEL_BIN" ]]; then "$PANEL_BIN" cluster "$@"; else cli_cluster "$@"; fi
 }
 
-menu_optimization() {
+menu_cluster() {
+    local c a b p w s
     while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}--- [3] PERFORMANCE & SECURITY ---${NC}"
-        echo "  1) Network Optimization (BBR + sysctl TCP buffers + MTU clamp)"
-        echo "  2) Tunnel Carrier Switch (Direct GRE <-> FOU UDP <-> WSS Obfuscated)"
-        echo "  3) Tunnel Watchdog & Auto Failover / Telegram Alerts"
-        echo "  4) Performance & Encryption Toggles (Proxy crypto/comp, Auto Pool)"
-        echo "  5) Free RAM & Cache (Cap journald 16MB + drop cache + 1GB swapfile)"
-        echo "  6) Restore Network Tuning (Revert to default sysctl)"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-6]: " O_OPT
-        case "$O_OPT" in
-            1) tune_apply; pause_prompt ;;
-            2) menu_carrier ;;
-            3) menu_watchdog ;;
-            4) menu_perf ;;
-            5) free_ram; pause_prompt ;;
-            6) tune_restore; pause_prompt ;;
-            0) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
-        esac
-    done
-}
-
-menu_diagnostics_backup() {
-    while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}--- [4] DIAGNOSTICS & BACKUP ---${NC}"
-        echo "  1) Full System & Tunnel Health Check (Doctor audit)"
-        echo "  2) Check Listening Ports & Routing Table"
-        echo "  3) View Live Logs (journalctl for FRP, Panel & Watchdog)"
-        echo "  4) High-Concurrency Connection Stress Test"
-        echo "  5) Backup Configurations Now (Encrypted/Dated snapshot)"
-        echo "  6) Restore Backup from File"
-        echo "  7) Schedule Automated Backup (Interval or Daily)"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-7]: " D_OPT
-        case "$D_OPT" in
-            1) doctor_health_check; pause_prompt ;;
+        ui_menu c "Cluster" "Several foreign servers behind this Iran server, with failover or load balancing." \
+            "1|Status|Foreign servers, health, latency and weights." \
+            "2|Add a foreign server|Name, IP, port, weight and protocol." \
+            "3|Remove a foreign server|By name or id." \
+            "4|Switch the active server|Send traffic to another foreign server now." \
+            "5|Balancing strategy|Weighted round robin, failover or lowest latency." \
+            "6|Revert failover|Clear the balancing rules and use the local tunnel."
+        case "$c" in
+            1) ui_run "Cluster status" cluster_cmd status ;;
             2)
-                echo -e "\n${CYAN}=== Listening Ports (FRP, Backhaul & Panel) ===${NC}"
-                if command -v ss >/dev/null 2>&1; then
-                    ss -tulpn | grep -E "frps|frpc|backhaul|gre-panel|7777" || ss -tulpn | head -15
-                else
-                    netstat -tulpn 2>/dev/null | grep -E "frps|frpc|backhaul|gre-panel|7777" || true
-                fi
-                echo -e "\n${CYAN}=== Routing Table & IP Forwarding ===${NC}"
-                ip route show
-                echo -e "${CYAN}IP Forwarding:${NC} $(sysctl -n net.ipv4.ip_forward 2>/dev/null || cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"
-                pause_prompt
+                ui_page "Cluster: add a foreign server"
+                ui_ask a "Name (e.g. de-1)"; [[ -z "$a" ]] && { ui_pause; continue; }
+                ui_ask b "Public IP"; [[ -z "$b" ]] && { ui_pause; continue; }
+                ui_ask p "Tunnel port" "7000"
+                ui_ask w "Weight (1-100)" "1"
+                ui_ask s "Protocol (gre or wss)" "gre"
+                if [[ -x "$PANEL_BIN" ]]; then "$PANEL_BIN" cluster add-foreign "$a" "$b" "$p" "$w" "$s"; else echo -e "${YELLOW}The panel is not installed: the cluster needs it.${NC}"; fi
+                ui_pause
                 ;;
-            3) show_logs ;;
+            3)
+                ui_page "Cluster: remove a foreign server"
+                ui_ask a "Name or id"
+                [[ -n "$a" ]] && cluster_cmd del-foreign "$a"
+                ui_pause
+                ;;
             4)
-                read -p "Target IP/Host [127.0.0.1]: " S_HOST
-                S_HOST=${S_HOST:-127.0.0.1}
-                read -p "Target Port [7777]: " S_PORT
-                S_PORT=${S_PORT:-7777}
-                read -p "Concurrent Connections [50]: " S_CONNS
-                S_CONNS=${S_CONNS:-50}
-                cli_stress_test "$S_HOST" "$S_PORT" "$S_CONNS"
-                pause_prompt
+                ui_page "Cluster: switch the active server"
+                ui_ask a "Name or id"
+                [[ -n "$a" ]] && cluster_cmd switch-foreign "$a"
+                ui_pause
                 ;;
-            5) backup_now; pause_prompt ;;
-            6)
-                echo -e "\n${CYAN}=== Available Backups ===${NC}"
-                cli_backup status
-                echo ""
-                read -p "Enter full path to backup file to restore: " R_FILE
-                if [[ -n "$R_FILE" && -f "$R_FILE" ]]; then
-                    backup_restore "$R_FILE"
-                else
-                    echo -e "${RED}[!] File not found: '$R_FILE'${NC}"
-                fi
-                pause_prompt
-                ;;
-            7)
-                echo "Schedule backup:"
-                echo "  1) Every N hours (e.g. 6)"
-                echo "  2) Daily at specific time (e.g. 03:00)"
-                echo "  3) Disable automated backup"
-                echo "  0) Cancel"
-                read -p "Select [0-3]: " B_SCHED
-                case "$B_SCHED" in
-                    1) read -p "Interval hours [1-168]: " B_H; cli_backup schedule --every "$B_H" ;;
-                    2) read -p "Daily time HH:MM (e.g. 03:00): " B_D; cli_backup schedule --daily "$B_D" ;;
-                    3) cli_backup schedule --off ;;
-                    *) ;;
+            5)
+                ui_menu s "Balancing strategy" "" \
+                    "1|Weighted round robin|Spread connections by weight." \
+                    "2|Failover|One server; the next takes over when it is down." \
+                    "3|Lowest latency|Always the server with the lowest ping."
+                case "$s" in
+                    1) ui_run "Strategy" cluster_cmd set-mode wrr ;;
+                    2) ui_run "Strategy" cluster_cmd set-mode failover ;;
+                    3) ui_run "Strategy" cluster_cmd set-mode lowest_latency ;;
                 esac
-                pause_prompt
                 ;;
+            6) ui_run "Revert failover" cli_cluster revert ;;
             0) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
         esac
     done
 }
 
-menu_maintenance() {
+# ---------------------------------------------------------- Diagnostics -----
+show_ports_routes() {
+    echo -e "${CYAN}Listening ports (FRP, Backhaul, panel)${NC}"
+    if command -v ss >/dev/null 2>&1; then
+        ss -tulpn 2>/dev/null | grep -E "frps|frpc|backhaul|gre-panel" || ss -tulpn 2>/dev/null | head -15
+    else
+        netstat -tulpn 2>/dev/null | grep -E "frps|frpc|backhaul|gre-panel" || true
+    fi
+    echo -e "\n${CYAN}Routes${NC}"
+    ip route show
+    echo -e "${CYAN}IP forwarding:${NC} $(sysctl -n net.ipv4.ip_forward 2>/dev/null || cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"
+}
+
+menu_diagnostics() {
+    local c h p n
     while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}--- [5] MAINTENANCE & UPDATE ---${NC}"
-        echo "  1) Update All (Latest hashem.sh + latest Web Panel binary; channel: $(update_get_channel), change: hashem update-channel stable|dev)"
-        echo "  2) Pre-cache / Verify Core Binaries (FRP, Backhaul, Go Panel)"
-        echo "  3) Install / Refresh System Dependencies"
-        echo "  4) Check & Load Kernel Modules (GRE & FOU)"
-        echo "  5) Show System Version & Tuning Status"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-5]: " M_OPT
-        case "$M_OPT" in
+        ui_menu c "Diagnostics" "" \
+            "1|Full health check|Doctor: services, GRE, MTU, latency, jitter and what to fix." \
+            "2|Fix what the check found|Doctor fix: safe repairs only." \
+            "3|Ports and routes|Listening ports, routing table, IP forwarding." \
+            "4|Reverse-path check|rp_filter problems that drop tunnel replies." \
+            "5|Connection stress test|Many connections at once; checks nothing drops." \
+            "6|System tuning status|BBR, buffers and MTU clamp."
+        case "$c" in
+            1) ui_run "Full health check" doctor_health_check ;;
+            2) ui_run "Doctor fix" cli_doctor fix ;;
+            3) ui_run "Ports and routes" show_ports_routes ;;
+            4) ui_run "Reverse-path check" cli_revpath ;;
+            5)
+                ui_page "Connection stress test"
+                ui_ask h "Target host" "127.0.0.1"
+                ui_ask p "Target port" "443"
+                ui_ask n "Connections at once" "50"
+                cli_stress_test "$h" "$p" "$n"
+                ui_pause
+                ;;
+            6) ui_run "System tuning status" tune_status ;;
+            0) return 0 ;;
+        esac
+    done
+}
+
+# ------------------------------------------------------------------ Logs ----
+# Follow a unit's log; Ctrl+C returns to the menu instead of quitting Hashem.
+ui_follow() {
+    command -v journalctl >/dev/null 2>&1 || { echo -e "${YELLOW}[!] journalctl is not available on this system.${NC}"; ui_pause; return 0; }
+    trap ':' INT
+    journalctl "$@" -n 80 -f -o short-iso 2>/dev/null
+    trap 'ui_cleanup; echo; exit 0' INT
+}
+
+menu_logs() {
+    local c
+    while true; do
+        ui_menu c "Logs" "Follow opens the live log; Ctrl+C comes back here." \
+            "1|Tunnel (follow)|FRP, Backhaul and GRE services." \
+            "2|Panel (follow)|The web panel service." \
+            "3|Watchdog (last 100 lines)|Checks, alerts and backups." \
+            "4|Bagher (follow)|The Bagher SSH tunnel." \
+            "5|Everything from Hashem (last 200 lines)|All Hashem services together."
+        case "$c" in
+            1) ui_page "Tunnel log"; ui_follow -u 'frps*' -u frpc -u 'backhaul-*' -u 'gre-t*' ;;
+            2) ui_page "Panel log"; ui_follow -u gre-panel ;;
+            3) ui_run "Watchdog log" journalctl -u hashem-watchdog -n 100 --no-pager -o short-iso ;;
+            4) ui_page "Bagher log"; ui_follow -u 'hashem-bagher*' ;;
+            5) ui_run "Hashem log" journalctl -u 'frps*' -u frpc -u 'backhaul-*' -u 'gre-*' -u 'hashem-bagher*' -u hashem-watchdog -n 200 --no-pager -o short-iso ;;
+            0) return 0 ;;
+        esac
+    done
+}
+show_logs() { ui_follow -u 'frps*' -u frpc -u 'backhaul-*' -u 'gre-t*'; }
+
+# ---------------------------------------------------------------- Backup ----
+menu_backup() {
+    local c f h d
+    while true; do
+        ui_menu c "Backup" "Encrypted snapshots of every config in ${BACKUP_DIR}." \
+            "1|Back up now|An encrypted, dated snapshot." \
+            "2|Restore|Pick a snapshot; configs are replaced and services restarted." \
+            "3|Schedule|Every N hours, daily at a time, or off." \
+            "4|Status and snapshots|Schedule, key and stored snapshots." \
+            "5|Show the backup key|Needed to restore on another server."
+        case "$c" in
+            1) ui_run "Back up now" backup_now ;;
+            2)
+                ui_page "Restore"
+                cli_backup status
+                echo
+                ui_ask f "Full path of the snapshot to restore"
+                if [[ -n "$f" && -f "$f" ]]; then
+                    ui_confirm "Replace the current configs and restart services?" && backup_restore "$f"
+                elif [[ -n "$f" ]]; then
+                    echo -e "${RED}[!] File not found: $f${NC}"
+                fi
+                ui_pause
+                ;;
+            3)
+                ui_menu d "Backup schedule" "" \
+                    "1|Every N hours|For example every 6 hours." \
+                    "2|Daily at a time|For example 03:00." \
+                    "3|Off|No automatic backups."
+                case "$d" in
+                    1) ui_page "Backup schedule"; ui_ask h "Hours between backups (1-168)" "6"; cli_backup schedule --every "$h"; ui_pause ;;
+                    2) ui_page "Backup schedule"; ui_ask h "Time of day (HH:MM)" "03:00"; cli_backup schedule --daily "$h"; ui_pause ;;
+                    3) ui_run "Backup schedule" cli_backup schedule --off ;;
+                esac
+                ;;
+            4) ui_run "Backup status" cli_backup status ;;
+            5) ui_run "Backup key" cli_backup key ;;
+            0) return 0 ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------- Update ----
+menu_update() {
+    local c ch
+    while true; do
+        ui_menu c "Update" "Channel: $(update_get_channel)   Panel: ${UI_VER:-not installed}" \
+            "1|Update now|Latest hashem and panel from the current channel (configs are backed up first)." \
+            "2|Update channel|stable, or dev for test builds." \
+            "3|Download core binaries|FRP and Backhaul, checked and cached." \
+            "4|Refresh system packages|The tools Hashem needs (iproute2, curl, ...)." \
+            "5|Load kernel modules|ip_gre and fou."
+        case "$c" in
             1)
+                ui_page "Update"
                 backup_configs "pre_update"
                 update_all
                 doctor_health_check
-                pause_prompt
+                ui_pause
                 ;;
             2)
-                echo -e "${CYAN}[*] Downloading and pre-caching core binaries...${NC}"
-                install_frp_binaries "both" || true
-                install_backhaul_binaries "both" || true
-                echo -e "${GREEN}[✔️] Core binaries verified and ready in cache.${NC}"
-                pause_prompt
+                ui_menu ch "Update channel" "Now: $(update_get_channel)" \
+                    "1|stable|Releases (recommended)." \
+                    "2|dev|Test builds, before they are released."
+                case "$ch" in
+                    1) ui_run "Update channel" cli_update_channel stable ;;
+                    2) ui_run "Update channel" cli_update_channel dev ;;
+                esac
                 ;;
             3)
-                rm -f "$DEPS_MARKER" 2>/dev/null
-                ensure_dependencies_smart
-                echo -e "${GREEN}[✔️] System dependencies refreshed.${NC}"
-                pause_prompt
+                ui_page "Core binaries"
+                install_frp_binaries "both" || true
+                install_backhaul_binaries "both" || true
+                echo -e "${GREEN}[OK] Core binaries are ready.${NC}"
+                ui_pause
                 ;;
             4)
-                echo -e "${CYAN}[*] Ensuring GRE and FOU kernel modules are active...${NC}"
-                modprobe ip_gre 2>/dev/null && modprobe fou 2>/dev/null && echo -e "${GREEN}[✔️] Modules ip_gre and fou loaded successfully.${NC}" || echo -e "${YELLOW}[!] Note: Could not load via modprobe (may be built-in).${NC}"
-                pause_prompt
+                ui_page "System packages"
+                rm -f "${PANEL_CONFIG_DIR}/.deps_installed" 2>/dev/null
+                ensure_dependencies_smart
+                echo -e "${GREEN}[OK] System packages refreshed.${NC}"
+                ui_pause
                 ;;
             5)
-                echo -e "\n${CYAN}=== System & Version Info ===${NC}"
-                echo "Hashem Script Version: $HASHEM_VERSION"
-                echo "Panel Version: $($PANEL_BIN --version 2>/dev/null || echo 'Not installed')"
-                tune_status
-                pause_prompt
+                ui_page "Kernel modules"
+                if modprobe ip_gre 2>/dev/null && modprobe fou 2>/dev/null; then
+                    echo -e "${GREEN}[OK] ip_gre and fou are loaded.${NC}"
+                else
+                    echo -e "${YELLOW}[!] modprobe failed; the modules may be built into the kernel.${NC}"
+                fi
+                ui_pause
                 ;;
             0) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
         esac
     done
 }
 
-menu_uninstall() {
+# -------------------------------------------------------------- Settings ----
+menu_tls() {
+    local c d e ip crt key
     while true; do
-        clear
-        show_banner
-        echo -e "${RED}--- [6] UNINSTALLATION ---${NC}"
-        echo "  1) Uninstall Web Panel Only (Leaves all tunnels active)"
-        echo "  2) Remove Tunnel Components Only (Leaves Web Panel active)"
-        echo "  3) Full Clean System Wipe (Erases all tunnels, panel, firewall & CLI)"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-3]: " UN_OPT
-        case "$UN_OPT" in
+        local info
+        info=$(panel_tls_status 2>&1)
+        ui_menu c "Settings / HTTPS certificate" "$info" \
+            "1|Let's Encrypt for a domain|The domain's A record must point here and port 80 must be open." \
+            "2|Renew now|Renews the way it was made (Let's Encrypt or the IP certificate)." \
+            "3|Self-signed for this IP|No domain needed; install the CA file once in the browser." \
+            "4|Your own certificate|Certificate and key files already on this server." \
+            "5|Remove HTTPS|Back to plain HTTP on the panel port."
+        case "$c" in
             1)
-                read -p "Are you sure you want to uninstall Web Panel? [y/N]: " C_P
-                if [[ "$C_P" =~ ^[Yy]$ ]]; then
+                ui_page "HTTPS: Let's Encrypt"
+                ui_ask d "Domain (e.g. panel.example.com)"
+                if [[ -n "$d" ]]; then
+                    ui_ask e "Email for expiry notices (Enter to skip)"
+                    panel_tls_issue "$d" "${e:--}"
+                fi
+                ui_pause
+                ;;
+            2) ui_run "HTTPS: renew" panel_tls_renew ;;
+            3)
+                ui_page "HTTPS: self-signed IP certificate"
+                ui_ask ip "Server IP (Enter = detect)"
+                panel_tls_ip "$ip"
+                ui_pause
+                ;;
+            4)
+                ui_page "HTTPS: your own certificate"
+                ui_ask crt "Certificate file (PEM)"
+                ui_ask key "Private key file (PEM)"
+                [[ -n "$crt" && -n "$key" ]] && panel_tls_custom "$crt" "$key"
+                ui_pause
+                ;;
+            5) ui_page "HTTPS: remove"; ui_confirm "Remove HTTPS from the panel?" && panel_tls_remove; ui_pause ;;
+            0) return 0 ;;
+        esac
+    done
+}
+
+menu_license() {
+    local c k
+    while true; do
+        local info
+        info=$(cli_license status 2>&1)
+        ui_menu c "Settings / License" "$info" \
+            "1|Activate a license key|Paste the key; it is checked before it replaces the current one." \
+            "2|Buy a license|Where to buy Hashem Pro." \
+            "3|Deactivate|Back to the free edition on this server."
+        case "$c" in
+            1)
+                ui_page "Activate a license"
+                ui_ask k "License key"
+                [[ -n "$k" ]] && cli_license activate "$k"
+                ui_pause
+                ;;
+            2)
+                ui_page "Buy a license"
+                echo -e "Hashem Pro unlocks Bagher, Backhaul, Performance, Watchdog, Benchmark, Diagnostics and the path test."
+                echo -e "Buy it at ${CYAN}https://pdnczone.com${NC}"
+                echo -e "Give the seller this server's machine hash:"
+                cli_license machine-id
+                ui_pause
+                ;;
+            3) ui_page "Deactivate"; ui_confirm "Remove the license from this server?" && cli_license deactivate; ui_pause ;;
+            0) return 0 ;;
+        esac
+    done
+}
+
+panel_settings() { # gre-panel settings ARGS..., then restart the panel when it changed something
+    if ! panel_supports "settings \["; then
+        echo -e "${YELLOW}[!] Update the panel first (Update > Update now): this panel version has no terminal settings.${NC}"
+        return 1
+    fi
+    "$PANEL_BIN" settings "$@" || return 1
+    [[ "${1:-show}" == "show" ]] || panel_restart_quiet
+}
+
+menu_settings() {
+    local c v
+    while true; do
+        ui_menu c "Settings" "" \
+            "-|Panel" \
+            "1|Address and login|Panel URL, username and how to sign in." \
+            "2|Change password|Signs every other session out." \
+            "3|Change username|The login name." \
+            "4|Change HTTP port|The panel moves to the new port; tunnels keep running." \
+            "5|Change address path|The secret path after IP:port/." \
+            "6|HTTPS certificate|Let's Encrypt, self-signed IP or your own." \
+            "7|License|Activate, buy or deactivate Hashem Pro." \
+            "-|Security" \
+            "8|Two-factor sign-in|See it, or turn it off when the phone is lost." \
+            "9|Web terminal tab|The root shell in the panel: on or off, and who may open it." \
+            "10|Idle sign-out|Minutes without activity before the panel signs out." \
+            "-|Service" \
+            "11|Restart the panel|Only the web panel; tunnels keep running." \
+            "12|Repair or reinstall the panel|Download and install the panel again."
+        case "$c" in
+            1) ui_page "Address and login"; show_panel_url; panel_supports "settings \[" && { echo; "$PANEL_BIN" settings show; }; ui_pause ;;
+            2) ui_run "Change password" reset_panel_password ;;
+            3) ui_page "Change username"; ui_ask v "New username"; [[ -n "$v" ]] && cli_panel_user "$v"; ui_pause ;;
+            4) ui_page "Change HTTP port"; ui_ask v "New port (1-65535)"; [[ -n "$v" ]] && cli_panel_port "$v"; ui_pause ;;
+            5) ui_page "Change address path"; ui_ask v "New path (letters and digits)"; [[ -n "$v" ]] && cli_panel_path "$v"; ui_pause ;;
+            6) menu_tls ;;
+            7) menu_license ;;
+            8)
+                ui_page "Two-factor sign-in"
+                panel_settings show 2>/dev/null | grep -i 'two-factor' || true
+                echo "Turn it on in the panel (Settings > Two-factor): it needs your authenticator app."
+                ui_confirm "Turn two-factor sign-in off?" && panel_settings 2fa off
+                ui_pause
+                ;;
+            9)
+                ui_menu v "Web terminal tab" "$(panel_settings show 2>/dev/null | grep -i 'terminal')" \
+                    "1|Turn on|Shows the Terminal tab (password asked again to open it)." \
+                    "2|Turn off|Hides the tab and refuses new shells." \
+                    "3|Allowed addresses|Only these IPs/CIDRs may open it (empty = any)."
+                case "$v" in
+                    1) ui_run "Web terminal" panel_settings terminal on ;;
+                    2) ui_run "Web terminal" panel_settings terminal off ;;
+                    3) ui_page "Web terminal: allowed addresses"; ui_ask v "IPs or CIDRs, space separated (Enter = any)"; panel_settings terminal-allow $v; ui_pause ;;
+                esac
+                ;;
+            10) ui_page "Idle sign-out"; ui_ask v "Minutes (0 = off, 5-1440)" "0"; panel_settings idle "$v"; ui_pause ;;
+            11) ui_run "Restart the panel" panel_restart_quiet ;;
+            12) ui_page "Repair the panel"; ui_confirm "Download and reinstall the panel?" && install_panel_smart; ui_pause ;;
+            0) return 0 ;;
+        esac
+    done
+}
+
+# ------------------------------------------------------------- Uninstall ----
+menu_uninstall() {
+    local c
+    while true; do
+        ui_menu c "Uninstall" "" \
+            "1|Panel only|Removes the web panel; tunnels keep running." \
+            "2|Tunnels only|Removes every tunnel; the panel stays." \
+            "3|Everything|Tunnels, panel, firewall rules and the hashem command."
+        case "$c" in
+            1)
+                ui_page "Uninstall the panel"
+                if ui_confirm "Uninstall the web panel?"; then
                     systemctl stop gre-panel 2>/dev/null || true
                     systemctl disable gre-panel 2>/dev/null || true
                     pkill -9 -f "${INSTALL_DIR}/gre-panel" >/dev/null 2>&1 || true
@@ -8750,200 +9206,73 @@ menu_uninstall() {
                     rm -rf /etc/gre-panel/tls /var/log/gre-panel*
                     systemctl daemon-reload
                     systemctl reset-failed >/dev/null 2>&1 || true
-                    echo -e "${GREEN}[✔️] Web Panel uninstalled successfully.${NC}"
+                    echo -e "${GREEN}[OK] Web panel uninstalled.${NC}"
                 fi
-                pause_prompt
+                ui_pause
                 ;;
             2)
-                read -p "Are you sure you want to remove all tunnel components? [y/N]: " C_T
-                if [[ "$C_T" =~ ^[Yy]$ ]]; then
+                ui_page "Remove all tunnels"
+                if ui_confirm "Remove every tunnel on this server?"; then
                     remove_tunnel_force
-                    echo -e "${GREEN}[✔️] All tunnel components removed.${NC}"
+                    echo -e "${GREEN}[OK] All tunnel components removed.${NC}"
                 fi
-                pause_prompt
+                ui_pause
                 ;;
             3)
-                read -p "ARE YOU SURE you want to WIPE EVERYTHING? All configs and services will be deleted! [y/N]: " C_ALL
-                if [[ "$C_ALL" =~ ^[Yy]$ ]]; then
+                ui_page "Uninstall everything"
+                if ui_confirm "Delete ALL tunnels, the panel and every config?"; then
                     uninstall_all_force
-                    echo -e "${GREEN}[✔️] Complete uninstallation finished.${NC}"
+                    echo -e "${GREEN}[OK] Hashem is uninstalled.${NC}"
+                    ui_cleanup
                     exit 0
                 fi
-                pause_prompt
+                ui_pause
                 ;;
             0) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
         esac
     done
 }
 
-menu_quick_setup() {
-    while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}=== 🚀 QUICK TUNNEL SETUP ===${NC}"
-        echo ""
-        echo "  1) Setup Iran Server (Create Key & Bundle)"
-        echo "  2) Setup Foreign Server via Bundle"
-        echo "  3) Backhaul Tunnel (setup, status, logs)"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-3]: " QS_OPT
-        case "$QS_OPT" in
-            1) setup_iran_server; pause_prompt ;;
-            2) setup_foreign_server; pause_prompt ;;
-            3) menu_backhaul ;;
-            0|q) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
-        esac
-    done
-}
-
-menu_cluster() {
-    while true; do
-        clear
-        show_banner
-        echo -e "${CYAN}=== ⚖️ MULTI-FOREIGN CLUSTER & LOAD BALANCER ===${NC}"
-        echo ""
-        if command -v gre-panel >/dev/null 2>&1; then
-            gre-panel cluster status 2>/dev/null || cli_cluster status
-        else
-            cli_cluster status
-        fi
-        echo ""
-        echo "  1) View Foreign Cluster Pool & Latency / Weights"
-        echo "  2) Add Foreign Server to Cluster"
-        echo "  3) Remove Foreign Server from Cluster"
-        echo "  4) Switch Active Foreign Server"
-        echo "  5) Change Balancing Strategy"
-        echo "  6) Revert Failover / Clear Balancing Rules"
-        echo "  0) Back to Main Menu"
-        echo ""
-        read -p "Select an option [0-6]: " CL_OPT
-        case "$CL_OPT" in
-            1)
-                clear
-                show_banner
-                echo -e "${CYAN}=== Foreign Node Pool & Health Status ===${NC}"
-                if command -v gre-panel >/dev/null 2>&1; then
-                    gre-panel cluster status
-                else
-                    cli_cluster status
-                fi
-                pause_prompt
-                ;;
-            2)
-                clear
-                show_banner
-                echo -e "${CYAN}=== Add Foreign Server to Cluster ===${NC}"
-                read -p "Foreign Server Name (e.g. kharej-de-1): " FN_NAME
-                [[ -z "$FN_NAME" ]] && { echo -e "${RED}[!] Name cannot be empty.${NC}"; pause_prompt; continue; }
-                read -p "Foreign Public IP: " FN_IP
-                [[ -z "$FN_IP" ]] && { echo -e "${RED}[!] IP cannot be empty.${NC}"; pause_prompt; continue; }
-                read -p "Tunnel Port [default 7000]: " FN_PORT
-                FN_PORT="${FN_PORT:-7000}"
-                read -p "Traffic Weight (1-100) [default 1]: " FN_WEIGHT
-                FN_WEIGHT="${FN_WEIGHT:-1}"
-                read -p "Protocol [gre/wss, default gre]: " FN_PROTO
-                FN_PROTO="${FN_PROTO:-gre}"
-                if command -v gre-panel >/dev/null 2>&1; then
-                    gre-panel cluster add-foreign "$FN_NAME" "$FN_IP" "$FN_PORT" "$FN_WEIGHT" "$FN_PROTO"
-                else
-                    echo -e "${YELLOW}[*] Panel binary not found. Please install gre-panel.${NC}"
-                fi
-                pause_prompt
-                ;;
-            3)
-                clear
-                show_banner
-                echo -e "${CYAN}=== Remove Foreign Server from Cluster ===${NC}"
-                read -p "Enter Foreign Server Name or ID to remove: " FN_DEL
-                [[ -z "$FN_DEL" ]] && { echo -e "${RED}[!] ID/Name cannot be empty.${NC}"; pause_prompt; continue; }
-                if command -v gre-panel >/dev/null 2>&1; then
-                    gre-panel cluster del-foreign "$FN_DEL"
-                fi
-                pause_prompt
-                ;;
-            4)
-                clear
-                show_banner
-                echo -e "${CYAN}=== Switch Active Foreign Server ===${NC}"
-                read -p "Enter Foreign Server Name or ID to activate: " FN_SW
-                [[ -z "$FN_SW" ]] && { echo -e "${RED}[!] ID/Name cannot be empty.${NC}"; pause_prompt; continue; }
-                if command -v gre-panel >/dev/null 2>&1; then
-                    gre-panel cluster switch-foreign "$FN_SW"
-                fi
-                pause_prompt
-                ;;
-            5)
-                clear
-                show_banner
-                echo -e "${CYAN}=== Change Balancing Strategy ===${NC}"
-                echo "  1) Weighted Round Robin (WRR - Proportional Distribution)"
-                echo "  2) Automatic Failover (Backup on Outage)"
-                echo "  3) Lowest Latency (Dynamic Lowest Ping)"
-                read -p "Select strategy [1-3]: " STRAT_OPT
-                case "$STRAT_OPT" in
-                    1) gre-panel cluster set-mode "wrr" 2>/dev/null || true ;;
-                    2) gre-panel cluster set-mode "failover" 2>/dev/null || true ;;
-                    3) gre-panel cluster set-mode "lowest_latency" 2>/dev/null || true ;;
-                    *) echo -e "${RED}[!] Invalid choice.${NC}" ;;
-                esac
-                pause_prompt
-                ;;
-            6)
-                clear
-                show_banner
-                echo -e "${CYAN}=== Reverting Failover Rules ===${NC}"
-                if command -v gre-panel >/dev/null 2>&1; then
-                    gre-panel cluster revert
-                else
-                    cli_cluster revert
-                fi
-                pause_prompt
-                ;;
-            0|q) return 0 ;;
-            *) echo -e "${RED}[!] Invalid option.${NC}"; sleep 1 ;;
-        esac
-    done
-}
-
+# ------------------------------------------------------------- Main menu ----
 menu_loop() {
-    trap 'echo -e "\n\n${CYAN}[*] Exiting Hashem Manager. Goodbye!${NC}"; exit 0' INT
+    ui_init
+    trap 'ui_cleanup; echo; exit 0' INT TERM
+    trap ui_cleanup EXIT
+    local c
     while true; do
-        clear
-        show_banner
-        echo ""
-        echo -e "${BOLD}MAIN MENU${NC}"
-        echo "  1) 🚀 Quick Tunnel Setup (Iran / Foreign)"
-        echo "  2) 🌐 Tunnel Management"
-        echo "  3) ⚖️ Multi-Foreign Cluster & Load Balancer"
-        echo "  4) 🥷 Bagher Pro Stealth Hybrid Engine"
-        echo "  5) ⚡ Auto-Pool & Performance Tuning"
-        echo "  6) 🖥️ Web Panel Credentials & SSL"
-        echo "  7) 🩺 Diagnostics, Doctor & Benchmark"
-        echo "  8) 📦 Backup & System Maintenance"
-        echo "  9) 🗑️ Uninstall Hashem"
-        echo "  0) 🚪 Exit"
-        echo ""
-        read -p "Select an option [0-9]: " MAIN_OPT
-        case "$MAIN_OPT" in
-            1) menu_quick_setup ;;
-            2) menu_tunnel ;;
-            3) menu_cluster ;;
+        ui_menu c "Main menu" "" \
+            "1|Status|Tunnel, services and the panel address." \
+            "2|Setup|Set this server up: Iran or foreign, GRE + FRP, Backhaul or Bagher." \
+            "3|Tunnel|Peers, bundle, carrier, route, restart, tear down." \
+            "4|Bagher [PRO]|Stealth hybrid tunnel over SSH." \
+            "5|Cluster|Several foreign servers with failover or load balancing." \
+            "6|Performance|FRP and Backhaul options, pools, network tuning." \
+            "7|Watchdog|Tunnel checks, Telegram alerts, encrypted backups." \
+            "8|Diagnostics|Health check, fixes, ports, stress test." \
+            "9|Logs|Live service logs." \
+            "10|Backup|Back up, restore and schedule." \
+            "11|Update|Update Hashem, channel, core binaries." \
+            "12|Settings|Panel login and address, HTTPS, license, two-factor, web terminal." \
+            "13|Uninstall|Remove the panel, the tunnels, or everything."
+        case "$c" in
+            1) page_status ;;
+            2) menu_setup ;;
+            3) menu_tunnel ;;
             4) menu_bagher ;;
-            5) menu_perf ;;
-            6) menu_panel ;;
-            7) menu_diagnostics_backup ;;
-            8) menu_maintenance ;;
-            9) menu_uninstall ;;
-            0|exit|q)
-                echo -e "${CYAN}Exiting Hashem Manager. Goodbye!${NC}"
+            5) menu_cluster ;;
+            6) menu_perf ;;
+            7) menu_watchdog ;;
+            8) menu_diagnostics ;;
+            9) menu_logs ;;
+            10) menu_backup ;;
+            11) menu_update ;;
+            12) menu_settings ;;
+            13) menu_uninstall ;;
+            0|q|exit)
+                ui_cleanup
+                (( UI_TTY )) && printf '\033[H\033[2J'
+                echo -e "${CYAN}Bye. Run 'hashem' to come back.${NC}"
                 exit 0
-                ;;
-            *)
-                echo -e "${RED}[!] Invalid option.${NC}"
-                sleep 1
                 ;;
         esac
     done
@@ -8959,7 +9288,7 @@ main_menu() {
 usage_cli() {
     cat <<EOF
 Usage:
-  hashem                                    # open interactive management menu (or auto-install on 1st run)
+  hashem                                    # the terminal app: arrow keys, Enter, Esc (installs on the first run)
   hashem setup-iran    --local-pub IP --remote-pub IP [--frp-port N] [--local-gre IP] [--peer-gre IP] [--token T] [--force]
   hashem setup-foreign --local-pub IP --remote-pub IP [--frp-port N] --token T --ports "443, 2083" [--local-gre IP] [--peer-gre IP] [--force]
                        # ... or: hashem setup-foreign --bundle hsh1_... / bh1_... / gh1_...
@@ -8973,12 +9302,16 @@ Usage:
   hashem uninstall [--force]                   # full wipe: tunnel + panel + 'hashem' itself
   hashem add-peer --local-pub IP --remote-pub IP [--frp-port N] --token T --local-gre IP --peer-gre IP --ports "443, 2083" [--name LABEL] [--bundle hsh1_...]
   hashem remove-peer --id N [--force] | edit-peer --id N [--name L] [--remote-pub IP] [--carrier C] [--ports "..."] | edit-peer-ports --id N --ports "443, 2083" | peer-list | peer-token --id N
-  hashem logs | restart | panel-tls [domain] [email] | panel-tls-custom <cert> <key> | panel-tls-ip [IP]   # (also: bash hashem.sh ...)
+  hashem logs | restart
+  hashem tls [status | issue DOMAIN [EMAIL] | renew | remove | ip [IP] | custom CERT KEY]   # panel HTTPS (Settings tab)
+  hashem settings [show | 2fa off | terminal on|off | terminal-allow [IP ...] | idle MIN]  # panel settings
+  hashem license [status | activate KEY | machine-id | deactivate]
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
   hashem ssh-fwd [status|enable|disable|gen-key|clear-dnat] # SSH port forward carrier
   hashem dial [status|auto|gre|public]         # foreign side: reach the Iran hub over GRE, its public IP, or auto (GRE if it works)
-  hashem perf status|enc on|off|comp on|off|tcpmux on|off|autopool on|off|status|tick|pool|apply
+  hashem perf status|apply|reset|enc on|off|comp on|off|tcpmux on|off|autopool on|off
+  hashem perf proxy-protocol off|v1|v2 | bandwidth MB | health-check on|off | backhaul-pool N
   hashem watchdog on|off|status|test|tick      # tunnel watchdog monitoring & alerts
   hashem backup now [--keep N] | restore <f> | schedule ... | status | key
   hashem tgsend "msg"                          # send Telegram alert manually
@@ -9383,7 +9716,7 @@ auto_install_and_show() {
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${GREEN}${BOLD}DNC MADE THIS${NC}"
-    echo -e "Hashem is free. If it keeps your connection alive, support it: ${CYAN}https://pdnczone.com${NC}"
+    echo -e "Hashem Pro (Bagher, Backhaul, Performance, Watchdog, Benchmark, Diagnostics): buy a license at ${CYAN}https://pdnczone.com${NC}"
     echo ""
 
     if [[ -t 0 ]]; then
@@ -9394,7 +9727,7 @@ auto_install_and_show() {
                 main_menu
                 ;;
             *)
-                echo -e "${GREEN}[✔️] All done! You can open the menu anytime by typing: ${CYAN}hashem${NC}\n"
+                echo -e "${GREEN}[OK] All done! You can open the menu anytime by typing: ${CYAN}hashem${NC}\n"
                 ;;
         esac
     fi
@@ -9589,7 +9922,7 @@ EOF
                 systemctl daemon-reload
                 systemctl enable --now hashem-bagher-frps.service
                 systemctl enable --now hashem-bagher.service
-                echo -e "${GREEN}[✔] Bagher Engine [PRO] started and enabled.${NC}"
+                echo -e "${GREEN}[OK] Bagher Engine [PRO] started and enabled.${NC}"
 
                 echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
                 echo -e "restrict,port-forwarding,permitlisten=\"127.0.0.1:${FRP_PORT}\" ${PUBKEY}\n"
@@ -9651,7 +9984,7 @@ WantedBy=multi-user.target
 EOF
                 systemctl daemon-reload
                 systemctl enable --now hashem-bagher.service
-                echo -e "${GREEN}[✔] Direct SSH Forward carrier service started and enabled.${NC}"
+                echo -e "${GREEN}[OK] Direct SSH Forward carrier service started and enabled.${NC}"
 
                 echo -e "\n${YELLOW}=== Foreign authorized_keys Entry ===${NC}"
                 local PERMITS=""
@@ -9673,7 +10006,7 @@ EOF
         start)
             systemctl start hashem-bagher.service 2>/dev/null || systemctl start hashem-ssh-fwd.service 2>/dev/null || true
             systemctl start hashem-bagher-frps.service 2>/dev/null || true
-            echo -e "${GREEN}[✔] Bagher Engine service started.${NC}"
+            echo -e "${GREEN}[OK] Bagher Engine service started.${NC}"
             ;;
         stop)
             systemctl stop hashem-bagher.service 2>/dev/null || true
@@ -9684,7 +10017,7 @@ EOF
         restart)
             systemctl restart hashem-bagher.service 2>/dev/null || systemctl restart hashem-ssh-fwd.service 2>/dev/null || true
             systemctl restart hashem-bagher-frps.service 2>/dev/null || true
-            echo -e "${GREEN}[✔] Bagher Engine service restarted.${NC}"
+            echo -e "${GREEN}[OK] Bagher Engine service restarted.${NC}"
             ;;
         logs)
             journalctl -u hashem-bagher.service -u hashem-ssh-fwd.service -n 50 --no-pager
@@ -9700,7 +10033,7 @@ EOF
         clear-dnat)
             systemctl disable --now hashem-rescue-dnat.service >/dev/null 2>&1 || true
             nft delete table inet hashem_dnat >/dev/null 2>&1 || true
-            echo -e "${GREEN}[✔] hashem_dnat cleared from nftables.${NC}"
+            echo -e "${GREEN}[OK] hashem_dnat cleared from nftables.${NC}"
             ;;
         bundle)
             mkdir -p /root/.ssh
@@ -9836,7 +10169,7 @@ WantedBy=multi-user.target
 EOF
             systemctl daemon-reload
             systemctl enable --now hashem-bagher-frpc.service
-            echo -e "${GREEN}[✔] Bagher Engine client successfully started on Foreign server!${NC}"
+            echo -e "${GREEN}[OK] Bagher Engine client successfully started on Foreign server!${NC}"
             ;;
         *)
             echo "Usage: hashem bagher [status|bundle|apply-bundle <bundle>|enable --remote-host IP [--mode bagher|direct] [--pool-count 25] [--frp-port 55400] [--ports \"...\"]|disable|start|stop|restart|logs|gen-key|clear-dnat]"
@@ -9875,6 +10208,10 @@ cli_license() {
 
     case "$SUB" in
         status)
+            if panel_supports "license \[status|activate"; then
+                "${PANEL_BIN}" license status --text
+                return 0
+            fi
             echo -e "${CYAN}=== Hashem License Status ===${NC}"
             echo -e "Hardware Fingerprint: ${YELLOW}${M_HASH:-UNKNOWN}${NC}"
             if [[ -f "$LIC_FILE" && -s "$LIC_FILE" ]]; then
@@ -9920,13 +10257,18 @@ cli_license() {
                 echo -e "Usage: hashem license activate <KEY>"
                 return 1
             fi
-            mkdir -p "$CONF_DIR"
-            echo -n "$KEY" > "$LIC_FILE"
-            chmod 600 "$LIC_FILE"
-            echo -e "${GREEN}[✔️] License key written to ${LIC_FILE}.${NC}"
+            if panel_supports "license \[status|activate"; then
+                # checked first: a wrong or foreign key never replaces a working one
+                "${PANEL_BIN}" license activate "$KEY" || return 1
+            else
+                mkdir -p "$CONF_DIR"
+                echo -n "$KEY" > "$LIC_FILE"
+                chmod 600 "$LIC_FILE"
+            fi
+            echo -e "${GREEN}[OK] License key saved.${NC}"
             if systemctl is-active --quiet gre-panel.service 2>/dev/null; then
                 systemctl restart gre-panel.service 2>/dev/null || true
-                echo -e "${GREEN}[✔️] Restarted gre-panel to apply license.${NC}"
+                echo -e "${GREEN}[OK] Restarted gre-panel to apply license.${NC}"
             fi
             cli_license status
             ;;
@@ -9941,7 +10283,7 @@ cli_license() {
                 "${PANEL_BIN:-/usr/local/bin/gre-panel}" license deactivate >/dev/null 2>&1 && FOUND=1
             fi
             if (( FOUND )); then
-                echo -e "${GREEN}[✔️] License removed. Reverted to Free edition.${NC}"
+                echo -e "${GREEN}[OK] License removed. Reverted to Free edition.${NC}"
                 if systemctl is-active --quiet gre-panel.service 2>/dev/null; then
                     systemctl restart gre-panel.service 2>/dev/null || true
                 fi
@@ -10008,7 +10350,7 @@ cli_cluster() {
             # cluster.json (it also updates its in-memory copy).
             if [[ -x "${PANEL_BIN:-/usr/local/bin/gre-panel}" ]] && "${PANEL_BIN:-/usr/local/bin/gre-panel}" cluster revert >/dev/null 2>&1; then
                 systemctl restart gre-panel 2>/dev/null || true  # drop the panel's cached cluster state
-                echo -e "${GREEN}[✔️] Failover rules removed and state reverted to local tunnel.${NC}"
+                echo -e "${GREEN}[OK] Failover rules removed and state reverted to local tunnel.${NC}"
                 return 0
             fi
             # Fallback: the chains the panel uses, and string fields (the panel
@@ -10025,7 +10367,7 @@ cli_cluster() {
                 fi
             fi
             systemctl restart gre-panel 2>/dev/null || true  # reload the panel's cached state
-            echo -e "${GREEN}[✔️] Failover rules removed and state reverted to local tunnel.${NC}"
+            echo -e "${GREEN}[OK] Failover rules removed and state reverted to local tunnel.${NC}"
             ;;
         *)
             echo "Usage: hashem cluster {status|peers|revert}"
@@ -10063,7 +10405,7 @@ if [[ $# -gt 0 ]]; then
         peer-list) peer_list ;;
         logs) show_logs ;;
         restart) restart_all ;;
-        restart-lite|tunnel-restart-lite) restart_all_lite; echo -e "${GREEN}[✔️] Tunnel services restarted successfully.${NC}" ;;
+        restart-lite|tunnel-restart-lite) restart_all_lite; echo -e "${GREEN}[OK] Tunnel services restarted successfully.${NC}" ;;
         perf) shift; cli_perf "$@" ;;
         watchdog) shift; cli_watchdog "$@" ;;
         backup) shift; cli_backup "$@" ;;
@@ -10081,6 +10423,19 @@ if [[ $# -gt 0 ]]; then
         doctor|test|diagnose) shift; cli_doctor "$@" ;;
         stress-test|test-load|stress) shift; cli_stress_test "$@" ;;
         panel-tls) shift; panel_tls_issue "$@" ;;
+        tls|https)
+            shift
+            case "${1:-status}" in
+                status) panel_tls_status ;;
+                issue|letsencrypt) shift; panel_tls_issue "$@" ;;
+                renew) panel_tls_renew ;;
+                remove) panel_tls_remove ;;
+                ip) shift; panel_tls_ip "${1:-}" ;;
+                custom) shift; panel_tls_custom "$@" ;;
+                *) echo "Usage: hashem tls [status | issue DOMAIN [EMAIL] | renew | remove | ip [IP] | custom CERT KEY]"; exit 1 ;;
+            esac
+            ;;
+        settings) shift; panel_settings "$@" ;;
         panel-tls-custom) shift; panel_tls_custom "$@" ;;
         panel-port) shift; cli_panel_port "${1:-}" ;;
         panel-user) shift; cli_panel_user "${1:-}" ;;
@@ -10103,7 +10458,7 @@ if [[ $# -gt 0 ]]; then
             echo -e "${CYAN}[*] Downloading and verifying core binaries from pdnczone repository...${NC}"
             install_frp_binaries "all" || { echo -e "${RED}[!] Failed to install FRP binaries.${NC}"; exit 1; }
             install_backhaul_binaries || { echo -e "${RED}[!] Failed to install Backhaul binary.${NC}"; exit 1; }
-            echo -e "${GREEN}[✔️] All core binaries (frps, frpc, backhaul) are cached in ${INSTALL_DIR}.${NC}"
+            echo -e "${GREEN}[OK] All core binaries (frps, frpc, backhaul) are cached in ${INSTALL_DIR}.${NC}"
             ;;
         backhaul|bh|modified-backhaul|backhaul-premium|mbh)
             menu_backhaul ;;
@@ -10177,7 +10532,7 @@ case "$PANEL_STATUS" in
                 systemctl restart gre-panel >/dev/null 2>&1 || true
                 sleep 2
                 if systemctl is-active --quiet gre-panel; then
-                    echo -e "${GREEN}[✔️] Panel repaired and running!${NC}"
+                    echo -e "${GREEN}[OK] Panel repaired and running!${NC}"
                     if [[ -t 0 ]]; then
                         main_menu
                     else

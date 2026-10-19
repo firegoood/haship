@@ -372,14 +372,66 @@ func cliLicense(args []string) int {
 			return 0
 		}
 		return 1
+	case "activate": // verifies the key first: a bad key never replaces a good one
+		key := ""
+		if len(args) > 1 {
+			key = strings.TrimSpace(args[1])
+		}
+		if key == "" {
+			fmt.Fprintln(os.Stderr, "Usage: gre-panel license activate KEY")
+			return 2
+		}
+		body, _ := json.Marshal(map[string]string{"key": key})
+		req, _ := http.NewRequest("POST", "/api/license", bytes.NewReader(body))
+		rr := &licenseStatusWriter{header: http.Header{}}
+		handleLicensePost(rr, req)
+		var res struct {
+			Status   string   `json:"status"`
+			Customer string   `json:"customer"`
+			Features []string `json:"features"`
+			Code     string   `json:"error_code"`
+			Error    string   `json:"error"`
+			Hint     string   `json:"hint"`
+		}
+		_ = json.Unmarshal(rr.body.Bytes(), &res)
+		if res.Status != "ok" {
+			fmt.Fprintf(os.Stderr, "[%s] %s\n", res.Code, res.Error)
+			if res.Hint != "" {
+				fmt.Fprintln(os.Stderr, "Hint: "+res.Hint)
+			}
+			return 1
+		}
+		fmt.Printf("License activated for %s (%s)\n", res.Customer, strings.Join(res.Features, ", "))
+		return 0
 	case "status":
 		loadLicenseFromDisk()
 		rr := &licenseStatusWriter{header: http.Header{}}
 		handleLicenseGet(rr, nil)
+		if len(args) > 1 && args[1] == "--text" { // for the terminal menu (no jq needed)
+			var v struct {
+				Valid    bool     `json:"is_valid"`
+				Hash     string   `json:"machine_hash"`
+				Customer string   `json:"customer"`
+				Expires  string   `json:"expires_human"`
+				Pro      []string `json:"pro_features"`
+				Error    string   `json:"error"`
+			}
+			_ = json.Unmarshal(rr.body.Bytes(), &v)
+			fmt.Printf("Machine hash: %s\n", v.Hash)
+			switch {
+			case v.Valid:
+				fmt.Printf("Status:       Hashem Pro, active\nCustomer:     %s\nExpires:      %s\nUnlocked:     %s\n", v.Customer, v.Expires, strings.Join(v.Pro, ", "))
+			case v.Error != "":
+				fmt.Printf("Status:       not active (%s)\n", v.Error)
+			default:
+				fmt.Println("Status:       Free edition (no license)")
+			}
+			return 0
+		}
 		fmt.Println(strings.TrimSpace(rr.body.String()))
 		return 0
 	}
-	fmt.Fprintln(os.Stderr, "Usage: gre-panel license [status|deactivate|check FEATURE]")
+	fmt.Fprintln(os.Stderr, "Usage: gre-panel license [status [--text] | activate KEY | deactivate | check FEATURE]")
 	return 2
 }
 

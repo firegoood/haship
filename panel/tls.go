@@ -29,7 +29,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -50,6 +49,7 @@ type tlsMeta struct {
 	IssuedAt string `json:"issued_at"`
 	Expiry   string `json:"expiry"`
 	Issuer   string `json:"issuer,omitempty"`
+	Source   string `json:"source,omitempty"` // letsencrypt | custom | ip (tls_acme.go)
 }
 
 var tlsDomainRe = regexp.MustCompile(`^(?i)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$`)
@@ -136,7 +136,8 @@ func clearTLSBackups() {
 
 // ---- Pre-flight Checks: Port Conflict & DNS ----
 
-func isPort80Available() bool {
+// isPort80Available: certbot's standalone challenge needs :80. A var for tests.
+var isPort80Available = func() bool {
 	ln, err := net.Listen("tcp", ":80")
 	if err != nil {
 		return false
@@ -242,6 +243,7 @@ func tlsStatusJSON() map[string]any {
 	if m != nil && m.Domain != "" {
 		out["domain"] = m.Domain
 		out["issued_at"] = m.IssuedAt
+		out["source"] = tlsSource(m)
 		out["domain_status"] = "active"
 	} else {
 		out["domain_status"] = "not_configured"
@@ -348,8 +350,7 @@ func handleTLSCheck(w http.ResponseWriter, r *http.Request) {
 		resp["resolved_ips"] = ips
 	}
 
-	_, err := exec.LookPath("certbot")
-	resp["certbot_installed"] = (err == nil)
+	resp["certbot_installed"] = certbotLookPath() == nil // installed on demand by the issue
 
 	writeJSON(w, resp)
 }
@@ -373,143 +374,41 @@ func handleTLSIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body.Domain = strings.ToLower(CleanHost(body.Domain))
-	body.Email = strings.TrimSpace(body.Email)
-	if !tlsDomainRe.MatchString(body.Domain) {
-		writeAPIError(w, r, "E-TLS-02", "")
+	if err := tlsIssueLetsEncrypt(body.Domain, body.Email, body.Port, body.SkipDNSCheck); err != nil {
+		writeTLSFail(w, r, err)
 		return
 	}
-
-	targetTLSPort := effectiveTLSPort()
-	if body.Port != 0 {
-		if body.Port < 1 || body.Port > 65535 {
-			writeAPIError(w, r, "E-TLS-03", "")
-			return
-		}
-		targetTLSPort = body.Port
-	}
-
-	// 1. Port conflict checks against active tunnels and HTTP panel port
-	if err := checkPortConflict(targetTLSPort); err != nil {
-		writeAPIError(w, r, "E-TLS-10", err.Error())
-		return
-	}
-
-	// 2. Check if port 80 is available for certbot standalone challenge
-	if !isPort80Available() {
-		writeAPIError(w, r, "E-TLS-10", "Port 80 is currently occupied by another service. Let's Encrypt HTTP challenge requires port 80. Free port 80 or use Reverse Proxy mode.")
-		return
-	}
-
-	// 3. DNS pre-flight verification
-	if !body.SkipDNSCheck {
-		if _, err := checkDomainDNS(body.Domain); err != nil {
-			writeAPIError(w, r, "E-TLS-09", err.Error())
-			return
-		}
-	}
-
-	// Save requested TLS port
-	if body.Port != 0 {
-		cfg.TLSPort = body.Port
-		saveCfg()
-	}
-
-	if _, err := exec.LookPath("certbot"); err != nil {
-		writeAPIError(w, r, "E-TLS-04", "")
-		return
-	}
-
-	// Atomic backup of previous certificates
-	backupTLSCerts()
-
-	args := []string{"certonly", "--standalone", "--non-interactive", "--agree-tos",
-		"--preferred-challenges", "http", "--http-01-port", "80",
-		"-d", body.Domain}
-	if body.Email != "" {
-		args = append(args, "-m", body.Email)
-	} else {
-		args = append(args, "--register-unsafely-without-email")
-	}
-
-	out, err := exec.Command("certbot", args...).CombinedOutput()
-	if err != nil {
-		rollbackTLSCerts()
-		recordError("E-TLS-05", r.Method+" "+r.URL.Path, strings.TrimSpace(string(out)))
-		info := errCatalog["E-TLS-05"]
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(info.Status)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error_code": "E-TLS-05", "error": strings.TrimSpace(string(out)), "hint": info.Hint,
-		})
-		return
-	}
-
-	live := filepath.Join("/etc/letsencrypt/live", body.Domain)
-	if err := tlsInstallFrom(live, body.Domain, body.Email); err != nil {
-		rollbackTLSCerts()
-		writeAPIError(w, r, "E-TLS-06", err.Error())
-		return
-	}
-
-	clearTLSBackups()
-	startHTTPSListener()
-	LogSecurityAudit("DOMAIN_CONFIGURED", cfg.Username, ClientIP(r), "Domain "+body.Domain+" configured with HTTPS on port "+strconv.Itoa(targetTLSPort))
+	domain := strings.ToLower(CleanHost(body.Domain))
+	LogSecurityAudit("DOMAIN_CONFIGURED", cfg.Username, ClientIP(r), "Domain "+domain+" configured with HTTPS on port "+strconv.Itoa(effectiveTLSPort()))
 	writeJSON(w, tlsStatusJSON())
+}
+
+// writeTLSFail answers with the code a tlsFail carries.
+func writeTLSFail(w http.ResponseWriter, r *http.Request, err error) {
+	if f, ok := err.(*tlsFail); ok {
+		writeAPIError(w, r, f.code, f.msg)
+		return
+	}
+	writeAPIError(w, r, "E-TLS-06", err.Error())
 }
 
 // POST /api/tls/renew — certbot renew --cert-name domain, re-install, reload.
 func handleTLSRenew(w http.ResponseWriter, r *http.Request) {
-	m := tlsMetaLoad()
-	if m == nil || m.Domain == "" {
-		writeAPIError(w, r, "E-TLS-07", "")
-		return
-	}
-	if _, err := exec.LookPath("certbot"); err != nil {
-		writeAPIError(w, r, "E-TLS-04", "")
-		return
-	}
-
-	backupTLSCerts()
-
-	out, err := exec.Command("certbot", "renew", "--cert-name", m.Domain, "--quiet").CombinedOutput()
+	renewed, err := tlsRenewCurrent()
 	if err != nil {
-		rollbackTLSCerts()
-		recordError("E-TLS-05", r.Method+" "+r.URL.Path, strings.TrimSpace(string(out)))
-		info := errCatalog["E-TLS-05"]
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(info.Status)
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"error_code": "E-TLS-05", "error": strings.TrimSpace(string(out)), "hint": info.Hint,
-		})
+		writeTLSFail(w, r, err)
 		return
 	}
-
-	live := filepath.Join("/etc/letsencrypt/live", m.Domain)
-	if err := tlsInstallFrom(live, m.Domain, m.Email); err != nil {
-		rollbackTLSCerts()
-		writeAPIError(w, r, "E-TLS-06", err.Error())
-		return
-	}
-
-	clearTLSBackups()
-	startHTTPSListener()
+	m := tlsMetaLoad()
 	LogSecurityAudit("DOMAIN_RENEWED", cfg.Username, ClientIP(r), "Certificate renewed for "+m.Domain)
-	writeJSON(w, tlsStatusJSON())
+	out := tlsStatusJSON()
+	out["renewed"] = renewed
+	writeJSON(w, out)
 }
 
 // DELETE /api/tls or POST /api/tls {"action":"remove"} — clean domain removal
 func handleTLSRemove(w http.ResponseWriter, r *http.Request) {
-	// 1. Stop HTTPS server in-process
-	stopHTTPSListener()
-
-	// 2. Remove certificate files and metadata
-	_ = os.Remove(tlsCertFile())
-	_ = os.Remove(tlsKeyFile())
-	_ = os.Remove(tlsMetaFile())
-	clearTLSBackups()
-
-	// 3. Log security audit
+	tlsRemoveAll()
 	LogSecurityAudit("DOMAIN_REMOVED", cfg.Username, ClientIP(r), "Domain removed; reverted to HTTP IP access")
 	recordError("E-TLS-11", r.Method+" "+r.URL.Path, "TLS domain removed, reverted to HTTP")
 
@@ -629,6 +528,9 @@ func stopHTTPSListener() {
 // server first, which cut the very request (issue/renew/upload over HTTPS)
 // that asked for the reload, so the UI showed a network error (M7).
 func startHTTPSListener() {
+	if cliMode { // gre-panel tls ...: the service restart serves the new files
+		return
+	}
 	httpsSrvMu.Lock()
 	defer httpsSrvMu.Unlock()
 
@@ -696,13 +598,14 @@ var letsencryptLiveDir = "/etc/letsencrypt/live"
 // certificate expires within 30 days, e.g. when certbot's timer is missing.
 func tlsRenewTick(now time.Time, lastRenewTry *time.Time) {
 	m := tlsMetaLoad()
-	if m == nil || m.Domain == "" {
-		return
+	if m == nil || m.Domain == "" || tlsSource(m) != tlsSourceLE {
+		return // an IP or custom certificate: certbot has nothing to do with it
 	}
 	live := filepath.Join(letsencryptLiveDir, m.Domain)
 	if exp, _, err := tlsCertExpiry(); err == nil && exp.Sub(now) < 30*24*time.Hour && now.Sub(*lastRenewTry) > 24*time.Hour {
 		*lastRenewTry = now
-		if _, lerr := exec.LookPath("certbot"); lerr == nil {
+		if certbotLookPath() == nil {
+			firewallOpenTCP(80)
 			if out, rerr := runCmdTimeout(5*time.Minute, "certbot", "renew", "--cert-name", m.Domain, "--quiet"); rerr != nil {
 				recordError("E-TLS-05", "auto-renew", strings.TrimSpace(string(out)))
 			}
@@ -763,6 +666,7 @@ func tlsInstallFrom(liveDir, domain, email string) error {
 		IssuedAt: time.Now().Format("2006-01-02 15:04:05"),
 		Expiry:   exp.Format("2006-01-02 15:04:05"),
 		Issuer:   issuer,
+		Source:   tlsSourceLE,
 	}
 	_ = os.WriteFile(tlsMetaFile(), mustJSON(meta), 0600)
 	recordError("E-TLS-00", "TLS "+domain, "certificate installed, expires "+meta.Expiry)

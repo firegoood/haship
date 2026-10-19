@@ -483,7 +483,7 @@ func cliSetPassword(args []string) int {
 
 	ip := getOutboundIP()
 	fmt.Println("==================================================")
-	fmt.Println("[✔️] Panel password successfully updated!")
+	fmt.Println("[OK] Panel password updated.")
 	fmt.Printf("Username:  %s\n", cfg.Username)
 	fmt.Printf("Password:  %s\n", newPass)
 	fmt.Printf("Base Path: /%s (UNCHANGED)\n", cfg.BasePath)
@@ -528,7 +528,7 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls-proxy | pathtest | cluster | license [status|deactivate]]")
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | tls-proxy | pathtest | cluster | license [status|activate|deactivate]]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
@@ -542,6 +542,10 @@ func main() {
 			os.Exit(cliShowInfo())
 		case "license":
 			os.Exit(cliLicense(os.Args[2:]))
+		case "tls":
+			os.Exit(cliTLS(os.Args[2:]))
+		case "settings":
+			os.Exit(cliSettings(os.Args[2:]))
 		}
 	}
 	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {

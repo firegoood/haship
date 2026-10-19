@@ -1,6 +1,6 @@
 package main
 
-// Donation / support nudge: a calm, rate-limited popup. The first one appears
+// Hashem Pro nudge (Buy License): a calm, rate-limited popup. The first one appears
 // a few seconds into the first visit after install (fresh: never shown);
 // later ones only after a tunnel has been healthy for a while. All pacing state lives on the
 // server (support.json) so phones, desktops and several tabs stay in sync and
@@ -22,7 +22,7 @@ const (
 	// How long to stay quiet after each outcome.
 	supportAfterShown  = 7 * 24 * time.Hour  // shown (or dismissed with ×/Later)
 	supportAfterSnooze = 30 * 24 * time.Hour // "don't remind me this month"
-	supportAfterDonate = 90 * 24 * time.Hour // clicked the donate link
+	supportAfterDonate = 90 * 24 * time.Hour // clicked Buy License (older panels sent "donate")
 
 	// Seconds of continuously healthy tunnel before the popup may appear.
 	supportDelaySeconds = 30
@@ -82,7 +82,7 @@ func supportRecord(action string, now time.Time) bool {
 		d = supportAfterShown
 	case "snooze":
 		d = supportAfterSnooze
-	case "donate":
+	case "buy", "donate":
 		d = supportAfterDonate
 	default:
 		return false
@@ -92,7 +92,7 @@ func supportRecord(action string, now time.Time) bool {
 	st := loadSupportLocked()
 	st.NextShowAt = now.Add(d).Unix()
 	st.LastAction = action
-	if action == "donate" {
+	if action == "buy" || action == "donate" {
 		st.Donated++
 	}
 	saveSupportLocked(st)
@@ -100,7 +100,7 @@ func supportRecord(action string, now time.Time) bool {
 }
 
 // handleSupport: GET -> static info (url, delay); POST {action} where action is
-// claim | close | snooze | donate. claim answers {"show":bool}.
+// claim | close | snooze | buy (donate: older panels). claim answers {"show":bool}.
 func handleSupport(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		supportMu.Lock()

@@ -302,13 +302,15 @@ Install steps: validate tag → download the panel binary and `hashem.sh` of tha
 Everything works from SSH too (commands as in `hashem help`):
 
 ```bash
-hashem                # first run: auto-install; afterwards shows panel credentials
-hashem menu           # interactive management menu
+hashem                # first run: auto-install; afterwards the terminal app (arrows, Enter, Esc)
+hashem menu           # the terminal app
 hashem status         # tunnel health, peers, service status
 hashem show-panel-url # print the panel URL again
 hashem reset-password # reset / auto-generate the admin password
 hashem password <p>   # set the panel password non-interactively
-hashem panel-tls <domain> <email>   # HTTPS for the panel (Let's Encrypt)
+hashem tls issue <domain> [email]   # HTTPS for the panel (Let's Encrypt; also: status, renew, remove, ip, custom)
+hashem settings show  # panel settings; also: 2fa off, terminal on|off, idle N
+hashem license activate <key>
 hashem logs           # relay logs
 hashem optimize       # BBR / MTU / sysctl tuning
 hashem doctor         # latency, jitter, MTU and speed diagnostics
@@ -318,6 +320,7 @@ hashem watchdog status
 hashem backup now     # encrypted backup (/var/backups/hashem)
 hashem perf autopool status  # Auto Pool: on|off|status|tick
 hashem perf tcpmux on|off    # must match on hub and spokes
+hashem perf proxy-protocol off|v1|v2 | bandwidth MB | health-check on|off | backhaul-pool N
 hashem free-ram       # free RAM
 hashem update         # update script and panel to the latest release
 hashem update-channel [stable|dev]

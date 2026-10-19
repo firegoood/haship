@@ -141,6 +141,7 @@ func tlsIssueIPCert(ip net.IP) (map[string]any, string) {
 		IssuedAt: now.Format("2006-01-02 15:04:05"),
 		Expiry:   expiry,
 		Issuer:   "Hashem Panel Local CA (self-signed)",
+		Source:   tlsSourceIP,
 	}
 	_ = os.WriteFile(tlsMetaFile(), mustJSON(meta), 0600)
 	clearTLSBackups()
