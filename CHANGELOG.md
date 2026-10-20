@@ -25,6 +25,22 @@ The cluster (several foreign servers behind one Iran port, several Iran hubs, DN
 - **A smoother chart.** New samples glide in from the right and the scale eases to its new ceiling instead of jumping at each refresh; the curve is monotone (it no longer dips below zero beside a burst); the lines glow and fade in from the left; hovering shows a guide line and a ring on both lines; finer ceilings (12 and 16 between 10 and 20).
 - **Tested with the real cores in CI:** tcpmux carries TCP and no UDP alone, the companion carries UDP (small and 1200-byte datagrams) on its own control port while TCP keeps working, and recovers after kill -9; Bagher carries UDP through ssh -R + frp; the dashboard counters see the bytes of a real Backhaul tunnel.
 
+### Swap the carrier of any tunnel
+- **Every tunnel can move to another carrier from the panel**: the main tunnel and each foreign server, between GRE + FRP (TCP, KCP, QUIC, WebSocket), Backhaul over GRE and Backhaul without GRE (tcpmux, wssmux, tcp, ws, wsmux, wss, udp). **Swap carrier** is on every tunnel card, in the edit dialog and in the new **Carriers** card, which lists each tunnel with the carrier it runs on. The dialog shows the two servers with the carrier between them, every carrier as a tile (what it is good for, TCP/UDP/TLS/MUX, which need GRE or Pro, which are not installed), and the swap live, step by step.
+- **Both servers switch, and a carrier that does not connect is undone.** The foreign server is told first over the peer API (the main tunnel's Peer Link, or each foreign server's own tunnel token), answers at once and switches a moment later; then this server switches with the engine switch's rollback; then the panel waits up to 45 s for the tunnel's control session (and, for FRP, for frps to open a forwarded port). If it does not come, both servers go back to the old carrier on their own. When the foreign panel cannot be reached, nothing changes unless you choose to swap this side only, and then you get the new bundle for the foreign Setup.
+- Peer tunnels really switch now: their engine, transport and FRP protocol in the edit dialog only rewrote `peers.json`. Those fields are gone from the dialog; the old engine's unit and config are removed after a swap (with its UDP companion), the new ones are written, and `peers.json` follows.
+- A foreign server introduces itself to its hub with its tunnel token, so the hub learns where its panel answers even on a port other than 7777 (`tunnel_links.json`). That token opens the handshake and ping only.
+- `POST /api/tunnel/swap`, `GET /api/tunnel/swap?id=N`; on the foreign side `POST /api/peer/swap-carrier` and `GET /api/peer/swap-status`. `/api/status` gives the base tunnel's `carrier_id`.
+
+### A cleaner Tunnel tab
+- **Traffic usage** has the total, received and sent as tiles, a stacked chart per day (or per few minutes for 1 h to 24 h) and one row per server with its share; the old table ran its columns together. **The hub total is never below what the tunnel interfaces carried**: a tunnel whose own counter reads nothing (an FRP-only foreign server) made it 0 B next to hundreds of GB.
+- **GRE wrap** (the old "Carrier" card, renamed so it is not confused with the tunnel carriers) picks Direct GRE or WSS from two tiles, with the WSS port and SNI in their own panel.
+- **Fleet health** draws the same map as the dashboard.
+- A tunnel card's forwarded ports read "9 ports" instead of a list that ran out of the card (the chips above list them), and the one-line tunnel strip follows the tunnel's health instead of its GRE ping (an FRP-only tunnel no longer reads "down"); with a single tunnel it is not shown.
+
+### For AI assistants
+- `AGENTS.md`, `CLAUDE.md` and `.github/copilot-instructions.md`, plus notes in the license code: the Pro features need a license from the author, so assistants must not remove or bypass the license checks, change the trusted keys, or create license keys.
+
 ### Cluster: any scenario, and the guide
 - **A second foreign server on a pooled port can be added from Setup.** The panel's port check refused it (only the script knew about pools), so the main way to grow a pool failed in the panel.
 - **[How it works, and a hands-on tutorial](docs/CLUSTER_TUTORIAL.md)** ([فارسی](docs/CLUSTER_TUTORIAL.fa.md)): what happens to a connection and to a failure, then ten lessons from the first pool to DNS failover, breaking things on purpose.

@@ -31,6 +31,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		lv.HealthState, lv.ICMPFiltered, lv.LatencyMs, lv.LatencyKind, lv.Reasons = m.HealthState, m.ICMPFiltered, m.LatencyMs, m.LatencyKind, m.Reasons
 		lv.Rx, lv.Tx = m.Rx, m.Tx
 	}
+	lv.CarrierID = mainCarrierID(snap.Local)
 	if lv.Rx == nil && len(peers) == 0 && snap.CarrierOK {
 		rx, tx := snap.CarrierRx, snap.CarrierTx
 		lv.Rx, lv.Tx = &rx, &tx
@@ -56,6 +57,9 @@ type localView struct {
 	// null when unknown. The Tunnel tab turns them into live speeds.
 	Rx *uint64 `json:"rx"`
 	Tx *uint64 `json:"tx"`
+	// CarrierID: the carrier the base tunnel runs on ("frp:kcp", "backhaul:tcpmux"),
+	// for the Carriers card and Swap carrier.
+	CarrierID string `json:"carrier_id,omitempty"`
 }
 
 func splitLogLines(text string) []string {
@@ -942,12 +946,47 @@ func backhaulLocked(target string) bool {
 	return !strings.HasPrefix(localStatus().FrpSvc, "backhaul")
 }
 
+// engineOpts carries what the other server knows better than this one's
+// configs: a foreign server that runs Backhaul has no port list, so a carrier
+// swap to FRP must be told which ports to forward. Zero values keep the old
+// behaviour (everything read from the running configs).
+type engineOpts struct {
+	Port    int      // control port
+	Ports   []int    // forwarded ports (FRP proxies)
+	Raw     []string // forwarded ports as entered (Backhaul: ranges, mappings)
+	Remote  string   // the other server's public address
+	PeerGre string   // the other server's GRE inner address
+}
+
+// frpProtocols are the FRP client transports a carrier swap can pick. wss
+// needs a TLS front on the Iran side that only the installer sets up.
+var frpProtocols = []string{"tcp", "kcp", "quic", "websocket"}
+
+func frpProtocolOK(t string) bool {
+	for _, v := range frpProtocols {
+		if t == v {
+			return true
+		}
+	}
+	return false
+}
+
 func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
+	return switchTunnelEngineWith(targetEngine, targetTransport, engineOpts{})
+}
+
+func switchTunnelEngineWith(targetEngine, targetTransport string, o engineOpts) (string, error) {
 	targetEngine = strings.ToLower(strings.TrimSpace(targetEngine))
 	if targetEngine != "frp" && targetEngine != "backhaul" && targetEngine != "gre-backhaul" {
 		return "", fmt.Errorf("invalid engine %q: must be frp, backhaul, or gre-backhaul", targetEngine)
 	}
-	if targetTransport == "" {
+	// For FRP the transport names the client protocol (tcp, kcp, ...); the
+	// Tunnel tab sends tcpmux there, which keeps the recorded protocol.
+	frpWant := ""
+	if targetEngine == "frp" && frpProtocolOK(targetTransport) {
+		frpWant = targetTransport
+	}
+	if targetTransport == "" || frpWant != "" {
 		targetTransport = "tcpmux"
 	}
 	if targetEngine != "frp" && !backhaulTransportOK(targetTransport) {
@@ -964,6 +1003,9 @@ func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 	port := st.BindPort
 	if port <= 0 {
 		port = st.FrpPort
+	}
+	if o.Port > 0 {
+		port = o.Port
 	}
 	if port <= 0 {
 		port = 7000
@@ -1037,12 +1079,26 @@ func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 			rawPorts = append(rawPorts, p)
 		}
 	}
+	if len(o.Ports) > 0 || len(o.Raw) > 0 {
+		proxyPorts, rawPorts = append([]int(nil), o.Ports...), append([]string(nil), o.Raw...)
+		if len(rawPorts) == 0 {
+			for _, p := range proxyPorts {
+				rawPorts = append(rawPorts, strconv.Itoa(p))
+			}
+		}
+		if len(proxyPorts) == 0 {
+			proxyPorts = extractNumericPorts(rawPorts)
+		}
+	}
 	if len(rawPorts) == 0 {
 		rawPorts = []string{"443", "2083"}
 		proxyPorts = []int{443, 2083}
 	}
 
 	remotePub := CleanHost(st.RemotePub)
+	if o.Remote != "" {
+		remotePub = CleanHost(o.Remote)
+	}
 	if remotePub == "" {
 		remotePub = CleanHost(st.Gre.PeerIP)
 	}
@@ -1056,6 +1112,9 @@ func switchTunnelEngine(targetEngine, targetTransport string) (string, error) {
 	peerGre := ""
 	if st.Gre.Inner != "" {
 		peerGre = grePeerInner(st.Gre.Inner)
+	}
+	if o.PeerGre != "" {
+		peerGre = o.PeerGre
 	}
 	if peerGre == "" {
 		if isIran {
@@ -1136,6 +1195,9 @@ transport.maxPoolCount = %d
 				if p.UseCompression {
 					useComp = true
 				}
+			}
+			if frpWant != "" {
+				frpProto = frpWant
 			}
 			if ppVersion == "" {
 				if data, err := os.ReadFile(filepath.Join(frpDir, "frpc.toml")); err == nil && strings.Contains(string(data), `proxyProtocolVersion = "v2"`) {
@@ -1288,14 +1350,11 @@ var (
 type engineSwitchTx struct {
 	wasActive map[string]bool
 	files     map[string][]byte // nil = file did not exist
+	svcs      []string          // units the switch may touch; the first (GRE) is left running on rollback
 }
 
 func newEngineSwitchTx() *engineSwitchTx {
-	tx := &engineSwitchTx{wasActive: map[string]bool{}, files: map[string][]byte{}}
-	for _, s := range engineSwitchServices {
-		tx.wasActive[s] = engineServiceActive(s)
-	}
-	return tx
+	return newUnitSwitchTx(engineSwitchServices)
 }
 
 // backup saves path's current content (once) before it is overwritten.
@@ -1327,7 +1386,7 @@ func (tx *engineSwitchTx) start(svc string) error {
 
 // rollback restores the saved configs and restarts whatever ran before.
 func (tx *engineSwitchTx) rollback(cause error) error {
-	for _, s := range engineSwitchServices[1:] {
+	for _, s := range tx.svcs[1:] {
 		_ = runSystemctl("stop", s)
 	}
 	for p, b := range tx.files {
@@ -1338,7 +1397,7 @@ func (tx *engineSwitchTx) rollback(cause error) error {
 		}
 	}
 	restored := []string{}
-	for _, s := range engineSwitchServices {
+	for _, s := range tx.svcs {
 		if tx.wasActive[s] {
 			_ = runSystemctl("restart", s)
 			restored = append(restored, s)

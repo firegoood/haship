@@ -356,3 +356,18 @@ func TestUsageTotalOnSpokeIsHost(t *testing.T) {
 		t.Fatalf("spoke total must come from the host series: %d/%d", all[0].Rx, all[0].Tx)
 	}
 }
+
+// A link whose own counter reads nothing (FRP-only spoke) must not pull the
+// total below what the tunnel interfaces carried.
+func TestUsageTotalNeverBelowHost(t *testing.T) {
+	s := newUsage()
+	for _, k := range []string{usageMainKey, usageHostKey} {
+		s.observe(k, k, t0, up64(0), up64(0))
+	}
+	s.observe(usageMainKey, "Tunnel", t0.Add(60*time.Second), nil, nil)
+	s.observe(usageHostKey, "host", t0.Add(60*time.Second), up64(5000), up64(700))
+	all := s.all(t0.Add(2*time.Minute), time.Hour, 60)
+	if all[0].Rx != 5000 || all[0].Tx != 700 || len(all[0].Points) == 0 {
+		t.Fatalf("total must follow the host series when the links count less: %+v", all[0])
+	}
+}

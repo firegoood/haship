@@ -423,6 +423,15 @@ func (s *usageStore) all(now time.Time, window time.Duration, step int64) []usag
 	for _, d := range ds {
 		tot.Days = append(tot.Days, *byDay[d])
 	}
+	// The links can count less than the machine carried: a tunnel whose own
+	// counter is not readable (a foreign spoke's FRP-only link) adds 0, and
+	// the total read 0 B next to hundreds of GB on "This server". The total
+	// is never below what the tunnel interfaces carried.
+	for _, sr := range out {
+		if sr.Key == usageHostKey && sr.Rx+sr.Tx > tot.Rx+tot.Tx {
+			tot.Rx, tot.Tx, tot.Points, tot.Days = sr.Rx, sr.Tx, sr.Points, sr.Days
+		}
+	}
 	return append([]usageSeries{tot}, out...)
 }
 
