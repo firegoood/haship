@@ -530,7 +530,7 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | tls-proxy | pathtest | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate]]")
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | doctor [check|fix] | tls-proxy | pathtest | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate]]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
@@ -548,6 +548,8 @@ func main() {
 			os.Exit(cliTLS(os.Args[2:]))
 		case "settings":
 			os.Exit(cliSettings(os.Args[2:]))
+		case "doctor":
+			os.Exit(cliDoctor(os.Args[2:]))
 		}
 	}
 	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {

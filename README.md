@@ -361,6 +361,7 @@ hashem join-hub --bundle <bundle>   # foreign side: also serve another Iran hub 
 hashem logs           # relay logs
 hashem optimize       # BBR / MTU / sysctl tuning
 hashem doctor         # latency, jitter, MTU and speed diagnostics
+hashem doctor fix     # Quick Repair (same as the Diagnostics tab), then diagnose again
 hashem carrier        # carrier management / failover
 hashem dial status    # foreign side: route to the Iran hub
 hashem watchdog status

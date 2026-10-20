@@ -5274,6 +5274,12 @@ doctor_diagnostics() {
 }
 
 doctor_apply_fixes() {
+    # The panel binary runs the Diagnostics tab's Quick Repair: the tuning
+    # below plus path MTU, forwarding, FRP limits, GRE and a stopped engine.
+    if panel_supports "doctor \["; then
+        "$PANEL_BIN" doctor fix
+        return
+    fi
     echo -e "\n${CYAN}[*] Applying automated optimizations...${NC}"
     tune_apply
     echo -e "${GREEN}[OK] Optimizations applied successfully.${NC}\n"
@@ -9701,7 +9707,7 @@ Usage:
   hashem watchdog on|off|status|test|tick      # tunnel watchdog monitoring & alerts
   hashem backup now [--keep N] | restore <f> | schedule ... | status | key
   hashem tgsend "msg"                          # send Telegram alert manually
-  hashem doctor [server|stop-server|fix]       # full latency, jitter, MTU & speed diagnostics
+  hashem doctor [server|stop-server|fix]       # latency, jitter, MTU & speed; fix = the panel's Quick Repair
   hashem stress-test [host] [port] [conns]     # high-concurrency connection stress test (verify zero drops)
   hashem update | update-all                   # update script + panel to the latest release of the update channel
   hashem update-channel [stable|dev]           # show / set update channel (default stable; dev = test builds)
