@@ -8141,6 +8141,9 @@ async function loadClusterStatus(manual) {
 
 const clMs = v => (v == null || v < 0) ? '—' : Math.round(v) + ' ms';
 const clSt = (kind, text) => `<span class="ent-st ${kind}"><i></i>${esc(tr('', text))}</span>`;
+// A linked hub on another panel version: the cluster needs the same one everywhere.
+const clHubVerBadge = h => !h.version_differs ? ''
+  : `<span class="badge warn">${esc(tr('', h.version ? 'Different: update both servers' : 'Older version: update it too'))}</span>`;
 
 function renderClusterUI(d) {
   const links = d.links || [], pools = d.pools || [], hubs = d.hubs || [], joined = d.joined_hubs || [];
@@ -8487,7 +8490,7 @@ function clRenderHubs(hubs, d) {
       const v = h.pools[k], s = CL_STATE[v.state] || CL_STATE.starting;
       return `<span class="badge ${s[0]}">${esc(k)}</span>`;
     }).join(' ') || '—';
-    return `<tr><td><b>${esc(h.name || h.id)}</b><div class="u-hint-12 u-mono">${esc(h.id)}${h.version ? ' · ' + esc(h.version) : ''}</div></td>
+    return `<tr><td><b>${esc(h.name || h.id)}</b><div class="u-hint-12 u-mono">${esc(h.id)}${h.version ? ' · ' + esc(h.version) : ''}</div>${clHubVerBadge(h)}</td>
       <td class="mono">${esc(h.public_ip || '—')}</td><td class="cl-wrap">${status}${h.last_seen ? `<div class="u-hint-12">${esc(tr('', 'last seen'))} ${esc(h.last_seen)}</div>` : ''}</td>
       <td class="num">${clMs(h.up ? h.latency_ms : -1)}</td><td>${pools}</td>
       <td><button class="hashem-btn hashem-btn-ghost u-btn-xs" onclick="clHubRemove(${jsArg(h.id)},${jsArg(h.name || h.id)})">${esc(tr('', 'Unlink'))}</button></td></tr>`;
@@ -8955,7 +8958,7 @@ function clInsLive(key, d) {
     const st = !h.up ? clSt('err', 'Unreachable') : h.healthy ? clSt('on', 'Up') : clSt('warn', 'Up, no working tunnel');
     const pools = Object.keys(h.pools || {}).sort().map(x => { const v = h.pools[x], s = CL_STATE[v.state] || CL_STATE.starting; return `<span class="badge ${s[0]}">${esc(x)}</span>`; }).join(' ') || '—';
     return clKV([['Status', st, true], ['Error', h.error || ''], ['Public IP', h.public_ip || '—'], ['Latency', clMs(h.up ? h.latency_ms : -1)],
-      ['Last seen', h.last_seen || '—'], ['Version', h.version || ''], ['Hub id', h.id], ['Pools There', pools, true]]);
+      ['Last seen', h.last_seen || '—'], ['Version', (esc(h.version || '') + ' ' + clHubVerBadge(h)).trim(), true], ['Hub id', h.id], ['Pools There', pools, true]]);
   }
   if (k === 'dns') {
     const dns = d.dns || {};

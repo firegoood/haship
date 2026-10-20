@@ -996,3 +996,29 @@ func TestJoinedHubsView(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 }
+
+func TestMeshViewFlagsVersionDrift(t *testing.T) {
+	newClusterFixture(t, true)
+	c := defaultClusterConfig()
+	c.Hubs = []HubPeer{{ID: "same"}, {ID: "other"}, {ID: "old"}, {ID: "never"}}
+	seen := time.Now()
+	meshMu.Lock()
+	meshState["same"] = &hubRT{Up: true, LastSeen: seen, Beat: meshBeat{Version: panelVersion}}
+	meshState["other"] = &hubRT{Up: true, LastSeen: seen, Beat: meshBeat{Version: panelVersion + "-x"}}
+	meshState["old"] = &hubRT{Up: true, LastSeen: seen, Beat: meshBeat{}} // predates the version field
+	meshState["never"] = &hubRT{Err: "timeout"}                           // no heartbeat yet: unknown, not different
+	meshMu.Unlock()
+	t.Cleanup(func() {
+		meshMu.Lock()
+		for _, h := range c.Hubs {
+			delete(meshState, h.ID)
+		}
+		meshMu.Unlock()
+	})
+	want := map[string]bool{"same": false, "other": true, "old": true, "never": false}
+	for _, v := range meshView(c) {
+		if v.VersionDiffers != want[v.ID] {
+			t.Errorf("hub %s: version_differs=%v, want %v", v.ID, v.VersionDiffers, want[v.ID])
+		}
+	}
+}

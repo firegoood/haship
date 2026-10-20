@@ -48,4 +48,7 @@ Order is fixed; if a step turns out risky it is skipped and recorded under "Defe
 - [x] gofmt whole tree + CI gate; lab tests in CI
 - [x] host alerts (disk/RAM/TLS cert), durable history, graceful shutdown
 - [x] fix: watchdog kill loop with older panel binaries
-- [ ] later: multi-hub dashboard, Peer Link push+rollback, version drift view, hashem doctor --fix
+- [x] multi-hub dashboard: the Cluster tab's map and linked hubs (v2.5.0)
+- [x] Peer Link push+rollback: carrier and engine switches apply locally, push to the peer and undo the local change when the peer fails (`benchmark.go`, `tunnel.go` engineSwitchTx)
+- [x] version drift view: the Update tab compares the Peer Link peer; the Cluster tab flags a linked hub on another version (`version_differs`)
+- [x] `hashem doctor fix`: runs the Diagnostics tab's Quick Repair through `gre-panel doctor fix`

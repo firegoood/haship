@@ -535,6 +535,9 @@ type hubView struct {
 	Error     string                   `json:"error,omitempty"`
 	Pools     map[string]meshPoolState `json:"pools"`
 	Version   string                   `json:"version,omitempty"`
+	// VersionDiffers: the hub answers with another panel version (or one too
+	// old to send it). The cluster needs the same version on every hub.
+	VersionDiffers bool `json:"version_differs,omitempty"`
 }
 
 func meshView(c ClusterConfig) []hubView {
@@ -547,6 +550,7 @@ func meshView(c ClusterConfig) []hubView {
 			v.Up, v.Healthy, v.LatencyMs, v.Error, v.Pools, v.Version = st.Up, st.Beat.Healthy, st.LatencyMs, st.Err, st.Beat.Pools, st.Beat.Version
 			if !st.LastSeen.IsZero() {
 				v.LastSeen = st.LastSeen.Format("2006-01-02 15:04:05")
+				v.VersionDiffers = st.Beat.Version != panelVersion
 			}
 		}
 		out = append(out, v)
