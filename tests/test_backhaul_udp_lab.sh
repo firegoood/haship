@@ -181,6 +181,45 @@ t0=$SECONDS
 wait_for 20 udp_probe 5 64; rc=$?
 check "3. UDP back within 20 s of kill -9 (took $((SECONDS - t0))s)" 0 "$rc"
 
+# 4. the dashboard's traffic counters (panel carrier_traffic.go): the panel's
+# own code builds its iptables chains in the hub namespace from these configs,
+# 2 MiB of TCP and 50 kB of UDP cross the tunnel, the counters must see them.
+if [[ -x ${CARRIER_LAB_TEST_BIN:-} ]] && command -v iptables-save >/dev/null 2>&1; then
+    mkdir -p "$TMP/bhconf/udp"
+    cp "$TMP/server.toml" "$TMP/bhconf/server.toml"
+    cp "$TMP/server-udp.toml" "$TMP/bhconf/udp/backhaul-udp-server.toml"
+    cat >"$TMP/traffic.sh" <<'EOF'
+python3 -I - <<'PY'
+import os, socket, sys
+data = os.urandom(2 << 20)
+s = socket.create_connection(("192.0.2.1", 18091), timeout=10)
+s.settimeout(10)
+s.sendall(data)
+got = 0
+while got < len(data):
+    c = s.recv(1 << 16)
+    if not c: break
+    got += len(c)
+u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+u.settimeout(1.0)
+u.connect(("192.0.2.1", 18091))
+for _ in range(50):
+    u.send(os.urandom(1000))
+    try: u.recv(65535)
+    except Exception: pass
+sys.exit(0 if got == len(data) else 1)
+PY
+EOF
+    ip netns exec "$HUB" env CARRIER_LAB_DIR="$TMP/bhconf" CARRIER_LAB_TRAFFIC="$TMP/traffic.sh" \
+        CARRIER_LAB_MIN=$((2 << 20)) "$CARRIER_LAB_TEST_BIN" -test.run '^TestCarrierLab$' -test.v >"$TMP/carrier.log" 2>&1
+    rc=$?
+    grep -o 'carrier counters after the traffic: .*' "$TMP/carrier.log" >> "$TMP/sockets.txt"
+    (( rc )) && { echo "--- carrier.log"; grep -v CMD-ERROR "$TMP/carrier.log" | tail -n 30; } >> "$TMP/sockets.txt"
+    check "4. dashboard counters see the tunnel's bytes (iptables, real core)" 0 "$rc"
+else
+    echo "skip 4: CARRIER_LAB_TEST_BIN or iptables-save missing"
+fi
+
 { echo "core: $ver"; cat "$TMP/sockets.txt" 2>/dev/null
   if (( fail )); then
       for f in server-udp client-udp server client client-udp2; do echo "--- $f.log"; tail -n 6 "$TMP/$f.log" 2>/dev/null | cut -c1-200; done

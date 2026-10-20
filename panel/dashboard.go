@@ -404,6 +404,11 @@ func greTrafficFrom(devData string) map[string]any {
 		}
 	}
 
+	// Backhaul and Bagher have no interface: their port counters (carrier_traffic.go).
+	if rx, tx, ok := carrierCounters(); ok {
+		cur[carrierKey] = [2]uint64{rx, tx}
+	}
+
 	if len(cur) == 0 && devData != "" {
 		primIf := primaryInterface()
 		for _, line := range strings.Split(devData, "\n") {

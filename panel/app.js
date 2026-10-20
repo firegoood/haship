@@ -1727,7 +1727,7 @@ function drawChart(hist, isDown) {
   if (pts.length < 2) {
     if (cv._animId) { cancelAnimationFrame(cv._animId); cv._animId = null; }
     cv._peak = null; cv._peakRange = null;
-    cv._ymax = null;
+    cv._ymax = null; cv._viewNow = null;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = C_IDLE; ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
@@ -1772,7 +1772,7 @@ function drawChart(hist, isDown) {
   if (!vals.length) {
     if (cv._animId) { cancelAnimationFrame(cv._animId); cv._animId = null; }
     cv._peak = null; cv._peakRange = null;
-    cv._ymax = null;
+    cv._ymax = null; cv._viewNow = null;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = C_IDLE; ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
@@ -1782,7 +1782,7 @@ function drawChart(hist, isDown) {
 
   // Nice ceiling in the 1024-based unit the axis prints, so the four gridlines
   // read 20 / 15 / 10 / 5 MB/s instead of 18.6 / 14.0 / 9.3 GB/s.
-  const LADDER = [1, 2, 4, 6, 8, 10];
+  const LADDER = [1, 1.2, 1.6, 2, 4, 6, 8, 10];
   const unitOf = v => Math.pow(1024, Math.max(0, Math.min(3, Math.floor(Math.log(Math.max(v, 1)) / Math.log(1024)))));
   const niceCeil = val => {
     const v = val || 1, u = unitOf(v), x = v / u, p = Math.pow(10, Math.floor(Math.log10(x)));
@@ -1791,7 +1791,7 @@ function drawChart(hist, isDown) {
 
   let rawMax = 0;
   vals.forEach(p => { rawMax = Math.max(rawMax, p.down || 0, p.up || 0); });
-  const candidate = niceCeil(rawMax * 1.2);
+  const candidate = niceCeil(rawMax * 1.1);
 
   const isFirstShow = !cv._hasDrawn;
   const rangeChanged = cv._drawnRange !== dashRange;
@@ -1820,19 +1820,24 @@ function drawChart(hist, isDown) {
 
   const t0 = pts[0].t;
   const t1 = pts[pts.length - 1].t;
-  const dtRange = (t1 - t0) || 1;
-  const X = t => padL + ((t - t0) / dtRange) * iw;
-  const Y = v => padT + ih - (v / max) * ih;
   cv._t0 = t0;
   cv._t1 = t1;
+
+  // The drawn view (time window and ceiling). A poll does not jump to the new
+  // one: it glides there from what is on screen, so new samples slide in from
+  // the right and the scale eases up or down.
+  const target = { t0, t1, max };
+  let vt0 = t0, vt1 = t1, vmax = max;
+  const X = t => padL + ((t - vt0) / ((vt1 - vt0) || 1)) * iw;
+  const Y = v => padT + ih - (v / (vmax || 1)) * ih;
 
   // Build precise point sequences
   const getSeq = key => {
     return series.map((p, i) => p ? { x: X(p.t), y: Y(p[key]), val: p[key], i, t: p.t } : null).filter(Boolean);
   };
 
-  const seqUl = getSeq('up');
-  const seqDl = getSeq('down');
+  let seqUl = getSeq('up');
+  let seqDl = getSeq('down');
 
   // Sticky peak detection on download series.
   let curMaxPt = null;
@@ -1888,32 +1893,57 @@ function drawChart(hist, isDown) {
     }
   }
 
-  // Curve tracer for Catmull-Rom cubic beziers
+  const peakT = peakPt ? peakPt.t : null;
+  // Re-project the sequences for the view being drawn.
+  const applyView = v => {
+    vt0 = v.t0; vt1 = v.t1; vmax = v.max;
+    seqUl = getSeq('up'); seqDl = getSeq('down');
+    if (peakT != null) peakPt = seqDl.find(p => p.t === peakT) || peakPt;
+  };
+
+  // Monotone cubic (Fritsch-Carlson): smooth like a spline, but it never
+  // overshoots a sample, so an idle stretch stays on the baseline instead of
+  // dipping below zero next to a burst.
   const traceCurve = seq => {
     ctx.beginPath();
-    if (seq.length === 1) {
-      ctx.moveTo(seq[0].x, seq[0].y);
-      ctx.lineTo(seq[0].x + 0.01, seq[0].y);
-    } else if (seq.length > 1) {
-      ctx.moveTo(seq[0].x, seq[0].y);
-      for (let i = 0; i < seq.length - 1; i++) {
-        const p0 = seq[Math.max(0, i - 1)], p1 = seq[i], p2 = seq[i + 1], p3 = seq[Math.min(seq.length - 1, i + 2)];
-        const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
-        const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
-        ctx.bezierCurveTo(c1x, c1y, c2x, c2y, p2.x, p2.y);
-      }
+    const n = seq.length;
+    if (!n) return;
+    ctx.moveTo(seq[0].x, seq[0].y);
+    if (n === 1) { ctx.lineTo(seq[0].x + 0.01, seq[0].y); return; }
+    const d = [], m = new Array(n);
+    for (let i = 0; i < n - 1; i++) {
+      const dx = seq[i + 1].x - seq[i].x;
+      d.push(dx ? (seq[i + 1].y - seq[i].y) / dx : 0);
+    }
+    m[0] = d[0]; m[n - 1] = d[n - 2];
+    for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+    for (let i = 0; i < n - 1; i++) {
+      if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+      const a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+      if (s > 9) { const k = 3 / Math.sqrt(s); m[i] = k * a * d[i]; m[i + 1] = k * b * d[i]; }
+    }
+    for (let i = 0; i < n - 1; i++) {
+      const p = seq[i], q = seq[i + 1], h = (q.x - p.x) / 3;
+      ctx.bezierCurveTo(p.x + h, p.y + h * m[i], q.x - h, q.y - h * m[i + 1], q.x, q.y);
     }
   };
 
   // Colors follow the legend tokens (--info download, --sc upload). A stopped
-  // tunnel greys both lines: the history is stale, not an alarm.
+  // tunnel greys both lines: the history is stale, not an alarm. The strokes
+  // fade in from the left, so the recent end reads strongest.
   const cDl = tokenRGB(isDown ? '--dim' : '--info'), cUl = tokenRGB(isDown ? '--dim' : '--sc');
-  const gradDl = rgba(cDl, 1), gradUl = rgba(cUl, isDown ? 0.6 : 1);
-  const colDlEnd = gradDl, colUlEnd = gradUl;
+  const hGrad = (c, a0, a1) => {
+    const g = ctx.createLinearGradient(padL, 0, padL + iw, 0);
+    g.addColorStop(0, rgba(c, a0)); g.addColorStop(1, rgba(c, a1));
+    return g;
+  };
+  const gradDl = hGrad(cDl, 0.45, 1), gradUl = hGrad(cUl, 0.3, isDown ? 0.6 : 1);
+  const colDlEnd = rgba(cDl, 1), colUlEnd = rgba(cUl, isDown ? 0.6 : 1);
   const gradFill = ctx.createLinearGradient(0, padT, 0, padT + ih);
-  gradFill.addColorStop(0, rgba(cDl, light ? 0.16 : 0.22)); gradFill.addColorStop(1, rgba(cDl, 0));
+  gradFill.addColorStop(0, rgba(cDl, light ? 0.2 : 0.3)); gradFill.addColorStop(0.6, rgba(cDl, light ? 0.05 : 0.08)); gradFill.addColorStop(1, rgba(cDl, 0));
   const gradFillUl = ctx.createLinearGradient(0, padT, 0, padT + ih);
-  gradFillUl.addColorStop(0, rgba(cUl, light ? 0.08 : 0.1)); gradFillUl.addColorStop(1, rgba(cUl, 0));
+  gradFillUl.addColorStop(0, rgba(cUl, light ? 0.12 : 0.16)); gradFillUl.addColorStop(1, rgba(cUl, 0));
+  const glow = !isDown && !light;
 
   // Pre-compute x tick labels
   const fmtTick = t => {
@@ -1933,14 +1963,14 @@ function drawChart(hist, isDown) {
     ctx.strokeStyle = C_GRID; ctx.lineWidth = 1;
     ctx.fillStyle = C_AXIS; ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'left';
     for (let g = 0; g <= 4; g++) {
-      const y = Math.round(padT + ih * g / 4) + 0.5, val = max * (1 - g / 4);
+      const y = Math.round(padT + ih * g / 4) + 0.5, val = vmax * (1 - g / 4);
       ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-      ctx.fillText(fmtAxis(val, unitOf(max)), 4, y + 3);
+      ctx.fillText(fmtAxis(val, unitOf(vmax)), 4, y + 3);
     }
 
     ctx.fillStyle = C_AXIS; ctx.font = '12px -apple-system, system-ui, sans-serif'; ctx.textAlign = 'center';
     for (let k = 0; k < nTicks; k++) {
-      const tickTime = t0 + ((t1 - t0) * k) / (nTicks - 1);
+      const tickTime = vt0 + ((vt1 - vt0) * k) / (nTicks - 1);
       const x = X(tickTime);
       const gx = Math.round(x) + 0.5;
       ctx.beginPath(); ctx.moveTo(gx, padT); ctx.lineTo(gx, padT + ih); ctx.stroke();
@@ -1959,7 +1989,8 @@ function drawChart(hist, isDown) {
       ctx.fillStyle = gradFillUl; ctx.fill();
       traceCurve(seqUl);
       ctx.strokeStyle = gradUl; ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.stroke();
+      if (glow) { ctx.shadowColor = rgba(cUl, 0.5); ctx.shadowBlur = 8; }
+      ctx.stroke(); ctx.shadowBlur = 0;
 
       const lastUl = seqUl[seqUl.length - 1];
       ctx.beginPath(); ctx.arc(lastUl.x, lastUl.y, 2.5, 0, Math.PI * 2);
@@ -1978,8 +2009,9 @@ function drawChart(hist, isDown) {
 
     if (seqDl.length) {
       traceCurve(seqDl);
-      ctx.strokeStyle = gradDl; ctx.lineWidth = 2.2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.stroke();
+      ctx.strokeStyle = gradDl; ctx.lineWidth = 2.4; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      if (glow) { ctx.shadowColor = rgba(cDl, 0.6); ctx.shadowBlur = 12; }
+      ctx.stroke(); ctx.shadowBlur = 0;
     }
 
     ctx.restore();
@@ -2069,6 +2101,26 @@ function drawChart(hist, isDown) {
         ctx.fillStyle = '#ffffff'; ctx.fill();
       }
     }
+
+    // Hover: a guide line and a ring on both lines at the hovered sample.
+    const hv = cv._hoverT;
+    if (hv != null && progress >= 1 && seqDl.length) {
+      const near = seq => seq.reduce((b, p) => (!b || Math.abs(p.t - hv) < Math.abs(b.t - hv)) ? p : b, null);
+      const pd = near(seqDl), pu = near(seqUl);
+      const gx = Math.round(pd.x) + 0.5;
+      ctx.save();
+      ctx.setLineDash([3, 4]);
+      ctx.strokeStyle = light ? 'rgba(24,24,27,0.3)' : 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(gx, padT); ctx.lineTo(gx, padT + ih); ctx.stroke();
+      ctx.restore();
+      for (const [p, c] of [[pu, colUlEnd], [pd, colDlEnd]]) {
+        if (!p) continue;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = light ? '#ffffff' : '#0f172a'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = c; ctx.stroke();
+      }
+    }
   };
 
   // Determine animation need
@@ -2081,47 +2133,58 @@ function drawChart(hist, isDown) {
 
   if (cv._animId) { cancelAnimationFrame(cv._animId); cv._animId = null; }
 
-  const startPulseLoop = () => {
+  // The view on screen when this poll arrived (mid-glide if the last one
+  // has not finished): the glide starts from there.
+  const fromView = (!prefersReduced && !shouldAnimate && cv._viewNow) ? cv._viewNow : null;
+  const GLIDE = 900;
+  const glideStart = performance.now();
+  const ease = p => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+  const lerp = (a, b, k) => a + (b - a) * k;
+  // Returns true while the glide is still moving.
+  const stepView = now => {
+    if (!fromView) { applyView(target); cv._viewNow = target; return false; }
+    const p = Math.min(1, (now - glideStart) / GLIDE), k = ease(p);
+    const v = { t0: lerp(fromView.t0, target.t0, k), t1: lerp(fromView.t1, target.t1, k), max: lerp(fromView.max, target.max, k) };
+    applyView(v);
+    cv._viewNow = v;
+    return p < 1;
+  };
+  const phase = () => isDown || prefersReduced ? 0 : (Date.now() % 1600) / 1600;
+  cv._redraw = () => renderFrame(1, phase());
+
+  // One loop draws the glide and the pulse on the newest sample; a stopped
+  // tunnel has no pulse, so its loop ends with the glide.
+  const startLoop = () => {
     if (cv._animId) cancelAnimationFrame(cv._animId);
-    const pulseStep = () => {
+    const step = now => {
       if (document.hidden || ($('tab-dashboard') && $('tab-dashboard').hidden)) {
+        applyView(target); cv._viewNow = target;
         cv._animId = null;
         return;
       }
-      const pPhase = (Date.now() % 1600) / 1600;
-      renderFrame(1, pPhase);
-      cv._animId = requestAnimationFrame(pulseStep);
+      const moving = stepView(now);
+      renderFrame(1, phase());
+      cv._animId = (moving || !isDown) ? requestAnimationFrame(step) : null;
     };
-    const pPhase = (Date.now() % 1600) / 1600;
-    renderFrame(1, pPhase);
-    cv._animId = requestAnimationFrame(pulseStep);
+    step(performance.now());
   };
 
   if (prefersReduced) {
+    applyView(target); cv._viewNow = target;
     renderFrame(1, 0);
   } else if (shouldAnimate) {
+    applyView(target); cv._viewNow = target;
     const animStart = performance.now();
-    const DURATION = 550;
+    const DURATION = 800;
     const animStep = now => {
-      const elapsed = now - animStart;
-      const p = Math.min(1, elapsed / DURATION);
-      const progress = 1 - Math.pow(1 - p, 3);
-      renderFrame(progress, 0);
-      if (p < 1) {
-        cv._animId = requestAnimationFrame(animStep);
-      } else {
-        if (!isDown) startPulseLoop();
-        else cv._animId = null;
-      }
+      const p = Math.min(1, (now - animStart) / DURATION);
+      renderFrame(1 - Math.pow(1 - p, 4), 0);
+      if (p < 1) cv._animId = requestAnimationFrame(animStep);
+      else startLoop();
     };
     cv._animId = requestAnimationFrame(animStep);
   } else {
-    // Soft update: same range, no draw animation.
-    if (!isDown) {
-      startPulseLoop();
-    } else {
-      renderFrame(1, 0);
-    }
+    startLoop();
   }
 }
 async function refreshDash() {
@@ -2307,6 +2370,10 @@ async function refreshDash() {
           p = s[idx];
         }
         if (!p || p.t == null) { tip.style.display = 'none'; return; }
+        if (cv._hoverT !== p.t) {
+          cv._hoverT = p.t;
+          if (!cv._animId && cv._redraw) cv._redraw();
+        }
         const d = new Date(p.t * 1000);
         const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
         const hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
@@ -2325,7 +2392,11 @@ async function refreshDash() {
         tip.style.left = (cv.offsetLeft + left) + 'px';
         tip.style.top = (cv.offsetTop + top) + 'px';
       });
-      cv.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      cv.addEventListener('mouseleave', () => {
+        tip.style.display = 'none';
+        cv._hoverT = null;
+        if (!cv._animId && cv._redraw) cv._redraw();
+      });
     }
     const acv = $('activityChart');
     if (acv && !acv.dataset.tipBound) {

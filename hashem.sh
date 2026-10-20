@@ -2778,6 +2778,17 @@ purge_legacy_obfuscation() {
     fi
 }
 
+# The panel counts Backhaul/Bagher traffic with two iptables chains (rules
+# without a target: they count, never drop). Removed with the tunnels.
+acct_chains_drop() {
+    local h
+    for h in INPUT:HASHEM_ACCT_IN OUTPUT:HASHEM_ACCT_OUT; do
+        iptables -D "${h%%:*}" -j "${h#*:}" 2>/dev/null || true
+        iptables -F "${h#*:}" 2>/dev/null || true
+        iptables -X "${h#*:}" 2>/dev/null || true
+    done
+}
+
 # ---- Performance & Obfuscation Controls (CLI + Menu 22) ----
 
 perf_apply() {
@@ -5592,6 +5603,7 @@ uninstall_all_force() {
             iptables -D INPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
             # cluster pools and hub forwarding
             [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" cluster reset >/dev/null 2>&1 || true
+            acct_chains_drop
         fi
         ip link del hashem-lb >/dev/null 2>&1 || true
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"
@@ -5667,6 +5679,7 @@ remove_tunnel_force() {
             iptables -D INPUT -p tcp --dport 8443 -j ACCEPT 2>/dev/null || true
             # cluster pools and hub forwarding
             [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" cluster reset >/dev/null 2>&1 || true
+            acct_chains_drop
         fi
         ip link del hashem-lb >/dev/null 2>&1 || true
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"

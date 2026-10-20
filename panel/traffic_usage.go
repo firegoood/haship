@@ -442,6 +442,11 @@ func usageOnSnapshot(s *HubSnapshot) {
 		trafficUsage.observe(usageKey(l), linkName(l), now, l.Rx, l.Tx)
 	}
 	rx, tx := tunnelRawTotals(s.DevData)
+	if rx == nil { // Backhaul or Bagher only: their port counters (carrier_traffic.go)
+		if r, t, ok := carrierCounters(); ok {
+			rx, tx = &r, &t
+		}
+	}
 	trafficUsage.observe(usageHostKey, "This server (all tunnels)", now, rx, tx)
 }
 
