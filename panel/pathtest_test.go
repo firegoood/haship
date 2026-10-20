@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net"
 	"net/http/httptest"
 	"strconv"
@@ -105,6 +106,18 @@ func TestPathTestLayout(t *testing.T) {
 		if got := ptDataProto(*c); got != want {
 			t.Errorf("%s data over %s, want %s", c.ID, got, want)
 		}
+	}
+}
+
+func TestPathTestMbps(t *testing.T) {
+	// a run faster than the clock tick reads 0 elapsed (common on Windows)
+	for _, d := range []time.Duration{0, -time.Second, time.Nanosecond} {
+		if got := ptMbps(256<<10, d); got <= 0 || math.IsInf(got, 0) || math.IsNaN(got) {
+			t.Errorf("ptMbps(256KiB, %v) = %v, want finite and > 0", d, got)
+		}
+	}
+	if got := ptMbps(1<<20, time.Second); got != 8.4 {
+		t.Errorf("1 MiB in 1s = %v Mbit/s, want 8.4", got)
 	}
 }
 
