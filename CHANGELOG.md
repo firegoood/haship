@@ -34,6 +34,7 @@ The cluster (several foreign servers behind one Iran port, several Iran hubs, DN
 - **Least connections mode.** New connections go to the members with the fewest open connections per unit of weight, counted from the kernel's socket table, re-weighted every 5 checks so the rules do not change every second. Best for long VLESS / VMess / SSH connections.
 - **Manual failback.** In failover mode, traffic can stay on the backup after the first server comes back, until you press Fail Back Now (`hashem cluster pool failback PORT`).
 - **Open connections per member** in the Cluster tab, in `/metrics` (with pool state, member health and share, linked hubs), and as the input of least connections.
+- **A linked hub on another version is flagged** in the Cluster tab (hub table and inspector), with the Update tab's "Different" / "Older version" badge: the cluster needs the same version on every hub.
 - **Several ports at once:** `443, 8443` or `2000-2005` in New Pool, or `hashem cluster pool add 443,8443`.
 - **DNS failover by webhook**, for any DNS provider: the leading hub POSTs the working hubs' IPs (with an optional bearer secret) whenever they change.
 - **Disabling a pool no longer restarts its relays**, which then fought over the same public port: the port goes to one tunnel (the lowest id) until the pool is enabled again.
