@@ -750,3 +750,51 @@ html[data-sb="1"] .sidebar .brand-tier { display: none; }
 }
 
 .tv-break svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
+
+/* ---- Dashboard hero map (heroTopo in app.js): this server and its links ---- */
+.hero-link.topo { display: block; }
+.hero-link.topo > :not(.hero-topo-host) { display: none; }
+.hero-topo { display: grid; grid-template-columns: auto minmax(40px, 1fr) minmax(0, max-content); align-items: center; min-width: 0; }
+.ht-hub { padding-inline-end: 4px; }
+.ht-wires { display: block; width: 100%; overflow: visible; }
+html[dir="rtl"] .ht-wires { transform: scaleX(-1); }
+.ht-wires path { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; }
+.ht-base { stroke-width: 2; stroke: color-mix(in srgb, var(--ok) 50%, transparent); }
+.ht-warn .ht-base { stroke: color-mix(in srgb, var(--wr) 60%, transparent); }
+.ht-down .ht-base { stroke: color-mix(in srgb, var(--er) 65%, transparent); stroke-dasharray: 4 5; }
+.ht-more .ht-base { stroke: var(--ln2); stroke-dasharray: 2 5; }
+.ht-gre { stroke-width: 10; stroke: color-mix(in srgb, var(--sc) 15%, transparent); }
+.ht-pk { stroke-width: 2.5; stroke-dasharray: 4 26; animation-name: ht-flow; animation-timing-function: linear; animation-iteration-count: infinite; }
+.ht-pk.ht-up { stroke: var(--sc); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sc) 70%, transparent)); }
+.ht-pk.ht-dn { stroke: var(--info); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--info) 70%, transparent)); animation-direction: reverse; }
+@keyframes ht-flow { from { stroke-dashoffset: 30; } to { stroke-dashoffset: 0; } }
+
+.ht-nodes { display: grid; grid-auto-rows: 64px; align-items: center; min-width: 0; }
+.ht-node { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 9px; row-gap: 3px; align-items: center;
+  height: 52px; min-width: 0; max-width: 340px; padding: 6px 12px; border-radius: 12px; text-align: start; font: inherit; color: var(--tx); cursor: pointer;
+  background: var(--s1); border: 1px solid var(--ln); box-shadow: var(--lift-sm); transition: border-color var(--dur-fast), transform var(--dur-fast); }
+.ht-node:hover { border-color: var(--ln3); transform: translateY(-1px); }
+.ht-node:focus-visible { outline: 2px solid var(--ent-focus); outline-offset: 2px; }
+.ht-dot { grid-row: 1 / span 2; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+.ht-node.ht-warn .ht-dot { background: var(--wr); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wr) 22%, transparent); }
+.ht-node.ht-down .ht-dot { background: var(--er); box-shadow: 0 0 0 3px color-mix(in srgb, var(--er) 22%, transparent); }
+.ht-node.ht-down { border-color: color-mix(in srgb, var(--er) 40%, transparent); }
+.ht-node.ht-warn { border-color: color-mix(in srgb, var(--wr) 40%, transparent); }
+.ht-id { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.ht-id b { font-size: var(--fs-small); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ht-id small { font-family: var(--font-mono); font-size: 12px; color: var(--mu); direction: ltr; unicode-bidi: isolate; white-space: nowrap; }
+.ht-tags { grid-row: 1; grid-column: 3; display: flex; gap: 4px; }
+.ht-eng, .ht-gre-tag { font-size: 12px; line-height: 18px; padding: 0 7px; border-radius: 999px; font-weight: 600;
+  color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); border: 1px solid color-mix(in srgb, var(--info) 30%, transparent); }
+.ht-gre-tag { color: var(--sc); background: color-mix(in srgb, var(--sc) 12%, transparent); border-color: color-mix(in srgb, var(--sc) 30%, transparent); }
+.ht-meta { grid-column: 2 / span 2; display: flex; gap: 10px; min-width: 0; overflow: hidden; font-size: 12px; color: var(--mu); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ht-meta span { direction: ltr; unicode-bidi: isolate; }
+.ht-lat { color: var(--tx2); font-weight: 600; }
+.ht-err { color: var(--er); font-weight: 600; }
+.ht-node.ht-more { display: flex; justify-content: center; align-items: center; color: var(--mu); border-style: dashed; box-shadow: none; font-size: var(--fs-small); }
+@container dash (max-width: 520px) {
+  .ht-id small, .ht-tags { display: none; }
+  .ht-node { padding: 6px 10px; }
+  .hero-topo { grid-template-columns: auto minmax(24px, 1fr) minmax(0, max-content); }
+}
+@media (prefers-reduced-motion: reduce) { .ht-pk { display: none; } }

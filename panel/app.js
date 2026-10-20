@@ -2337,6 +2337,18 @@ async function refreshDash() {
     const carrier = d.active_carrier && d.active_carrier !== 'direct' ? String(d.active_carrier).toUpperCase() : '';
     set('kpiLinksSub', unset ? tr('', 'Not configured')
       : [carrier ? tr('', 'via') + ' ' + carrier : '', nPorts ? nPorts + ' ' + tr('', nPorts === 1 ? 'port' : 'ports') : ''].filter(Boolean).join(' · '));
+    // Once a tunnel exists the wire becomes a map of every link this server holds.
+    const heroLinkEl = $('heroLink');
+    if (heroLinkEl) {
+      const links = unset ? [] : dashLinks(d, bObj, iran, foreign);
+      heroLinkEl.classList.toggle('topo', links.length > 0);
+      let host = heroLinkEl.querySelector('.hero-topo-host');
+      if (!host) { host = document.createElement('div'); host.className = 'hero-topo-host'; heroLinkEl.appendChild(host); }
+      host.innerHTML = links.length ? heroTopo(links, tr('', iran ? 'Iran server' : foreign ? 'Foreign server' : 'This server'), d.local_pub || '—') : '';
+      host.querySelectorAll('[data-goto-link]').forEach(b => {
+        b.onclick = () => { const k = b.dataset.gotoLink; if (k) gotoPeerCard(k); else goTab('tunnel'); };
+      });
+    }
     let ms = null;
     if (multi) {
       peers.forEach(p => { const v = (p.ping_ok && p.ping_ms) ? parseFloat(p.ping_ms) : (p.health_state === 'healthy' && p.latency_ms >= 0 ? p.latency_ms : null); if (v != null && (ms == null || v < ms)) ms = v; });
@@ -2756,6 +2768,79 @@ function renderDashPeers(peers) {
   });
 }
 if ($('dashPeersOpen')) $('dashPeersOpen').onclick = () => goTab('tunnel');
+
+// ---- Dashboard hero: this server and every tunnel it holds, as one map ----
+// Same language as the Tunnel tab's link diagram (tunViz): violet packets go
+// out, blue packets come in, GRE is a violet tube, a link that is down is a
+// red dashed wire.
+const HT_ROW = 64, HT_MAX = 6;
+function dashLinks(d, bObj, iran, foreign) {
+  const L = [], st = window._lastLocal || {}, peers = d.peers || [], g = d.gre || {}, f = d.frp || {};
+  const eng = String(d.active_engine || '').toLowerCase();
+  const msOf = o => { const p = linkPing(o); return p.ok ? p.txt : ''; };
+  if (g.exists || f.up || f.svc) {
+    const up = !!(g.exists || f.up);
+    let rate = linkRate('main', st.rx, st.tx);
+    const t = d.traffic || {};
+    if (!rate && st.rx == null && !peers.length && t.speed_down != null) rate = { dn: t.speed_down, up: t.speed_up };
+    L.push({ key: 'main', name: tr('', peers.length ? 'Main tunnel' : (foreign ? 'Iran server' : 'Foreign server')),
+      ip: d.remote_pub || g.peer || '', state: vizState(st) || (up ? 'ok' : 'down'),
+      eng: /backhaul/.test(eng) || /^backhaul/.test(f.svc || '') ? 'Backhaul' : 'FRP', gre: !!g.exists,
+      lat: msOf(st.health_state ? st : d), rate });
+  }
+  peers.forEach(p => {
+    const bh = p.engine === 'backhaul' || p.engine === 'gre-backhaul' || /backhaul/.test(p.frps_svc || '');
+    L.push({ key: String(p.id), name: p.name || ('peer-' + p.id), ip: p.remote_pub || '',
+      state: vizState(p) || ((p.gre_up || p.frp_up) ? 'ok' : 'down'), eng: bh ? 'Backhaul' : 'FRP',
+      gre: !(p.engine === 'backhaul' || p.no_gre), lat: msOf(p), rate: linkRate('p' + p.id, p.rx, p.tx) });
+  });
+  if (bObj && (bObj.is_active || bObj.has_config || bObj.remote_host)) {
+    L.push({ key: 'bagher', name: 'Bagher', ip: bObj.remote_host || '',
+      state: bObj.connected ? 'ok' : (bObj.is_active ? 'warn' : 'down'), eng: 'SSH', gre: false,
+      lat: bObj.latency_ms > 0 ? Math.round(bObj.latency_ms) + 'ms' : '', rate: null });
+  }
+  return L;
+}
+function heroTopo(links, hubName, hubIp) {
+  const shown = links.slice(0, links.length > HT_MAX ? HT_MAX - 1 : HT_MAX);
+  const more = links.length - shown.length;
+  const rows = shown.length + (more ? 1 : 0), H = rows * HT_ROW, mid = H / 2;
+  const now = Date.now() / 1000;
+  const wire = (l, i) => {
+    const y = i * HT_ROW + HT_ROW / 2;
+    const d = `M0 ${mid} C130 ${mid} 170 ${y} 300 ${y}`;
+    const pk = (cls, bps, dy) => {
+      const dur = flowDur(bps);
+      if (l.state === 'down' || !dur) return '';
+      return `<path class="ht-pk ${cls}" d="${d}" transform="translate(0 ${dy})" style="animation-duration:${dur}s;animation-delay:${(-(now % dur)).toFixed(2)}s"/>`;
+    };
+    return `<g class="ht-w ht-${l.state}">${l.gre && l.state !== 'down' ? `<path class="ht-gre" d="${d}"/>` : ''}<path class="ht-base" d="${d}"/>`
+      + pk('ht-up', l.rate && l.rate.up, -2.5) + pk('ht-dn', l.rate && l.rate.dn, 2.5) + '</g>';
+  };
+  const node = l => {
+    const r = l.rate, meta = [];
+    if (l.state === 'down') meta.push(`<span class="ht-err">${esc(tr('', 'No connection'))}</span>`);
+    else {
+      if (l.lat) meta.push(`<span class="ht-lat">${esc(l.lat)}</span>`);
+      if (r) meta.push(`<span class="tv-dn">↓ ${esc(fmtRate(r.dn))}</span><span class="tv-up">↑ ${esc(fmtRate(r.up))}</span>`);
+    }
+    return `<button type="button" class="ht-node ht-${l.state}" data-goto-link="${esc(l.key)}">
+      <i class="ht-dot" aria-hidden="true"></i>
+      <span class="ht-id"><b data-no-i18n>${esc(l.name)}</b><small data-no-i18n>${esc(l.ip)}</small></span>
+      <span class="ht-tags"><span class="ht-eng" data-no-i18n>${esc(l.eng)}</span>${l.gre ? '<span class="ht-gre-tag">GRE</span>' : ''}</span>
+      <span class="ht-meta">${meta.join('')}</span>
+    </button>`;
+  };
+  return `<div class="hero-topo">
+    <div class="hero-node ht-hub">
+      <span class="hero-node-ic" aria-hidden="true">${ICO_SRV}</span>
+      <span class="hero-node-name">${esc(hubName)}</span>
+      <span class="hero-node-ip" data-no-i18n>${esc(hubIp)}</span>
+    </div>
+    <svg class="ht-wires" viewBox="0 0 300 ${H}" preserveAspectRatio="none" height="${H}" aria-hidden="true">${shown.map(wire).join('')}${more ? wire({ state: 'more' }, shown.length) : ''}</svg>
+    <div class="ht-nodes">${shown.map(node).join('')}${more ? `<button type="button" class="ht-node ht-more" data-goto-link="">+${more} ${esc(tr('', 'more'))}</button>` : ''}</div>
+  </div>`;
+}
 // Scroll to a peer's full card (switches tab if needed).
 function gotoPeerCard(peerId) {
   goTab('tunnel');

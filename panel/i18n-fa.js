@@ -2636,5 +2636,6 @@ window.FA_TEXT = {
 "Writer": "نویسنده‌ی رکورد",
 "No connection": "اتصال برقرار نیست",
 "Tunnel connected": "تونل وصل است",
-"active": "فعال"
+"active": "فعال",
+"more": "بیشتر"
 };
