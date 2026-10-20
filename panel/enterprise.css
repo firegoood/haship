@@ -685,3 +685,68 @@ html[data-sb="1"] .sidebar .brand-tier { display: none; }
 .cl-ev.warn i { background: var(--wr); } .cl-ev.error i { background: var(--er); }
 .cl-ev time { color: var(--mu); white-space: nowrap; }
 @media (max-width: 640px) { .cl-ev { grid-template-columns: 10px 1fr; } .cl-ev time { grid-column: 2; } .cl-ev span { grid-column: 2; } }
+
+/* ---- Tunnel link diagram (tunViz in app.js) ---- */
+.tv-wrap { display: flex; flex-direction: column; gap: 10px; }
+.tv { position: relative; display: flex; align-items: center; gap: 14px; padding: 20px 18px 14px; border-radius: var(--r-lg); border: 1px solid var(--ln); background: linear-gradient(180deg, var(--s2), var(--s1)); overflow: hidden; isolation: isolate; }
+.tv::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background: radial-gradient(55% 140% at 50% 0%, color-mix(in srgb, var(--info) 14%, transparent), transparent 70%); }
+.tv.tv-warn::before { background: radial-gradient(55% 140% at 50% 0%, color-mix(in srgb, var(--wr) 14%, transparent), transparent 70%); }
+.tv.tv-off::before { background: radial-gradient(55% 140% at 50% 0%, color-mix(in srgb, var(--er) 12%, transparent), transparent 70%); }
+.tv-node { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 104px; max-width: 150px; text-align: center; }
+.tv-node b { font-size: 13px; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.tv-node small { font-size: 12px; color: var(--mu); font-family: var(--font-mono); direction: ltr; unicode-bidi: isolate; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.tv-ico { position: relative; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; margin-bottom: 4px; color: var(--info); background: var(--s1); border: 1px solid var(--ln2); box-shadow: var(--lift-sm); }
+.tv-ico.far { color: var(--sc); }
+.tv-ico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.tv.tv-on .tv-ico::after { content: ""; position: absolute; inset: -5px; border-radius: 18px; border: 1.5px solid currentColor; opacity: 0; animation: tv-ping 2.6s ease-out infinite; }
+.tv.tv-on .tv-ico.far::after { animation-delay: 1.3s; }
+.tv.tv-off .tv-ico { color: var(--dim); }
+@keyframes tv-ping { 0% { opacity: .55; transform: scale(.9); } 100% { opacity: 0; transform: scale(1.25); } }
+
+.tv-link { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 9px; }
+.tv-tag { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; min-height: 22px; }
+.tv-tag span { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--tx2); background: var(--sunk); border: 1px solid var(--ln2); }
+.tv-tag .eng { color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); border-color: color-mix(in srgb, var(--info) 35%, transparent); }
+.tv-tag .gre { color: var(--sc); background: color-mix(in srgb, var(--sc) 12%, transparent); border-color: color-mix(in srgb, var(--sc) 35%, transparent); }
+.tv-tag .udp { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+
+/* The pipe: upper lane this server -> other, lower lane other -> this. With
+   GRE the pipe sits in a second tube, the way the tunnel runs inside GRE. */
+.tv-pipe { position: relative; width: 100%; height: 18px; border-radius: 999px; overflow: hidden; background: var(--sunk); border: 1px solid var(--ln2); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .18); }
+.tv.tv-gre .tv-pipe { box-shadow: inset 0 1px 3px rgba(0, 0, 0, .18), 0 0 0 3px var(--s1), 0 0 0 4.5px color-mix(in srgb, var(--sc) 55%, transparent); }
+.tv.tv-on .tv-pipe { border-color: color-mix(in srgb, var(--info) 35%, transparent); }
+.tv.tv-off .tv-pipe { overflow: visible; border-style: dashed; background: repeating-linear-gradient(90deg, var(--ln2) 0 10px, transparent 10px 18px); }
+.tv-lane { position: absolute; left: 0; right: 0; height: 50%; }
+.tv-lane.tv-u { top: 0; } .tv-lane.tv-d { bottom: 0; }
+.tv-lane b { position: absolute; top: 50%; left: -24px; width: 22px; height: 3px; margin-top: -1.5px; border-radius: 3px; animation: tv-flow var(--d) linear infinite; animation-delay: calc(var(--p) - var(--d) * var(--k)); }
+.tv-lane b:nth-child(1) { --k: 0; } .tv-lane b:nth-child(2) { --k: .25; } .tv-lane b:nth-child(3) { --k: .5; } .tv-lane b:nth-child(4) { --k: .75; }
+.tv-u b { background: linear-gradient(90deg, transparent, var(--sc)); box-shadow: 0 0 8px color-mix(in srgb, var(--sc) 70%, transparent); }
+.tv-d b { background: linear-gradient(270deg, transparent, var(--info)); box-shadow: 0 0 8px color-mix(in srgb, var(--info) 70%, transparent); animation-direction: reverse; }
+.tv-lane.idle::after { content: ""; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--ln2), transparent); }
+[dir="rtl"] .tv-lane { transform: scaleX(-1); }
+@keyframes tv-flow { from { left: -24px; } to { left: 100%; } }
+.tv-break { position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: var(--er); box-shadow: 0 0 0 4px color-mix(in srgb, var(--er) 22%, transparent); }
+
+.tv-meta { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; min-height: 18px; font-size: 12px; color: var(--mu); font-variant-numeric: tabular-nums; }
+.tv-meta span { white-space: nowrap; direction: ltr; unicode-bidi: isolate; }
+.tv-lat { color: var(--tx2); font-weight: 600; }
+.tv-dn { color: var(--info); } .tv-up { color: var(--sc); } .tv-err { color: var(--er); font-weight: 600; }
+
+.tv-ports { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tv-ports-k { font-size: 12px; color: var(--mu); text-transform: uppercase; letter-spacing: .05em; margin-inline-end: 4px; }
+.tv-port { font-family: var(--font-mono); font-size: 12px; padding: 3px 9px; border-radius: 8px; color: var(--tx); background: var(--s2); border: 1px solid var(--ln2); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--info) 60%, transparent); }
+.tv-port.more { box-shadow: none; color: var(--mu); }
+
+@media (max-width: 600px) {
+  .tv { gap: 8px; padding: 16px 10px 12px; }
+  .tv-node { min-width: 62px; }
+  .tv-node small { display: none; }
+  .tv-ico { width: 38px; height: 38px; border-radius: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-lane b, .tv.tv-on .tv-ico::after { animation: none; }
+  .tv-lane b { display: none; }
+  .tv-lane:not(.idle)::after { content: ""; position: absolute; top: 50%; left: 6%; right: 6%; height: 3px; margin-top: -1.5px; border-radius: 3px; background: color-mix(in srgb, var(--info) 60%, transparent); }
+}
+
+.tv-break svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }

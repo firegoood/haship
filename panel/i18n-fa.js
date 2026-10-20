@@ -2633,5 +2633,8 @@ window.FA_TEXT = {
 "Up since": "وصل از",
 "Why": "علت",
 "Working hubs": "هاب‌های سالم",
-"Writer": "نویسنده‌ی رکورد"
+"Writer": "نویسنده‌ی رکورد",
+"No connection": "اتصال برقرار نیست",
+"Tunnel connected": "تونل وصل است",
+"active": "فعال"
 };

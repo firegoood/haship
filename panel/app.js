@@ -1201,6 +1201,62 @@ async function showPeerToken(peerId, name) {
     showActOut(tr('', 'Bundle'), `Bundle for '${name}': ${show}\nForeign side: paste it into the token field (fills everything). Legacy token: ${r.token || '—'}`);
   } catch(e) { toastErr('token lookup failed', e.message); }
 }
+// ---- Tunnel link diagram: this server ⇄ pipe with moving packets ⇄ other server ----
+// Live speed of one link from its byte counters between two status polls.
+const _linkSeen = {};
+function linkRate(key, rx, tx) {
+  if (rx == null || tx == null) return null;
+  const now = Date.now() / 1000, p = _linkSeen[key];
+  if (p && rx === p.rx && tx === p.tx) return (now - p.t > 30) ? { dn: 0, up: 0 } : p.r; // same sample drawn again
+  _linkSeen[key] = { rx, tx, t: now, r: null };
+  if (!p || now - p.t > 120 || rx < p.rx || tx < p.tx) return null;
+  const dt = Math.max(1, now - p.t);
+  return (_linkSeen[key].r = { dn: (rx - p.rx) / dt, up: (tx - p.tx) / dt });
+}
+// Packet speed on the pipe, in steps so a new poll rarely changes it (0 = idle).
+function flowDur(bps) {
+  if (bps == null) return 2.8;
+  return bps < 1024 ? 0 : bps < 64e3 ? 2.6 : bps < 512e3 ? 1.9 : bps < 4e6 ? 1.3 : bps < 32e6 ? 0.9 : 0.6;
+}
+const ICO_GLOBE = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
+// o: {state: 'ok'|'warn'|'down', here, hereSub, there, thereSub, tags: [[text, cls]],
+//     gre, lat, rate: {dn, up} | null, ports: []}. dn = other server -> this one.
+function tunViz(o) {
+  const live = o.state !== 'down';
+  // The phase comes from the clock, so a poll that redraws the card does not
+  // restart the packets.
+  const lane = (cls, bps) => {
+    if (!live) return '';
+    const d = flowDur(bps);
+    if (!d) return `<i class="tv-lane ${cls} idle"></i>`;
+    const ph = -((Date.now() / 1000) % d);
+    return `<i class="tv-lane ${cls}" style="--d:${d}s;--p:${ph.toFixed(2)}s"><b></b><b></b><b></b><b></b></i>`;
+  };
+  const r = o.rate;
+  const meta = [];
+  if (o.lat) meta.push(`<span class="tv-lat">${esc(o.lat)}</span>`);
+  if (live && r) meta.push(`<span class="tv-dn">↓ ${esc(fmtRate(r.dn))}</span><span class="tv-up">↑ ${esc(fmtRate(r.up))}</span>`);
+  if (!live) meta.push(`<span class="tv-err">${esc(tr('', 'No connection'))}</span>`);
+  const ports = (o.ports || []).map(String).filter(Boolean);
+  const shown = ports.slice(0, 8);
+  return `<div class="tv-wrap">
+    <div class="tv ${live ? 'tv-on' : 'tv-off'}${o.state === 'warn' ? ' tv-warn' : ''}${o.gre ? ' tv-gre' : ''}">
+      <div class="tv-node"><span class="tv-ico">${ICO_SRV}</span><b>${esc(o.here)}</b><small>${esc(o.hereSub || '')}</small></div>
+      <div class="tv-link">
+        <div class="tv-tag">${(o.tags || []).filter(t => t && t[0]).map(t => `<span class="${t[1] || ''}" data-no-i18n>${esc(t[0])}</span>`).join('')}</div>
+        <div class="tv-pipe" role="img" aria-label="${esc(tr('', live ? 'Tunnel connected' : 'Tunnel down'))}">
+          ${lane('tv-u', r && r.up)}${lane('tv-d', r && r.dn)}
+          ${live ? '' : '<span class="tv-break" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg></span>'}
+        </div>
+        <div class="tv-meta">${meta.join('')}</div>
+      </div>
+      <div class="tv-node"><span class="tv-ico far">${ICO_GLOBE}</span><b>${esc(o.there)}</b><small>${esc(o.thereSub || '')}</small></div>
+    </div>
+    ${shown.length ? `<div class="tv-ports"><span class="tv-ports-k">${esc(tr('', 'Forwarded'))}</span>${shown.map(p => `<span class="tv-port" data-no-i18n>${esc(p)}</span>`).join('')}${ports.length > shown.length ? `<span class="tv-port more">+${ports.length - shown.length}</span>` : ''}</div>` : ''}
+  </div>`;
+}
+const vizState = o => o.health_state === 'down' ? 'down' : o.health_state === 'degraded' ? 'warn' : (o.health_state ? 'ok' : null);
+
 function renderPeers(peers) {
   const box = $('peerCards');
   if (!box) return;
@@ -1228,6 +1284,14 @@ function renderPeers(peers) {
           <span class="badge ${bagherState[0]}"><span class="dot"></span>${esc(tr('', bagherState[1]))}</span>
         </div>
       </div>
+      ${tunViz({
+        state: bagherLinked ? 'ok' : (bagherRun ? 'warn' : 'down'),
+        here: tr('', 'This server'), hereSub: tr('', b.role === 'foreign' ? 'Foreign' : 'Iran'),
+        there: tr('', b.role === 'foreign' ? 'Iran server' : 'Foreign server'), thereSub: b.remote_host || '',
+        tags: [['Bagher', 'eng'], ['SSH', ''], [b.udp ? 'UDP' : '', 'udp']],
+        lat: (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? b.latency_ms.toFixed(0) + ' ms' : null,
+        rate: null, ports: Array.isArray(b.ports) ? b.ports : [],
+      })}
       <div class="det-grid">
         <div class="det-card">
           <div class="det-card-head">${ICO_SRV} <span>Bagher Node</span></div>
@@ -1299,9 +1363,20 @@ function renderPeers(peers) {
           <span class="qs-hint mono">#${p.id}</span>
           ${engBadge}
           ${transBadge}
-          <span class="badge ${up ? 'ok' : 'err'}"><span class="dot"></span>${up ? 'active' : 'down'}</span>
+          ${(() => { // the header follows the link's health: a running service without its session is not "active"
+            const v = vizState(p) || (up ? 'ok' : 'down');
+            return `<span class="badge ${v === 'ok' ? 'ok' : v === 'warn' ? 'warn' : 'err'}"><span class="dot"></span>${esc(tr('', v === 'ok' ? 'active' : v === 'warn' ? 'degraded' : 'down'))}</span>`;
+          })()}
         </div>
       </div>
+      ${tunViz({
+        state: vizState(p) || (up ? 'ok' : 'down'),
+        here: tr('', 'Iran server'), hereSub: p.local_pub || '',
+        there: nm, thereSub: p.remote_pub || '',
+        tags: [[isBh || isGreBh ? 'Backhaul' : 'FRP', 'eng'], [p.transport || '', ''], [isBh ? '' : 'GRE', 'gre']],
+        gre: !isBh, lat: linkPing(p).ok ? linkPing(p).txt : null, rate: linkRate('p' + p.id, p.rx, p.tx),
+        ports: p.raw_ports ? String(p.raw_ports).split(/[ ,]+/) : (p.ports || []),
+      })}
       <div class="det-grid">
         <div class="det-card">
           <div class="det-card-head">${ICO_SRV} <span>Foreign Server</span></div>
@@ -1402,6 +1477,18 @@ function renderTunnel(st) {
     : `<span class="badge err"><span class="dot"></span><bdi data-no-i18n>${esc(st.frp_svc || 'service')}</bdi> · ${esc(tr('', 'stopped'))}</span>`;
   const ports = ((st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || [])).join(', ') || '—';
   const title = tr('', 'Tunnel') + (st.remote_pub ? ' · ' + st.remote_pub : '');
+  let mainRate = linkRate('main', st.rx, st.tx);
+  const dashT = window._lastDash && window._lastDash.traffic;
+  if (!mainRate && st.rx == null && !(tunPeerCache || []).length && dashT && dashT.speed_down != null) mainRate = { dn: dashT.speed_down, up: dashT.speed_up };
+  const mainPing = linkPing(st);
+  const mainViz = !hasMain ? '' : tunViz({
+    state: vizState(st) || (up ? 'ok' : 'down'),
+    here: tr('', 'This server'), hereSub: tr('', isIran ? 'Iran' : 'Foreign') + (st.local_pub ? ' · ' + st.local_pub : ''),
+    there: tr('', isIran ? 'Foreign server' : 'Iran server'), thereSub: st.remote_pub || gre.peer_ip || st.gre_peer || '',
+    tags: [[bhSvc ? 'Backhaul' : 'FRP', 'eng'], [eng !== 'frp' ? st.transport : '', ''], [usesGre ? 'GRE' : '', 'gre']],
+    gre: usesGre, lat: mainPing.ok ? mainPing.txt : null, rate: mainRate,
+    ports: (st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || []),
+  });
   // Main tunnel card: the same detail rows as a peer card. GRE rows only where
   // the engine uses GRE (a standalone Backhaul server has no gre-tunnel).
   const mainCard = !hasMain ? '' : `
@@ -1415,6 +1502,7 @@ function renderTunnel(st) {
           ${(usesGre && !st.ping_ok && st.frp_up) ? '<span class="badge info"><span class="dot"></span>' + esc(tr('fleet_frp_only', 'FRP only')) + '</span>' : ''}
         </div>
       </div>
+      ${mainViz}
       <div class="det-grid">
         <div class="det-card">
           <div class="det-card-head">${ICO_SRV} <span>${esc(tr('', 'Server'))}</span></div>
@@ -2194,6 +2282,7 @@ async function refreshDash() {
   try {
     const d = await api('/api/dashboard?range=' + dashRange);
     if (!d || typeof d !== 'object') return;
+    window._lastDash = d;
     const on = !!d.online;
     const peers = d.peers || [];
     const nPeers = d.peer_count || peers.length;

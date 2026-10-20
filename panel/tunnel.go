@@ -29,6 +29,11 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	lv := localView{tunnelStatus: snap.Local, LatencyMs: -1}
 	if m := snap.Main; m != nil {
 		lv.HealthState, lv.ICMPFiltered, lv.LatencyMs, lv.LatencyKind, lv.Reasons = m.HealthState, m.ICMPFiltered, m.LatencyMs, m.LatencyKind, m.Reasons
+		lv.Rx, lv.Tx = m.Rx, m.Tx
+	}
+	if lv.Rx == nil && len(peers) == 0 && snap.CarrierOK {
+		rx, tx := snap.CarrierRx, snap.CarrierTx
+		lv.Rx, lv.Tx = &rx, &tx
 	}
 	resp := map[string]any{"local": lv, "peers": peers, "peer_count": len(peers), "peer_max": maxPeers(), "snapshot_age_ms": snap.AgeMs()}
 	if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
@@ -46,6 +51,11 @@ type localView struct {
 	LatencyMs    float64  `json:"latency_ms"`
 	LatencyKind  string   `json:"latency_kind,omitempty"`
 	Reasons      []string `json:"reasons,omitempty"`
+	// Rx/Tx: bytes received/sent by the base tunnel (its GRE interface, or the
+	// Backhaul/Bagher port counters when this server has no other tunnel);
+	// null when unknown. The Tunnel tab turns them into live speeds.
+	Rx *uint64 `json:"rx"`
+	Tx *uint64 `json:"tx"`
 }
 
 func splitLogLines(text string) []string {
