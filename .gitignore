@@ -1,0 +1,9 @@
+panel/panel
+panel/panel.exe
+build/
+*.exe
+
+# License signing material never belongs in the panel repository
+*.key
+*.license
+/hashem-fork-keys/
