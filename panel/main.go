@@ -686,6 +686,8 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/spoof/tester", requireAuth(requireCSRF(handleSpoofTester)))
 	mux.HandleFunc("GET "+base+"/api/xray", requireAuth(handleXrayGet))
 	mux.HandleFunc("POST "+base+"/api/xray", requireAuth(requireCSRF(handleXrayPost)))
+	mux.HandleFunc("GET "+base+"/api/limits", requireAuth(handleLimitsGet))
+	mux.HandleFunc("POST "+base+"/api/limits", requireAuth(requireCSRF(handleLimitsPost)))
 	mux.HandleFunc("POST "+base+"/api/link-name", requireAuth(requireCSRF(handleLinkName)))
 	mux.HandleFunc("GET "+base+"/api/fleet", requireAuth(handleFleet))
 	mux.HandleFunc("GET "+base+"/api/selfstats", requireAuth(handleSelfStats))
@@ -776,6 +778,7 @@ func main() {
 	go startRescueMonitor()
 	go startClusterMonitor()
 	go startMeshLoop()
+	go startLimitsLoop()
 	go func() {
 		cc := loadCarrierConfig()
 		if strings.HasPrefix(cc.ActiveCarrier, "wss") {
@@ -812,6 +815,7 @@ func main() {
 	go func() {
 		<-sigc
 		close(histStop)
+		limitsFlush()
 		time.Sleep(300 * time.Millisecond) // let the final history write finish
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()

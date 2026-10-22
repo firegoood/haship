@@ -1647,6 +1647,13 @@
           <p class="qs-hint" data-i18n="usage_hint">Saved on disk every minute, so it survives restarts, updates and reboots. Per foreign server, plus the hub total.</p>
           <div id="usageBody"><p class="qs-hint">…</p></div>
         </div>
+        <!-- Speed and volume limits per foreign server (limits.go; loadLimits in app.js) -->
+        <div class="tunnel-card" id="limitsCard">
+          <div class="tc-header"><p class="tc-title">Speed and volume limits <span class="eng-pro hidden" id="limitsPro" data-no-i18n>PRO</span></p><span class="badge dim" id="limitsBadge">—</span></div>
+          <p class="qs-hint">One speed for both directions and a volume for each foreign server, or unlimited. When a server's volume is used up, its links are cut until the next reset; the other servers keep working.</p>
+          <div class="xr-err hidden" id="limitsErr" role="alert"></div>
+          <div id="limitsBody"><div class="ent-skel u-h-14"></div></div>
+        </div>
         <!-- Tunnel Health: per-tunnel PASS / FAIL / UNREACHABLE (service + session + data) -->
         <div class="tunnel-card" id="tunnelHealthCard">
           <div class="tc-header">
@@ -3415,6 +3422,43 @@
 
 
 
+<div class="ent-modal-ov" id="limitModal" hidden>
+  <div class="ent-modal lm-modal" role="dialog" aria-modal="true" aria-labelledby="limitModalTitle">
+    <div class="ent-modal-h"><b id="limitModalTitle">Limits</b><button class="ent-x" id="limitModalX" aria-label="Close" data-i18n-aria="aria_close">×</button></div>
+    <div class="ent-modal-b">
+      <div class="lm-srv" id="limitModalSrv"></div>
+      <div class="lm-sec">
+        <span class="qs-label" id="lmSpeedLbl">Speed (one number for both directions)</span>
+        <div class="qs-seg" role="group" aria-labelledby="lmSpeedLbl"><button type="button" id="lmSpeedOff" aria-pressed="true">Unlimited</button><button type="button" id="lmSpeedOn" aria-pressed="false">Limit</button></div>
+        <div class="lm-in" id="lmSpeedWrap" hidden>
+          <label class="qs-label" for="lmSpeed">Mbit/s</label>
+          <input class="hashem-input" id="lmSpeed" type="number" min="0.1" max="100000" step="0.1" inputmode="decimal" placeholder="e.g. 100">
+          <div class="lm-chips" data-for="lmSpeed"><button type="button" data-v="10">10</button><button type="button" data-v="50">50</button><button type="button" data-v="100">100</button><button type="button" data-v="500">500</button></div>
+        </div>
+      </div>
+      <div class="lm-sec">
+        <span class="qs-label" id="lmQuotaLbl">Volume (download and upload together)</span>
+        <div class="qs-seg" role="group" aria-labelledby="lmQuotaLbl"><button type="button" id="lmQuotaOff" aria-pressed="true">Unlimited</button><button type="button" id="lmQuotaOn" aria-pressed="false">Limit</button></div>
+        <div class="lm-in" id="lmQuotaWrap" hidden>
+          <label class="qs-label" for="lmQuota">GB</label>
+          <input class="hashem-input" id="lmQuota" type="number" min="0.01" max="1000000" step="any" inputmode="decimal" placeholder="e.g. 500">
+          <div class="lm-chips" data-for="lmQuota"><button type="button" data-v="100">100</button><button type="button" data-v="500">500</button><button type="button" data-v="1000">1000</button><button type="button" data-v="5000">5000</button></div>
+        </div>
+      </div>
+      <div class="lm-sec" id="lmResetSec" hidden>
+        <span class="qs-label" id="lmResetLbl">Reset the used volume</span>
+        <div class="qs-seg" role="group" aria-labelledby="lmResetLbl"><button type="button" id="lmResetMonthly" aria-pressed="true">Every month</button><button type="button" id="lmResetNever" aria-pressed="false">Only by hand</button></div>
+        <div class="lm-in" id="lmDayWrap">
+          <label class="qs-label" for="lmDay">On day</label>
+          <select class="hashem-input" id="lmDay"></select>
+        </div>
+      </div>
+      <div class="qs-hint">The volume already used is kept when you change the limits. A limit covers every tunnel to this server.</div>
+      <div class="xr-err hidden" id="limitModalErr"></div>
+    </div>
+    <div class="ent-modal-f"><button class="hashem-btn hashem-btn-ghost" id="limitModalNo">Cancel</button><button class="hashem-btn hashem-btn-primary" id="limitModalYes">Save</button></div>
+  </div>
+</div>
 <div class="ent-modal-ov" id="nameModal" hidden>
   <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="nameModalTitle">
     <div class="ent-modal-h"><b id="nameModalTitle">Name this server</b><button class="ent-x" id="nameModalX" aria-label="Close" data-i18n-aria="aria_close">×</button></div>

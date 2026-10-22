@@ -113,6 +113,8 @@ var errCatalog = map[string]errInfo{
 	"E-XRAY-05": {500, "the Xray link did not stay up", "Check: hashem xray logs"},
 	"E-XRAY-06": {404, "no such Xray link", "Reload the page: the link may have been removed."},
 	"E-XRAY-07": {409, "an Xray-core install is already running", "Wait for it to finish; the tab shows its progress."},
+	// speed and volume limits
+	"E-LIMIT-01": {400, "bad limits request", "The detail names the field; fix it and try again."},
 	// log diagnostics (annotation only, also reused by status hints)
 	"E-GRE-01":     {0, "GRE interface missing / down", "Tunnel setup did not create it, or it was deleted — reinstall that peer."},
 	"E-GRE-02":     {0, "GRE ping failed (100% loss / unreachable)", "Peers cannot reach each other: firewall, wrong public IP, or GRE blocked."},

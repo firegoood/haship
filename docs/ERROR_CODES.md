@@ -224,6 +224,12 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | --- | --- | --- | --- |
 | `E-PATHTEST-01` | 400 | path test could not start | See the detail: usually a port in use (pick another first port) or a damaged code (copy it again from the Iran server). |
 
+## E-LIMIT-xx — Speed and volume limits
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-LIMIT-01` | 400 | bad limits request | The detail names the field; fix it and try again. |
+
 ## E-LIC-xx — LIC
 
 | Code | HTTP | Meaning | What to do |
@@ -284,4 +290,4 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
 | `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
 
-Total: 153 codes.
+Total: 154 codes.

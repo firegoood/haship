@@ -288,6 +288,7 @@ const PRO_TXT = {
   cluster: ['pro_t_cluster', 'Cluster — Hashem Pro', 'pro_b_cluster', 'The cluster is a Hashem Pro feature: pools of foreign servers behind one port, linked Iran hubs and DNS failover. Pools that already run keep running without it.'],
   spoof: ['pro_t_spoof', 'Spoof Tunnel — Hashem Pro', 'pro_b_spoof', 'The Spoof Tunnel is a Hashem Pro feature, on both servers: an IP-spoofing pipe wrapped with WireGuard to cross whitelist-based Layer-3 firewalls.'],
   xray: ['pro_t_xray', 'Xray Tunnel — Hashem Pro', 'pro_b_xray', 'The Xray Tunnel is a Hashem Pro feature, on both servers: Reality, XHTTP, gRPC or mKCP, direct or reverse, next to any Xray panel.'],
+  limits: ['pro_t_limits', 'Speed and volume limits — Hashem Pro', 'pro_b_limits', 'Limiting the speed and volume of each foreign server is a Hashem Pro feature. Limits already set keep working without it, and can always be removed.'],
 };
 function isSentinelLicensed() {
   const f = (_licenseData && _licenseData.is_valid && _licenseData.features) || [];
@@ -306,6 +307,7 @@ function proSync() {
   tag('spoofPro', 'spoof');
   tag('navXrayPro', 'xray');
   tag('xrayPro', 'xray');
+  tag('limitsPro', 'limits');
   if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', clLicensed());
   if ($('navSentinelPro')) $('navSentinelPro').classList.toggle('hidden', isSentinelLicensed());
   ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navSpoofPro', 'navXrayPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
@@ -360,7 +362,7 @@ function goTab(name) {
     loadClusterStatus();
   }
   if (name === 'perf') loadPerf();
-  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); loadXray(true); }
+  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); loadLimits(); loadXray(true); }
   if (name === 'watchdog') loadWatchdog();
   if (name === 'doctor') loadDoctor();
   if (name === 'benchmark') { loadBenchmark(); loadPathTest(); }
@@ -7294,6 +7296,158 @@ async function loadUsage() {
     if (t && !t.hidden && !document.hidden) loadUsage();
   }, 60000);
 })();
+
+// ---- Speed and volume limits per foreign server (limits.go) ----
+// One rule per server IP: a rate for both directions and/or a volume that
+// cuts the server's links when used up, reset monthly or by hand.
+let _limitsData = null, limitsTimer = null;
+const fmtGB = n => {
+  n = +n || 0;
+  if (n >= 1e12) return (n / 1e12).toFixed(2) + ' TB';
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + ' GB';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + ' MB';
+  return Math.round(n / 1e3) + ' KB';
+};
+const fmtMbit = bps => {
+  const m = (+bps || 0) * 8 / 1e6;
+  return (m >= 100 ? Math.round(m) : m.toFixed(m >= 10 ? 1 : 2)) + ' Mbit/s';
+};
+function limLinkName(k) {
+  if (k === 'main') return tr('', 'Main tunnel');
+  const m = /^(peer|bagher|xray)-(\d+)$/.exec(k);
+  if (!m) return k;
+  return { peer: tr('', 'Peer'), bagher: 'Bagher', xray: 'Xray' }[m[1]] + ' ' + m[2];
+}
+const limDate = sec => new Date(sec * 1000).toLocaleDateString(currentLang === 'fa' ? 'fa-IR' : undefined, { month: 'short', day: 'numeric' });
+function limRow(s) {
+  const r = s.rule, ip = s.ip;
+  const used = r ? r.used_rx + r.used_tx : 0;
+  const q = r && r.quota_gb > 0 ? r.quota_gb * 1e9 : 0;
+  const pct = q ? Math.min(100, used / q * 100) : 0;
+  const [cls, label] = !r ? ['dim', tr('', 'Unlimited')]
+    : r.blocked ? ['err', tr('', 'Cut: volume used up')]
+    : q && pct >= 90 ? ['warn', tr('', '90% of the volume used')]
+    : s.orphan ? ['dim', tr('', 'No tunnel to it now')]
+    : ['info', tr('', 'Limited')];
+  const rate = r && r.rate_mbit > 0 ? r.rate_mbit : 0;
+  const live = r ? Math.max(s.speed_rx, s.speed_tx) * 8 / 1e6 : 0;
+  const lp = rate ? Math.min(100, live / rate * 100) : 0;
+  const meter = (p, c) => `<div class="lm-meter ${c}" aria-hidden="true"><i style="--p:${p.toFixed(1)}%"></i></div>`;
+  const speed = `<div class="lm-box"><div class="lm-k"><span>${esc(tr('', 'Speed'))}</span><b class="lm-num">${rate ? esc(rate + ' Mbit/s') : esc(tr('', 'Unlimited'))}</b></div>` +
+    meter(lp, rate ? (lp >= 95 ? 'warn' : '') : 'inf') +
+    `<div class="lm-sub">${r ? '<span class="lm-num">↓ ' + esc(fmtMbit(s.speed_rx)) + ' · ↑ ' + esc(fmtMbit(s.speed_tx)) + '</span>' : esc(tr('', 'Not measured: no limit set'))}</div></div>`;
+  const vol = `<div class="lm-box"><div class="lm-k"><span>${esc(tr('', 'Volume'))}</span><b class="lm-num">${q ? esc(fmtGB(used) + ' / ' + fmtGB(q)) : r ? esc(fmtGB(used)) : esc(tr('', 'Unlimited'))}</b></div>` +
+    meter(pct, q ? (r.blocked || pct >= 100 ? 'err' : pct >= 90 ? 'warn' : '') : 'inf') +
+    `<div class="lm-sub">${r ? esc((q && r.reset === 'monthly' && s.next_reset ? tr('', 'Resets on') + ' ' + limDate(s.next_reset) : q ? tr('', 'Reset by hand') : tr('', 'No volume limit')) + ' · ' + tr('', 'counted since') + ' ' + limDate(r.period_start)) : ''}</div></div>`;
+  const acts = [`<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openLimitEdit(${jsArg(ip)})">${esc(r ? tr('', 'Edit limits') : tr('', 'Set limits'))}</button>`];
+  if (r && (used > 0 || r.blocked)) acts.push(`<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="limitAction('reset', ${jsArg(ip)})">${esc(tr('', 'Reset usage'))}</button>`);
+  if (r) acts.push(`<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="limitAction('remove', ${jsArg(ip)})">${esc(tr('', 'Remove limits'))}</button>`);
+  return `<div class="lm-row${r && r.blocked ? ' cut' : cls === 'warn' ? ' warn' : ''}">
+    <div class="lm-head"><div class="lm-name"><b class="lm-num">${esc(s.name || ip)}</b>${s.name ? '<small class="lm-num">' + esc(ip) + '</small>' : ''}</div>
+      <div class="lm-links">${(s.links || []).map(k => '<span>' + esc(limLinkName(k)) + '</span>').join('')}</div>
+      <span class="badge ${cls}">${esc(label)}</span></div>
+    <div class="lm-grid">${speed}${vol}</div>
+    <div class="lm-acts">${acts.join('')}</div></div>`;
+}
+function renderLimits(d) {
+  _limitsData = d;
+  const box = $('limitsBody');
+  if (!box) return;
+  if ($('limitsPro')) $('limitsPro').classList.toggle('hidden', isProLicensed('limits'));
+  const err = $('limitsErr');
+  if (err) { err.textContent = d.error ? tr('', 'Limits could not be applied:') + ' ' + d.error : ''; err.classList.toggle('hidden', !d.error); }
+  const list = d.servers || [], ruled = list.filter(s => s.rule), cut = ruled.filter(s => s.rule.blocked).length;
+  const b = $('limitsBadge');
+  if (b) {
+    b.className = 'badge ' + (cut ? 'err' : ruled.length ? 'info' : 'dim');
+    b.textContent = cut ? cut + ' ' + tr('', 'cut') : ruled.length ? ruled.length + ' ' + tr('', 'limited') : tr('', 'Unlimited');
+  }
+  box.innerHTML = list.length ? '<div class="lm-list">' + list.map(limRow).join('') + '</div>'
+    : '<p class="qs-hint">' + esc(tr('', 'No foreign server yet. Servers show here once a tunnel to them is set up.')) + '</p>';
+}
+async function loadLimits() {
+  try { renderLimits(await api('/api/limits')); } catch (e) { reportErr('limits', e); }
+}
+(function initLimits() {
+  if (!limitsTimer) limitsTimer = setInterval(() => {
+    const t = $('tab-tunnel');
+    if (t && !t.hidden && !document.hidden) loadLimits();
+  }, 10000);
+})();
+function openLimitEdit(ip) {
+  if (!isProLicensed('limits')) { openBagherLicModal('limits'); return; }
+  const s = ((_limitsData || {}).servers || []).find(x => x.ip === ip);
+  const ov = $('limitModal');
+  if (!s || !ov) return;
+  const r = s.rule || {};
+  $('limitModalTitle').textContent = tr('', 'Limits') + ' — ' + (s.name || ip);
+  $('limitModalSrv').innerHTML = '<b class="lm-num">' + esc(ip) + '</b>' + ((s.links || []).length ? ' · ' + s.links.map(k => esc(limLinkName(k))).join(', ') : '');
+  const day = $('lmDay');
+  if (!day.options.length) for (let i = 1; i <= 28; i++) day.add(new Option(String(i), String(i)));
+  const today = new Date().getDate();
+  day.value = String(r.reset_day || (today > 28 ? 1 : today));
+  $('lmSpeed').value = r.rate_mbit > 0 ? r.rate_mbit : '';
+  $('lmQuota').value = r.quota_gb > 0 ? r.quota_gb : '';
+  const st = { speed: r.rate_mbit > 0, quota: r.quota_gb > 0, monthly: r.reset !== 'never' || !(r.quota_gb > 0) };
+  const err = $('limitModalErr');
+  err.classList.add('hidden');
+  const press = (off, on, v) => { $(off).setAttribute('aria-pressed', String(!v)); $(on).setAttribute('aria-pressed', String(v)); };
+  const sync = () => {
+    press('lmSpeedOff', 'lmSpeedOn', st.speed); $('lmSpeedWrap').hidden = !st.speed;
+    press('lmQuotaOff', 'lmQuotaOn', st.quota); $('lmQuotaWrap').hidden = !st.quota; $('lmResetSec').hidden = !st.quota;
+    press('lmResetNever', 'lmResetMonthly', st.monthly); $('lmDayWrap').hidden = !st.monthly;
+  };
+  const set = (k, v, focus) => () => { st[k] = v; sync(); if (focus) $(focus).focus(); };
+  $('lmSpeedOff').onclick = set('speed', false); $('lmSpeedOn').onclick = set('speed', true, 'lmSpeed');
+  $('lmQuotaOff').onclick = set('quota', false); $('lmQuotaOn').onclick = set('quota', true, 'lmQuota');
+  $('lmResetNever').onclick = set('monthly', false); $('lmResetMonthly').onclick = set('monthly', true);
+  ov.querySelectorAll('.lm-chips button').forEach(b => { b.onclick = () => { $(b.parentNode.dataset.for).value = b.dataset.v; }; });
+  sync();
+  const close = () => modalHide(ov);
+  const save = async () => {
+    const body = {
+      action: 'set', ip,
+      rate_mbit: st.speed ? parseFloat($('lmSpeed').value) : 0,
+      quota_gb: st.quota ? parseFloat($('lmQuota').value) : 0,
+      reset: st.quota && st.monthly ? 'monthly' : 'never',
+      reset_day: parseInt(day.value, 10) || 1,
+    };
+    const bad = st.speed && !(body.rate_mbit >= 0.1) ? tr('', 'Enter the speed in Mbit/s (at least 0.1).')
+      : st.quota && !(body.quota_gb >= 0.01) ? tr('', 'Enter the volume in GB (at least 0.01).') : '';
+    if (bad) { err.textContent = bad; err.classList.remove('hidden'); return; }
+    const btn = $('limitModalYes');
+    btn.disabled = true;
+    try {
+      renderLimits(await api('/api/limits', body));
+      close();
+      toastOk(tr('', 'Limits saved'), s.name || ip);
+    } catch (e) {
+      err.textContent = e.message;
+      err.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  $('limitModalYes').onclick = save;
+  $('limitModalNo').onclick = close;
+  $('limitModalX').onclick = close;
+  modalShow(ov, close);
+  $(st.speed ? 'lmSpeed' : 'lmSpeedOn').focus();
+}
+async function limitAction(action, ip) {
+  if (action === 'reset' && !isProLicensed('limits')) { openBagherLicModal('limits'); return; }
+  const s = ((_limitsData || {}).servers || []).find(x => x.ip === ip) || {};
+  const ask = action === 'reset'
+    ? [tr('', 'Reset the used volume?'), tr('', "This server's used volume goes back to 0. If its links were cut, they come back now."), tr('', 'Reset usage')]
+    : [tr('', 'Remove the limits?'), tr('', 'This server gets unlimited speed and volume. If its links were cut, they come back now.'), tr('', 'Remove limits')];
+  if (!await entConfirm(...ask)) return;
+  try {
+    renderLimits(await api('/api/limits', { action, ip }));
+    toastOk(action === 'reset' ? tr('', 'Usage reset') : tr('', 'Limits removed'), s.name || ip);
+  } catch (e) {
+    toastErr(tr('', 'Failed'), e.message);
+  }
+}
 
 async function runDoctor() {
   if (doctorRunning) return;

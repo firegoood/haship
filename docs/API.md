@@ -66,6 +66,9 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/history` | session | `handleHistoryGet` |
 | `GET` | `/api/license` | session | `handleLicenseGet` |
 | `POST` | `/api/license` | session + CSRF | `handleLicensePost` |
+| `GET` | `/api/limits` | session | `handleLimitsGet` |
+| `POST` | `/api/limits` | session + CSRF | `handleLimitsPost` |
+| `POST` | `/api/link-name` | session + CSRF | `handleLinkName` |
 | `POST` | `/api/login` | none | `handleLogin` |
 | `POST` | `/api/logout` | none | `handleLogout` |
 | `GET` | `/api/logs` | session | `handleLogs` |
@@ -150,4 +153,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/xray` | session + CSRF | `handleXrayPost` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 126 routes.
+Total: 129 routes.

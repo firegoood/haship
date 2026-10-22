@@ -155,6 +155,11 @@ func TestProGatesAPIs(t *testing.T) {
 			handleXrayPost(rr, httptest.NewRequest("POST", "/api/xray", strings.NewReader(`{"action":"snitest"}`)))
 			return rr
 		}},
+		{"speed and volume limits", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleLimitsPost(rr, httptest.NewRequest("POST", "/api/limits", strings.NewReader(`{"action":"nope"}`)))
+			return rr
+		}},
 		{"Backhaul setup", func() *httptest.ResponseRecorder {
 			rr := httptest.NewRecorder()
 			handleSetupPost(rr, httptest.NewRequest("POST", "/api/setup", strings.NewReader(`{"role":"iran","engine":"backhaul","local_public":"bad"}`)))

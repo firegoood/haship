@@ -3047,6 +3047,23 @@ acct_chains_drop() {
     done
 }
 
+# The per-server speed and volume limits (panel/limits.go): the HASHEM_LIMIT
+# chain and the tc policers (pref 4917) on every interface.
+limits_drop() {
+    local h d n
+    for h in INPUT OUTPUT FORWARD; do
+        iptables -D "$h" -j HASHEM_LIMIT 2>/dev/null || true
+    done
+    iptables -F HASHEM_LIMIT 2>/dev/null || true
+    iptables -X HASHEM_LIMIT 2>/dev/null || true
+    command -v tc >/dev/null 2>&1 || return 0
+    for d in /sys/class/net/*; do
+        n=${d##*/}
+        tc filter del dev "$n" egress pref 4917 2>/dev/null || true
+        tc filter del dev "$n" ingress pref 4917 2>/dev/null || true
+    done
+}
+
 # ---- Performance & Obfuscation Controls (CLI + Menu 22) ----
 
 perf_apply() {
@@ -5868,6 +5885,7 @@ uninstall_all_force() {
             # cluster pools and hub forwarding
             [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" cluster reset >/dev/null 2>&1 || true
             acct_chains_drop
+            limits_drop
         fi
         ip link del hashem-lb >/dev/null 2>&1 || true
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"
@@ -5956,6 +5974,7 @@ remove_tunnel_force() {
             # cluster pools and hub forwarding
             [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" cluster reset >/dev/null 2>&1 || true
             acct_chains_drop
+            limits_drop
         fi
         ip link del hashem-lb >/dev/null 2>&1 || true
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"
