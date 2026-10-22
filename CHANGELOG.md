@@ -3,6 +3,10 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
+## Unreleased
+
+- The Live Activity stream no longer shows `command "systemctl" failed (exit 4) | output: inactive` every few seconds. `systemctl is-active` exits non-zero for a stopped or uninstalled unit, which is the answer the status pollers ask for, not an error; these calls are no longer logged or counted as errors. A failed command's multi-line output is now logged on one line.
+
 ## v2.6.0 — 2026-10-22
 
 A new tunnel type, **Spoof**, that crosses whitelist firewalls by forging its source IP on both servers, with a built-in tester that finds the source IPs that get through; every tunnel can **swap its carrier** from the panel; **UDP in every tunnel**; a map of every tunnel on the dashboard. Update both servers of a tunnel: the carrier swap and the Spoof tunnel need this version on each side.

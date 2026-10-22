@@ -82,14 +82,19 @@ func runCmdTimeoutCtx(ctx context.Context, timeout time.Duration, name string, a
 	start := time.Now()
 	out, err := runner(ctx, name, args...)
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
-	recordExec(name, time.Since(start), err, timedOut)
-	if err != nil && !timedOut {
+	var exitErr *exec.ExitError
+	answer := errors.As(err, &exitErr) && exitIsAnswer(name, args)
+	if answer {
+		recordExec(name, time.Since(start), nil, false)
+	} else {
+		recordExec(name, time.Since(start), err, timedOut)
+	}
+	if err != nil && !timedOut && !answer {
 		var exitCode = -1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr != nil {
 			exitCode = exitErr.ExitCode()
 		}
-		trimmed := strings.TrimSpace(string(out))
+		trimmed := strings.Join(strings.Fields(string(out)), " ") // one journal line
 		if len(trimmed) > 120 {
 			trimmed = trimmed[:120] + "..."
 		}
@@ -100,6 +105,21 @@ func runCmdTimeoutCtx(ctx context.Context, timeout time.Duration, name string, a
 		}
 	}
 	return out, err
+}
+
+// exitIsAnswer reports whether a non-zero exit of this command is its answer
+// rather than a failure: `systemctl is-active` exits 3 for a stopped unit and
+// 4 for one that is not installed, which the status pollers ask every few
+// seconds. Logging those filled the activity stream with false errors.
+func exitIsAnswer(name string, args []string) bool {
+	if name != "systemctl" || len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "is-active", "is-enabled", "is-failed":
+		return true
+	}
+	return false
 }
 
 // runCmdTimeout runs name with a hard timeout (combined stdout+stderr), counting the

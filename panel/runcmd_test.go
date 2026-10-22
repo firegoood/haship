@@ -109,3 +109,21 @@ func TestRunCmdRealExec(t *testing.T) {
 		t.Fatalf("stdout-only leaked stderr: %q", out)
 	}
 }
+
+func TestExitIsAnswer(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"systemctl", []string{"is-active", "frps", "frpc"}, true},
+		{"systemctl", []string{"is-enabled", "frps"}, true},
+		{"systemctl", []string{"restart", "frps"}, false},
+		{"systemctl", nil, false},
+		{"ip", []string{"is-active"}, false},
+	} {
+		if got := exitIsAnswer(c.name, c.args); got != c.want {
+			t.Errorf("exitIsAnswer(%s %v) = %v, want %v", c.name, c.args, got, c.want)
+		}
+	}
+}
