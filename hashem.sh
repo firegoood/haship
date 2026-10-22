@@ -2303,6 +2303,15 @@ xray_link_units() {
     done
 }
 
+# xray_enabled_units: the links that should run (a link stopped in the panel
+# is disabled and stays stopped on `hashem xray start`).
+xray_enabled_units() {
+    local u
+    for u in $(xray_link_units); do
+        systemctl is-enabled --quiet "$u" 2>/dev/null && echo "$u"
+    done
+}
+
 # xray_remove_all: stop and remove the tunnel's units and its Xray-core.
 # The panel's link settings stay, so installing again brings them back.
 xray_remove_all() {
@@ -2339,11 +2348,11 @@ cli_xray() {
             (( n )) || echo "  No Xray tunnel links yet: set one up in the panel's Xray tab."
             ;;
         start|up)
-            xray_link_units | xargs -r systemctl start && echo -e "${GREEN}[OK] Xray tunnel links started.${NC}" ;;
+            xray_enabled_units | xargs -r systemctl start && echo -e "${GREEN}[OK] Xray tunnel links started.${NC}" ;;
         stop|down)
             xray_link_units | xargs -r systemctl stop; echo -e "${GREEN}[OK] Xray tunnel links stopped.${NC}" ;;
         restart)
-            xray_link_units | xargs -r systemctl restart && echo -e "${GREEN}[OK] Xray tunnel links restarted.${NC}" ;;
+            xray_enabled_units | xargs -r systemctl restart && echo -e "${GREEN}[OK] Xray tunnel links restarted.${NC}" ;;
         logs)
             journalctl -u 'hashem-xray-*' -n "${2:-100}" --no-pager ;;
         uninstall|remove)

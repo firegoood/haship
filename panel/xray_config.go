@@ -501,9 +501,10 @@ func (l XrayLink) validate() error {
 			return fmt.Errorf("port %d is listed twice", q)
 		}
 		seen[q] = true
-		// Iran in reverse mode listens on the tunnel port and the users' ports.
-		if l.Mode == xrayModeReverse && q == l.TunnelPort {
-			return fmt.Errorf("port %d is the tunnel port: in reverse mode the Iran server listens on both, pick another", q)
+		// Reverse: Iran would listen on both. Direct: the foreign server would
+		// hand that port's traffic back to its own tunnel inbound, a loop.
+		if q == l.TunnelPort {
+			return fmt.Errorf("port %d is also the tunnel port: pick another tunnel port", q)
 		}
 	}
 	if l.ProbePort != 0 && (!xrayPortOK(l.ProbePort) || seen[l.ProbePort] || l.ProbePort == l.TunnelPort) {

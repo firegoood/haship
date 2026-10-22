@@ -501,7 +501,11 @@ var xrayTCPPing = func(host string, port int) (float64, error) {
 var xrayConns = func(l XrayLink) int {
 	filter := fmt.Sprintf("( sport = :%d )", l.TunnelPort)
 	if !l.serverEnd() {
+		// only to the other server: other programs dial port 443 too
 		filter = fmt.Sprintf("( dport = :%d )", l.TunnelPort)
+		if ip := carrierIPv4(xrayDialAddress(l)); ip != "" {
+			filter = fmt.Sprintf("( dport = :%d and dst %s )", l.TunnelPort, ip)
+		}
 	}
 	out, err := runCmdTimeoutOut(3*time.Second, "ss", "-Htn", "state", "established", filter)
 	if err != nil {
@@ -557,9 +561,13 @@ func xrayCheckHealth(l XrayLink, wait time.Duration) xrayHealth {
 		} else if h.Link == "up" {
 			h.PingMS = h.ProbeMS // reverse: one round trip down the open link
 		}
+	case l.Side == xraySideForeign && l.Mode == xrayModeReverse && l.Profile.Transport == "kcp":
+		// mKCP is UDP: no connection to count or connect to; Iran's probe
+		// checks the link
+		h.Link = "listening"
 	case l.Side == xraySideForeign && l.Mode == xrayModeReverse:
 		for {
-			if h.Conns = xrayConns(l); h.Conns > 0 || l.Profile.Transport == "kcp" {
+			if h.Conns = xrayConns(l); h.Conns > 0 {
 				break
 			}
 			if time.Now().After(deadline) {
@@ -968,6 +976,9 @@ func handleXrayPost(w http.ResponseWriter, r *http.Request) {
 	}
 	// up applies link i and answers with its steps (and the bundle on Iran).
 	up := func(i int, extra map[string]any) {
+		if xrayMoveProbe(&st.Links[i], st, xrayListeners()) {
+			_ = saveXrayState(st)
+		}
 		l := st.Links[i]
 		steps, err := applyXrayLink(l, others(l.ID))
 		resp := map[string]any{"status": "ok", "steps": steps}
@@ -1041,6 +1052,7 @@ func handleXrayPost(w http.ResponseWriter, r *http.Request) {
 		}
 		l, err := xrayDraft(req, old)
 		if err == nil {
+			xrayMoveProbe(&l, st, xrayListeners())
 			err = l.validate()
 		}
 		if err != nil {
@@ -1152,4 +1164,27 @@ func xrayIndexByUUID(st xrayState, id string) int {
 		}
 	}
 	return -1
+}
+
+// xrayMoveProbe gives link l a new probe port when another program took its
+// own (the user never picks it, so it must never block the link). It reports
+// whether the port changed.
+func xrayMoveProbe(l *XrayLink, st xrayState, ls []xrayListener) bool {
+	if l.Side != xraySideIran || l.ProbePort == 0 {
+		return false
+	}
+	for _, x := range ls {
+		if x.Proto == "tcp" && x.Port == l.ProbePort && !xrayOwnPath(x.Exe) {
+			avoid := append(append([]int{l.TunnelPort}, l.Ports...), xrayUsedProbePorts(st)...)
+			for _, y := range ls {
+				avoid = append(avoid, y.Port)
+			}
+			if p := xrayFreeLoopbackPort(avoid); p > 0 {
+				l.ProbePort = p
+				return true
+			}
+			return false
+		}
+	}
+	return false
 }

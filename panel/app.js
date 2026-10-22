@@ -5527,13 +5527,13 @@ async function loadXray(quiet) {
   xrArm();
 }
 
-// xrArm refreshes every 4 s (2 s while the core installs) while the links are on screen.
 // xrShown: the Xray tab is open, or the Tunnel tab with Xray links on it.
 function xrShown() {
   const x = $('tab-xray'), t = $('tab-tunnel');
   return (x && !x.hidden) || (t && !t.hidden && !!(_xray && (_xray.links || []).length));
 }
 
+// xrArm refreshes every 4 s (2 s while the core installs) while the links are on screen.
 function xrArm() {
   clearTimeout(_xrTimer);
   if (!xrShown()) return;
@@ -5545,7 +5545,8 @@ function xrArm() {
 function renderXray() {
   const d = _xray;
   const links = d.links || [];
-  const up = links.filter(l => !l.disabled && l.health && l.health.link === 'up').length;
+  // the foreign end of a direct link only listens: "ready" is its good state
+  const up = links.filter(l => !l.disabled && l.health && (l.health.link === 'up' || l.health.link === 'listening')).length;
   const b = $('xrayBadge');
   if (b) {
     let cls = 'dim', txt = tr('xray_idle', 'No tunnel yet');
@@ -5555,7 +5556,16 @@ function renderXray() {
     b.textContent = txt;
   }
   $('xrayTop').innerHTML = xrTopHTML(d);
+  // A link's open bundle or bring-up steps survive the refresh.
+  const keep = {};
+  document.querySelectorAll('#xrayLinks [id^="xrOut"]').forEach(o => { if (o.innerHTML) keep[o.id] = [o.innerHTML, o.dataset.bundle]; });
   $('xrayLinks').innerHTML = links.length ? `<div class="xr-stack">${links.map(l => xrLinkCard(l)).join('')}</div>` : '';
+  Object.keys(keep).forEach(id => {
+    const o = $(id);
+    if (!o) return;
+    o.innerHTML = keep[id][0];
+    if (keep[id][1]) o.dataset.bundle = keep[id][1];
+  });
   if ($('tunXrayCards')) $('tunXrayCards').innerHTML = links.map(l => xrLinkCard(l, true)).join('');
   if (!_xrWiz) $('xrayWizard').innerHTML = xrStartHTML(links.length > 0);
 }
@@ -5658,7 +5668,7 @@ function xrLinkCard(l, compact) {
   if (h.ping_ms > 0) meta.push(`<span class="tv-lat" data-no-i18n>${esc(tr('', 'ping'))} ${h.ping_ms.toFixed(h.ping_ms < 10 ? 1 : 0)} ms</span>`);
   if (state !== 'down' && state !== 'off' && r) meta.push(`<span class="tv-dn">↓ ${esc(fmtRate(dn))}</span><span class="tv-up">↑ ${esc(fmtRate(up))}</span>`);
   if (state === 'down') meta.push(`<span class="tv-err">${esc(tr('', 'No connection'))}</span>`);
-  if (link === 'listening') meta.push(`<span>${esc(tr('', 'waiting for Iran'))}${h.conns ? ' · ' + h.conns + ' ' + esc(tr('', 'connections')) : ''}</span>`);
+  if (link === 'listening') meta.push(`<span>${esc(tr('', 'the Iran server checks this link'))}${h.conns ? ' · ' + h.conns + ' ' + esc(tr('', 'connections')) : ''}</span>`);
   // the tunnel port sits on the server that listens: foreign (direct) or Iran (reverse)
   const rev = l.mode === 'reverse', tp = ' :' + l.tunnel_port;
   const iranAddr = iran ? (_xray.public_ip || '') : (l.remote || ''), forAddr = iran ? (l.remote || '') : '';
@@ -5708,15 +5718,17 @@ async function xrInstall() {
 }
 
 async function xrAct(action, id) {
-  const out = $('xrOut' + id);
-  if (out) out.innerHTML = action === 'stop' ? '' : xrRunHTML({});
+  // looked up each time: the 4 s refresh may have redrawn the card meanwhile
+  const out = () => $('xrOut' + id);
+  const put = html => { const o = out(); if (o) { o.innerHTML = html; delete o.dataset.bundle; } };
+  put(action === 'stop' ? '' : xrRunHTML({}));
   try {
     const r = await api('/api/xray', { action, id });
-    if (r.steps && out) await xrRunPlay(out, r);
-    else if (out) out.innerHTML = '';
+    if (r.steps) await xrRunPlay('xrOut' + id, r);
+    else put('');
     if (r.status === 'error') toastErr(tr('', 'The link did not come up'), r.error || '');
   } catch (e) {
-    if (out) out.innerHTML = `<div class="xr-err">${esc(e.message)}</div>`;
+    put(`<div class="xr-err">${esc(e.message)}</div>`);
   }
   xrayHealthSoon();
 }
@@ -5772,11 +5784,13 @@ function xrRunHTML(res, shown) {
   }).join('')}</ol>`;
 }
 
-// xrRunPlay shows a result's steps one after another, as the server went.
-async function xrRunPlay(box, res) {
+// xrRunPlay shows a result's steps one after another, as the server went,
+// in the element with id boxId (found again each step: it may be redrawn).
+async function xrRunPlay(boxId, res) {
   const n = (res.steps || []).length;
   for (let i = 0; i <= n; i++) {
-    if (!box || !box.isConnected) return;
+    const box = $(boxId);
+    if (!box) return;
     box.innerHTML = xrRunHTML(res, i);
     if (i < n) await new Promise(r => setTimeout(r, 260));
   }
@@ -5859,10 +5873,11 @@ function xrWizMode(mode) {
 }
 
 function xrWizPresetSet(name) {
-  const sni = (_xrWiz.profile || {}).sni || '';
+  // a disguise site carries over between Reality presets only (not a CDN domain)
+  const old = _xrWiz.profile || {};
   _xrWiz.preset = name;
   _xrWiz.profile = xrPresetOf(name);
-  if (_xrWiz.profile.security === 'reality') _xrWiz.profile.sni = sni;
+  if (_xrWiz.profile.security === 'reality' && old.security === 'reality') _xrWiz.profile.sni = old.sni || '';
   if (_xrWiz.profile.cdn && !XR_CDN_PORTS.includes(_xrWiz.tunnel_port)) _xrWiz.tunnel_port = 443;
 }
 
@@ -5984,7 +5999,7 @@ function xrAdvHTML(w) {
         ${sel('xaCong', 'TCP congestion', o.congestions, p.congestion, 'System default')}
         ${inp('xaMark', 'Socket mark', p.mark, '0')}
         <div class="xr-field"><span class="qs-label">${esc(tr('', 'Sockets'))}</span>${chk('xaTFO', 'TCP Fast Open', p.tfo)}${chk('xaMPTCP', 'Multipath TCP', p.mptcp)}</div>
-        ${w.mode === 'direct' ? inp('xaListen', 'Listen address for the users\' ports', w.listen, '0.0.0.0') : ''}
+        ${inp('xaListen', 'Listen address for the users\' ports', w.listen, '0.0.0.0')}
       </div>
       ${t !== 'kcp' ? `<h5>${esc(tr('', 'Fragment (anti-DPI, on the dialing end)'))}</h5>
       <div class="xr-fields">
@@ -6192,7 +6207,7 @@ async function xrWizSubmit() {
   }
   w.result = Object.assign({}, r, { done: false });
   if (!w.id && r.link) w.id = r.link.id;
-  await xrRunPlay($('xrWizRun'), r);
+  await xrRunPlay('xrWizRun', r);
   w.result.done = true;
   if ($('xrWizTail')) $('xrWizTail').innerHTML = xrWizTail();
   if (r.status === 'error') toastErr(tr('', 'The link did not come up'), r.error || '');
@@ -6224,7 +6239,7 @@ async function xrImport() {
   box.innerHTML = xrRunHTML({});
   try {
     const r = await api('/api/xray', { action: 'import', bundle, name: ($('xrImpName') || {}).value || '' });
-    await xrRunPlay(box, r);
+    await xrRunPlay('xrImpRun', r);
     if (r.status === 'error') toastErr(tr('', 'The link did not come up'), r.error || '');
     else toastOk(tr('', r.updated ? 'Link updated' : 'Link added'), '');
   } catch (e) {

@@ -463,3 +463,57 @@ func TestXrayInstallAndSNI(t *testing.T) {
 		t.Errorf("SNI order %v", order)
 	}
 }
+
+// Review fixes: a forwarded port that is also the tunnel port, a probe port
+// another program took, mKCP in reverse on the foreign end, and the dialing
+// end counting only its own tunnel connections.
+func TestXrayReviewFixes(t *testing.T) {
+	// direct: the foreign server would feed that port back into its own tunnel
+	l := xrayTestLink(t, "reality", xrayModeDirect, xraySideIran)
+	l.Ports = []int{8443}
+	if err := l.validate(); err == nil || !strings.Contains(err.Error(), "tunnel port") {
+		t.Errorf("direct link with a port equal to the tunnel port: %v", err)
+	}
+
+	e := newXrayEnv(t)
+	_, m := e.post(`{"action":"create","mode":"direct","remote":"198.51.100.7","tunnel_port":443,"ports":[2053],"public_ip":"203.0.113.9"}`)
+	probe := loadXrayState().Links[0].ProbePort
+	if m["status"] != "ok" || probe == 0 {
+		t.Fatalf("create: %v", m)
+	}
+	// another program takes the probe port: the link moves its probe, it is not refused
+	e.listeners = []xrayListener{{Proto: "tcp", Port: probe, Proc: "nginx"}}
+	if _, m = e.post(`{"action":"apply","id":1}`); m["status"] != "ok" {
+		t.Errorf("apply with the probe port taken: %v", m)
+	}
+	if now := loadXrayState().Links[0].ProbePort; now == probe || now == 0 {
+		t.Errorf("probe port %d -> %d", probe, now)
+	}
+	if _, m = e.post(`{"action":"update","id":1,"mode":"direct","remote":"198.51.100.7","tunnel_port":443,"ports":[2053],"name":"x"}`); m["status"] != "ok" {
+		t.Errorf("update with the old probe port taken: %v", m)
+	}
+
+	// mKCP in reverse, foreign end: nothing to count over UDP, Iran checks it
+	k := xrayTestLink(t, "kcp", xrayModeReverse, xraySideForeign)
+	if h := xrayCheckHealth(k, 0); h.Link != "listening" {
+		t.Errorf("reverse mKCP foreign end: %+v", h)
+	}
+}
+
+func TestXrayConnsCountsOnlyTheLink(t *testing.T) {
+	old := runner
+	t.Cleanup(func() { runner = old })
+	var got []string
+	runner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		got = append(got, name+" "+strings.Join(args, " "))
+		return []byte("0 0 10.0.0.2:51000 198.51.100.7:443\n0 0 10.0.0.2:51002 198.51.100.7:443\n"), nil
+	}
+	l := xrayTestLink(t, "reality", xrayModeDirect, xraySideIran)
+	l.TunnelPort = 443
+	if n := xrayConns(l); n != 2 {
+		t.Errorf("count %d", n)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "( dport = :443 and dst 198.51.100.7 )") {
+		t.Errorf("ss filter: %v", got)
+	}
+}

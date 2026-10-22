@@ -2948,5 +2948,6 @@ window.FA_TEXT = {
 "Packet": "پکت",
 "How many": "تعداد",
 "Sent before the first real packet to each address; the other end drops them.": "قبل از اولین پکت واقعی به هر آدرس فرستاده می‌شوند؛ سمت دیگر دورشان می‌ریزد.",
-"TCP Fast Open": "باز کردن سریع TCP (TFO)"
+"TCP Fast Open": "باز کردن سریع TCP (TFO)",
+"the Iran server checks this link": "سرور ایران این لینک را بررسی می‌کند"
 };

@@ -13,7 +13,7 @@ check() { if [[ "$2" != "$3" ]]; then echo "FAIL: $1 (want [$2] got [$3])"; fail
 
 ext() { awk -v n="$1" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' hashem.sh; }
 RED='' GREEN='' YELLOW='' CYAN='' NC=''
-for f in xray_unzip install_xray_core xray_link_units xray_remove_all cli_xray pro_ok; do eval "$(ext "$f")"; done
+for f in xray_unzip install_xray_core xray_link_units xray_enabled_units xray_remove_all cli_xray pro_ok; do eval "$(ext "$f")"; done
 eval "$(grep -E '^(DEFAULT_XRAY_VERSION|XRAY_SHA256_amd64)=' hashem.sh)"
 check "pinned version" v26.3.27 "$DEFAULT_XRAY_VERSION"
 check "pinned sha256 is 64 hex digits" yes "$([[ $XRAY_SHA256_amd64 =~ ^[0-9a-f]{64}$ ]] && echo yes)"
@@ -60,6 +60,9 @@ check "nothing kills an xray by name" 0 "$(grep -nE '(pkill|killall)[^#]*xray' h
 mkdir -p "$T/bin"
 cat > "$T/bin/systemctl" <<EOF
 #!/bin/bash
+# link 3 was stopped in the panel: disabled
+[[ "\$1" == is-enabled && "\$3" == hashem-xray-3.service ]] && exit 1
+[[ "\$1" == is-enabled ]] && exit 0
 echo "\$*" >> "$T/systemctl.log"
 EOF
 chmod +x "$T/bin/systemctl"
@@ -85,7 +88,7 @@ check "no license: hashem xray install refused" "" "$(cli_xray install 2>/dev/nu
 check "no license: refusal names the feature" yes "$(cli_xray install | grep -q 'Xray Tunnel is a Hashem Pro feature' && echo yes)"
 : > "$T/systemctl.log"
 cli_xray restart >/dev/null
-check "no license: restart still runs" 1 "$(grep -c 'restart hashem-xray-1.service hashem-xray-3.service' "$T/systemctl.log")"
+check "no license: restart still runs; a link stopped in the panel stays stopped" 1 "$(grep -cx 'restart hashem-xray-1.service' "$T/systemctl.log")"
 for f in start stop restart logs status uninstall; do
     check "hashem xray $f never asks for a license" 0 "$(ext cli_xray | awk -v s="        $f" 'index($0, s) == 1 {p=1} p && /;;/ {print; exit} p {print}' | grep -c pro_ok)"
 done
