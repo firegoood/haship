@@ -63,7 +63,8 @@ func TestCarrierEndsReadsAllConfigs(t *testing.T) {
 	write("udp/backhaul-udp-server.toml", "[server]\nbind_addr = \"0.0.0.0:3081\"\n")
 	write("udp/dup.toml", "[server]\nbind_addr = \"0.0.0.0:3081\"\n")
 
-	want := []carrierEnd{{Port: 3080, UDP: true}, {Port: 3081, UDP: true}, {Port: 3090, UDP: true}, {Port: 4000, Remote: "203.0.113.9", UDP: true}}
+	want := []carrierEnd{{Port: 3080, UDP: true, Tag: "backhaul-server"}, {Port: 3081, UDP: true, Tag: "backhaul-server"},
+		{Port: 3090, UDP: true, Tag: "backhaul-server-3"}, {Port: 4000, Remote: "203.0.113.9", UDP: true, Tag: "backhaul-client-h2"}}
 	if got := carrierEnds(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
 	}

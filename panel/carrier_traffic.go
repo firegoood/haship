@@ -39,7 +39,46 @@ const (
 type carrierEnd struct {
 	Port   int
 	Remote string // the IPv4 this server dials; "" when it listens on Port
+	From   string // listening: count only this peer's IPv4 (sshd also serves logins)
 	UDP    bool   // also count UDP on the port (Backhaul udp transport, UDP companion)
+	// Tag is the tunnel the end belongs to: its Backhaul unit
+	// ("backhaul-server-3", the UDP companion files under it too) or
+	// "bagher-N" for Bagher link N. Per-link speeds and usage read it.
+	Tag string
+}
+
+// acctKey identifies an end in iptables-save output, which has no tags.
+type acctKey struct {
+	Listen bool
+	Port   int
+	Peer   string // the -s/-d address, "" for any
+}
+
+func (e carrierEnd) key() acctKey {
+	if e.Remote != "" {
+		return acctKey{Port: e.Port, Peer: e.Remote}
+	}
+	return acctKey{Listen: true, Port: e.Port, Peer: e.From}
+}
+
+// backhaulTag is the unit a Backhaul config belongs to: config.toml and
+// server.toml are backhaul-server, client.toml backhaul-client, server-3.toml
+// backhaul-server-3; a UDP companion's config is udp/<unit>.toml.
+func backhaulTag(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), ".toml")
+	if filepath.Base(filepath.Dir(path)) == "udp" {
+		if rest, ok := strings.CutPrefix(base, "backhaul-udp-"); ok { // named after the companion unit
+			return "backhaul-" + rest
+		}
+		return base
+	}
+	switch base {
+	case "config", "server":
+		return "backhaul-server"
+	case "client":
+		return "backhaul-client"
+	}
+	return "backhaul-" + base
 }
 
 // carrierConfigs lists the Backhaul configs on this server: the main ones, the
@@ -123,17 +162,53 @@ func carrierEnds() []carrierEnd {
 		if err != nil {
 			continue
 		}
-		ends = append(ends, backhaulCarrierEnd(parseBackhaulConf(string(data)))...)
+		tag := backhaulTag(p)
+		for _, e := range backhaulCarrierEnd(parseBackhaulConf(string(data))) {
+			e.Tag = tag
+			ends = append(ends, e)
+		}
 	}
 	sshFwdMu.Lock()
 	cfg := loadSSHFwdConfigLocked()
 	sshFwdMu.Unlock()
-	if cfg.Enabled && cfg.Role == "client" && cfg.RemoteSSHPort > 0 {
+	ends = append(ends, bagherCarrierEnds(cfg)...)
+	return dedupeEnds(ends)
+}
+
+// bagherCarrierEnds are Bagher's SSH connections: on Iran one per foreign
+// server it dials, on the foreign server its sshd port for the Iran server
+// only (the same sshd also serves admin logins). The check used to want
+// role "client", which Bagher never has, so its traffic was never counted.
+func bagherCarrierEnds(cfg SSHFwdConfig) []carrierEnd {
+	if !cfg.Enabled || strings.TrimSpace(cfg.RemoteHost) == "" {
+		return nil
+	}
+	port := func(p int) int {
+		if p > 0 {
+			return p
+		}
+		return 22
+	}
+	if cfg.Role == "foreign" || cfg.Role == "server" {
 		if ip := carrierIPv4(cfg.RemoteHost); ip != "" {
-			ends = append(ends, carrierEnd{Port: cfg.RemoteSSHPort, Remote: ip})
+			return []carrierEnd{{Port: port(cfg.RemoteSSHPort), From: ip, Tag: "bagher-1"}}
+		}
+		return nil
+	}
+	var ends []carrierEnd
+	if ip := carrierIPv4(cfg.RemoteHost); ip != "" {
+		ends = append(ends, carrierEnd{Port: port(cfg.RemoteSSHPort), Remote: ip, Tag: "bagher-1"})
+	}
+	for _, l := range cfg.Links {
+		p := l.RemoteSSHPort
+		if p <= 0 {
+			p = cfg.RemoteSSHPort
+		}
+		if ip := carrierIPv4(l.RemoteHost); ip != "" {
+			ends = append(ends, carrierEnd{Port: port(p), Remote: ip, Tag: fmt.Sprintf("bagher-%d", l.ID)})
 		}
 	}
-	return dedupeEnds(ends)
+	return ends
 }
 
 // backhaulCarrierEnd is the end a Backhaul config makes: it listens on the
@@ -157,20 +232,27 @@ func backhaulCarrierEnd(c backhaulConf) []carrierEnd {
 	return nil
 }
 
+// dedupeEnds keeps one end per counted connection (the first tag wins: two
+// rules for the same packets would count them twice).
 func dedupeEnds(ends []carrierEnd) []carrierEnd {
-	seen := map[carrierEnd]bool{}
+	seen := map[acctKey]int{}
 	var out []carrierEnd
 	for _, e := range ends {
-		if !seen[e] {
-			seen[e] = true
-			out = append(out, e)
+		if i, ok := seen[e.key()]; ok {
+			out[i].UDP = out[i].UDP || e.UDP
+			continue
 		}
+		seen[e.key()] = len(out)
+		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Port != out[j].Port {
 			return out[i].Port < out[j].Port
 		}
-		return out[i].Remote < out[j].Remote
+		if out[i].Remote != out[j].Remote {
+			return out[i].Remote < out[j].Remote
+		}
+		return out[i].From < out[j].From
 	})
 	return out
 }
@@ -190,10 +272,14 @@ func carrierRules(ends []carrierEnd, ifname string) string {
 			protos = append(protos, "udp")
 		}
 		for _, pr := range protos {
-			if e.Remote == "" { // this server listens on the port
+			switch {
+			case e.Remote == "" && e.From != "": // listens, for one peer only
+				fmt.Fprintf(&b, "-A %s%s -s %s/32 -p %s --dport %d\n", acctIn, in, e.From, pr, e.Port)
+				fmt.Fprintf(&b, "-A %s%s -d %s/32 -p %s --sport %d\n", acctOut, out, e.From, pr, e.Port)
+			case e.Remote == "": // this server listens on the port
 				fmt.Fprintf(&b, "-A %s%s -p %s --dport %d\n", acctIn, in, pr, e.Port)
 				fmt.Fprintf(&b, "-A %s%s -p %s --sport %d\n", acctOut, out, pr, e.Port)
-			} else { // this server dials Remote:Port
+			default: // this server dials Remote:Port
 				fmt.Fprintf(&b, "-A %s%s -s %s/32 -p %s --sport %d\n", acctIn, in, e.Remote, pr, e.Port)
 				fmt.Fprintf(&b, "-A %s%s -d %s/32 -p %s --dport %d\n", acctOut, out, e.Remote, pr, e.Port)
 			}
@@ -206,6 +292,50 @@ func carrierRules(ends []carrierEnd, ifname string) string {
 // parseAcctSave sums the byte counters of our chains in `iptables-save -c`
 // output and reports whether both chains and both jumps to them exist.
 func parseAcctSave(out string) (rx, tx uint64, ready bool) {
+	rx, tx, _, ready = parseAcctSaveEnds(out)
+	return rx, tx, ready
+}
+
+// acctRuleKey reads which end a counting rule belongs to from its text, as
+// iptables-save prints it ("-A HASHEM_ACCT_IN -i eth0 -s 1.2.3.4/32 -p tcp
+// -m tcp --sport 22"). In the IN chain --dport is a port this server listens
+// on and -s the peer; in the OUT chain --sport and -d.
+func acctRuleKey(rule string, in bool) (acctKey, bool) {
+	f := strings.Fields(rule)
+	var k acctKey
+	var lport, dport int
+	var peer string
+	for i := 0; i+1 < len(f); i++ {
+		switch f[i] {
+		case "--dport":
+			dport, _ = strconv.Atoi(f[i+1])
+		case "--sport":
+			lport, _ = strconv.Atoi(f[i+1])
+		case "-s", "-d":
+			if (f[i] == "-s") == in {
+				peer = strings.TrimSuffix(f[i+1], "/32")
+			}
+		}
+	}
+	if !in { // OUT: the local port is the source port
+		lport, dport = dport, lport
+	}
+	// now dport is the local listening port (if any), lport the remote's port
+	switch {
+	case dport > 0:
+		k = acctKey{Listen: true, Port: dport, Peer: peer}
+	case lport > 0:
+		k = acctKey{Port: lport, Peer: peer}
+	default:
+		return k, false
+	}
+	return k, true
+}
+
+// parseAcctSaveEnds is parseAcctSave with the bytes of each end as well
+// ([0] received, [1] sent).
+func parseAcctSaveEnds(out string) (rx, tx uint64, ends map[acctKey][2]uint64, ready bool) {
+	ends = map[acctKey][2]uint64{}
 	var chains, hooks int
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -234,13 +364,26 @@ func parseAcctSave(out string) (rx, tx uint64, ready bool) {
 		if err != nil {
 			continue
 		}
-		if strings.HasPrefix(rule, "-A "+acctIn+" ") {
+		in := strings.HasPrefix(rule, "-A "+acctIn+" ")
+		if !in && !strings.HasPrefix(rule, "-A "+acctOut+" ") {
+			continue
+		}
+		if in {
 			rx += n
-		} else if strings.HasPrefix(rule, "-A "+acctOut+" ") {
+		} else {
 			tx += n
 		}
+		if k, ok := acctRuleKey(rule, in); ok {
+			c := ends[k]
+			if in {
+				c[0] += n
+			} else {
+				c[1] += n
+			}
+			ends[k] = c
+		}
 	}
-	return rx, tx, chains == 2 && hooks == 2
+	return rx, tx, ends, chains == 2 && hooks == 2
 }
 
 var carrierState = struct {
@@ -248,9 +391,25 @@ var carrierState = struct {
 	sig        string // the rules last loaded by this process
 	at         time.Time
 	rx, tx     uint64
+	tags       map[string][2]uint64 // per tunnel: [0] received, [1] sent
 	ok         bool
 	lastFailed time.Time
 }{}
+
+// carrierTagCounters is the last reading per tunnel (see carrierEnd.Tag);
+// call carrierCounters first for a fresh one.
+func carrierTagCounters() map[string][2]uint64 {
+	carrierState.Lock()
+	defer carrierState.Unlock()
+	if !carrierState.ok {
+		return nil
+	}
+	out := make(map[string][2]uint64, len(carrierState.tags))
+	for k, v := range carrierState.tags {
+		out[k] = v
+	}
+	return out
+}
 
 // carrierCounters returns the bytes received (rx) and sent (tx) by this
 // server's Backhaul and Bagher carriers since the chains were last built. ok
@@ -286,7 +445,7 @@ func readCarrierCounters() (rx, tx uint64, ok bool) {
 		carrierState.lastFailed = time.Now()
 		return 0, 0, false
 	}
-	rx, tx, ready := parseAcctSave(string(out))
+	rx, tx, byEnd, ready := parseAcctSaveEnds(string(out))
 	if !ready || rules != carrierState.sig {
 		// New or changed tunnels, a reboot or a firewall reload: build the
 		// chains again (their counters start over, which the ledger treats as
@@ -296,10 +455,15 @@ func readCarrierCounters() (rx, tx uint64, ok bool) {
 			return 0, 0, false
 		}
 		carrierState.sig = rules
-		rx, tx = 0, 0
+		rx, tx, byEnd = 0, 0, nil
+	}
+	tags := map[string][2]uint64{}
+	for _, e := range ends {
+		c, t := byEnd[e.key()], tags[e.Tag]
+		tags[e.Tag] = [2]uint64{t[0] + c[0], t[1] + c[1]}
 	}
 	carrierState.lastFailed = time.Time{}
-	carrierState.rx, carrierState.tx, carrierState.ok = rx, tx, true
+	carrierState.rx, carrierState.tx, carrierState.tags, carrierState.ok = rx, tx, tags, true
 	return rx, tx, true
 }
 

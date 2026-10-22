@@ -1213,15 +1213,22 @@ async function showPeerToken(peerId, name) {
   } catch(e) { toastErr('token lookup failed', e.message); }
 }
 // ---- Tunnel link diagram: this server ⇄ pipe with moving packets ⇄ other server ----
-// Live speed of one link from its byte counters between two status polls.
+// Live speed of one link from its byte counters between two server readings.
+// at is when the server read them (counters_at, unix ms). The browser's own
+// clock is not it: a poll returns the snapshot of up to 5 s before, so two
+// polls 0.2 s apart could hold readings 5 s apart and showed 5x the speed.
 const _linkSeen = {};
-function linkRate(key, rx, tx) {
+let _statusCountersAt = null; // counters_at of the last /api/status
+function linkRate(key, rx, tx, at) {
   if (rx == null || tx == null) return null;
-  const now = Date.now() / 1000, p = _linkSeen[key];
-  if (p && rx === p.rx && tx === p.tx) return (now - p.t > 30) ? { dn: 0, up: 0 } : p.r; // same sample drawn again
-  _linkSeen[key] = { rx, tx, t: now, r: null };
-  if (!p || now - p.t > 120 || rx < p.rx || tx < p.tx) return null;
-  const dt = Math.max(1, now - p.t);
+  const wall = Date.now() / 1000, t = at ? at / 1000 : wall, p = _linkSeen[key];
+  if (p && (t <= p.t || (rx === p.rx && tx === p.tx))) {
+    // the same reading again (or an older one): keep its speed; idle after 30 s
+    return (wall - p.seen > 30) ? { dn: 0, up: 0 } : p.r;
+  }
+  _linkSeen[key] = { rx, tx, t, seen: wall, r: null };
+  if (!p || t - p.t > 120 || rx < p.rx || tx < p.tx) return null;
+  const dt = Math.max(1, t - p.t);
   return (_linkSeen[key].r = { dn: (rx - p.rx) / dt, up: (tx - p.tx) / dt });
 }
 // Packet speed on the pipe, in steps so a new poll rarely changes it (0 = idle).
@@ -1408,7 +1415,7 @@ function renderPeers(peers) {
         here: tr('', 'Iran server'), hereSub: p.local_pub || '',
         there: nm, thereSub: p.remote_pub || '',
         tags: [[isBh || isGreBh ? 'Backhaul' : 'FRP', 'eng'], [p.transport || '', ''], [isBh ? '' : 'GRE', 'gre']],
-        gre: !isBh, lat: linkPing(p).ok ? linkPing(p).txt : null, rate: linkRate('p' + p.id, p.rx, p.tx),
+        gre: !isBh, lat: linkPing(p).ok ? linkPing(p).txt : null, rate: linkRate('p' + p.id, p.rx, p.tx, _statusCountersAt),
         ports: p.raw_ports ? String(p.raw_ports).split(/[ ,]+/) : (p.ports || []),
       })}
       <div class="det-grid">
@@ -1512,7 +1519,7 @@ function renderTunnel(st) {
     : `<span class="badge err"><span class="dot"></span><bdi data-no-i18n>${esc(st.frp_svc || 'service')}</bdi> · ${esc(tr('', 'stopped'))}</span>`;
   const ports = ((st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || [])).join(', ') || '—';
   const title = tr('', 'Tunnel') + (st.remote_pub ? ' · ' + st.remote_pub : '');
-  let mainRate = linkRate('main', st.rx, st.tx);
+  let mainRate = linkRate('main', st.rx, st.tx, _statusCountersAt);
   const dashT = window._lastDash && window._lastDash.traffic;
   if (!mainRate && st.rx == null && !(tunPeerCache || []).length && dashT && dashT.speed_down != null) mainRate = { dn: dashT.speed_down, up: dashT.speed_up };
   const mainPing = linkPing(st);
@@ -1644,6 +1651,7 @@ async function refresh() {
   let ok = true;
   try {
     const s = await api('/api/status');
+    _statusCountersAt = s.counters_at || null;
     // peers first: renderTunChips (called inside renderTunnel) reads the cache
     tunPeerCache = s.peers || null;
     renderTunnel(s.local);
@@ -2809,7 +2817,7 @@ function dashLinks(d, bObj, iran, foreign) {
   const msOf = o => { const p = linkPing(o); return p.ok ? p.txt : ''; };
   if (g.exists || f.up || f.svc) {
     const up = !!(g.exists || f.up);
-    let rate = linkRate('main', st.rx, st.tx);
+    let rate = linkRate('main', st.rx, st.tx, _statusCountersAt);
     const t = d.traffic || {};
     if (!rate && st.rx == null && !peers.length && t.speed_down != null) rate = { dn: t.speed_down, up: t.speed_up };
     L.push({ key: 'main', name: tr('', peers.length ? 'Main tunnel' : (foreign ? 'Iran server' : 'Foreign server')),
@@ -2821,7 +2829,7 @@ function dashLinks(d, bObj, iran, foreign) {
     const bh = p.engine === 'backhaul' || p.engine === 'gre-backhaul' || /backhaul/.test(p.frps_svc || '');
     L.push({ key: String(p.id), name: p.name || ('peer-' + p.id), ip: p.remote_pub || '',
       state: vizState(p) || ((p.gre_up || p.frp_up) ? 'ok' : 'down'), eng: bh ? 'Backhaul' : 'FRP',
-      gre: !(p.engine === 'backhaul' || p.no_gre), lat: msOf(p), rate: linkRate('p' + p.id, p.rx, p.tx) });
+      gre: !(p.engine === 'backhaul' || p.no_gre), lat: msOf(p), rate: linkRate('p' + p.id, p.rx, p.tx, d.counters_at) });
   });
   if (bObj && (bObj.is_active || bObj.has_config || bObj.remote_host)) {
     L.push({ key: 'bagher', name: 'Bagher', ip: bObj.remote_host || '',
@@ -6834,7 +6842,7 @@ function fleetLinks(nodes) {
       key: p ? String(n.id) : 'main', name: n.name, ip: n.remote_pub || '',
       state: n.health === 'healthy' ? 'ok' : n.health === 'degraded' ? 'warn' : 'down',
       eng: /backhaul/.test(n.engine || '') ? 'Backhaul' : 'FRP', gre: n.engine !== 'backhaul',
-      lat: ms, rate: p ? linkRate('p' + p.id, p.rx, p.tx) : linkRate('main', L.rx, L.tx),
+      lat: ms, rate: p ? linkRate('p' + p.id, p.rx, p.tx, _statusCountersAt) : linkRate('main', L.rx, L.tx, _statusCountersAt),
     };
   });
 }

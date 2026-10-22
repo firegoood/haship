@@ -14,6 +14,20 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 - Quick Edit no longer resets a custom foreign SSH port to 22 and user to root.
 - `hashem uninstall` now removes the Bagher units.
 
+### Traffic and speed you can trust
+
+- **Total traffic jumped up for no reason.** Two parts of the panel read the same counters: the 5-second snapshot, with a `/proc/net/dev` read taken seconds earlier, and the history recorder, with a fresh read. When the older reading was processed after the newer one, every counter looked lower, was taken for a reset, and each tunnel interface's whole counter (often gigabytes) was added to the total again. Now the snapshot is the only reader, and a reading older than the last one is ignored.
+- **Live speeds were up to 5× too high on the Tunnel tab and the dashboard map.** The browser measured the time between its own polls, but each poll returns the snapshot taken up to 5 s earlier: two polls 0.2 s apart could carry readings 5 s apart. Speeds now use the time the server read the counters (`counters_at` in `/api/status` and `/api/dashboard`). The dashboard's live speed also uses the reading time, not the time it was processed.
+- **Bagher traffic was never counted.** The counting code expected the role "client", which Bagher never has. Now each Bagher link counts its own SSH connection: on the Iran server per foreign server, and on the foreign server only the Iran server's traffic to its sshd, so admin logins are not counted.
+- **The main tunnel had no speed on a hub with more foreign servers.** Its counters were never filled in. Now they come from the `gre-tunnel` interface, or from its Backhaul unit's port counters.
+- **Backhaul without GRE now shows a speed per foreign server.** Its traffic used to appear only in the total. The iptables counters are now split per Backhaul unit (the UDP companion counts with its unit) and per Bagher link.
+- **No more counting the whole server.** With no tunnel interface, and while a GRE interface was being recreated, the panel counted the main network interface, meaning every byte the server moved, as tunnel traffic. That fallback is gone. The Spoof tunnel's WireGuard interface is now counted.
+- **Traffic during a restart or update is kept.** Each interface's last counters are saved, so bytes moved while the panel was stopped count after it starts.
+- **Usage ledger.** The "This server" series had the same reset bug as the total: when an interface went away, the remaining interfaces' whole counters were added again, and a new interface's existing counter was booked as traffic. It is now counted per interface and includes Backhaul and Bagher.
+- **New CI lab (`tests/test_traffic_lab.sh`).** It sends exact byte counts over a GRE main tunnel, a GRE peer, a Backhaul peer without GRE and a Bagher link. It then checks every number the panel shows (per-link counters, dashboard totals, usage ledger), a paced 2 MB/s transfer's live speed, and traffic sent while the traffic state is reset as a restart would.
+
+Totals that the old bugs inflated stay as they are; from this version on, only real bytes are added.
+
 ### Smaller changes
 
 - The Live Activity stream no longer shows `command "systemctl" failed (exit 4) | output: inactive` every few seconds. `systemctl is-active` exits non-zero for a stopped or uninstalled unit, which is the answer the status pollers ask for, not an error; these calls are no longer logged or counted as errors. A failed command's multi-line output is now logged on one line.

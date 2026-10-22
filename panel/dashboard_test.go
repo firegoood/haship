@@ -181,51 +181,21 @@ func TestLoadHistoryCleansNulls(t *testing.T) {
 	}
 }
 
-func TestGreTrafficFromSmartFallback(t *testing.T) {
-	histMu.Lock()
-	histLoaded = true
-	histCached = nil
-	histMu.Unlock()
-
-	trafficStateMu.Lock()
-	trafficStateInit = false
-	lifetimeUp = 0
-	lifetimeDown = 0
-	lastRawUp = 0
-	lastRawDown = 0
-	lastRawIf = nil
-	trafficStateMu.Unlock()
-
-	devData1 := "Inter-|   Receive                                                |  Transmit\n" +
-		" face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n" +
-		"    lo: 100000       10    0    0    0     0          0         0   100000       10    0    0    0     0       0          0\n" +
-		"  ens5: 50000000     500    0    0    0     0          0         0  80000000     800    0    0    0     0       0          0\n"
-
-	t1 := greTrafficFrom(devData1)
-	if t1["up"] == nil || t1["down"] == nil || t1["total"] == nil {
-		t.Fatalf("expected non-nil traffic counters on init, got: %v", t1)
+// With no tunnel interface and no carrier the main NIC is not counted: it
+// carries the whole server's traffic (the panel used to show it as tunnel
+// traffic, and to count it while a GRE interface was being recreated).
+func TestGreTrafficNoNICFallback(t *testing.T) {
+	resetTrafficState(t)
+	nic := func(rx, tx uint64) string {
+		return devLines(map[string][2]uint64{"lo": {100000, 100000}, "ens5": {rx, tx}})
 	}
-
-	// Second sample with 5MB more rx and tx
-	devData2 := "Inter-|   Receive                                                |  Transmit\n" +
-		" face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n" +
-		"    lo: 100000       10    0    0    0     0          0         0   100000       10    0    0    0     0       0          0\n" +
-		"  ens5: 55000000     550    0    0    0     0          0         0  85000000     850    0    0    0     0       0          0\n"
-
-	t2 := greTrafficFrom(devData2)
-	upVal, okUp := t2["up"].(uint64)
-	downVal, okDown := t2["down"].(uint64)
-	if !okUp || !okDown {
-		t.Fatalf("expected uint64 counters, got up=%T down=%T", t2["up"], t2["down"])
+	greTrafficFrom(nic(50000000, 80000000))
+	m := greTrafficFrom(nic(55000000, 85000000))
+	if m["up"].(uint64) != 0 || m["down"].(uint64) != 0 {
+		t.Fatalf("the main NIC must not count as tunnel traffic: %v", m)
 	}
-	if upVal != 5000000 || downVal != 5000000 {
-		t.Errorf("expected 5MB delta, got up=%d, down=%d", upVal, downVal)
-	}
-	if _, ok := t2["speed_up"].(float64); !ok {
-		t.Errorf("expected float64 speed_up, got %T", t2["speed_up"])
-	}
-	if _, ok := t2["speed_down"].(float64); !ok {
-		t.Errorf("expected float64 speed_down, got %T", t2["speed_down"])
+	if _, ok := m["speed_up"].(float64); !ok {
+		t.Fatalf("speed_up must be a float64: %T", m["speed_up"])
 	}
 }
 
@@ -247,6 +217,7 @@ func resetTrafficState(t *testing.T) {
 	histMu.Unlock()
 	trafficStateMu.Lock()
 	trafficStateInit, lifetimeUp, lifetimeDown, lastRawUp, lastRawDown, lastRawIf = false, 0, 0, 0, 0, nil
+	lastSampleAt, speedDeltaUp, speedDeltaDown, currentSpeedUp, currentSpeedDown = time.Time{}, 0, 0, 0, 0
 	trafficStateMu.Unlock()
 	t.Cleanup(func() { configDir = old })
 }

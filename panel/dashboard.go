@@ -184,13 +184,25 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 		},
 		"traffic": traffic,
 		"history": trafficHistory(r.URL.Query().Get("range")),
-		"uptime":  uptimeInfo(snap.FrpSince),
-		"system":  systemInfo(),
-		"conns":   snap.ActiveConns,
-		"bagher":  bagherStatus,
-		"checked": time.Now().UTC().Format(time.RFC3339),
+		// when the counters (traffic, peers' rx/tx) were read: speeds in the
+		// browser are bytes over the difference of two of these
+		"counters_at": countersAtMs(snap),
+		"uptime":      uptimeInfo(snap.FrpSince),
+		"system":      systemInfo(),
+		"conns":       snap.ActiveConns,
+		"bagher":      bagherStatus,
+		"checked":     time.Now().UTC().Format(time.RFC3339),
 	}
 	writeJSON(w, d)
+}
+
+// countersAtMs is the snapshot's counter reading time in unix ms (nil before
+// the first snapshot).
+func countersAtMs(s *HubSnapshot) any {
+	if s == nil || s.CountersAt.IsZero() {
+		return nil
+	}
+	return s.CountersAt.UnixMilli()
 }
 
 func nilIfEmpty(s string) any {
@@ -222,7 +234,7 @@ var (
 	lifetimeUp       uint64
 	lifetimeDown     uint64
 	trafficStateInit bool
-	lastSampleTime   time.Time
+	lastSampleAt     time.Time // when the counters of the last speed window were read
 	lastStateSave    time.Time
 	speedDeltaUp     uint64
 	speedDeltaDown   uint64
@@ -236,7 +248,10 @@ type persistentTrafficState struct {
 	LifetimeTotal uint64 `json:"lifetime_total"`
 	LastRawUp     uint64 `json:"last_raw_up"`
 	LastRawDown   uint64 `json:"last_raw_down"`
-	SavedAt       int64  `json:"saved_at"`
+	// LastIf: each interface's last raw counters, so the traffic it moved
+	// while the panel was stopped (an update, a restart) is counted too.
+	LastIf  map[string][2]uint64 `json:"last_if,omitempty"`
+	SavedAt int64                `json:"saved_at"`
 }
 
 func trafficStateFile() string { return filepath.Join(configDir, "traffic_state.json") }
@@ -255,6 +270,10 @@ func loadTrafficStateLocked() {
 			lifetimeDown = st.LifetimeDown
 			lastRawUp = st.LastRawUp
 			lastRawDown = st.LastRawDown
+			// The carrier chains are rebuilt (from 0) when the panel starts:
+			// their old reading is no baseline.
+			delete(st.LastIf, carrierKey)
+			lastRawIf = st.LastIf
 			return
 		}
 	}
@@ -278,6 +297,7 @@ func saveTrafficStateLocked() {
 		LifetimeTotal: lifetimeUp + lifetimeDown,
 		LastRawUp:     lastRawUp,
 		LastRawDown:   lastRawDown,
+		LastIf:        lastRawIf,
 		SavedAt:       time.Now().Unix(),
 	}
 	b := mustJSON(st)
@@ -336,7 +356,7 @@ func isTunnelInterface(ifname string) bool {
 		strings.HasPrefix(ifname, "enp") || strings.HasPrefix(ifname, "wl") {
 		return false
 	}
-	if strings.HasPrefix(ifname, "gre-") || strings.HasPrefix(ifname, "tun") {
+	if strings.HasPrefix(ifname, "gre-") || strings.HasPrefix(ifname, "tun") || ifname == spoofIface {
 		return true
 	}
 	known := getKnownPeerIfs()
@@ -368,105 +388,95 @@ func primaryInterface() string {
 }
 
 // ---- traffic: rx/tx bytes summed across tunnel interfaces ----
-// Multi-peer: sum counters of every registered GRE and Backhaul interface.
+// Every GRE (and WireGuard Spoof) interface, plus the port counters of the
+// tunnels that have no interface (Backhaul without GRE, Bagher).
+
+// greTraffic samples the counters now. The snapshot is the one regular
+// sampler; this is for a dashboard request before the first snapshot.
 func greTraffic() map[string]any {
+	at := time.Now()
 	data, _ := os.ReadFile("/proc/net/dev")
-	return greTrafficFrom(string(data))
+	rx, tx, ok := carrierCounters()
+	return trafficSample(string(data), rx, tx, ok, at)
 }
 
+// greTrafficFrom is trafficSample with the carrier counters read now.
 func greTrafficFrom(devData string) map[string]any {
-	// Raw counters per interface: [0] received (down), [1] transmitted (up).
+	rx, tx, ok := carrierCounters()
+	return trafficSample(devData, rx, tx, ok, time.Now())
+}
+
+// trafficTunnelIfs reads every tunnel interface's raw counters from a
+// /proc/net/dev dump: [0] received (down), [1] transmitted (up).
+func trafficTunnelIfs(devData string) map[string][2]uint64 {
 	cur := map[string][2]uint64{}
-	parse := func(line, ifname string) ([2]uint64, bool) {
-		f := strings.Fields(strings.TrimPrefix(line, ifname+":"))
+	for _, line := range strings.Split(devData, "\n") {
+		i := strings.Index(line, ":")
+		if i < 0 {
+			continue
+		}
+		ifname := strings.TrimSpace(line[:i])
+		if !isTunnelInterface(ifname) {
+			continue
+		}
+		f := strings.Fields(line[i+1:])
 		if len(f) < 9 {
-			return [2]uint64{}, false
+			continue
 		}
-		var r, t uint64
-		_, _ = fmt.Sscanf(f[0], "%d", &r)
-		_, _ = fmt.Sscanf(f[8], "%d", &t)
-		return [2]uint64{r, t}, true
-	}
-
-	if devData != "" {
-		for _, line := range strings.Split(devData, "\n") {
-			line = strings.TrimSpace(line)
-			if !strings.Contains(line, ":") {
-				continue
-			}
-			ifname := strings.TrimSpace(strings.Split(line, ":")[0])
-			if !isTunnelInterface(ifname) {
-				continue
-			}
-			if c, ok := parse(line, ifname); ok {
-				cur[ifname] = c
-			}
+		r, e1 := strconv.ParseUint(f[0], 10, 64)
+		t, e2 := strconv.ParseUint(f[8], 10, 64)
+		if e1 == nil && e2 == nil {
+			cur[ifname] = [2]uint64{r, t}
 		}
 	}
+	return cur
+}
 
+// trafficSample folds one reading of the counters, taken at at, into the
+// lifetime totals and the live speed.
+//
+// Readings must arrive in time order. Two samplers used to share this state
+// (the snapshot, with a /proc/net/dev read seconds earlier, and the history
+// recorder, reading fresh): a stale reading looked like every counter had
+// gone down, was taken for a reset, and each interface's whole counter was
+// added to the total again. A reading older than the last one is now ignored.
+//
+// There is no fallback to the main network interface any more: with no
+// tunnel it counted the whole server's traffic as tunnel traffic, and while a
+// GRE interface was being recreated it counted the server's traffic for it.
+func trafficSample(devData string, carrierRx, carrierTx uint64, carrierOK bool, at time.Time) map[string]any {
+	cur := trafficTunnelIfs(devData)
 	// Backhaul and Bagher have no interface: their port counters (carrier_traffic.go).
-	if rx, tx, ok := carrierCounters(); ok {
-		cur[carrierKey] = [2]uint64{rx, tx}
-	}
-
-	if len(cur) == 0 && devData != "" {
-		primIf := primaryInterface()
-		for _, line := range strings.Split(devData, "\n") {
-			line = strings.TrimSpace(line)
-			if !strings.Contains(line, ":") {
-				continue
-			}
-			ifname := strings.TrimSpace(strings.Split(line, ":")[0])
-			if primIf != "" && strings.Contains(devData, primIf+":") {
-				if ifname != primIf {
-					continue
-				}
-			} else {
-				if ifname == "lo" || strings.HasPrefix(ifname, "docker") || strings.HasPrefix(ifname, "veth") || strings.HasPrefix(ifname, "br-") {
-					continue
-				}
-			}
-			if c, ok := parse(line, ifname); ok && (c[0] > 0 || c[1] > 0) {
-				cur[ifname] = c
-				break
-			}
-		}
+	if carrierOK {
+		cur[carrierKey] = [2]uint64{carrierRx, carrierTx}
 	}
 
 	trafficStateMu.Lock()
 	defer trafficStateMu.Unlock()
 
-	now := time.Now()
-
 	first := !trafficStateInit
 	if first {
 		loadTrafficStateLocked()
-		lastSampleTime = now
+	}
+	if !lastSampleAt.IsZero() && at.Before(lastSampleAt) {
+		return trafficResultLocked() // out of order: already counted past it
 	}
 
 	// Deltas are taken per interface. Comparing one summed counter made the
-	// chart spike: when the tunnel interface went away the source switched to
-	// the main NIC (hundreds of GB), and when one of several tunnels dropped
-	// the smaller sum was taken for a counter reset and counted again.
-	// An interface seen for the first time is only a baseline.
+	// chart spike: when one of several tunnels dropped, the smaller sum was
+	// taken for a counter reset and counted again. An interface seen for the
+	// first time is only a baseline; one seen before this process started
+	// (traffic_state.json) counts what it moved while the panel was down.
 	var dU, dD, rawUp, rawDown uint64
 	for name, c := range cur {
 		rawDown += c[0]
 		rawUp += c[1]
 		prev, seen := lastRawIf[name]
-		if first || !seen {
+		if !seen {
 			continue
 		}
-		if c[0] >= prev[0] {
-			dD += c[0] - prev[0]
-		} else {
-			dD += c[0] // counter reset: the interface was recreated
-		}
-		if c[1] >= prev[1] {
-			dU += c[1] - prev[1]
-		} else {
-			dU += c[1]
-		}
+		dD += counterDelta(prev[0], c[0])
+		dU += counterDelta(prev[1], c[1])
 	}
 	lastRawIf = cur
 
@@ -475,22 +485,35 @@ func greTrafficFrom(devData string) map[string]any {
 	lastRawUp = rawUp
 	lastRawDown = rawDown
 
-	if (dU > 0 || dD > 0) && time.Since(lastStateSave) >= 5*time.Second {
+	if (dU > 0 || dD > 0 || first) && time.Since(lastStateSave) >= 5*time.Second {
 		saveTrafficStateLocked()
 	}
 
 	speedDeltaUp += dU
 	speedDeltaDown += dD
-
-	dt := now.Sub(lastSampleTime).Seconds()
-	if dt >= 1.0 {
+	if lastSampleAt.IsZero() {
+		speedDeltaUp, speedDeltaDown = 0, 0
+		lastSampleAt = at
+	} else if dt := at.Sub(lastSampleAt).Seconds(); dt >= 1.0 {
 		currentSpeedUp = float64(speedDeltaUp) / dt
 		currentSpeedDown = float64(speedDeltaDown) / dt
-		speedDeltaUp = 0
-		speedDeltaDown = 0
-		lastSampleTime = now
+		speedDeltaUp, speedDeltaDown = 0, 0
+		lastSampleAt = at
 	}
+	return trafficResultLocked()
+}
 
+// counterDelta is the bytes a counter moved from prev to cur. A counter
+// below its last value was recreated (interface re-added, reboot, chains
+// rebuilt): it counts from 0, so the new value is the traffic since then.
+func counterDelta(prev, cur uint64) uint64 {
+	if cur >= prev {
+		return cur - prev
+	}
+	return cur
+}
+
+func trafficResultLocked() map[string]any {
 	return map[string]any{
 		"up":         lifetimeUp,
 		"down":       lifetimeDown,
@@ -828,9 +851,6 @@ func startTrafficRecorder() {
 			loadHistory()
 			histMu.Unlock()
 
-			// Initial sample
-			recordTrafficSample(greTraffic())
-
 			sampleTicker := time.NewTicker(5 * time.Second)
 			defer sampleTicker.Stop()
 
@@ -843,9 +863,12 @@ func startTrafficRecorder() {
 			for {
 				select {
 				case <-sampleTicker.C:
+					// The snapshot's reading: a second sampler of the same
+					// counters raced it (see trafficSample).
 					t0 := time.Now()
-					traffic := greTraffic()
-					recordTrafficSample(traffic)
+					if snap := currentSnapshot(); snap != nil && snap.Traffic != nil && !snap.CountersAt.IsZero() {
+						recordTrafficSampleAt(snap.Traffic, snap.CountersAt)
+					}
 					recordSampler("trafficRecorder", time.Since(t0))
 				case <-flushTicker.C:
 					flushHistoryIfDirty()
@@ -864,12 +887,19 @@ func startTrafficRecorder() {
 // recordTrafficSample appends one point per sample (5s). Points are
 // cumulative counters, so rate = delta between neighbours. Cap 90 days.
 func recordTrafficSample(traffic map[string]any) {
+	recordTrafficSampleAt(traffic, time.Now())
+}
+
+// recordTrafficSampleAt records a reading taken at at; the point carries
+// that time, so a rate between two points is over the time the counters
+// actually moved in.
+func recordTrafficSampleAt(traffic map[string]any, at time.Time) {
 	histMu.Lock()
 	defer histMu.Unlock()
 	hist := loadHistory()
-	now := time.Now().Unix()
+	now := at.Unix()
 	if n := len(hist); n > 0 && now-hist[n-1].T < 4 {
-		return // same poll, don't double-record
+		return // the same snapshot, or one too close to the last point
 	}
 	pt := trafficPoint{T: now}
 	if v, ok := traffic["up"].(uint64); ok {

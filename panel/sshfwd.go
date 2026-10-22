@@ -599,6 +599,9 @@ WantedBy=multi-user.target
 	cfg.Mode = "bagher"
 	cfg.FRPBindPort = b.FRPPort
 	cfg.PoolCount = b.PoolCount
+	if b.SSHPort > 0 { // this server's sshd port, which the Iran server dials (its traffic is counted there)
+		cfg.RemoteSSHPort = b.SSHPort
+	}
 	cfg.UDP = b.UDP
 	cfg.Ports = b.Ports
 	if b.IranPub != "" {

@@ -76,11 +76,16 @@ type hostView struct {
 	inner      map[string]string // ifname -> first inet CIDR
 	active     map[string]bool   // unit -> active
 	devData    string            // raw /proc/net/dev
+	devAt      time.Time         // when devData and the carrier counters were read
 	dev        map[string]devCounters
-	flowing    map[string]bool // iface counters moved since the previous tick
-	owners     map[int]int
-	icmp       func(target string) icmpResult
-	connect    func(id int) connectResult
+	// Backhaul/Bagher port counters, read right after devData (carrier_traffic.go)
+	carrierRx, carrierTx uint64
+	carrierOK            bool
+	carrierTags          map[string][2]uint64
+	flowing              map[string]bool // iface counters moved since the previous tick
+	owners               map[int]int
+	icmp                 func(target string) icmpResult
+	connect              func(id int) connectResult
 }
 
 func (v *hostView) icmpFor(target string) icmpResult {
@@ -96,6 +101,17 @@ func (v *hostView) traffic(ifname string) (rx, tx *uint64) {
 		return nil, nil
 	}
 	r, t := c.rx, c.tx
+	return &r, &t
+}
+
+// carrierTraffic is the port counters of one Backhaul unit or Bagher link
+// (a tunnel without an interface of its own).
+func (v *hostView) carrierTraffic(tag string) (rx, tx *uint64) {
+	c, ok := v.carrierTags[tag]
+	if !ok || tag == "" {
+		return nil, nil
+	}
+	r, t := c[0], c[1]
 	return &r, &t
 }
 
@@ -221,9 +237,16 @@ func collectHost(recs []peerRecord, prev map[string]devCounters) *hostView {
 		}
 	})
 	timedStep("netdev", func() {
+		// The interface and the port counters are read together and stamped
+		// with one time, so every speed is bytes over the time between two reads.
+		v.devAt = time.Now()
 		if b, err := os.ReadFile(filepath.Join(procRoot, "net/dev")); err == nil {
 			v.devData = string(b)
 			v.dev = parseNetDev(v.devData)
+		}
+		v.carrierRx, v.carrierTx, v.carrierOK = carrierCounters()
+		if v.carrierOK {
+			v.carrierTags = carrierTagCounters()
 		}
 		for name, c := range v.dev {
 			if p, ok := prev[name]; ok && p != c {
@@ -282,6 +305,14 @@ func mainTunnelFrom(st tunnelStatus, v *hostView) *peerLive {
 		l.icmpTarget = grePeerInner(st.Gre.Inner)
 	}
 	sig.TrafficFlowing = v.flowing["gre-tunnel"]
+	// The base tunnel's bytes: its GRE interface, or its Backhaul unit's port
+	// counters. It had none, so the hub's main tunnel never showed a speed.
+	if st.Gre.Exists {
+		l.Rx, l.Tx = v.traffic("gre-tunnel")
+	} else {
+		l.Rx, l.Tx = v.carrierTraffic(st.FrpSvc)
+	}
+	sig.Rx, sig.Tx = l.Rx, l.Tx
 	l.applyHealth(sig, v.icmpFor(l.icmpTarget))
 	return l
 }
@@ -305,12 +336,20 @@ type HubSnapshot struct {
 	LocalSession bool
 	LocalRTT     float64
 	ActiveConns  any
-	// Carrier: the Backhaul/Bagher port counters (carrier_traffic.go).
+	// CountersAt is when DevData and the carrier counters were read: every
+	// speed (dashboard, per link) is bytes moved between two CountersAt.
+	CountersAt time.Time
+	// Carrier: the Backhaul/Bagher port counters (carrier_traffic.go), in
+	// total and per tunnel.
 	CarrierRx, CarrierTx uint64
 	CarrierOK            bool
-	PublicIP             string
-	FrpSince             string
-	Bagher               map[string]any
+	CarrierTags          map[string][2]uint64
+	// LocalRx/LocalTx: this server's base tunnel (GRE interface, Backhaul
+	// unit, or Bagher); nil when unknown.
+	LocalRx, LocalTx *uint64
+	PublicIP         string
+	FrpSince         string
+	Bagher           map[string]any
 }
 
 // AgeMs is the snapshot age in milliseconds, -1 for the empty snapshot.
@@ -431,10 +470,11 @@ func buildSnapshot() *HubSnapshot {
 	s.LocalSession, s.LocalRTT = localSessionFrom(local, s.Main, v)
 
 	timedStep("traffic", func() {
-		s.Traffic = greTrafficFrom(v.devData)
-		s.DevData = v.devData
+		s.Traffic = trafficSample(v.devData, v.carrierRx, v.carrierTx, v.carrierOK, v.devAt)
+		s.DevData, s.CountersAt = v.devData, v.devAt
 		s.ActiveConns = activeConns()
-		s.CarrierRx, s.CarrierTx, s.CarrierOK = carrierCounters()
+		s.CarrierRx, s.CarrierTx, s.CarrierOK, s.CarrierTags = v.carrierRx, v.carrierTx, v.carrierOK, v.carrierTags
+		s.LocalRx, s.LocalTx = localTraffic(local, v)
 	})
 	s.PublicIP = detectPublicIPCached()
 	s.FrpSince = frpSinceCached(local.FrpSvc)
@@ -447,6 +487,32 @@ func buildSnapshot() *HubSnapshot {
 	recordSampler("snapshot", time.Since(t0))
 	s.Bagher = getSSHFwdSnapshotStatus()
 	return s
+}
+
+// localTraffic is the base tunnel's counters: the gre-tunnel interface, the
+// Backhaul unit's port counters, or (Bagher only) all carrier counters.
+func localTraffic(st tunnelStatus, v *hostView) (rx, tx *uint64) {
+	if st.Gre.Exists {
+		if rx, tx = v.traffic("gre-tunnel"); rx != nil {
+			return rx, tx
+		}
+	}
+	if rx, tx = v.carrierTraffic(st.FrpSvc); rx != nil {
+		return rx, tx
+	}
+	if st.FrpSvc == "" && !st.Gre.Exists { // Bagher only: its links
+		var r, t uint64
+		have := false
+		for tag, c := range v.carrierTags {
+			if strings.HasPrefix(tag, "bagher-") {
+				r, t, have = r+c[0], t+c[1], true
+			}
+		}
+		if have {
+			return &r, &t
+		}
+	}
+	return nil, nil
 }
 
 // localSessionFrom reports this machine's own tunnel session (see HubSnapshot).

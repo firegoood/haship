@@ -32,11 +32,11 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		lv.Rx, lv.Tx = m.Rx, m.Tx
 	}
 	lv.CarrierID = mainCarrierID(snap.Local)
-	if lv.Rx == nil && len(peers) == 0 && snap.CarrierOK {
-		rx, tx := snap.CarrierRx, snap.CarrierTx
-		lv.Rx, lv.Tx = &rx, &tx
+	if lv.Rx == nil {
+		lv.Rx, lv.Tx = snap.LocalRx, snap.LocalTx
 	}
-	resp := map[string]any{"local": lv, "peers": peers, "peer_count": len(peers), "peer_max": maxPeers(), "snapshot_age_ms": snap.AgeMs()}
+	resp := map[string]any{"local": lv, "peers": peers, "peer_count": len(peers), "peer_max": maxPeers(), "snapshot_age_ms": snap.AgeMs(),
+		"counters_at": countersAtMs(snap)}
 	if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
 		resp["csrf_token"] = GenerateCSRFToken(c.Value)
 	}
@@ -458,6 +458,9 @@ func livePeersFrom(v *hostView, recs []peerRecord) []peerLive {
 		if !p.NoGre {
 			l.Rx, l.Tx = v.traffic(p.GreIf)
 			sig.TrafficFlowing = v.flowing[p.GreIf]
+		} else {
+			// Backhaul without GRE has no interface: its unit's port counters
+			l.Rx, l.Tx = v.carrierTraffic(p.FrpsSvc)
 		}
 		sig.Rx, sig.Tx = l.Rx, l.Tx
 		l.applyHealth(sig, ic)
