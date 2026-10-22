@@ -953,6 +953,7 @@ func getSSHFwdSnapshotStatus() map[string]any {
 	metrics := getBagherLiveMetrics(cfg)
 	return map[string]any{
 		"links":           bagherLinksStatus(cfg, "", false),
+		"name":            linkLabel("bagher-1"),
 		"has_config":      true,
 		"enabled":         cfg.Enabled || isActive,
 		"is_active":       isActive,
@@ -1042,6 +1043,7 @@ func getSSHFwdStatusLocked() map[string]any {
 
 	return map[string]any{
 		"links":             bagherLinksStatus(cfg, pubKey, true),
+		"name":              linkLabel("bagher-1"),
 		"has_config":        hasConfig,
 		"enabled":           cfg.Enabled || isActive,
 		"is_active":         isActive,
@@ -1102,6 +1104,9 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		Bundle      string `json:"bundle"`
 		UDP         *bool  `json:"udp"`
 		ID          int    `json:"id"`
+		// Name labels the foreign server (link 1 on enable, the new one on
+		// add_link); a pointer, so an enable that does not send it keeps it
+		Name *string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-SSHFWD-01", "invalid json payload")
@@ -1129,9 +1134,18 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-SSHFWD-07", fmt.Sprintf("invalid bagher bundle: %v", err))
 			return
 		}
+		if body.Name != nil {
+			if err := validLinkName(strings.TrimSpace(*body.Name)); err != nil {
+				writeAPIError(w, r, "E-SSHFWD-07", err.Error())
+				return
+			}
+		}
 		if err := applyBagherBundle(b); err != nil {
 			writeAPIError(w, r, "E-SSHFWD-08", fmt.Sprintf("failed applying bagher bundle: %v", err))
 			return
+		}
+		if body.Name != nil && strings.TrimSpace(*body.Name) != "" {
+			_ = setLinkName("bagher-1", *body.Name)
 		}
 		writeJSON(w, map[string]any{
 			"status":      "ok",
@@ -1194,6 +1208,12 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		if !(HasFeature("bagher") || HasFeature("frp_ssh")) {
 			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
 			return
+		}
+		if body.Name != nil {
+			if err := setLinkName("bagher-1", *body.Name); err != nil {
+				writeAPIError(w, r, "E-SSHFWD-02", err.Error())
+				return
+			}
 		}
 		cfg.Mode = "bagher"
 		if body.Role != "" {
@@ -1273,6 +1293,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-SSHFWD-07", err.Error())
 			return
 		}
+		dropLinkNames("bagher-")
 		writeJSON(w, map[string]any{
 			"status":      "ok",
 			"message":     "Bagher tunnel cleaned and reset",
@@ -1308,6 +1329,14 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
 			return
 		}
+		name := ""
+		if body.Name != nil {
+			name = strings.TrimSpace(*body.Name)
+		}
+		if err := validLinkName(name); err != nil {
+			writeAPIError(w, r, "E-SSHFWD-02", err.Error())
+			return
+		}
 		l, err := addBagherLink(&cfg, BagherLink{
 			RemoteHost: body.RemoteHost, RemoteUser: strings.TrimSpace(body.RemoteUser),
 			RemoteSSHPort: body.SSHPort, Ports: parsePorts(body.Ports), UDP: body.UDP != nil && *body.UDP,
@@ -1324,6 +1353,9 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		if err := saveSSHFwdConfigLocked(cfg); err != nil {
 			writeAPIError(w, r, "E-SSHFWD-04", err.Error())
 			return
+		}
+		if name != "" {
+			_ = setLinkName(fmt.Sprintf("bagher-%d", l.ID), name)
 		}
 		if cfg.Enabled {
 			if err := installBagherLinkUnits(cfg, false); err != nil {
@@ -1346,6 +1378,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		_, _ = runCmd("systemctl", "disable", "--now", bagherLinkUnit(body.ID)+".service")
 		_ = os.Remove(bagherLinkUnitPath(body.ID))
 		_ = os.Remove(bagherCarrierStatusPath(body.ID))
+		_ = setLinkName(fmt.Sprintf("bagher-%d", body.ID), "")
 		_, _ = runCmd("systemctl", "daemon-reload")
 		if err := saveSSHFwdConfigLocked(cfg); err != nil {
 			writeAPIError(w, r, "E-SSHFWD-04", err.Error())

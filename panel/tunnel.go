@@ -32,6 +32,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		lv.Rx, lv.Tx = m.Rx, m.Tx
 	}
 	lv.CarrierID = mainCarrierID(snap.Local)
+	lv.Name = linkLabel("main")
 	if lv.Rx == nil {
 		lv.Rx, lv.Tx = snap.LocalRx, snap.LocalTx
 	}
@@ -60,6 +61,8 @@ type localView struct {
 	// CarrierID: the carrier the base tunnel runs on ("frp:kcp", "backhaul:tcpmux"),
 	// for the Carriers card and Swap carrier.
 	CarrierID string `json:"carrier_id,omitempty"`
+	// Name: what the user calls the base tunnel's other server ("" = none).
+	Name string `json:"name,omitempty"`
 }
 
 func splitLogLines(text string) []string {

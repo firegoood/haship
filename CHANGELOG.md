@@ -49,6 +49,7 @@ Totals that the old bugs inflated stay as they are; from this version on, only r
 
 ### Smaller changes
 
+- **The first foreign server can have a name.** Before, only the servers added later could be named. The setup forms (Iran setup, Bagher setup, the foreign server's join) now have an optional name field, and the main tunnel's card, the Bagher card and each Bagher link have a **Rename** button. The name shows on the dashboard map, the Tunnel tab and the edit window. It is kept in `link_names.json`; renaming does not restart the tunnel.
 - The Live Activity stream no longer shows `command "systemctl" failed (exit 4) | output: inactive` every few seconds. `systemctl is-active` exits non-zero for a stopped or uninstalled unit, which is the answer the status pollers ask for, not an error; these calls are no longer logged or counted as errors. A failed command's multi-line output is now logged on one line.
 
 ## v2.6.0 — 2026-10-22

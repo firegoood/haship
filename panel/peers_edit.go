@@ -308,6 +308,22 @@ func handlePeersPatch(w http.ResponseWriter, r *http.Request) {
 
 	// Case 1: ID == 0 -> Edit Main / Base Tunnel
 	if body.ID == 0 {
+		// The main tunnel's name lives in link_names.json (it has no record of
+		// its own); a rename alone does not touch the running tunnel.
+		if err := validLinkName(body.Name); err != nil {
+			writeAPIError(w, r, "E-PEER-07", err.Error())
+			return
+		}
+		if body.Name != "" {
+			if err := setLinkName("main", body.Name); err != nil {
+				writeAPIError(w, r, "E-PEER-07", err.Error())
+				return
+			}
+		}
+		if body.RemotePub == "" && body.Carrier == "" && body.Engine == "" && body.Transport == "" && body.Ports == nil && body.RawPorts == nil {
+			writeJSON(w, map[string]any{"status": "ok", "output": "main tunnel renamed"})
+			return
+		}
 		excludeID := 0
 		var legacyPeer *peerRecord
 		for _, p := range loadPeers() {

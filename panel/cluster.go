@@ -421,7 +421,7 @@ func lbLinkName(l lbLink) string {
 		return l.Name
 	}
 	if l.ID == mainTunnelID {
-		return "Main tunnel"
+		return xrayOr(linkLabel("main"), "Main tunnel")
 	}
 	return fmt.Sprintf("peer-%d", l.ID)
 }

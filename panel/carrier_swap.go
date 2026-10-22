@@ -144,7 +144,7 @@ func resolveSwapTunnel(id int) (swapTunnel, error) {
 }
 
 func mainSwapTunnel(st tunnelStatus, legacy *peerRecord) swapTunnel {
-	t := swapTunnel{ID: 0, Name: "Main tunnel", Main: true, rec: legacy}
+	t := swapTunnel{ID: 0, Name: xrayOr(linkLabel("main"), "Main tunnel"), Main: true, rec: legacy}
 	t.Port = st.BindPort
 	if t.Port <= 0 {
 		t.Port = st.FrpPort

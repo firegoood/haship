@@ -2949,5 +2949,15 @@ window.FA_TEXT = {
 "How many": "تعداد",
 "Sent before the first real packet to each address; the other end drops them.": "قبل از اولین پکت واقعی به هر آدرس فرستاده می‌شوند؛ سمت دیگر دورشان می‌ریزد.",
 "TCP Fast Open": "باز کردن سریع TCP (TFO)",
-"the Iran server checks this link": "سرور ایران این لینک را بررسی می‌کند"
+"the Iran server checks this link": "سرور ایران این لینک را بررسی می‌کند",
+"Rename": "تغییر نام",
+"Name saved": "نام ذخیره شد",
+"Name this server": "نام‌گذاری این سرور",
+"Name of the foreign server (optional)": "نام سرور خارج (اختیاری)",
+"Name of the Iran server (optional)": "نام سرور ایران (اختیاری)",
+"Name (optional):": "نام (اختیاری):",
+"e.g. Frankfurt": "مثلاً فرانکفورت",
+"e.g. Tehran": "مثلاً تهران",
+"e.g. Helsinki": "مثلاً هلسینکی",
+"Shown on the dashboard map, the tunnel cards and the limits. Empty: no name.": "روی نقشه داشبورد، کارت‌های تونل و محدودیت‌ها نمایش داده می‌شود. خالی: بدون نام."
 };

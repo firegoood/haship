@@ -311,7 +311,7 @@ func bagherLinksStatus(cfg SSHFwdConfig, pubKey string, withBundle bool) []map[s
 			"id": l.ID, "remote_host": l.RemoteHost, "ports": l.Ports, "udp": l.UDP,
 			"remote_ssh_port": l.RemoteSSHPort, "remote_user": l.RemoteUser,
 			"is_active": active, "connected": connected, "latency_ms": rtt,
-			"unit": bagherLinkUnit(l.ID),
+			"unit": bagherLinkUnit(l.ID), "name": linkLabel(fmt.Sprintf("bagher-%d", l.ID)),
 		}
 		if st, ok := readBagherCarrierStatus(l.ID, 24*time.Hour); ok && st.Error != "" && !st.Connected {
 			m["last_error"] = st.Error

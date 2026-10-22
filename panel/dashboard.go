@@ -187,6 +187,7 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 		// when the counters (traffic, peers' rx/tx) were read: speeds in the
 		// browser are bytes over the difference of two of these
 		"counters_at": countersAtMs(snap),
+		"main_name":   linkLabel("main"),
 		"uptime":      uptimeInfo(snap.FrpSince),
 		"system":      systemInfo(),
 		"conns":       snap.ActiveConns,

@@ -217,6 +217,35 @@ function entConfirm(title, body, confirmYes) {
     _entModalCleanup = () => { $('entModalYes').onclick = $('entModalNo').onclick = $('entModalX').onclick = null; ov.onclick = null; };
   });
 }
+// renameLink names a link that has no record of its own (the main tunnel:
+// "main", Bagher's foreign servers: "bagher-N"); then redraws what shows it.
+function renameLink(key, current) {
+  const ov = $('nameModal'), inp = $('nameModalInput'), err = $('nameModalErr');
+  if (!ov) return;
+  inp.value = current || '';
+  err.classList.add('hidden');
+  const close = () => modalHide(ov);
+  modalShow(ov, close);
+  inp.focus();
+  const save = async () => {
+    try {
+      await api('/api/link-name', { key, name: inp.value.trim() });
+      close();
+      toastOk(tr('', 'Name saved'), inp.value.trim());
+      if (typeof refresh === 'function') refresh();
+      if (/^bagher/.test(key) && typeof loadSSHFwd === 'function') loadSSHFwd();
+      if (typeof refreshDash === 'function') refreshDash();
+    } catch (e) {
+      err.textContent = e.message;
+      err.classList.remove('hidden');
+    }
+  };
+  $('nameModalYes').onclick = save;
+  $('nameModalNo').onclick = close;
+  $('nameModalX').onclick = close;
+  inp.onkeydown = e => { if (e.key === 'Enter') save(); };
+}
+
 // Skeleton blocks for loading states (Dashboard/Logs/Update reuse).
 function skel(n) {
   let s = '';
@@ -1305,11 +1334,12 @@ function renderPeers(peers) {
     const linkRow = l => {
       const st = l.connected ? ['ok', 'Connected'] : (l.is_active ? ['warn', 'Waiting for the other server'] : ['err', 'Stopped']);
       return `<div class="det-row bagher-link">
-        <span class="det-k"><bdi class="mono" data-no-i18n>${esc(l.remote_host || '—')}</bdi></span>
+        <span class="det-k">${l.name ? `<bdi data-no-i18n>${esc(l.name)}</bdi> · ` : ''}<bdi class="mono" data-no-i18n>${esc(l.remote_host || '—')}</bdi></span>
         <span class="det-v bagher-link-v">
           <span class="badge ${st[0]}"><span class="dot"></span>${esc(tr('', st[1]))}</span>
           <span class="mono" data-no-i18n>${esc((l.ports || []).join(', '))}${l.udp ? ' +UDP' : ''}</span>
           ${l.latency_ms > 0 ? `<span class="mono" data-no-i18n>${l.latency_ms.toFixed(1)} ms</span>` : ''}
+          <button class="hashem-btn hashem-btn-ghost u-btn-30" onclick="renameLink('bagher-${+l.id}', ${jsArg(l.name || '')})">${esc(tr('', 'Rename'))}</button>
           <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="bagherLinkCopyBundle(${+l.id})">${esc(tr('', 'Copy Bundle'))}</button>
           <button class="hashem-btn hashem-btn-ghost u-btn-30" onclick="bagherLinkRemove(${+l.id})">${esc(tr('', 'Remove'))}</button>
         </span>
@@ -1325,16 +1355,17 @@ function renderPeers(peers) {
       <div class="tc-header u-flex-wrap-gap8">
         <div class="u-flex-center-gap10">
           <span class="status-indicator ${bagherUp ? 'active' : 'offline'}"><span class="dot"></span></span>
-          <b class="u-fs-16-tx">Bagher</b>
+          <b class="u-fs-16-tx">Bagher${b.name ? ' · <bdi data-no-i18n>' + esc(b.name) + '</bdi>' : ''}</b>
           <span class="badge info" data-no-i18n>SSH + FRP</span>
           <span class="badge dim">${esc(roleLabel)}</span>
           <span class="badge ${bagherState[0]}"><span class="dot"></span>${esc(tr('', bagherState[1]))}</span>
+          <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="renameLink('bagher-1', ${jsArg(b.name || '')})">${esc(tr('', 'Rename'))}</button>
         </div>
       </div>
       ${tunViz({
         state: bagherLinked ? 'ok' : (bagherRun ? 'warn' : 'down'),
         here: tr('', 'This server'), hereSub: tr('', b.role === 'foreign' ? 'Foreign' : 'Iran'),
-        there: tr('', b.role === 'foreign' ? 'Iran server' : 'Foreign server'), thereSub: b.remote_host || '',
+        there: b.name || tr('', b.role === 'foreign' ? 'Iran server' : 'Foreign server'), thereSub: b.remote_host || '',
         tags: [['Bagher', 'eng'], ['SSH', ''], [b.udp ? 'UDP' : '', 'udp']],
         lat: (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? b.latency_ms.toFixed(0) + ' ms' : null,
         rate: null, ports: Array.isArray(b.ports) ? b.ports : [],
@@ -1526,7 +1557,8 @@ function renderTunnel(st) {
     ? `<span class="badge ok"><span class="dot"></span><bdi data-no-i18n>${esc(st.frp_svc || 'frp')}</bdi></span>`
     : `<span class="badge err"><span class="dot"></span><bdi data-no-i18n>${esc(st.frp_svc || 'service')}</bdi> · ${esc(tr('', 'stopped'))}</span>`;
   const ports = ((st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || [])).join(', ') || '—';
-  const title = tr('', 'Tunnel') + (st.remote_pub ? ' · ' + st.remote_pub : '');
+  // the user's name for the other server when there is one
+  const title = st.name ? st.name + (st.remote_pub ? ' · ' + st.remote_pub : '') : tr('', 'Tunnel') + (st.remote_pub ? ' · ' + st.remote_pub : '');
   let mainRate = linkRate('main', st.rx, st.tx, _statusCountersAt);
   const dashT = window._lastDash && window._lastDash.traffic;
   if (!mainRate && st.rx == null && !(tunPeerCache || []).length && dashT && dashT.speed_down != null) mainRate = { dn: dashT.speed_down, up: dashT.speed_up };
@@ -1534,7 +1566,7 @@ function renderTunnel(st) {
   const mainViz = !hasMain ? '' : tunViz({
     state: vizState(st) || (up ? 'ok' : 'down'),
     here: tr('', 'This server'), hereSub: tr('', isIran ? 'Iran' : 'Foreign') + (st.local_pub ? ' · ' + st.local_pub : ''),
-    there: tr('', isIran ? 'Foreign server' : 'Iran server'), thereSub: st.remote_pub || gre.peer_ip || st.gre_peer || '',
+    there: st.name || tr('', isIran ? 'Foreign server' : 'Iran server'), thereSub: st.remote_pub || gre.peer_ip || st.gre_peer || '',
     tags: [[bhSvc ? 'Backhaul' : 'FRP', 'eng'], [eng !== 'frp' ? st.transport : '', ''], [usesGre ? 'GRE' : '', 'gre']],
     gre: usesGre, lat: mainPing.ok ? mainPing.txt : null, rate: mainRate,
     ports: (st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || []),
@@ -1550,6 +1582,7 @@ function renderTunnel(st) {
           ${eng ? '<span class="badge info" data-no-i18n>' + esc(LS_ENGINE[eng] || eng) + '</span>' : ''}
           <span class="badge ${up ? 'ok' : 'err'}"><span class="dot"></span>${esc(tr('', up ? 'Active' : 'Down'))}</span>
           ${(usesGre && !st.ping_ok && st.frp_up) ? '<span class="badge info"><span class="dot"></span>' + esc(tr('fleet_frp_only', 'FRP only')) + '</span>' : ''}
+          <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="renameLink('main', ${jsArg(st.name || '')})">${esc(tr('', 'Rename'))}</button>
         </div>
       </div>
       ${mainViz}
@@ -2364,7 +2397,7 @@ async function refreshDash() {
     else if (multi && nPeers > 1) { remName = nPeers + ' ' + tr('', 'foreign servers'); remIp = upPeers + ' / ' + nPeers + ' ' + tr('', 'up'); }
     else if (multi) { remName = peers[0].name || 'Foreign server'; remIp = peers[0].remote_pub || '—'; }
     else {
-      remName = iran ? 'Foreign server' : foreign ? 'Iran server' : 'Other server';
+      remName = d.main_name || (bagherUp && !(d.gre || {}).exists && bObj.name) || (iran ? 'Foreign server' : foreign ? 'Iran server' : 'Other server');
       remIp = d.remote_pub || g.peer || (bagherUp ? bObj.remote_host : '') || '—';
     }
     set('heroRemoteName', tr('', remName));
@@ -2838,7 +2871,7 @@ function dashLinks(d, bObj, iran, foreign) {
     let rate = linkRate('main', st.rx, st.tx, _statusCountersAt);
     const t = d.traffic || {};
     if (!rate && st.rx == null && !peers.length && t.speed_down != null) rate = { dn: t.speed_down, up: t.speed_up };
-    L.push({ key: 'main', name: tr('', peers.length ? 'Main tunnel' : (foreign ? 'Iran server' : 'Foreign server')),
+    L.push({ key: 'main', name: d.main_name || tr('', peers.length ? 'Main tunnel' : (foreign ? 'Iran server' : 'Foreign server')),
       ip: d.remote_pub || g.peer || '', state: vizState(st) || (up ? 'ok' : 'down'),
       eng: /backhaul/.test(eng) || /^backhaul/.test(f.svc || '') ? 'Backhaul' : 'FRP', gre: !!g.exists,
       lat: msOf(st.health_state ? st : d), rate });
@@ -2850,11 +2883,11 @@ function dashLinks(d, bObj, iran, foreign) {
       gre: !(p.engine === 'backhaul' || p.no_gre), lat: msOf(p), rate: linkRate('p' + p.id, p.rx, p.tx, d.counters_at) });
   });
   if (bObj && (bObj.is_active || bObj.has_config || bObj.remote_host)) {
-    L.push({ key: 'bagher', name: 'Bagher', ip: bObj.remote_host || '',
+    L.push({ key: 'bagher', name: bObj.name || 'Bagher', ip: bObj.remote_host || '',
       state: bObj.connected ? 'ok' : (bObj.is_active ? 'warn' : 'down'), eng: 'SSH', gre: false,
       lat: bObj.latency_ms > 0 ? Math.round(bObj.latency_ms) + 'ms' : '', rate: null });
     // more foreign servers on the same Bagher hub
-    (Array.isArray(bObj.links) ? bObj.links : []).forEach(l => L.push({ key: 'bagher' + l.id, name: 'Bagher ' + l.id,
+    (Array.isArray(bObj.links) ? bObj.links : []).forEach(l => L.push({ key: 'bagher' + l.id, name: l.name || 'Bagher ' + l.id,
       ip: l.remote_host || '', state: l.connected ? 'ok' : (l.is_active ? 'warn' : 'down'), eng: 'SSH', gre: false,
       lat: l.latency_ms > 0 ? Math.round(l.latency_ms) + 'ms' : '', rate: null }));
   }
@@ -3078,6 +3111,7 @@ async function doSetup() {
       frp_transport: ($('sEngine') && $('sEngine').value === 'frp') ? selTrans : '',
       local_public: $('sLocalPub').value.trim(),
       remote_public: $('sRemotePub').value.trim(),
+      name: $('sMainName') ? $('sMainName').value.trim() : '',
       local_gre: $('sLocalGre') ? $('sLocalGre').value.trim() : '',
       peer_gre: $('sPeerGre') ? $('sPeerGre').value.trim() : '',
       frp_port: parseInt($('sFrpPort').value, 10),
@@ -3469,6 +3503,7 @@ $('joinBtn').onclick = async () => {
       token: rawToken,
       dial: bundle.engine === 'backhaul' ? '' : ($('jDial') ? $('jDial').value : 'auto'),
       accept_udp: !!bundle.udp,
+      name: $('jName') ? $('jName').value.trim() : '',
       ports, force: true,
     } : {
       role: 'foreign',
@@ -3481,6 +3516,7 @@ $('joinBtn').onclick = async () => {
       local_gre: (m.inner || '').split('/')[0] || adv('fLocalGre') || $('sLocalGre').value.trim(),
       peer_gre: peerInnerHint(st) || adv('fPeerGre') || $('sPeerGre').value.trim(),
       frp_port: st.frp_port || parseInt(adv('fFrpPort') || $('sFrpPort').value, 10) || 7000,
+      name: $('jName') ? $('jName').value.trim() : '',
       token, ports, force: true,
     };
     if (!body.ports) {
@@ -8026,7 +8062,7 @@ function openEditPeer(peerId) {
   const p = (peerId === 0) ? (window._lastLocal || {}) : ((tunPeerCache || []).find(x => x.id === peerId) || {});
   if (peerId === 0) {
     const st = p;
-    name = 'Main tunnel';
+    name = st.name || ''; // the main tunnel's own name, empty until one is given
     remoteIp = (st.gre && (st.gre.peer_ip || st.gre_peer)) || '';
     carrier = (st.carrier && (st.carrier.active || st.carrier.mode)) || 'direct';
     engine = st.engine || (st.frp_svc && st.frp_svc.includes('backhaul') ? (st.no_gre ? 'backhaul' : 'gre-backhaul') : 'frp');
@@ -8053,7 +8089,7 @@ function openEditPeer(peerId) {
 
   _editPortsList = [...ports];
 
-  $('editPortsTitle').textContent = 'Edit Tunnel \u2014 ' + name;
+  $('editPortsTitle').textContent = 'Edit Tunnel \u2014 ' + (name || tr('', 'Main tunnel'));
   $('editPortsSub').textContent   = tr('', 'Rename the tunnel or change its foreign IP and forwarded ports. To change how it travels, use Swap carrier.');
   
   if ($('editPeerName'))   $('editPeerName').value = name;
@@ -9073,6 +9109,7 @@ async function bagherIranApplyClick() {
       role: 'iran',
       remote_host,
       remote_user: val('sshfwdRemoteUser') || 'root',
+      name: val('sshfwdName') || undefined, // empty keeps the saved name
       ssh_port: parseInt(val('sshfwdRemotePort'), 10) || 22,
       ports,
       pool_count: parseInt(val('sshfwdPoolCount'), 10) || 25,
@@ -9112,7 +9149,7 @@ async function bagherForeignConnectClick(bundle) {
   const w = $('joinWarn'), out = $('joinOut');
   w.classList.add('hidden');
   try {
-    const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle });
+    const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle, name: $('jName') ? $('jName').value.trim() : '' });
     out.classList.remove('hidden');
     out.textContent = (res && res.message) || tr('', 'Connected to the Iran server');
     toastOk(tr('', 'Connected to the Iran server'));
@@ -9344,7 +9381,7 @@ function bagherAddLinkStep(done) {
   $('bagherAddLinkCancel').textContent = tr('', done ? 'Done' : 'Cancel');
 }
 function openBagherAddLink() {
-  ['bagherLinkHost', 'bagherLinkPorts', 'bagherLinkSSHPort', 'bagherLinkUser'].forEach(id => { $(id).value = ''; });
+  ['bagherLinkName', 'bagherLinkHost', 'bagherLinkPorts', 'bagherLinkSSHPort', 'bagherLinkUser'].forEach(id => { $(id).value = ''; });
   $('bagherLinkUdp').checked = !!(_sshfwdData || {}).udp;
   $('bagherAddLinkWarn').classList.add('hidden');
   bagherAddLinkStep(false);
@@ -9364,7 +9401,7 @@ async function saveBagherAddLink() {
   btn.disabled = true;
   try {
     const res = await api('/api/sshfwd', {
-      action: 'add_link', remote_host, ports, udp: $('bagherLinkUdp').checked,
+      action: 'add_link', remote_host, ports, udp: $('bagherLinkUdp').checked, name: $('bagherLinkName').value.trim(),
       ssh_port: parseInt($('bagherLinkSSHPort').value, 10) || 0, remote_user: $('bagherLinkUser').value.trim(),
     });
     if (res.status_data) { _sshfwdData = res.status_data; renderSSHFwd(); }

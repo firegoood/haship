@@ -1939,6 +1939,7 @@
                 <div class="qs-row">
                   <div class="fg" id="wrapLocalPub"><label for="sLocalPub" data-i18n="setup_local_pub">Iran public IP (auto, editable)</label><input class="hashem-input" id="sLocalPub" inputmode="decimal"></div>
                   <div class="fg"><label for="sRemotePub" data-i18n="setup_remote_pub">Remote public IP (the other server)</label><input class="hashem-input" id="sRemotePub" inputmode="decimal" placeholder="e.g. 203.0.113.10"></div>
+                  <div class="fg"><label for="sMainName">Name of the foreign server (optional)</label><input class="hashem-input" id="sMainName" maxlength="40" autocomplete="off" placeholder="e.g. Frankfurt"></div>
                   <div class="fg" id="wrapLocalGre"><label for="sLocalGre" data-i18n="setup_local_gre">Local GRE IP</label><input class="hashem-input" id="sLocalGre" inputmode="decimal"></div>
                   <div class="fg" id="wrapPeerGre"><label for="sPeerGre" data-i18n="setup_peer_gre">Peer GRE IP</label><input class="hashem-input" id="sPeerGre" inputmode="decimal"></div>
                   <div class="fg" id="wrapCtrlPort"><label for="sFrpPort" id="lblControlPort" data-i18n="setup_ctrl_port">Control / Bind port</label><input class="hashem-input" id="sFrpPort" inputmode="numeric"></div>
@@ -1972,6 +1973,7 @@
                 </div>
                 <div class="qs-row">
                   <div class="fg"><label for="sshfwdRemoteHost" data-i18n="setup_bagher_host">Foreign server public IP</label><input class="hashem-input" id="sshfwdRemoteHost" inputmode="decimal" placeholder="e.g. 198.51.100.73"></div>
+                  <div class="fg"><label for="sshfwdName">Name of the foreign server (optional)</label><input class="hashem-input" id="sshfwdName" maxlength="40" autocomplete="off" placeholder="e.g. Frankfurt"></div>
                   <div class="fg"><label for="sshfwdPorts" data-i18n="setup_forward_ports">Forwarded Ports (single, ranges, mappings)</label><input class="hashem-input" id="sshfwdPorts" placeholder="e.g. 443, 8443, 2083"></div>
                 </div>
                 <div class="fg"><label class="u-check-row"><input type="checkbox" id="sshfwdUdp"><span data-i18n="setup_bh_udp">Also forward UDP on these ports</span></label></div>
@@ -2016,6 +2018,7 @@
               <label class="qs-label" data-i18n="setup_foreign_step2">Connect this server to Iran</label>
               <div class="u-grid-gap-10">
                 <div class="fg"><label for="jToken" data-i18n="setup_bundle_paste_lbl">Setup bundle or token (from Iran side)</label><input class="hashem-input" id="jToken" autocomplete="off" data-i18n-ph="setup_bundle_paste_ph" placeholder="paste hsh1_..., bh1_..., gh1_... or BAGHER:... bundle"></div>
+                <div class="fg"><label for="jName">Name of the Iran server (optional)</label><input class="hashem-input" id="jName" maxlength="40" autocomplete="off" placeholder="e.g. Tehran"></div>
                 <div class="fg" id="jPortsWrap"><label for="jPorts">Reverse ports (ranges &amp; mappings allowed)</label><input class="hashem-input" id="jPorts" placeholder="auto-filled from bundle, or 443, 10000-10050"></div>
                 <div id="joinFrpOpts" class="u-grid-gap-10">
                 <div class="fg u-mt-2">
@@ -3412,6 +3415,19 @@
 
 
 
+<div class="ent-modal-ov" id="nameModal" hidden>
+  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="nameModalTitle">
+    <div class="ent-modal-h"><b id="nameModalTitle">Name this server</b><button class="ent-x" id="nameModalX" aria-label="Close" data-i18n-aria="aria_close">×</button></div>
+    <div class="ent-modal-b">
+      <label class="qs-label" for="nameModalInput">Name</label>
+      <input class="hashem-input" id="nameModalInput" maxlength="40" autocomplete="off" placeholder="e.g. Frankfurt">
+      <div class="qs-hint u-mt-6">Shown on the dashboard map, the tunnel cards and the limits. Empty: no name.</div>
+      <div class="xr-err hidden" id="nameModalErr"></div>
+    </div>
+    <div class="ent-modal-f"><button class="hashem-btn hashem-btn-ghost" id="nameModalNo">Cancel</button><button class="hashem-btn hashem-btn-primary" id="nameModalYes">Save</button></div>
+  </div>
+</div>
+
 <div class="ent-modal-ov" id="termAuthModal" hidden>
   <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="termAuthTitle">
     <div class="ent-modal-h"><b id="termAuthTitle">Confirm it's you</b><button class="ent-x" id="termAuthX" aria-label="Close">×</button></div>
@@ -3725,6 +3741,10 @@
       <div class="fg">
         <label for="bagherLinkHost" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">Foreign Server Public IP / Host:</label>
         <input class="hashem-input u-w-full u-mono" id="bagherLinkHost" placeholder="e.g. 198.51.100.74" autocomplete="off">
+      </div>
+      <div class="fg">
+        <label for="bagherLinkName" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">Name (optional):</label>
+        <input class="hashem-input u-w-full" id="bagherLinkName" maxlength="40" autocomplete="off" placeholder="e.g. Helsinki">
       </div>
       <div class="fg">
         <label for="bagherLinkPorts" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">Forwarded Ports:</label>

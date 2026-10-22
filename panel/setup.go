@@ -466,6 +466,10 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	body.PeerGre = strings.TrimSpace(body.PeerGre)
 	body.Token = strings.TrimSpace(body.Token)
 	body.Name = strings.TrimSpace(body.Name)
+	if err := validLinkName(body.Name); err != nil {
+		writeAPIError(w, r, "E-SETUP-01", err.Error())
+		return
+	}
 
 	// add-peer mode: each new foreign server gets its own token + tunnel.
 	// Port conflicts (same remotePort on two peers) are rejected with 409
@@ -658,6 +662,10 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	// the first tunnel's other server: named in the setup form
+	if (body.Role == "iran" || body.Role == "foreign") && body.Name != "" {
+		_ = setLinkName("main", body.Name)
+	}
 	writeJSON(w, out)
 }
 
