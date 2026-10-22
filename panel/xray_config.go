@@ -131,6 +131,7 @@ type XrayProfile struct {
 	Mark       int    `json:"mark,omitempty"`
 
 	Fragment *XrayFragment `json:"fragment,omitempty"` // dialing end only
+	Noise    *XrayNoise    `json:"noise,omitempty"`    // dialing end, UDP (mKCP) only
 	KCP      *XrayKCP      `json:"kcp,omitempty"`
 }
 
@@ -139,6 +140,80 @@ type XrayFragment struct {
 	Packets string `json:"packets"` // "tlshello" or a range such as "1-3"
 	Length  string `json:"length"`  // "100-200"
 	Delay   string `json:"delay"`   // "10-20" ms
+}
+
+// XrayNoise is what the dialing end sends before its first real UDP packet
+// (finalmask "noise"): Count packets of random bytes (Length) or of a fixed
+// Packet (str, hex or base64), Delay ms apart.
+type XrayNoise struct {
+	Type   string `json:"type"`             // rand | str | hex | base64
+	Packet string `json:"packet,omitempty"` // str / hex / base64
+	Length string `json:"length,omitempty"` // rand: bytes, "10-60"
+	Delay  string `json:"delay,omitempty"`  // ms, "10-20"
+	Count  int    `json:"count,omitempty"`  // 1-10, default 1
+}
+
+func (n XrayNoise) validate() error {
+	if n.Delay != "" && !xrayRangeRe.MatchString(n.Delay) {
+		return fmt.Errorf("noise: the delay is a range in ms, like 10-20")
+	}
+	if n.Count < 0 || n.Count > 10 {
+		return fmt.Errorf("noise: 1-10 packets")
+	}
+	var size int
+	switch n.Type {
+	case "rand":
+		if !xrayRangeRe.MatchString(n.Length) || strings.HasPrefix(n.Length, "0") {
+			return fmt.Errorf("noise: random packets need a length range, like 10-60")
+		}
+		hi := n.Length
+		if i := strings.IndexByte(hi, '-'); i >= 0 {
+			hi = hi[i+1:]
+		}
+		size, _ = strconv.Atoi(hi)
+	case "str":
+		size = len(n.Packet)
+	case "hex":
+		b, err := hex.DecodeString(n.Packet)
+		if err != nil {
+			return fmt.Errorf("noise: the packet is not hex")
+		}
+		size = len(b)
+	case "base64":
+		b, err := base64.StdEncoding.DecodeString(n.Packet)
+		if err != nil {
+			return fmt.Errorf("noise: the packet is not base64")
+		}
+		size = len(b)
+	default:
+		return fmt.Errorf("noise: the type is rand, str, hex or base64")
+	}
+	if size < 1 || size > 1200 {
+		return fmt.Errorf("noise: a packet is 1-1200 bytes")
+	}
+	return nil
+}
+
+// xrayNoiseMask is a noise setting as Xray's finalmask.
+func xrayNoiseMask(n XrayNoise) map[string]any {
+	item := map[string]any{}
+	if n.Type == "rand" {
+		item["rand"] = n.Length
+	} else {
+		item["type"], item["packet"] = n.Type, n.Packet
+	}
+	if n.Delay != "" {
+		item["delay"] = n.Delay
+	}
+	count := n.Count
+	if count < 1 {
+		count = 1
+	}
+	items := make([]any, count)
+	for i := range items {
+		items[i] = item
+	}
+	return map[string]any{"type": "noise", "settings": map[string]any{"noise": items}}
 }
 
 // XrayKCP is mKCP's tuning. Password keys the mkcp-aes128gcm mask (what the
@@ -553,6 +628,14 @@ func (l XrayLink) validate() error {
 			return fmt.Errorf("fragment: packets is tlshello or a range like 1-3, length a range like 100-200 (not 0), delay a range in ms")
 		}
 	}
+	if n := p.Noise; n != nil {
+		if p.Transport != "kcp" {
+			return fmt.Errorf("noise is for links over UDP (mKCP); use fragment for TCP")
+		}
+		if err := n.validate(); err != nil {
+			return err
+		}
+	}
 	if p.Transport == "kcp" {
 		k := p.KCP
 		if k == nil || !xrayKCPPassRe.MatchString(k.Password) {
@@ -807,9 +890,14 @@ func xrayStream(l XrayLink, server bool) map[string]any {
 			ks["downlinkCapacity"] = k.Down
 		}
 		s["kcpSettings"] = ks
-		s["finalmask"] = map[string]any{"udp": []any{
-			map[string]any{"type": "mkcp-aes128gcm", "settings": map[string]any{"password": k.Password}},
-		}}
+		masks := []any{map[string]any{"type": "mkcp-aes128gcm", "settings": map[string]any{"password": k.Password}}}
+		// Noise on the dialing end: junk packets before the first real one to
+		// each address. The first mask sits next to the wire, so the junk goes
+		// out raw and the other end's aes128gcm drops it.
+		if !server && p.Noise != nil {
+			masks = append([]any{xrayNoiseMask(*p.Noise)}, masks...)
+		}
+		s["finalmask"] = map[string]any{"udp": masks}
 	}
 	if !server && p.Fragment != nil && network != "kcp" {
 		fs := map[string]any{"packets": p.Fragment.Packets, "length": p.Fragment.Length}

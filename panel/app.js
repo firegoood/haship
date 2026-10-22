@@ -5943,7 +5943,7 @@ function xrAdvHTML(w) {
   const inp = (id, label, val, ph, hint) => `<div class="xr-field"><label class="qs-label" for="${id}">${esc(tr('', label))}</label>
       <input class="hashem-input u-ltr u-mono" id="${id}" value="${esc(val == null || val === 0 ? '' : String(val))}" placeholder="${esc(ph || '')}" autocomplete="off">${hint ? `<div class="qs-hint">${esc(tr('', hint))}</div>` : ''}</div>`;
   const chk = (id, label, on) => `<label class="xr-check"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> ${esc(tr('', label))}</label>`;
-  const fr = p.fragment || {}, k = p.kcp || {};
+  const fr = p.fragment || {}, k = p.kcp || {}, nz = p.noise || {};
   const t = p.transport;
   return `<details class="xr-adv"${w.advOpen ? ' open' : ''} ontoggle="if(_xrWiz)_xrWiz.advOpen=this.open">
     <summary>${esc(tr('', 'Advanced settings'))}</summary>
@@ -5971,7 +5971,13 @@ function xrAdvHTML(w) {
       </div>` : ''}
       ${t === 'kcp' ? `<h5>mKCP</h5><div class="xr-fields">
         ${inp('xaKMTU', 'MTU', k.mtu, '1350')}${inp('xaKTTI', 'TTI (ms)', k.tti, '20')}${inp('xaKUp', 'Upload capacity (MB/s)', k.up, '20')}${inp('xaKDown', 'Download capacity (MB/s)', k.down, '100')}
-        <div class="xr-field"><span class="qs-label">${esc(tr('', 'Congestion control'))}</span>${chk('xaKCong', 'On', k.congestion)}</div></div>` : ''}
+        <div class="xr-field"><span class="qs-label">${esc(tr('', 'Congestion control'))}</span>${chk('xaKCong', 'On', k.congestion)}</div></div>
+      <h5>${esc(tr('', 'Noise (anti-DPI, on the dialing end)'))}</h5>
+      <div class="xr-fields">
+        ${sel('xaNzType', 'Noise packets', ['rand', 'str', 'hex', 'base64'], nz.type || '', 'Off', 'onchange="xrWizRefresh()"')}
+        ${nz.type === 'rand' ? inp('xaNzLen', 'Length (bytes)', nz.length, '10-60') : nz.type ? inp('xaNzPkt', 'Packet', nz.packet, nz.type === 'hex' ? 'deadbeef' : nz.type === 'base64' ? 'aGVsbG8=' : 'hello') : ''}
+        ${nz.type ? inp('xaNzDelay', 'Delay (ms)', nz.delay, '10-20') + inp('xaNzCount', 'How many', nz.count, '1', 'Sent before the first real packet to each address; the other end drops them.') : ''}
+      </div>` : ''}
       <h5>${esc(tr('', 'Connection'))}</h5>
       <div class="xr-fields">
         ${inp('xaMux', 'Mux concurrency (0 = off)', p.mux, '0', 'Not with Vision or in reverse mode.')}
@@ -6019,7 +6025,13 @@ function xrWizRead() {
   if ($('xaCert')) { p.cert_file = v('xaCert'); p.key_file = v('xaKey'); p.cdn = !!c('xaCDN'); }
   if ($('xrAddr')) p.address = v('xrAddr');
   if (p.security !== 'tls') p.cdn = false;
+  if (p.transport !== 'kcp') p.noise = null; // noise rides on UDP only
   if ($('xaKMTU')) p.kcp = Object.assign(p.kcp || {}, { mtu: n('xaKMTU'), tti: n('xaKTTI'), up: n('xaKUp'), down: n('xaKDown'), congestion: !!c('xaKCong') });
+  if ($('xaNzType')) {
+    const t = v('xaNzType');
+    p.noise = !t ? null : { type: t, length: v('xaNzLen') || (t === 'rand' ? '10-60' : ''), packet: v('xaNzPkt') || '',
+      delay: v('xaNzDelay') || '', count: n('xaNzCount') || 1 };
+  }
   p.mux = n('xaMux'); p.congestion = v('xaCong'); p.mark = n('xaMark'); p.tfo = !!c('xaTFO'); p.mptcp = !!c('xaMPTCP');
   if ($('xaListen')) w.listen = v('xaListen');
   if ($('xaFrPk')) {

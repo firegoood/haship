@@ -392,6 +392,17 @@ func xrayTestMatrix(t *testing.T) map[string]XrayLink {
 		}
 	}
 	m["tls-xhttp-direct-foreign-owncert"] = xrayTLSLink(t, "xhttp", xrayModeDirect, xraySideForeign)
+	// mKCP with noise (every packet type) on the dialing end
+	for _, n := range []XrayNoise{{Type: "rand", Length: "10-60", Delay: "5-10", Count: 3}, {Type: "str", Packet: "hello"},
+		{Type: "hex", Packet: "deadbeef"}, {Type: "base64", Packet: "aGVsbG8="}} {
+		n := n
+		dial := map[string]string{xrayModeDirect: xraySideIran, xrayModeReverse: xraySideForeign}
+		for mode, side := range dial {
+			l := xrayTestLink(t, "kcp", mode, side)
+			l.Profile.Noise = &n
+			m["kcp-noise-"+n.Type+"-"+mode] = l
+		}
+	}
 	return m
 }
 
@@ -549,5 +560,53 @@ func TestXrayTLSAndCDN(t *testing.T) {
 	// Reality links carry no certificate.
 	if g := xrayTestLink(t, "reality", xrayModeDirect, xraySideIran); g.Keys.TLSCert != "" {
 		t.Error("a Reality link has a TLS certificate")
+	}
+}
+
+func TestXrayNoise(t *testing.T) {
+	l := xrayTestLink(t, "kcp", xrayModeDirect, xraySideIran)
+	l.Profile.Noise = &XrayNoise{Type: "rand", Length: "10-60", Delay: "10-20", Count: 2}
+	cfg, err := buildXrayConfig(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := xrayJSON(t, cfg)
+	// noise first (next to the wire), then the mKCP encryption
+	want := `"finalmask":{"udp":[{"settings":{"noise":[{"delay":"10-20","rand":"10-60"},{"delay":"10-20","rand":"10-60"}]},"type":"noise"},{"settings":{"password":"kcppassword1"},"type":"mkcp-aes128gcm"}]}`
+	if !strings.Contains(s, want) {
+		t.Errorf("dialing end lacks %s\n%s", want, s)
+	}
+	f := xrayTestLink(t, "kcp", xrayModeDirect, xraySideForeign)
+	f.Profile.Noise = l.Profile.Noise
+	cfg, _ = buildXrayConfig(f)
+	if s := xrayJSON(t, cfg); strings.Contains(s, `"noise"`) {
+		t.Errorf("the listening end sends noise:\n%s", s)
+	}
+	l.Profile.Noise = &XrayNoise{Type: "hex", Packet: "deadbeef"}
+	cfg, _ = buildXrayConfig(l)
+	if s := xrayJSON(t, cfg); !strings.Contains(s, `"noise":[{"packet":"deadbeef","type":"hex"}]`) {
+		t.Errorf("hex noise:\n%s", s)
+	}
+	for name, n := range map[string]XrayNoise{
+		"type":       {Type: "zero", Packet: "x"},
+		"no length":  {Type: "rand"},
+		"zero":       {Type: "rand", Length: "0-10"},
+		"too big":    {Type: "rand", Length: "10-2000"},
+		"bad hex":    {Type: "hex", Packet: "zz"},
+		"bad base64": {Type: "base64", Packet: "!!"},
+		"empty str":  {Type: "str"},
+		"delay":      {Type: "str", Packet: "x", Delay: "soon"},
+		"count":      {Type: "str", Packet: "x", Count: 11},
+	} {
+		k := l
+		k.Profile.Noise = &n
+		if err := k.validate(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	r := xrayTestLink(t, "reality", xrayModeDirect, xraySideIran)
+	r.Profile.Noise = &XrayNoise{Type: "str", Packet: "x"}
+	if err := r.validate(); err == nil || !strings.Contains(err.Error(), "UDP") {
+		t.Errorf("noise on a TCP link: %v", err)
 	}
 }

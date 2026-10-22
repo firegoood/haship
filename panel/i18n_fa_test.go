@@ -86,3 +86,13 @@ func TestI18nSourceIsEnglish(t *testing.T) {
 		}
 	}
 }
+
+// A Persian phrase must not hold its own English key: the page translates text
+// it shows, so "Path" -> "مسیر (Path)" grows forever and freezes the browser.
+func TestI18nFaValuesDoNotHoldTheirKey(t *testing.T) {
+	for en, fa := range faText(t) {
+		if strings.Contains(fa, en) {
+			t.Errorf("%q -> %q holds its own key", en, fa)
+		}
+	}
+}

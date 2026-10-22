@@ -2876,8 +2876,8 @@ window.FA_TEXT = {
 "Ports to forward": "پورت‌های فوروارد",
 "Security": "امنیت",
 "XHTTP mode": "حالت XHTTP",
-"Fingerprint": "اثر انگشت (Fingerprint)",
-"Target (host:port)": "مقصد Reality (host:port)",
+"Fingerprint": "اثر انگشت",
+"Target (host:port)": "مقصد Reality (میزبان:پورت)",
 "PROXY protocol to the target": "PROXY protocol به مقصد",
 "TLS server name": "نام سرور TLS",
 "Address to dial (CDN)": "آدرس اتصال (CDN)",
@@ -2905,7 +2905,7 @@ window.FA_TEXT = {
 "Tunnel port on this server": "پورت تونل روی این سرور",
 "Tunnel port on the foreign server": "پورت تونل روی سرور خارج",
 "System default": "پیش‌فرض سیستم",
-"Path": "مسیر (Path)",
+"Path": "مسیر",
 "gRPC service name": "نام سرویس gRPC",
 "Not with Vision or in reverse mode.": "نه با Vision و نه در حالت معکوس.",
 "tlshello or a range like 1-3; empty = off": "tlshello یا بازه‌ای مثل 1-3؛ خالی = خاموش",
@@ -2941,5 +2941,12 @@ window.FA_TEXT = {
 "On the server end. Empty: the panel's own certificate.": "روی سمت سرور. خالی یعنی گواهی خود پنل.",
 "The panel makes a certificate for this name and the dialing end trusts only that one.": "پنل برای این نام گواهی می‌سازد و سمت وصل‌شونده فقط به همان اعتماد می‌کند.",
 "Connects to": "وصل می‌شود به",
-"Open in the Xray tab": "باز کردن در تب Xray"
+"Open in the Xray tab": "باز کردن در تب Xray",
+"Noise (anti-DPI, on the dialing end)": "نویز (ضد DPI، روی سمتی که وصل می‌شود)",
+"Noise packets": "پکت‌های نویز",
+"Length (bytes)": "طول (بایت)",
+"Packet": "پکت",
+"How many": "تعداد",
+"Sent before the first real packet to each address; the other end drops them.": "قبل از اولین پکت واقعی به هر آدرس فرستاده می‌شوند؛ سمت دیگر دورشان می‌ریزد.",
+"TCP Fast Open": "باز کردن سریع TCP (TFO)"
 };
