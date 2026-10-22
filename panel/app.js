@@ -257,6 +257,7 @@ const PRO_TXT = {
   watchdog: ['pro_t_wd', 'Watchdog — Hashem Pro', 'pro_b_wd', 'The watchdog is a Hashem Pro feature. A watchdog that already runs keeps its alerts, backups and schedules.'],
   benchmark: ['pro_t_bench', 'Benchmark — Hashem Pro', 'pro_b_bench', 'The benchmark and the path test are Hashem Pro features.'],
   cluster: ['pro_t_cluster', 'Cluster — Hashem Pro', 'pro_b_cluster', 'The cluster is a Hashem Pro feature: pools of foreign servers behind one port, linked Iran hubs and DNS failover. Pools that already run keep running without it.'],
+  spoof: ['pro_t_spoof', 'Spoof Tunnel — Hashem Pro', 'pro_b_spoof', 'The Spoof Tunnel is a Hashem Pro feature, on both servers: an IP-spoofing pipe wrapped with WireGuard to cross whitelist-based Layer-3 firewalls.'],
 };
 function isSentinelLicensed() {
   const f = (_licenseData && _licenseData.is_valid && _licenseData.features) || [];
@@ -271,9 +272,11 @@ function proSync() {
   tag('navPerfPro', 'performance');
   tag('navWatchdogPro', 'watchdog');
   tag('navBenchmarkPro', 'benchmark');
+  tag('navSpoofPro', 'spoof');
+  tag('spoofPro', 'spoof');
   if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', clLicensed());
   if ($('navSentinelPro')) $('navSentinelPro').classList.toggle('hidden', isSentinelLicensed());
-  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
+  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navSpoofPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
     const el = $(id); if (!el) return;
     const t = id === 'navSentinelPro' ? tr('pro_addon', 'Add-on license') : 'Hashem Pro';
     el.title = t; el.setAttribute('aria-label', t);
@@ -290,7 +293,7 @@ function goTab(name) {
   // Bagher lives in Setup (create) and Tunnel (run) like every other tunnel.
   if (name === 'sshfwd' || name === 'bagher') { openBagherSetup(); return; }
   // Hashem Pro tabs: the license window instead of the tab
-  const proTab = { doctor: 'diagnostics', perf: 'performance', watchdog: 'watchdog', benchmark: 'benchmark' }[name];
+  const proTab = { doctor: 'diagnostics', perf: 'performance', watchdog: 'watchdog', benchmark: 'benchmark', spoof: 'spoof' }[name];
   if (proTab && !isProLicensed(proTab)) {
     if (_licenseData === null) {
       loadLicense().then(() => { if (isProLicensed(proTab)) goTab(name); else openBagherLicModal(proTab); });
@@ -310,7 +313,7 @@ function goTab(name) {
     openBagherLicModal('cluster');
     return;
   }
-  ['dashboard','tunnel','cluster','setup','logs','perf','watchdog','doctor','benchmark','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  ['dashboard','tunnel','cluster','setup','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -329,6 +332,7 @@ function goTab(name) {
   if (name === 'watchdog') loadWatchdog();
   if (name === 'doctor') loadDoctor();
   if (name === 'benchmark') { loadBenchmark(); loadPathTest(); }
+  if (name === 'spoof') loadSpoof();
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
   if (name === 'terminal') termOnShow();
@@ -448,6 +452,10 @@ const I18N = {
     nav_watchdog: "Watchdog",
     nav_doctor: "Diagnostics",
     nav_benchmark: "Benchmark",
+    nav_spoof: "Spoof",
+    spoof_title: "Spoof Tunnel",
+    spoof_sub: "A tunnel that forges its source IP on both servers to cross whitelist-based Layer-3 firewalls, wrapped with WireGuard for a real encrypted link. Test which spoof IPs get through first, then bring the tunnel up.",
+    spoof_idle: "Not configured",
     nav_update: "Update",
     upd_channel: "Update channel",
     upd_channel_stable: "Stable",
@@ -5143,6 +5151,270 @@ function pollSwap(id) {
     refresh();
     loadTunnelHealth();
   }, 1000);
+}
+
+// ---------- Spoof Tunnel (tab-spoof) ----------
+// An IP-spoofing UDP pipe (ParsaKSH/spoof-tunnel) wrapped with WireGuard. The
+// Iran server is "local", the foreign server "remote". Everything is rendered
+// into #spoofBody from the /api/spoof state.
+let _spoof = null;
+let _spoofTesterTimer = null;
+const SPOOF_TRANSPORTS = ['tcp', 'udp', 'icmp', 'icmpv6'];
+
+async function loadSpoof() {
+  const body = $('spoofBody');
+  if (!body) return;
+  try {
+    _spoof = await api('/api/spoof');
+  } catch (e) {
+    body.innerHTML = stateError(e.message, null, true);
+    return;
+  }
+  renderSpoof();
+  loadSpoofTester();
+}
+
+function spoofBadge(d, h) {
+  const b = $('spoofBadge');
+  if (!b) return;
+  let cls = 'dim', txt = tr('spoof_idle', 'Not configured');
+  if (d.enabled && h && h.core_active && h.wg_active) { cls = 'ok'; txt = tr('', 'Tunnel up'); }
+  else if (d.enabled) { cls = 'warn'; txt = tr('', 'Starting…'); }
+  else if (d.has_keys || (d.spoof_ips && d.spoof_ips.length)) { cls = 'info'; txt = tr('', 'Configured'); }
+  b.className = 'badge ' + cls;
+  b.textContent = txt;
+}
+
+function spoofOpt(sel, cur) {
+  return SPOOF_TRANSPORTS.map(t => `<option value="${t}"${t === cur ? ' selected' : ''}>${t.toUpperCase()}</option>`).join('');
+}
+
+function renderSpoof() {
+  const d = _spoof, h = d.health || {};
+  spoofBadge(d, h);
+  const body = $('spoofBody');
+  if (!d.installed) {
+    body.innerHTML = `<div class="sw-result warn">${esc(tr('', 'The spoof core is not installed on this server yet. Install it from the terminal:'))}
+      <textarea class="hashem-input sw-bundle" readonly data-no-i18n>hashem spoof install</textarea></div>`;
+  }
+  const isLocal = d.role === 'local';
+  const roleSeg = `<div class="qs-seg u-mb-12" role="group">
+      <button type="button" id="spRoleLocal" class="${isLocal ? 'active' : ''}" aria-pressed="${isLocal}">${esc(tr('', 'This is the Iran server'))}</button>
+      <button type="button" id="spRoleRemote" class="${!isLocal ? 'active' : ''}" aria-pressed="${!isLocal}">${esc(tr('', 'This is the foreign server'))}</button>
+    </div>`;
+
+  // Runtime health strip.
+  const dot = (on, label) => `<span class="sp-hdot ${on ? 'on' : 'off'}"></span>${esc(label)}`;
+  const health = d.installed ? `<div class="sp-health">
+      ${dot(h.core_active, tr('', 'Pipe'))}
+      ${dot(h.wg_active, tr('', 'WireGuard'))}
+      ${dot(h.peer_ping, tr('', 'Peer reachable'))}
+      ${h.handshake ? `<span class="sp-hs" data-no-i18n>${esc(tr('', 'Last handshake'))}: ${esc(h.handshake)}</span>` : ''}
+    </div>` : '';
+
+  // Setup form. The foreign server fills most fields by importing the bundle.
+  const ips = (d.spoof_ips || []).join('\n');
+  const form = `<div class="sp-grid">
+      <label class="qs-label" data-i18n-skip>${esc(tr('', "The other server's public IP"))}</label>
+      <input class="hashem-input u-ltr u-mono" id="spPeerIP" value="${esc(d.peer_public_ip || '')}" placeholder="198.51.100.10" autocomplete="off">
+      <div class="sp-row3">
+        <div><label class="qs-label">${esc(tr('', 'Public port'))}</label><input class="hashem-input u-ltr u-mono" id="spListen" value="${esc(String(d.listen_port || 8090))}" inputmode="numeric"></div>
+        <div><label class="qs-label">${esc(tr('', 'Recv port'))}</label><input class="hashem-input u-ltr u-mono" id="spRecv" value="${esc(String(d.recv_port || 5001))}" inputmode="numeric"></div>
+        <div><label class="qs-label">${esc(tr('', 'Spoof port'))}</label><input class="hashem-input u-ltr u-mono" id="spSpoofPort" value="${esc(String(d.spoof_port || 443))}" inputmode="numeric"></div>
+      </div>
+      <div class="sp-row2">
+        <div><label class="qs-label">${esc(tr('', 'Send transport'))}</label><select class="hashem-input" id="spSend">${spoofOpt(d.send_transport)}</select></div>
+        <div><label class="qs-label">${esc(tr('', 'Recv transport'))}</label><select class="hashem-input" id="spRecvT">${spoofOpt(d.recv_transport)}</select></div>
+      </div>
+      <label class="qs-label">${esc(tr('', 'Spoof source IPs (one per line, from the tester)'))}</label>
+      <textarea class="hashem-input u-ltr u-mono sp-ips" id="spIPs" rows="3" placeholder="203.0.113.7">${esc(ips)}</textarea>
+      <div class="sp-acts">
+        <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="spSaveBtn">${esc(tr('', 'Save'))}</button>
+        ${d.enabled
+          ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" id="spDownBtn">${esc(tr('', 'Stop tunnel'))}</button>`
+          : ''}
+        <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" id="spUpBtn">${esc(d.enabled ? tr('', 'Apply & restart') : tr('', 'Bring tunnel up'))}</button>
+      </div>
+    </div>`;
+
+  // WireGuard / bundle block, role-dependent.
+  let keyBlock;
+  if (isLocal) {
+    keyBlock = `<div class="sp-sub"><b>${esc(tr('', 'Link to the foreign server'))}</b>
+      <p class="qs-hint">${esc(tr('', 'Generate a bundle here and paste it into the Spoof tab on the foreign server. It carries the WireGuard keys for both sides.'))}</p>
+      <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="spBundleBtn">${esc(tr('', 'Generate foreign bundle'))}</button>
+      <div id="spBundleOut"></div></div>`;
+  } else {
+    keyBlock = `<div class="sp-sub"><b>${esc(tr('', 'Import the bundle from the Iran server'))}</b>
+      <p class="qs-hint">${esc(tr('', 'Paste the bundle generated in the Spoof tab on the Iran server. It fills the peer IP, ports, transports and WireGuard keys.'))}</p>
+      <textarea class="hashem-input u-ltr u-mono sp-ips" id="spBundleIn" rows="2" placeholder="spf1_…"></textarea>
+      <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="spImportBtn">${esc(tr('', 'Import bundle'))}</button></div>`;
+  }
+
+  body.innerHTML = (d.installed ? '' : body.innerHTML) + roleSeg + health + form + keyBlock + spoofTesterHTML();
+  spoofWire();
+  renderSpoofTester();
+}
+
+function spoofWire() {
+  const d = _spoof;
+  const setRole = role => spoofPost({ action: 'save', role });
+  if ($('spRoleLocal')) $('spRoleLocal').onclick = () => { if (d.role !== 'local') setRole('local'); };
+  if ($('spRoleRemote')) $('spRoleRemote').onclick = () => { if (d.role !== 'remote') setRole('remote'); };
+  if ($('spSaveBtn')) $('spSaveBtn').onclick = () => spoofPost(spoofFormReq('save'));
+  if ($('spUpBtn')) $('spUpBtn').onclick = () => spoofPost(spoofFormReq('up'), true);
+  if ($('spDownBtn')) $('spDownBtn').onclick = () => spoofPost({ action: 'down' });
+  if ($('spBundleBtn')) $('spBundleBtn').onclick = spoofGenBundle;
+  if ($('spImportBtn')) $('spImportBtn').onclick = spoofImport;
+  spoofTesterWire();
+}
+
+// spoofFormReq reads the form into a request of the given action.
+function spoofFormReq(action) {
+  const num = id => { const v = parseInt(($(id) || {}).value, 10); return isNaN(v) ? 0 : v; };
+  const ips = (($('spIPs') || {}).value || '').split('\n').map(s => s.trim()).filter(Boolean);
+  return {
+    action,
+    peer_public_ip: ($('spPeerIP') || {}).value || '',
+    listen_port: num('spListen'), recv_port: num('spRecv'), spoof_port: num('spSpoofPort'),
+    send_transport: ($('spSend') || {}).value, recv_transport: ($('spRecvT') || {}).value,
+    spoof_ips: ips,
+  };
+}
+
+async function spoofPost(req, isUp) {
+  const btns = ['spSaveBtn', 'spUpBtn', 'spDownBtn'].map($).filter(Boolean);
+  btns.forEach(b => b.disabled = true);
+  try {
+    const r = await api('/api/spoof', req);
+    _spoof = r.spoof || _spoof;
+    if (r.detail) toastOk(tr('', 'Spoof Tunnel'), r.detail);
+    else if (req.action === 'save') toastOk(tr('', 'Saved'), '');
+    await loadSpoof();
+  } catch (e) {
+    toastErr(tr('', 'Spoof Tunnel'), e.message);
+    btns.forEach(b => b.disabled = false);
+  }
+}
+
+async function spoofGenBundle() {
+  const btn = $('spBundleBtn');
+  btn.disabled = true;
+  try {
+    const r = await api('/api/spoof', Object.assign(spoofFormReq('bundle')));
+    _spoof = r.spoof || _spoof;
+    $('spBundleOut').innerHTML = `<textarea class="hashem-input sw-bundle" readonly data-no-i18n>${esc(r.bundle)}</textarea>
+      <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="spCopyBundle">${esc(tr('', 'Copy Bundle'))}</button>`;
+    $('spCopyBundle').onclick = () => (navigator.clipboard ? navigator.clipboard.writeText(r.bundle) : Promise.reject())
+      .then(() => toastOk(tr('', 'Bundle copied'), '')).catch(() => toastWarn(tr('', 'Copy failed'), r.bundle));
+  } catch (e) {
+    toastErr(tr('', 'Could not generate the bundle'), e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function spoofImport() {
+  const bundle = ($('spBundleIn') || {}).value || '';
+  if (!bundle.trim()) { toastWarn(tr('', 'Paste a bundle first'), ''); return; }
+  const btn = $('spImportBtn');
+  btn.disabled = true;
+  try {
+    await api('/api/spoof', { action: 'import', bundle });
+    toastOk(tr('', 'Bundle imported'), tr('', 'Now run the tester and bring the tunnel up.'));
+    await loadSpoof();
+  } catch (e) {
+    toastErr(tr('', 'Could not import the bundle'), e.message);
+    btn.disabled = false;
+  }
+}
+
+// ---- Spoof IP tester ----
+function spoofTesterHTML() {
+  return `<div class="sp-sub sp-tester"><b>${esc(tr('', 'Spoof IP tester'))}</b>
+    <p class="qs-hint">${esc(tr('', 'Finds which source IPs the firewall lets through. Run the receiver on one server and the sender on the other, then swap. Passing IPs become that server\'s spoof list.'))}</p>
+    <div class="sp-row2">
+      <div><label class="qs-label">${esc(tr('', 'Mode'))}</label><select class="hashem-input" id="stMode"><option value="receiver">${esc(tr('', 'Receiver'))}</option><option value="sender">${esc(tr('', 'Sender'))}</option></select></div>
+      <div><label class="qs-label">${esc(tr('', 'Protocol'))}</label><select class="hashem-input" id="stProto"><option value="icmp">ICMP</option><option value="tcp">TCP</option></select></div>
+    </div>
+    <div class="sp-row3">
+      <div><label class="qs-label">${esc(tr('', 'Timeout (s)'))}</label><input class="hashem-input u-ltr u-mono" id="stTimeout" value="30" inputmode="numeric"></div>
+      <div><label class="qs-label">${esc(tr('', 'Packets/IP'))}</label><input class="hashem-input u-ltr u-mono" id="stCount" value="10" inputmode="numeric"></div>
+      <div><label class="qs-label">${esc(tr('', 'Max loss %'))}</label><input class="hashem-input u-ltr u-mono" id="stLoss" value="20" inputmode="numeric"></div>
+    </div>
+    <div id="stSenderRow" class="hidden"><label class="qs-label">${esc(tr('', 'Destination IP (the receiver server)'))}</label><input class="hashem-input u-ltr u-mono" id="stDst" placeholder="198.51.100.10"></div>
+    <label class="qs-label">${esc(tr('', 'Source IPs / ranges / CIDRs (one per line)'))}</label>
+    <textarea class="hashem-input u-ltr u-mono sp-ips" id="stSources" rows="3" placeholder="203.0.113.0/24"></textarea>
+    <div class="sp-acts">
+      <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" id="stStart">${esc(tr('', 'Start test'))}</button>
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 hidden" id="stStop">${esc(tr('', 'Stop'))}</button>
+    </div>
+    <div id="stResult"></div></div>`;
+}
+
+function spoofTesterWire() {
+  const mode = $('stMode');
+  if (mode) mode.onchange = () => { const s = $('stSenderRow'); if (s) s.classList.toggle('hidden', mode.value !== 'sender'); };
+  if ($('stStart')) $('stStart').onclick = spoofTesterStart;
+  if ($('stStop')) $('stStop').onclick = () => api('/api/spoof/tester', { action: 'stop' }).then(loadSpoofTester).catch(() => {});
+}
+
+async function spoofTesterStart() {
+  const num = (id, dflt) => { const v = parseInt(($(id) || {}).value, 10); return isNaN(v) ? dflt : v; };
+  const sources = (($('stSources') || {}).value || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const req = {
+    action: 'start', mode: ($('stMode') || {}).value, protocol: ($('stProto') || {}).value,
+    sources, dst_ip: ($('stDst') || {}).value || '',
+    timeout: num('stTimeout', 30), packet_count: num('stCount', 10), max_loss: num('stLoss', 20),
+  };
+  try {
+    await api('/api/spoof/tester', req);
+    loadSpoofTester();
+  } catch (e) {
+    toastErr(tr('', 'Could not start the tester'), e.message);
+  }
+}
+
+async function loadSpoofTester() {
+  clearInterval(_spoofTesterTimer);
+  let t;
+  try { t = await api('/api/spoof/tester'); } catch (_) { return; }
+  _spoof && (_spoof._tester = t);
+  renderSpoofTester(t);
+  if (t.status === 'running') {
+    _spoofTesterTimer = setInterval(async () => {
+      let s;
+      try { s = await api('/api/spoof/tester'); } catch (_) { return; }
+      _spoof && (_spoof._tester = s);
+      renderSpoofTester(s);
+      if (s.status !== 'running') clearInterval(_spoofTesterTimer);
+    }, 1500);
+  }
+}
+
+function renderSpoofTester(t) {
+  t = t || (_spoof && _spoof._tester) || (_spoof && _spoof.tester);
+  const box = $('stResult');
+  if (!box || !t) return;
+  const start = $('stStart'), stop = $('stStop');
+  if (start) start.disabled = t.status === 'running';
+  if (stop) stop.classList.toggle('hidden', t.status !== 'running');
+  if (t.status === 'running') {
+    box.innerHTML = `<div class="sp-trun"><span class="ent-spinner"></span> ${esc(tr('', 'Testing…'))} <b data-no-i18n>${t.progress || 0}%</b></div>`;
+    return;
+  }
+  if (t.status === 'error') { box.innerHTML = `<div class="sw-result err">${esc(t.error || tr('', 'The test failed.'))}</div>`; return; }
+  const passed = t.passed || [];
+  if (t.status === 'done' && !passed.length) { box.innerHTML = `<div class="sw-result warn">${esc(tr('', 'No IPs passed. Try more sources or a higher loss threshold.'))}</div>`; return; }
+  if (!passed.length) { box.innerHTML = ''; return; }
+  const rows = passed.map(p => `<tr><td class="u-mono" data-no-i18n>${esc(p.ip)}</td><td class="u-mono" data-no-i18n>${p.received}/${p.sent}</td><td class="u-mono" data-no-i18n>${p.loss_pct.toFixed(1)}%</td></tr>`).join('');
+  box.innerHTML = `<div class="sw-result ok">${esc(docTpl('{0} usable spoof IPs found.', [String(passed.length)]))}</div>
+    <table class="sp-ttable"><thead><tr><th>${esc(tr('', 'IP'))}</th><th>${esc(tr('', 'Received'))}</th><th>${esc(tr('', 'Loss'))}</th></tr></thead><tbody>${rows}</tbody></table>
+    <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="stUse">${esc(tr('', 'Use these as my spoof IPs'))}</button>`;
+  if ($('stUse')) $('stUse').onclick = () => {
+    const el = $('spIPs');
+    if (el) { el.value = passed.map(p => p.ip).join('\n'); toastOk(tr('', 'Spoof IPs filled'), tr('', 'Save or bring the tunnel up to apply.')); }
+  };
 }
 
 // ---------- Watchdog & Backup (tab-watchdog) ----------

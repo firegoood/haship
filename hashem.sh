@@ -2106,6 +2106,118 @@ install_backhaul_binaries() {
     fi
 }
 
+# ---- Spoof Tunnel (ParsaKSH/spoof-tunnel): IP-spoofing UDP pipe + WireGuard ----
+DEFAULT_SPOOF_VERSION="v3.0.2"
+SPOOF_REPO="ParsaKSH/spoof-tunnel"
+# sha256 of the official v3.0.2 release binaries (verified on download).
+SPOOF_SHA256_amd64="a8dfe9e838ad5655b467765eae6f374e5f63af31bf2dded9aab295815fbcabf8"
+SPOOF_SHA256_arm64="caf08b3960d4eea72910fb0613a8893560a41f5b2f2e18f9a6c595c9ad7ea16c"
+
+# install_spoof_binary: download the pinned spoof core, verify its sha256, and
+# install it to INSTALL_DIR/spoof. WireGuard tools are pulled in too, since the
+# panel wraps the pipe with WireGuard.
+install_spoof_binary() {
+    install_wireguard_tools
+    if [[ -x "${INSTALL_DIR}/spoof" ]]; then
+        return 0
+    fi
+    detect_arch
+    if [[ "$FRP_ARCH" != "amd64" && "$FRP_ARCH" != "arm64" ]]; then
+        echo -e "${RED}[!] Spoof Tunnel has no release for ${FRP_ARCH} (amd64/arm64 only).${NC}"
+        return 1
+    fi
+    local SPOOF_VER="$DEFAULT_SPOOF_VERSION"
+    local WANT_SHA
+    eval "WANT_SHA=\${SPOOF_SHA256_${FRP_ARCH}}"
+    echo -e "${CYAN}[*] Downloading Spoof Tunnel ${SPOOF_VER} (${FRP_ARCH})...${NC}"
+
+    local TMP_DIR
+    TMP_DIR=$(mktemp -d)
+    local BIN_FILE="spoof-linux-${FRP_ARCH}"
+    local URL="https://github.com/${SPOOF_REPO}/releases/download/${SPOOF_VER}/${BIN_FILE}"
+    if ! download_with_fallback "${TMP_DIR}/spoof" "$URL" 90; then
+        echo -e "${RED}[!] Failed to download Spoof Tunnel from GitHub or mirrors.${NC}"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
+    local GOT_SHA
+    GOT_SHA=$(sha256sum "${TMP_DIR}/spoof" 2>/dev/null | awk '{print $1}')
+    if [[ -n "$WANT_SHA" && "$GOT_SHA" != "$WANT_SHA" ]]; then
+        echo -e "${RED}[!] Spoof binary checksum mismatch — refusing to install.${NC}"
+        echo -e "    want ${WANT_SHA}\n    got  ${GOT_SHA}"
+        rm -rf "$TMP_DIR"
+        return 1
+    fi
+    install -m 0755 "${TMP_DIR}/spoof" "${INSTALL_DIR}/spoof" 2>/dev/null || {
+        cp -f "${TMP_DIR}/spoof" "${INSTALL_DIR}/spoof" && chmod +x "${INSTALL_DIR}/spoof"; }
+    rm -rf "$TMP_DIR"
+    if [[ -x "${INSTALL_DIR}/spoof" ]]; then
+        echo -e "${GREEN}[OK] Spoof Tunnel ${SPOOF_VER} installed to ${INSTALL_DIR}/spoof.${NC}"
+        return 0
+    fi
+    echo -e "${RED}[!] Spoof binary install failed.${NC}"
+    return 1
+}
+
+# install_wireguard_tools: wg / wg-quick, used by the Spoof tunnel overlay.
+install_wireguard_tools() {
+    if command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1; then
+        return 0
+    fi
+    echo -e "${CYAN}[*] Installing WireGuard tools...${NC}"
+    if command -v apt-get >/dev/null 2>&1; then
+        wait_for_package_manager_lock 2>/dev/null || true
+        export DEBIAN_FRONTEND=noninteractive
+        (timeout 25 apt-get update -qq || true)
+        apt-get install -y -qq --no-install-recommends wireguard-tools 2>/dev/null || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q wireguard-tools 2>/dev/null || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y -q wireguard-tools 2>/dev/null || true
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm wireguard-tools 2>/dev/null || true
+    fi
+    command -v wg >/dev/null 2>&1 || echo -e "${YELLOW}[!] WireGuard tools not found; install 'wireguard-tools' manually.${NC}"
+}
+
+# cli_spoof: terminal entry for the Spoof Tunnel. Mutating actions need Pro,
+# checked through the panel binary (same key/rules as the panel).
+cli_spoof() {
+    local SUB="${1:-status}"
+    case "$SUB" in
+        install|cores)
+            pro_ok spoof "Spoof Tunnel" || return 1
+            install_spoof_binary || return 1
+            ;;
+        status)
+            if [[ -x "${INSTALL_DIR}/spoof" ]]; then
+                echo -e "${GREEN}[OK] Spoof core installed:${NC} $("${INSTALL_DIR}/spoof" --version 2>/dev/null || echo present)"
+            else
+                echo -e "${YELLOW}[!] Spoof core not installed. Run: hashem spoof install${NC}"
+            fi
+            systemctl is-active spoof-core >/dev/null 2>&1 && echo -e "  core:      ${GREEN}active${NC}" || echo -e "  core:      ${YELLOW}inactive${NC}"
+            systemctl is-active wg-quick@wg-spoof >/dev/null 2>&1 && echo -e "  wireguard: ${GREEN}active${NC}" || echo -e "  wireguard: ${YELLOW}inactive${NC}"
+            command -v wg >/dev/null 2>&1 && wg show wg-spoof 2>/dev/null || true
+            ;;
+        up|start)
+            pro_ok spoof "Spoof Tunnel" || return 1
+            install_spoof_binary || return 1
+            systemctl restart spoof-core 2>/dev/null && systemctl restart wg-quick@wg-spoof 2>/dev/null \
+                && echo -e "${GREEN}[OK] Spoof tunnel started.${NC}" \
+                || echo -e "${RED}[!] Could not start; set it up in the panel's Spoof tab first.${NC}"
+            ;;
+        down|stop)
+            systemctl disable --now wg-quick@wg-spoof 2>/dev/null || true
+            systemctl disable --now spoof-core 2>/dev/null || true
+            echo -e "${GREEN}[OK] Spoof tunnel stopped.${NC}"
+            ;;
+        *)
+            echo -e "Usage: hashem spoof {install|status|up|down}"
+            return 1
+            ;;
+    esac
+}
+
 backhaul_ensure_tls() {
     mkdir -p "$BACKHAUL_CONFIG_DIR"
     if [[ ! -f "${BACKHAUL_CONFIG_DIR}/server.crt" || ! -f "${BACKHAUL_CONFIG_DIR}/server.key" ]]; then
@@ -11041,6 +11153,7 @@ if [[ $# -gt 0 ]]; then
         backhaul|bh|modified-backhaul|backhaul-premium|mbh)
             menu_backhaul ;;
         backhaul-migrate) cli_backhaul_migrate ;;
+        spoof|spoof-tunnel) shift; cli_spoof "$@" ;;
         remove-tunnel)
             if [[ "${2:-}" == "--force" ]]; then remove_tunnel_force; else remove_tunnel; fi ;;
         uninstall)

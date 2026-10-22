@@ -286,9 +286,10 @@ const (
 	proPerformance = "performance"
 	proWatchdog    = "watchdog"
 	proBenchmark   = "benchmark"
+	proSpoof       = "spoof"
 )
 
-var proFeatures = []string{proPathTest, proBackhaul, proDiagnostics, proPerformance, proWatchdog, proBenchmark}
+var proFeatures = []string{proPathTest, proBackhaul, proDiagnostics, proPerformance, proWatchdog, proBenchmark, proSpoof}
 
 func hasPro(feature string) bool {
 	if HasFeature(feature) || HasFeature("bagher") || HasFeature("frp_ssh") {

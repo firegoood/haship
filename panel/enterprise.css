@@ -976,3 +976,28 @@ html[dir="rtl"] .ht-wires { transform: scaleX(-1); }
 
 /* Forwarded port count on tunnel cards (portCount in app.js) */
 .det-count { font-weight: 600; color: var(--tx); font-variant-numeric: tabular-nums; }
+
+/* ---- Spoof Tunnel tab (tab-spoof): sp-* ---- */
+.sp-health { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 4px 0 16px; font-size: var(--fs-small); color: var(--mu); }
+.sp-hdot { display: inline-flex; align-items: center; gap: 6px; }
+.sp-hdot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); display: inline-block; }
+.sp-hdot.on::before { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+.sp-hdot.off::before { background: var(--dim); }
+.sp-hs { color: var(--dim); }
+.sp-grid { display: flex; flex-direction: column; gap: 10px; }
+.sp-row2, .sp-row3 { display: grid; gap: 10px; }
+.sp-row2 { grid-template-columns: 1fr 1fr; }
+.sp-row3 { grid-template-columns: 1fr 1fr 1fr; }
+.sp-ips { resize: vertical; min-height: 60px; }
+.sp-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.sp-acts .hashem-btn { flex: 0 0 auto; }
+.sp-sub { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--ln); }
+.sp-sub > b { display: block; color: var(--tx); font-size: var(--fs-body); font-weight: 700; margin-bottom: 4px; }
+.sp-sub .qs-hint { margin-bottom: 10px; }
+.sp-sub .hashem-input { margin-bottom: 8px; }
+.sp-tester { background: var(--sunk); border-radius: var(--r-md); padding: 14px; border-top: none; margin-top: 18px; }
+.sp-trun { display: flex; align-items: center; gap: 8px; color: var(--mu); font-size: var(--fs-small); margin-top: 10px; }
+.sp-ttable { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: var(--fs-small); }
+.sp-ttable th { text-align: start; color: var(--dim); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--ln); }
+.sp-ttable td { padding: 4px 8px; color: var(--tx); border-bottom: 1px solid var(--ln2); }
+@media (max-width: 560px) { .sp-row3 { grid-template-columns: 1fr; } .sp-row2 { grid-template-columns: 1fr; } }

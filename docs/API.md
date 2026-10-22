@@ -106,6 +106,10 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/session-settings` | session + CSRF | `handleSessionSettingsPost` |
 | `GET` | `/api/setup` | session | `handleSetupGet` |
 | `POST` | `/api/setup` | session + CSRF | `handleSetupPost` |
+| `GET` | `/api/spoof` | session | `handleSpoofGet` |
+| `POST` | `/api/spoof` | session + CSRF | `handleSpoofPost` |
+| `GET` | `/api/spoof/tester` | session | `handleSpoofTester` |
+| `POST` | `/api/spoof/tester` | session + CSRF | `handleSpoofTester` |
 | `GET` | `/api/sshfwd` | session | `handleSSHFwdGet` |
 | `POST` | `/api/sshfwd` | session + CSRF | `handleSSHFwdPost` |
 | `GET` | `/api/status` | session | `handleStatus` |
@@ -144,4 +148,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 120 routes.
+Total: 124 routes.
