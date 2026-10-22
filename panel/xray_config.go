@@ -16,16 +16,24 @@ package main
 // This file only builds configs: pure functions, no I/O.
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -83,6 +91,11 @@ type XrayKeys struct {
 	PrivateKey string `json:"private_key,omitempty"`
 	PublicKey  string `json:"public_key,omitempty"`
 	ShortID    string `json:"short_id,omitempty"`
+	// TLS without a certificate of the user's own: one the panel makes for the
+	// SNI (PEM). The key lives only on the TLS server end; the dialing end
+	// pins the certificate, or, through a CDN, checks the CDN's real one.
+	TLSCert string `json:"tls_cert,omitempty"`
+	TLSKey  string `json:"tls_key,omitempty"`
 }
 
 // XrayProfile is how the link looks on the wire. A beginner picks a preset
@@ -102,9 +115,12 @@ type XrayProfile struct {
 	Path      string `json:"path,omitempty"` // xhttp / ws / httpupgrade path, gRPC service name
 	Host      string `json:"host,omitempty"` // HTTP Host header
 	XHTTPMode string `json:"xhttp_mode,omitempty"`
-	// Address is dialed instead of the other server's IP (a CDN domain).
+	// CDN: the dialing end goes through a CDN (Cloudflare) to the SNI domain,
+	// whose DNS record points at the TLS server end.
+	CDN bool `json:"cdn,omitempty"`
+	// Address is dialed instead of the other server (a CDN's clean IP).
 	Address  string `json:"address,omitempty"`
-	CertFile string `json:"cert_file,omitempty"` // TLS server end
+	CertFile string `json:"cert_file,omitempty"` // TLS server end: the user's own certificate
 	KeyFile  string `json:"key_file,omitempty"`
 
 	Mux        int    `json:"mux,omitempty"` // mux concurrency, 0 = off
@@ -161,7 +177,7 @@ var xrayPresets = map[string]XrayProfile{
 	// HTTP requests instead of one long stream: for when raw Reality is cut.
 	"xhttp": {Preset: "xhttp", Transport: "xhttp", Security: "reality", XHTTPMode: "auto", Fingerprint: "chrome"},
 	// Through a CDN (Cloudflare): a real domain and certificate.
-	"cdn":  {Preset: "cdn", Transport: "xhttp", Security: "tls", XHTTPMode: "packet-up", Fingerprint: "chrome"},
+	"cdn":  {Preset: "cdn", Transport: "xhttp", Security: "tls", CDN: true, XHTTPMode: "packet-up", Fingerprint: "chrome"},
 	"grpc": {Preset: "grpc", Transport: "grpc", Security: "reality", Fingerprint: "chrome"},
 	// UDP: for when TCP is throttled.
 	"kcp": {Preset: "kcp", Transport: "kcp", Security: "none", KCP: &XrayKCP{MTU: 1350, TTI: 20, Up: 20, Down: 100, Congestion: true}},
@@ -284,8 +300,85 @@ func newXrayLink(l XrayLink) (XrayLink, error) {
 			l.Profile.SNI = xraySNIReverse[0]
 		}
 	}
+	// TLS with no certificate of the user's own: the panel makes one for the
+	// SNI, and a new one when the SNI changes.
+	if l.Profile.Security == "tls" && l.Profile.CertFile == "" && l.Profile.SNI != "" {
+		if cn, _ := xrayCertName(l.Keys.TLSCert); cn != l.Profile.SNI {
+			if l.Keys.TLSCert, l.Keys.TLSKey, err = newXrayCert(l.Profile.SNI); err != nil {
+				return l, err
+			}
+		}
+	}
+	if l.Profile.Security != "tls" {
+		l.Keys.TLSCert, l.Keys.TLSKey = "", ""
+	}
 	return l, nil
 }
+
+// newXrayCert is a self-signed ECDSA certificate for name, valid ten years
+// (PEM). A CDN in "Full" mode accepts it; without a CDN the dialing end pins it.
+func newXrayCert(name string) (certPEM, keyPEM string, err error) {
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 120))
+	if err != nil {
+		return "", "", err
+	}
+	tpl := &x509.Certificate{
+		SerialNumber: serial, Subject: pkix.Name{CommonName: name}, DNSNames: []string{name},
+		NotBefore: time.Now().Add(-24 * time.Hour), NotAfter: time.Now().AddDate(10, 0, 0),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	if ip := net.ParseIP(name); ip != nil {
+		tpl.DNSNames, tpl.IPAddresses = nil, []net.IP{ip}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &k.PublicKey, k)
+	if err != nil {
+		return "", "", err
+	}
+	kb, err := x509.MarshalECPrivateKey(k)
+	if err != nil {
+		return "", "", err
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb})), nil
+}
+
+// xrayCertName is a PEM certificate's name and its SHA-256 (hex), the pin
+// the dialing end checks.
+func xrayCertName(certPEM string) (name, sha string) {
+	b, _ := pem.Decode([]byte(certPEM))
+	if b == nil || b.Type != "CERTIFICATE" {
+		return "", ""
+	}
+	c, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		return "", ""
+	}
+	sum := sha256.Sum256(c.Raw)
+	return c.Subject.CommonName, hex.EncodeToString(sum[:])
+}
+
+// xrayKeyOK reports whether a PEM private key parses.
+func xrayKeyOK(keyPEM string) bool {
+	b, _ := pem.Decode([]byte(keyPEM))
+	if b == nil {
+		return false
+	}
+	if _, err := x509.ParseECPrivateKey(b.Bytes); err == nil {
+		return true
+	}
+	_, err := x509.ParsePKCS8PrivateKey(b.Bytes)
+	return err == nil
+}
+
+// xrayPEMLines is a PEM block as Xray's inline certificate lines.
+func xrayPEMLines(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") }
+
+// xrayCDNPorts are the HTTPS ports Cloudflare proxies.
+var xrayCDNPorts = []int{443, 2053, 2083, 2087, 2096, 8443}
 
 // ---- validation ----
 
@@ -426,8 +519,33 @@ func (l XrayLink) validate() error {
 			return fmt.Errorf("the Reality public key is invalid")
 		}
 	}
-	if p.Security == "tls" && l.serverEnd() && (!xrayFileRe.MatchString(p.CertFile) || !xrayFileRe.MatchString(p.KeyFile)) {
-		return fmt.Errorf("TLS needs a certificate and key file (absolute paths) on the server end")
+	if p.Security == "tls" {
+		ownCert := p.CertFile != "" || p.KeyFile != ""
+		switch {
+		case ownCert && (!xrayFileRe.MatchString(p.CertFile) || !xrayFileRe.MatchString(p.KeyFile)):
+			return fmt.Errorf("your own certificate needs both files, as absolute paths")
+		case !ownCert && l.serverEnd() && !xrayKeyOK(l.Keys.TLSKey):
+			return fmt.Errorf("the link's TLS certificate is missing: save the link again on the Iran server")
+		case !ownCert && !p.CDN:
+			// the dialing end pins the panel's certificate
+			if _, sha := xrayCertName(l.Keys.TLSCert); sha == "" {
+				return fmt.Errorf("the link's TLS certificate is missing: save the link again on the Iran server")
+			}
+		}
+	}
+	if p.CDN {
+		if p.Security != "tls" {
+			return fmt.Errorf("a CDN needs TLS")
+		}
+		if net.ParseIP(p.SNI) != nil {
+			return fmt.Errorf("a CDN needs a domain name, not an IP")
+		}
+		if !xrayHasPort(xrayCDNPorts, l.TunnelPort) {
+			return fmt.Errorf("Cloudflare passes HTTPS only on ports 443, 2053, 2083, 2087, 2096 and 8443: pick one as the tunnel port")
+		}
+		if p.Transport != "xhttp" && p.Transport != "ws" && p.Transport != "httpupgrade" && p.Transport != "grpc" {
+			return fmt.Errorf("a CDN carries XHTTP, WebSocket, HTTPUpgrade or gRPC")
+		}
 	}
 	if f := p.Fragment; f != nil {
 		if (f.Packets != "tlshello" && !xrayRangeRe.MatchString(f.Packets)) || !xrayRangeRe.MatchString(f.Length) ||
@@ -602,6 +720,9 @@ func xrayDialAddress(l XrayLink) string {
 	if l.Profile.Address != "" {
 		return l.Profile.Address
 	}
+	if l.Profile.CDN {
+		return l.Profile.SNI // the domain, which the CDN answers for
+	}
 	return l.Remote
 }
 
@@ -632,12 +753,22 @@ func xrayStream(l XrayLink, server bool) map[string]any {
 		}
 	case "tls":
 		if server {
-			s["tlsSettings"] = map[string]any{
-				"serverName":   p.SNI,
-				"certificates": []any{map[string]any{"certificateFile": p.CertFile, "keyFile": p.KeyFile}},
+			// the user's own certificate files, or the panel's, inline
+			cert := map[string]any{"certificateFile": p.CertFile, "keyFile": p.KeyFile}
+			if p.CertFile == "" {
+				cert = map[string]any{"certificate": xrayPEMLines(l.Keys.TLSCert), "key": xrayPEMLines(l.Keys.TLSKey)}
 			}
+			s["tlsSettings"] = map[string]any{"serverName": p.SNI, "certificates": []any{cert}}
 		} else {
-			s["tlsSettings"] = map[string]any{"serverName": p.SNI, "fingerprint": xrayFP(p)}
+			ts := map[string]any{"serverName": p.SNI, "fingerprint": xrayFP(p)}
+			// No CDN and the panel's certificate: trust exactly that one. Through
+			// a CDN the CDN's real certificate is checked as usual.
+			if !p.CDN && p.CertFile == "" {
+				if _, sha := xrayCertName(l.Keys.TLSCert); sha != "" {
+					ts["pinnedPeerCertSha256"] = sha
+				}
+			}
+			s["tlsSettings"] = ts
 		}
 	}
 	host := p.Host

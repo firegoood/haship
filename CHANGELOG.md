@@ -16,8 +16,11 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 - **SNI tester.** Tests the disguise sites from the server (TLS 1.3 with h2) and picks the fastest that works.
 - Each link's traffic is counted on its own (`xray-N`) with the panel's counters.
 - CLI: `hashem xray install|status|start|stop|restart|logs|uninstall`. `hashem uninstall` removes the tunnel's units and core.
-- **Tested in CI** with the real Xray-core: every preset in both modes carries 8 MiB each way (sha256), 16 parallel connections and UDP. Reverse mode is tested with the Iran server's outgoing connections blocked. The lab also checks that a fake 3x-ui on port 443 is named and left running, that the tunnel port without the key shows the borrowed site's certificate, that the foreign end refuses a port it does not forward, and that a reverse link comes back after the foreign Xray is killed.
-- Coming next: CDN mode (TLS through Cloudflare) in the wizard, and the links on the dashboard map and the Tunnel tab.
+- **Tested in CI** with the real Xray-core: every preset, and TLS on XHTTP, WebSocket, HTTPUpgrade and gRPC (the path a CDN takes to the server), in both modes, carries 8 MiB each way (sha256), 16 parallel connections and UDP. Reverse mode is tested with the Iran server's outgoing connections blocked. The lab also checks that a fake 3x-ui on port 443 is named and left running, that the tunnel port without the key shows the borrowed site's certificate, that the foreign end refuses a port it does not forward, and that a reverse link comes back after the foreign Xray is killed.
+- **CDN mode (Cloudflare).** A CDN preset sends the link through Cloudflare: a censor sees only a Cloudflare site, and a blocked server IP stays reachable. You give a domain whose DNS is on Cloudflare and, if you like, a clean Cloudflare IP. The wizard lists the Cloudflare steps: an A record with the proxy on, and SSL/TLS mode Full. The tunnel port is limited to the ports Cloudflare passes (443, 2053, 2083, 2087, 2096, 8443). The panel makes the certificate for the domain, carried inside the config, so no file has to be set up. The link's picture shows the cloud on the way. XHTTP is the default; WebSocket, HTTPUpgrade and gRPC are in the advanced settings.
+- **TLS without a CDN** (advanced settings): the panel's certificate, pinned on the dialing end, so it is checked with no certificate authority. Your own certificate files can be used instead.
+- The Xray tab sits in the Tunnel group, right after Setup.
+- Coming next: the links on the dashboard map and the Tunnel tab.
 
 ### Bagher: lower ping, and several foreign servers on one Iran server
 

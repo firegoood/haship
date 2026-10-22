@@ -27,8 +27,7 @@ func xrayTestLink(t *testing.T, preset, mode, side string) XrayLink {
 		l.Remote = "203.0.113.9"
 	}
 	if preset == "cdn" {
-		l.Profile.SNI, l.Profile.Address = "tun.example.com", "tun.example.com"
-		l.Profile.CertFile, l.Profile.KeyFile = "/etc/hashem/tls/cert.pem", "/etc/hashem/tls/key.pem"
+		l.Profile.SNI, l.Profile.Address = "tun.example.com", "104.16.0.1"
 	}
 	l.Keys = XrayKeys{UUID: "0f8d5c7e-1a2b-4c3d-8e9f-0123456789ab", ShortID: "a1b2c3d4"}
 	if p.Security == "reality" {
@@ -48,7 +47,7 @@ func xrayTestLink(t *testing.T, preset, mode, side string) XrayLink {
 	}
 	// The dialing end never has the Reality private key.
 	if !l.serverEnd() {
-		l.Keys.PrivateKey = ""
+		l.Keys.PrivateKey, l.Keys.TLSKey = "", ""
 	}
 	return l
 }
@@ -205,7 +204,7 @@ func TestXrayConfigTransports(t *testing.T) {
 	}{
 		{"xhttp", []string{`"network":"xhttp"`, `"xhttpSettings":{"mode":"auto","path":"/p1"}`, `"security":"reality"`}},
 		{"grpc", []string{`"grpcSettings":{"serviceName":"svc1"}`}},
-		{"cdn", []string{`"security":"tls"`, `"address":"tun.example.com"`, `"host":"tun.example.com"`, `"mode":"packet-up"`}},
+		{"cdn", []string{`"security":"tls"`, `"address":"104.16.0.1"`, `"host":"tun.example.com"`, `"mode":"packet-up"`}},
 		{"kcp", []string{`"network":"kcp"`, `"kcpSettings":{"congestion":true,"downlinkCapacity":100,"mtu":1350,"tti":20,"uplinkCapacity":20}`,
 			`"finalmask":{"udp":[{"settings":{"password":"kcppassword1"},"type":"mkcp-aes128gcm"}]}`, `"security":"none"`}},
 	}
@@ -383,6 +382,16 @@ func xrayTestMatrix(t *testing.T) map[string]XrayLink {
 			}
 		}
 	}
+	// TLS without a CDN (the panel's certificate, pinned) on every transport it carries,
+	// and the user's own certificate files
+	for _, tr := range []string{"xhttp", "ws", "httpupgrade", "grpc"} {
+		for _, mode := range []string{xrayModeDirect, xrayModeReverse} {
+			for _, side := range []string{xraySideIran, xraySideForeign} {
+				m["tls-"+tr+"-"+mode+"-"+side] = xrayTLSLink(t, tr, mode, side)
+			}
+		}
+	}
+	m["tls-xhttp-direct-foreign-owncert"] = xrayTLSLink(t, "xhttp", xrayModeDirect, xraySideForeign)
 	return m
 }
 
@@ -397,7 +406,7 @@ func TestXrayConfigsLoad(t *testing.T) {
 	cert, key := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
 	writeTestCert(t, cert, key)
 	for name, l := range xrayTestMatrix(t) {
-		if l.Profile.Security == "tls" {
+		if strings.HasSuffix(name, "-owncert") {
 			l.Profile.CertFile, l.Profile.KeyFile = cert, key
 		}
 		cfg, err := buildXrayConfig(l)
@@ -435,5 +444,110 @@ func writeTestCert(t *testing.T, certPath, keyPath string) {
 	}
 	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// xrayTLSLink is a TLS link without a CDN on transport tr, as the Iran server
+// makes it and each end keeps it.
+func xrayTLSLink(t *testing.T, tr, mode, side string) XrayLink {
+	t.Helper()
+	l := XrayLink{ID: 3, Mode: mode, Side: xraySideIran, Remote: "198.51.100.7", TunnelPort: 2083, Ports: []int{2053}, UDP: true,
+		Profile: XrayProfile{Transport: tr, Security: "tls", SNI: "tun.example.com", Fingerprint: "chrome"}}
+	l.Keys.UUID = "0f8d5c7e-1a2b-4c3d-8e9f-0123456789ab"
+	l, err := newXrayLink(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Side = side
+	if side == xraySideForeign && !l.serverEnd() {
+		l.Keys.TLSKey = "" // the bundle keeps it from the dialing foreign server
+	}
+	return l
+}
+
+func TestXrayTLSAndCDN(t *testing.T) {
+	// The panel's certificate: made for the SNI, kept, made again for a new SNI.
+	l := xrayTLSLink(t, "xhttp", xrayModeDirect, xraySideIran)
+	name, pin := xrayCertName(l.Keys.TLSCert)
+	if name != "tun.example.com" || len(pin) != 64 || !xrayKeyOK(l.Keys.TLSKey) {
+		t.Fatalf("certificate %q pin %q", name, pin)
+	}
+	same, _ := newXrayLink(l)
+	if same.Keys.TLSCert != l.Keys.TLSCert {
+		t.Error("the certificate changed although the SNI did not")
+	}
+	other := l
+	other.Profile.SNI = "cdn.example.org"
+	other, _ = newXrayLink(other)
+	if n, _ := xrayCertName(other.Keys.TLSCert); n != "cdn.example.org" {
+		t.Errorf("a new SNI kept the old certificate (%s)", n)
+	}
+
+	// Without a CDN the dialing end trusts exactly that certificate...
+	cfg, err := buildXrayConfig(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := xrayJSON(t, cfg)
+	if !strings.Contains(s, `"pinnedPeerCertSha256":"`+pin+`"`) || !strings.Contains(s, `"address":"198.51.100.7"`) {
+		t.Errorf("Iran (client) does not pin the certificate or dials the wrong address:\n%s", s)
+	}
+	// ...and the server end serves it inline, no file needed.
+	f := xrayTLSLink(t, "xhttp", xrayModeDirect, xraySideForeign)
+	cfg, err = buildXrayConfig(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = xrayJSON(t, cfg)
+	if !strings.Contains(s, `"certificate":["-----BEGIN CERTIFICATE-----"`) || !strings.Contains(s, `"key":["-----BEGIN EC PRIVATE KEY-----"`) {
+		t.Errorf("server end lacks the inline certificate:\n%s", s)
+	}
+
+	// Through a CDN: the CDN's own certificate is checked, the domain or clean IP dialed.
+	c := xrayTestLink(t, "cdn", xrayModeDirect, xraySideIran)
+	c.Profile.Address = ""
+	cfg, err = buildXrayConfig(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = xrayJSON(t, cfg)
+	if strings.Contains(s, "pinnedPeerCertSha256") || !strings.Contains(s, `"address":"tun.example.com"`) {
+		t.Errorf("CDN client pins or does not dial the domain:\n%s", s)
+	}
+	c.TunnelPort = 9443
+	if err := c.validate(); err == nil || !strings.Contains(err.Error(), "Cloudflare") {
+		t.Errorf("CDN on a port Cloudflare does not pass: %v", err)
+	}
+	c.TunnelPort, c.Profile.SNI = 443, "203.0.113.4"
+	if err := c.validate(); err == nil {
+		t.Error("CDN with an IP for its domain")
+	}
+	c.Profile.SNI, c.Profile.Transport = "tun.example.com", "kcp"
+	if err := c.validate(); err == nil {
+		t.Error("CDN over mKCP")
+	}
+
+	// The bundle carries the key only to the end that serves TLS.
+	l.Keys.PrivateKey = ""
+	bd, err := makeXrayBundle(l, "203.0.113.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fb, _ := parseXrayBundle(bd)
+	if !xrayKeyOK(fb.Keys.TLSKey) {
+		t.Error("direct: the foreign server (TLS server) did not get the key")
+	}
+	r := xrayTLSLink(t, "ws", xrayModeReverse, xraySideIran)
+	bd, err = makeXrayBundle(r, "203.0.113.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rb, _ := parseXrayBundle(bd)
+	if rb.Keys.TLSKey != "" || rb.Keys.TLSCert == "" {
+		t.Error("reverse: the foreign server (dialing) got the TLS key, or no certificate to pin")
+	}
+	// Reality links carry no certificate.
+	if g := xrayTestLink(t, "reality", xrayModeDirect, xraySideIran); g.Keys.TLSCert != "" {
+		t.Error("a Reality link has a TLS certificate")
 	}
 }

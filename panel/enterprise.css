@@ -1056,7 +1056,7 @@ html[dir="rtl"] .ht-wires { transform: scaleX(-1); }
   .xr-scene .xr-dial, .xr-scene .tv-tag, .xr-scene .tv-meta { grid-column: 1 / -1; }
   .xr-scene .xr-dial { grid-row: 1; }
   .xr-scene .tv-tag { grid-row: 2; }
-  .xr-scene .tv-node, .xr-scene .tv-pipe { grid-row: 3; }
+  .xr-scene .tv-node, .xr-scene .xr-pipe { grid-row: 3; }
   .xr-scene .tv-meta { grid-row: 4; }
 }
 /* Persian words next to a domain or a number keep their own reading order */
@@ -1133,3 +1133,8 @@ html[dir="rtl"] .ht-wires { transform: scaleX(-1); }
 @media (prefers-reduced-motion: reduce) {
   .xr-wire.live::after, .xr-dash, .xr-run li.go i { animation: none; }
 }
+/* the pipe and, through a CDN, the cloud it passes */
+.xr-pipe { position: relative; width: 100%; }
+.xr-cdn { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--gold); background: var(--s1); border: 1px solid var(--gold-line); box-shadow: 0 0 0 4px var(--gold-soft); }
+.xr-cdn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.xr-list { margin: 0; padding-inline-start: 20px; display: grid; gap: 4px; }

@@ -316,7 +316,7 @@ function goTab(name) {
     openBagherLicModal('cluster');
     return;
   }
-  ['dashboard','tunnel','cluster','setup','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  ['dashboard','tunnel','cluster','setup','xray','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -5472,6 +5472,9 @@ let _xrTimer = null;
 let _xrWiz = null;     // the open wizard: {step, id, mode, preset, profile, ...}
 let _xrCheckT = null;  // debounce of the wizard's port check
 let _xrCheck = null;   // its last answer
+// the HTTPS ports Cloudflare proxies (the server checks the same list)
+const XR_CDN_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
+const ICO_CLOUD = '<svg viewBox="0 0 24 24"><path d="M7 18h10.5a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.2 9.4 4.3 4.3 0 0 0 7 18z"/></svg>';
 const XR_STEPS = [['core', 'Xray-core'], ['ports', 'Ports are free'], ['config', 'Xray accepts the config'], ['service', 'Service running'], ['link', 'Link works']];
 // meter: speed, stealth, stability (out of 5)
 const XR_PRESETS = {
@@ -5479,6 +5482,7 @@ const XR_PRESETS = {
   xhttp: { name: 'XHTTP', wire: 'VLESS · XHTTP · Reality', meter: [4, 5, 4], hint: 'Ordinary HTTP requests instead of one long stream: for when plain Reality gets cut.' },
   grpc: { name: 'gRPC', wire: 'VLESS · gRPC · Reality', meter: [4, 4, 3], hint: 'Many streams over one connection, like an app talking to its API.' },
   kcp: { name: 'mKCP', wire: 'VLESS · mKCP · UDP', meter: [3, 2, 3], hint: 'Over UDP, encrypted by mKCP: for when TCP is throttled.' },
+  cdn: { name: 'CDN', wire: 'VLESS · XHTTP · TLS · Cloudflare', meter: [3, 5, 5], hint: 'Through Cloudflare: a censor sees only a Cloudflare site, and a blocked server IP stays reachable. Needs a domain on Cloudflare.' },
 };
 const ICO_USERS = '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/></svg>';
 const ICO_APP = '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>';
@@ -5585,10 +5589,10 @@ function xrScene(o) {
     <div class="tv-link">
       <div class="xr-dial${rev ? ' rev' : ''}">${xrArrow('')}<span>${esc(tr('', rev ? 'the foreign server dials Iran' : 'Iran dials the foreign server'))}</span></div>
       <div class="tv-tag">${(o.tags || []).filter(t => t && t[0]).map(t => `<span class="${t[1] || ''}" ${t[2] ? '' : 'data-no-i18n'}>${esc(t[0])}</span>`).join('')}</div>
-      <div class="tv-pipe" role="img" aria-label="${esc(tr('', live ? 'Tunnel connected' : 'Tunnel down'))}">
+      <div class="xr-pipe"><div class="tv-pipe" role="img" aria-label="${esc(tr('', live ? 'Tunnel connected' : 'Tunnel down'))}">
         ${xrLane('tv-u', o.up, live)}${xrLane('tv-d', o.dn, live)}
         ${live ? '' : '<span class="tv-break" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg></span>'}
-      </div>
+      </div>${o.cdn ? `<span class="xr-cdn" role="img" aria-label="Cloudflare" title="Cloudflare">${ICO_CLOUD}</span>` : ''}</div>
       <div class="tv-meta">${(o.meta || []).join('')}</div>
     </div>
     ${node('foreign', ICO_GLOBE, true, o.forSub)}
@@ -5604,7 +5608,8 @@ function xrTags(p) {
   if (p.security === 'reality') wire.push('Reality'); else if (p.security === 'tls') wire.push('TLS');
   if (p.vision) wire.push('Vision');
   tags.push([wire.join(' · '), 'eng']);
-  if (p.security !== 'none' && p.sni) tags.push([tr('', 'looks like') + ' ' + p.sni, 'mask', true]);
+  if (p.cdn && p.sni) tags.push([tr('', 'through Cloudflare as') + ' ' + p.sni, 'mask', true]);
+  else if (p.security !== 'none' && p.sni) tags.push([tr('', 'looks like') + ' ' + p.sni, 'mask', true]);
   else if (p.transport === 'kcp') tags.push([tr('', 'encrypted UDP'), 'mask', true]);
   return tags;
 }
@@ -5626,7 +5631,7 @@ function xrLinkCard(l) {
   const rev = l.mode === 'reverse', tp = ' :' + l.tunnel_port;
   const iranAddr = iran ? (_xray.public_ip || '') : (l.remote || ''), forAddr = iran ? (l.remote || '') : '';
   const scene = xrScene({
-    state, mode: l.mode, here: l.side, up, dn, meta, tags: xrTags(l.profile || {}),
+    state, mode: l.mode, here: l.side, up, dn, meta, tags: xrTags(l.profile || {}), cdn: !!(l.profile || {}).cdn,
     iranSub: iranAddr + (rev ? tp : ''), forSub: forAddr + (rev ? '' : tp),
   });
   const badge = { ok: ['ok', 'Connected'], warn: ['warn', link === 'listening' ? 'Ready' : 'Checking…'], down: ['err', 'No connection'], off: ['dim', 'Stopped'] }[state];
@@ -5818,6 +5823,15 @@ function xrWizPresetSet(name) {
   _xrWiz.preset = name;
   _xrWiz.profile = xrPresetOf(name);
   if (_xrWiz.profile.security === 'reality') _xrWiz.profile.sni = sni;
+  if (_xrWiz.profile.cdn && !XR_CDN_PORTS.includes(_xrWiz.tunnel_port)) _xrWiz.tunnel_port = 443;
+}
+
+// xrWizRefresh redraws the settings after a choice that changes which fields apply.
+function xrWizRefresh() {
+  xrWizRead();
+  _xrWiz.advOpen = true;
+  if (_xrWiz.profile.cdn && !XR_CDN_PORTS.includes(_xrWiz.tunnel_port)) _xrWiz.tunnel_port = 443;
+  xrWizRender();
 }
 
 function xrWizPreset(name) { xrWizRead(); xrWizPresetSet(name); xrWizRender(); }
@@ -5839,14 +5853,31 @@ function xrWizStep2() {
   const f = (id, label, val, ph, hint, extra) => `<div class="xr-field"><label class="qs-label" for="${id}">${esc(tr('', label))}</label>
       <input class="hashem-input u-ltr u-mono" id="${id}" value="${esc(val == null ? '' : String(val))}" placeholder="${esc(ph || '')}" autocomplete="off" ${extra || ''}>
       ${hint ? `<div class="qs-hint" id="${id}Hint">${hint}</div>` : `<div class="qs-hint" id="${id}Hint"></div>`}</div>`;
-  const reality = p.security === 'reality';
+  const reality = p.security === 'reality', cdn = !!p.cdn;
   const sniList = ((_xray && _xray.sni) || {})[rev ? 'reverse' : 'direct'] || [];
+  // where the domain's DNS record points: the server the CDN connects to
+  const origin = rev ? (w.public_ip || tr('', "this server's IP")) : (w.remote || tr('', "the foreign server's IP"));
+  const cdnHTML = !cdn ? '' : `<div class="xr-fields">
+      ${f('xrSni', 'Domain on Cloudflare', p.sni, 'tun.example.com', esc(tr('', 'A domain or subdomain whose DNS is on Cloudflare.')))}
+      ${f('xrAddr', 'Clean Cloudflare IP (optional)', p.address, '104.16.0.1', esc(tr('', 'The address the dialing server connects to. Empty: the domain itself.')))}
+    </div>
+    <div class="xr-note info">${ICO_INFO}<div class="xr-note-body"><b>${esc(tr('', 'On Cloudflare'))}</b>
+      <ol class="xr-list">
+        <li>${esc(tr('', 'DNS: an A record for the domain to'))} <bdi class="u-mono" data-no-i18n>${esc(origin)}</bdi>, ${esc(tr('', 'with the proxy on (orange cloud).'))}</li>
+        <li>${esc(tr('', 'SSL/TLS mode: Full (not Full strict). The link uses a certificate the panel makes for the domain.'))}</li>
+        <li>${esc(tr('', 'Network: turn on WebSockets or gRPC if you pick those transports in the advanced settings.'))}</li>
+      </ol></div></div>`;
   return `<div class="xr-presets">${presets}</div>
     <div class="xr-fields">
-      ${f('xrRemote', rev ? 'Foreign server IP (optional)' : 'Foreign server IP or domain', w.remote, '198.51.100.10', esc(tr('', rev ? 'Only to show and count its traffic: in reverse mode the foreign server connects here.' : 'The Iran server connects to it.')))}
+      ${f('xrRemote', rev ? 'Foreign server IP (optional)' : 'Foreign server IP or domain', w.remote, '198.51.100.10', esc(tr('', rev
+        ? 'Only to show and count its traffic: in reverse mode the foreign server connects here.'
+        : cdn ? "It goes in the domain's DNS record; the Iran server connects through Cloudflare." : 'The Iran server connects to it.')))}
       ${rev ? f('xrPubIP', "This server's public IP", w.public_ip, '203.0.113.5', esc(tr('', 'The foreign server connects to this address.'))) : ''}
       ${f('xrPorts', 'Ports to forward', w.ports, '2053, 8080', esc(tr('', 'Users connect to these ports here; each reaches the same port on the foreign server (your 3x-ui inbounds).')), 'inputmode="numeric"')}
-      ${f('xrTunnel', rev ? 'Tunnel port on this server' : 'Tunnel port on the foreign server', w.tunnel_port, '443', esc(tr('', '443 looks most like normal HTTPS.')), 'inputmode="numeric"')}
+      ${cdn ? `<div class="xr-field"><label class="qs-label" for="xrTunnel">${esc(tr('', rev ? 'Tunnel port on this server' : 'Tunnel port on the foreign server'))}</label>
+        <select class="hashem-input u-ltr" id="xrTunnel">${XR_CDN_PORTS.map(x => `<option value="${x}"${x === w.tunnel_port ? ' selected' : ''}>${x}</option>`).join('')}</select>
+        <div class="qs-hint" id="xrTunnelHint">${esc(tr('', 'Cloudflare passes HTTPS only on these ports.'))}</div></div>`
+        : f('xrTunnel', rev ? 'Tunnel port on this server' : 'Tunnel port on the foreign server', w.tunnel_port, '443', esc(tr('', '443 looks most like normal HTTPS.')), 'inputmode="numeric"')}
       ${f('xrName', 'Name (optional)', w.name, 'Frankfurt', '')}
       <div class="xr-field"><span class="qs-label">${esc(tr('', 'UDP'))}</span>
         <label class="xr-check"><input type="checkbox" id="xrUdp" ${w.udp ? 'checked' : ''}> ${esc(tr('', 'Forward UDP too (games, calls, QUIC)'))}</label></div>
@@ -5857,6 +5888,7 @@ function xrWizStep2() {
         <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="xrSniTest()">${esc(tr('', 'Find a working site'))}</button></div>
       <div class="qs-hint">${esc(tr('', rev ? 'Reality borrows this site\'s TLS handshake on the Iran server, so it must open from Iran (TLS 1.3 with h2). The test runs from this server.' : 'Reality borrows this site\'s TLS handshake: a censor sees a visit to it. It must work from Iran (TLS 1.3 with h2); the test runs from this server.'))}</div>
       <div class="xr-sni" id="xrSniOut"></div></div>` : ''}
+    ${cdnHTML}
     ${xrAdvHTML(w)}
     <div class="xr-wiz-foot">
       ${w.id ? '<span></span>' : `<button type="button" class="hashem-btn hashem-btn-ghost" onclick="xrWizGo(1)">${esc(tr('', 'Back'))}</button>`}
@@ -5866,8 +5898,8 @@ function xrWizStep2() {
 // xrAdvHTML: every setting of the profile, closed by default.
 function xrAdvHTML(w) {
   const p = w.profile || {}, o = (_xray && _xray.options) || {};
-  const sel = (id, label, list, val, none) => `<div class="xr-field"><label class="qs-label" for="${id}">${esc(tr('', label))}</label>
-      <select class="hashem-input" id="${id}">${none ? `<option value="">${esc(tr('', none))}</option>` : ''}${(list || []).map(v => `<option value="${esc(v)}"${String(v) === String(val) ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></div>`;
+  const sel = (id, label, list, val, none, extra) => `<div class="xr-field"><label class="qs-label" for="${id}">${esc(tr('', label))}</label>
+      <select class="hashem-input" id="${id}" ${extra || ""}>${none ? `<option value="">${esc(tr('', none))}</option>` : ''}${(list || []).map(v => `<option value="${esc(v)}"${String(v) === String(val) ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></div>`;
   const inp = (id, label, val, ph, hint) => `<div class="xr-field"><label class="qs-label" for="${id}">${esc(tr('', label))}</label>
       <input class="hashem-input u-ltr u-mono" id="${id}" value="${esc(val == null || val === 0 ? '' : String(val))}" placeholder="${esc(ph || '')}" autocomplete="off">${hint ? `<div class="qs-hint">${esc(tr('', hint))}</div>` : ''}</div>`;
   const chk = (id, label, on) => `<label class="xr-check"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> ${esc(tr('', label))}</label>`;
@@ -5878,8 +5910,8 @@ function xrAdvHTML(w) {
     <div class="xr-adv-body">
       <h5>${esc(tr('', 'Transport'))}</h5>
       <div class="xr-fields">
-        ${sel('xaTransport', 'Transport', o.transports, t)}
-        ${sel('xaSecurity', 'Security', o.securities, p.security)}
+        ${sel('xaTransport', 'Transport', o.transports, t, '', 'onchange="xrWizRefresh()"')}
+        ${sel('xaSecurity', 'Security', o.securities, p.security, '', 'onchange="xrWizRefresh()"')}
         ${t === 'xhttp' || t === 'ws' || t === 'httpupgrade' || t === 'grpc' ? inp('xaPath', t === 'grpc' ? 'gRPC service name' : 'Path', p.path, t === 'grpc' ? 'random if empty' : '/random if empty') : ''}
         ${t === 'xhttp' ? sel('xaMode', 'XHTTP mode', o.xhttp_modes, p.xhttp_mode || 'auto') : ''}
         ${t !== 'kcp' && t !== 'raw' ? inp('xaHost', 'HTTP Host', p.host, '') : ''}
@@ -5891,7 +5923,12 @@ function xrAdvHTML(w) {
         ${inp('xaSpider', 'SpiderX', p.spider_x, '/')}
         ${sel('xaXver', 'PROXY protocol to the target', ['0', '1', '2'], String(p.xver || 0))}
       </div>` : ''}
-      ${p.security === 'tls' ? `<div class="xr-fields">${inp('xaSniTLS', 'TLS server name', p.sni, 'tun.example.com')}${inp('xaAddr', 'Address to dial (CDN)', p.address, 'tun.example.com')}${inp('xaCert', 'Certificate file (server end)', p.cert_file, '/etc/ssl/tun.crt')}${inp('xaKey', 'Key file (server end)', p.key_file, '/etc/ssl/tun.key')}</div>` : ''}
+      ${p.security === 'tls' ? `<h5>TLS</h5><div class="xr-fields">
+        ${p.cdn ? '' : inp('xaSniTLS', 'TLS server name', p.sni, 'tun.example.com', 'The panel makes a certificate for this name and the dialing end trusts only that one.')}
+        <div class="xr-field"><span class="qs-label">CDN</span><label class="xr-check"><input type="checkbox" id="xaCDN" ${p.cdn ? 'checked' : ''} onchange="xrWizRefresh()"> ${esc(tr('', 'Through a CDN (Cloudflare)'))}</label></div>
+        ${inp('xaCert', 'Your own certificate file (optional)', p.cert_file, '/etc/ssl/tun.crt', 'On the server end. Empty: the panel\'s own certificate.')}
+        ${inp('xaKey', 'Your own key file (optional)', p.key_file, '/etc/ssl/tun.key')}
+      </div>` : ''}
       ${t === 'kcp' ? `<h5>mKCP</h5><div class="xr-fields">
         ${inp('xaKMTU', 'MTU', k.mtu, '1350')}${inp('xaKTTI', 'TTI (ms)', k.tti, '20')}${inp('xaKUp', 'Upload capacity (MB/s)', k.up, '20')}${inp('xaKDown', 'Download capacity (MB/s)', k.down, '100')}
         <div class="xr-field"><span class="qs-label">${esc(tr('', 'Congestion control'))}</span>${chk('xaKCong', 'On', k.congestion)}</div></div>` : ''}
@@ -5938,7 +5975,10 @@ function xrWizRead() {
   if ($('xaHost')) p.host = v('xaHost');
   p.vision = !!c('xaVision');
   if ($('xaFp')) { p.fingerprint = v('xaFp'); p.target = v('xaTarget'); p.spider_x = v('xaSpider'); p.xver = n('xaXver'); }
-  if ($('xaSniTLS')) { p.sni = v('xaSniTLS'); p.address = v('xaAddr'); p.cert_file = v('xaCert'); p.key_file = v('xaKey'); }
+  if ($('xaSniTLS')) p.sni = v('xaSniTLS');
+  if ($('xaCert')) { p.cert_file = v('xaCert'); p.key_file = v('xaKey'); p.cdn = !!c('xaCDN'); }
+  if ($('xrAddr')) p.address = v('xrAddr');
+  if (p.security !== 'tls') p.cdn = false;
   if ($('xaKMTU')) p.kcp = Object.assign(p.kcp || {}, { mtu: n('xaKMTU'), tti: n('xaKTTI'), up: n('xaKUp'), down: n('xaKDown'), congestion: !!c('xaKCong') });
   p.mux = n('xaMux'); p.congestion = v('xaCong'); p.mark = n('xaMark'); p.tfo = !!c('xaTFO'); p.mptcp = !!c('xaMPTCP');
   if ($('xaListen')) w.listen = v('xaListen');
@@ -5966,6 +6006,10 @@ function xrWizProblem() {
   if (!ports.length || ports.some(p => !(p > 0 && p < 65536))) return tr('', 'Enter the ports to forward, like 2053, 8080.');
   if (!(w.tunnel_port > 0 && w.tunnel_port < 65536)) return tr('', 'Enter a tunnel port.');
   if (w.mode === 'direct' && !w.remote) return tr('', "Enter the foreign server's IP.");
+  const pr = w.profile || {};
+  if (pr.cdn && !pr.sni) return tr('', 'Enter the domain on Cloudflare.');
+  if (pr.cdn && !XR_CDN_PORTS.includes(w.tunnel_port)) return tr('', 'Cloudflare passes HTTPS only on these ports.') + ' ' + XR_CDN_PORTS.join(', ');
+  if (pr.security === 'tls' && !pr.sni) return tr('', 'Enter the TLS server name.');
   if (w.mode === 'reverse' && !w.public_ip) return tr('', "Enter this server's public IP: the foreign server connects to it.");
   if (w.expert && w.expert.trim()) { try { const j = JSON.parse(w.expert); if (!j || typeof j !== 'object' || Array.isArray(j)) throw 0; } catch (_) { return tr('', 'The expert JSON is not a JSON object.'); } }
   if (_xrCheck && _xrCheck.conflicts && _xrCheck.conflicts.length) return _xrCheck.conflicts.map(c => `${c.proto.toUpperCase()} ${c.port}: ${c.owner}`).join(' · ');
@@ -5986,7 +6030,7 @@ function xrWizReq(action) {
 function xrWizCheckSoon() {
   clearTimeout(_xrCheckT);
   const fire = () => { clearTimeout(_xrCheckT); _xrCheckT = setTimeout(xrWizCheck, 500); };
-  ['xrPorts', 'xrTunnel', 'xrUdp', 'xaTransport'].forEach(id => { const el = $(id); if (el) { el.oninput = fire; el.onchange = fire; } });
+  ['xrPorts', 'xrTunnel', 'xrUdp'].forEach(id => { const el = $(id); if (el) { el.oninput = fire; el.onchange = fire; } });
   fire();
 }
 
@@ -6042,14 +6086,15 @@ function xrWizStep3() {
   // an empty SNI gets the first default on the server
   if (p.security === 'reality' && !p.sni) p.sni = (((_xray && _xray.sni) || {})[rev ? 'reverse' : 'direct'] || [''])[0];
   const row = (k, v) => `<dt>${esc(tr('', k))}</dt><dd data-no-i18n>${esc(v)}</dd>`;
-  const scene = xrScene({ state: 'ok', mode: w.mode, here: 'iran', up: null, dn: null, tags: xrTags(p),
+  const scene = xrScene({ state: 'ok', mode: w.mode, here: 'iran', up: null, dn: null, tags: xrTags(p), cdn: !!p.cdn,
     iranSub: rev ? (w.public_ip + ' :' + w.tunnel_port) : '', forSub: rev ? (w.remote || '') : (w.remote + ' :' + w.tunnel_port),
     meta: [`<span>${esc(tr('', 'preview'))}</span>`] });
   return `${scene}
     <dl class="xr-review">
       ${row('Direction', tr('', rev ? 'Reverse: the foreign server dials Iran' : 'Direct: Iran dials the foreign server'))}
       ${row('Wire', xrTags(p)[0][0])}
-      ${p.security !== 'none' ? row('Disguise', p.sni) : ''}
+      ${p.cdn ? row('Domain', p.sni) + row('Connects to', p.address || p.sni) : ''}
+      ${p.security === 'reality' ? row('Disguise', p.sni) : ''}
       ${row('Ports', xrWizPorts().join(', ') + (w.udp ? ' + UDP' : ''))}
       ${row('Tunnel port', String(w.tunnel_port) + (rev ? ' ' + tr('', '(on this server)') : ' ' + tr('', '(on the foreign server)')))}
     </dl>

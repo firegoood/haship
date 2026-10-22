@@ -37,6 +37,7 @@ func newXrayEnv(t *testing.T) *xrayEnv {
 		configDir, engineUnitDir, xrayBinPath, xrayDir = oldCfg, oldUnit, oldBin, oldDir
 		runner, runSystemctl, engineServiceActive = oldRunner, oldSys, oldActive
 		xrayVerifyDelay, xrayLinkWait, xrayListeners, xrayProbe, xrayTCPPing, xrayConns = oldVerify, oldWait, oldLs, oldProbe, oldPing, oldConns
+		xrayEnvActive = nil
 	})
 	e.use()
 	if err := os.MkdirAll(xrayDir, 0o755); err != nil {
@@ -48,8 +49,17 @@ func newXrayEnv(t *testing.T) *xrayEnv {
 	return e
 }
 
+// xrayEnvActive is the server the globals point at now.
+var xrayEnvActive *xrayEnv
+
 // use makes this server the one the panel code sees (a test may have two).
+// It writes the globals only when the server changes: a goroutine of this
+// server's (the install, a health check) may be reading them.
 func (e *xrayEnv) use() {
+	if xrayEnvActive == e {
+		return
+	}
+	xrayEnvActive = e
 	configDir, engineUnitDir = filepath.Join(e.dir, "cfg"), filepath.Join(e.dir, "units")
 	xrayDir = filepath.Join(e.dir, "core")
 	xrayBinPath = filepath.Join(xrayDir, "xray")

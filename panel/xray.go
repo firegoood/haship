@@ -116,7 +116,7 @@ func makeXrayBundle(l XrayLink, iranIP string) (string, error) {
 	f := l
 	f.ID, f.Name, f.Side, f.Remote, f.ProbePort, f.Listen, f.Disabled, f.Expert = 0, "", xraySideForeign, CleanHost(iranIP), 0, "", false, nil
 	if !f.serverEnd() {
-		f.Keys.PrivateKey = "" // reverse: the foreign server only dials
+		f.Keys.PrivateKey, f.Keys.TLSKey = "", "" // reverse: the foreign server only dials
 	}
 	if f.Mode == xrayModeReverse && f.Remote == "" {
 		return "", fmt.Errorf("this server's public IP is unknown, so the foreign server could not reach it: set it first")
@@ -327,7 +327,13 @@ func applyXrayLink(l XrayLink, others []XrayLink) ([]xrayStep, error) {
 		return fail("service", "E-XRAY-05", err.Error())
 	}
 	tcp, udp := l.listens()
-	allowUFWPorts(append(tcp, udp...))
+	var open []int // the probe port listens on 127.0.0.1 only: nothing to open
+	for _, p := range append(tcp, udp...) {
+		if p != l.ProbePort {
+			open = append(open, p)
+		}
+	}
+	allowUFWPorts(open)
 	_ = runSystemctl("daemon-reload")
 	_ = runSystemctl("enable", unit)
 	if err := runSystemctl("restart", unit); err != nil {
@@ -497,7 +503,13 @@ var xrayConns = func(l XrayLink) int {
 	if err != nil {
 		return 0
 	}
-	return len(strings.Fields(strings.TrimSpace(string(out)))) / 4
+	n := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // xrayCheckHealth checks a link now; wait > 0 retries the probe that long
@@ -591,7 +603,7 @@ func xrayCarrierEnds() []carrierEnd {
 		if l.serverEnd() {
 			// listening: count only the other server, when its address is known
 			from := ""
-			if l.Remote != "" {
+			if l.Remote != "" && !l.Profile.CDN { // through a CDN they come from its addresses
 				from = carrierIPv4(l.Remote)
 			}
 			ends = append(ends, carrierEnd{Port: l.TunnelPort, From: from, UDP: udp, Tag: xrayTag(l.ID)})
@@ -743,7 +755,7 @@ func xrayTestSNIs(snis []string) []xraySNIResult {
 // xrayLinkView is a link as GET /api/xray shows it: no private key.
 func xrayLinkView(l XrayLink, snap *HubSnapshot, withHealth bool) map[string]any {
 	v := l
-	v.Keys.PrivateKey = ""
+	v.Keys.PrivateKey, v.Keys.TLSKey = "", ""
 	raw, _ := json.Marshal(v)
 	var m map[string]any
 	_ = json.Unmarshal(raw, &m)

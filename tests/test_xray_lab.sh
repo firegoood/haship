@@ -185,7 +185,9 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 -su
     || { bad "making the lab site's certificate"; exit 1; }
 bg py $FO service 127.0.0.1 $PORT
 bg py $FO banner 127.0.0.1 $EVIL
+# the Reality server borrows it: the foreign server in direct mode, Iran in reverse mode
 bg py $FO tls_site 127.0.0.1 9443 "$TMP/site.crt" "$TMP/site.key"
+bg py $IR tls_site 127.0.0.1 9443 "$TMP/site.crt" "$TMP/site.key"
 
 # ---- a fake 3x-ui on the foreign server: another xray, in x-ui's folder, on 443
 mkdir -p "$TMP/root/usr/local/x-ui/bin"

@@ -34,9 +34,14 @@ func TestXrayLabGen(t *testing.T) {
 		}
 	}
 	var combos []string
-	for _, preset := range []string{"reality", "xhttp", "grpc", "kcp"} {
+	// the presets, and TLS with the panel's own certificate (pinned) on each
+	// transport a CDN carries: the path a CDN takes to the server end
+	for _, preset := range []string{"reality", "xhttp", "grpc", "kcp", "tls-xhttp", "tls-ws", "tls-httpupgrade", "tls-grpc"} {
 		for _, mode := range []string{xrayModeDirect, xrayModeReverse} {
 			p := xrayPresets[preset]
+			if tr, ok := strings.CutPrefix(preset, "tls-"); ok {
+				p = XrayProfile{Transport: tr, Security: "tls", SNI: "tls.lab", Fingerprint: "chrome"}
+			}
 			if p.Security == "reality" {
 				p.SNI, p.Target = "lab.example", env("TARGET")
 			}
