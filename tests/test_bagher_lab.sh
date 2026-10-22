@@ -145,13 +145,24 @@ in_ns $FO2 "$FRP_DIR/frpc" -c "$TMP/frpc2.toml" >"$TMP/frpc2.log" 2>&1 & pids+=(
 # ---- Iran: frps and one carrier per foreign server, each under a Restart=always loop
 start_frps() { in_ns $IR "$FRP_DIR/frps" -c "$TMP/frps.toml" >>"$TMP/frps.log" 2>&1 & FRPS_PID=$!; pids+=($FRPS_PID); }
 start_frps
-# carrier_loop LINK: the unit's ExecStart (the carrier) with the unit's restart delay.
-carrier_loop() {
-    in_ns $IR bash -c "while true; do env GRE_PANEL_DIR='$TMP' BAGHER_LAB_CARRIER_LINK=$1 BAGHER_LAB_KNOWN='$TMP/known_hosts' '$BIN' -test.run '^TestBagherLabCarrier\$' >>'$TMP/carrier$1.log' 2>&1; echo \"exit \$? \$(date +%T)\" >>'$TMP/carrier$1.log'; sleep $RESTART; done" &
+# loop NAME CMD: CMD under a Restart=always loop with the unit's delay. The
+# loop's and the current CMD's pids go to NAME.loop / NAME.pid (ip netns exec
+# may or may not fork, so $! is not reliably either of them).
+loop() {
+    local name=$1; shift
+    in_ns $IR bash -c "echo \$\$ >'$TMP/$name.loop'; while true; do $* >>'$TMP/$name.log' 2>&1 & echo \$! >'$TMP/$name.pid'; wait \$!; echo \"exit \$? \$(date +%T)\" >>'$TMP/$name.log'; sleep $RESTART; done" &
     pids+=($!)
+    wait_for 5 test -s "$TMP/$name.pid"
 }
-carrier_loop 1; LOOP1=$!
-carrier_loop 2; LOOP2=$!
+# kill_cmd NAME: kill -9 the current CMD (the loop restarts it); stop_loop NAME: both, for good.
+kill_cmd() { kill -9 "$(cat "$TMP/$1.pid")" 2>/dev/null; }
+stop_loop() { kill -9 "$(cat "$TMP/$1.loop")" 2>/dev/null; kill_cmd "$1"; rm -f "$TMP/$1.pid" "$TMP/$1.loop"; }
+# carrier_loop LINK: the unit's ExecStart (the carrier).
+carrier_loop() {
+    loop "carrier$1" "env GRE_PANEL_DIR='$TMP' BAGHER_LAB_CARRIER_LINK=$1 BAGHER_LAB_KNOWN='$TMP/known_hosts' '$BIN' -test.run '^TestBagherLabCarrier\$'"
+}
+carrier_loop 1
+carrier_loop 2
 
 fetch() { in_ns $US curl -fsS --max-time 20 "http://$IR_US:$1/blob" | sha256sum | cut -d' ' -f1; }
 want1=$(sha256sum <"$TMP/www1/blob" | cut -d' ' -f1)
@@ -229,12 +240,20 @@ if in_ns $IR tc qdisc add dev vg-ir root netem delay 30ms 2>/dev/null && in_ns $
     wait_for 30 pl_up
     new=$(lat_ms)
     # The same link over plain ssh -N, the carrier before this version.
-    pkill -9 -P "$LOOP1"; kill -9 "$LOOP1" 2>/dev/null; wait "$LOOP1" 2>/dev/null
-    in_ns $IR bash -c "while true; do /usr/bin/ssh -N -i '$TMP/id' -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -R 127.0.0.1:$FRP:127.0.0.1:$FRP -o Ciphers=aes128-gcm@openssh.com,chacha20-poly1305@openssh.com -o TCPKeepAlive=yes root@$FO_IP >>'$TMP/legacy.log' 2>&1; sleep 2; done" & LEG=$!; pids+=($LEG)
+    cpid=$(cat "$TMP/carrier1.pid")
+    stop_loop carrier1
+    sleep 1
+    kill -0 "$cpid" 2>/dev/null && bad "carrier 1 still running after stop (pid $cpid)"
+    loop legacy "/usr/bin/ssh -N -i '$TMP/id' -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -R 127.0.0.1:$FRP:127.0.0.1:$FRP -o Ciphers=aes128-gcm@openssh.com,chacha20-poly1305@openssh.com -o TCPKeepAlive=yes root@$FO_IP"
     old=""
     wait_for 90 pl_up && old=$(lat_ms)
-    pkill -9 -P "$LEG"; kill -9 "$LEG" 2>/dev/null; wait "$LEG" 2>/dev/null
-    carrier_loop 1; LOOP1=$!
+    # proof that this was ssh -N: it is alive and holds the only session on Foreign 1
+    lpid=$(cat "$TMP/legacy.pid" 2>/dev/null)
+    sess=$(in_ns $FO ss -Htn state established "( sport = :22 )" | wc -l)
+    kill -0 "$lpid" 2>/dev/null && [[ $sess == 1 ]] && ok "comparison ran over plain ssh -N (pid $lpid, $sess SSH session on Foreign 1)" \
+        || bad "comparison was not over ssh -N alone (ssh pid ${lpid:-none}, $sess SSH sessions on Foreign 1)"
+    stop_loop legacy
+    carrier_loop 1
     in_ns $IR tc qdisc del dev vg-ir root 2>/dev/null; in_ns $FO tc qdisc del dev vg-fo root 2>/dev/null
     wait_for 90 tunnel_up || bad "carrier did not come back after the ping comparison"
     note "two-part reply over a 60 ms round trip: carrier ${new:-?} ms, plain ssh -N ${old:-?} ms ($(ssh -V 2>&1 | cut -d, -f1))"
@@ -268,8 +287,10 @@ out=$(in_ns $IR timeout 15 ssh -i "$TMP/wrong" -o BatchMode=yes -o IdentitiesOnl
 
 # ---- 4. recovery and independence ---------------------------------------------
 t0=$(date +%s)
-pkill -9 -P "$LOOP1" || true   # the carrier, not its restart loop
+cpid=$(cat "$TMP/carrier1.pid")
+kill_cmd carrier1   # the carrier, not its restart loop
 sleep 1
+kill -0 "$cpid" 2>/dev/null && bad "carrier survived kill -9"
 if wait_for $((RESTART + 60)) tunnel_up; then ok "recovers after kill -9 of the carrier ($(( $(date +%s) - t0 ))s)"
 else bad "no recovery after kill -9 of the carrier"; fi
 
@@ -295,7 +316,7 @@ else bad "no recovery within 240s after a 60s outage"; echo "--- carrier1.log"; 
 
 # the job log needs auth; annotations are public
 if [[ -n ${GITHUB_ACTIONS:-} ]]; then
-    { cat "$TMP/result.txt"; (( fail )) && { echo "--- carrier1.log"; tail -n 10 "$TMP/carrier1.log"; echo "--- frpc.log"; tail -n 10 "$TMP/frpc.log"; }; } > "$TMP/report.txt"
+    { cat "$TMP/result.txt"; (( fail )) && { echo "--- carrier1.log"; tail -n 10 "$TMP/carrier1.log"; echo "--- legacy.log"; tail -n 5 "$TMP/legacy.log"; echo "--- frpc.log"; tail -n 10 "$TMP/frpc.log"; }; } > "$TMP/report.txt"
     msg=$(tail -c 6000 "$TMP/report.txt" | sed -e 's/%/%25/g' | sed -e ':a;N;$!ba;s/\n/%0A/g' -e 's/\r/%0D/g')
     echo "::$([[ $fail -eq 0 ]] && echo notice || echo error) title=Bagher lab::$msg"
 fi
