@@ -177,6 +177,23 @@ func TestRunCmdLogsUnexpectedSystemctlExit(t *testing.T) {
 	}
 }
 
+func TestRunCmdQuietSkipsErrorLog(t *testing.T) {
+	withRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return []byte("iptables: No chain/target/match by that name."), realExitError(t, 1)
+	})
+	logs := captureLog(t)
+	out, err := runCmdQuiet(time.Second, "iptables", "-C", "HASHEM-REVPATH", "-j", "ACCEPT")
+	if err == nil || !strings.Contains(string(out), "No chain") {
+		t.Fatalf("quiet probe must still return output and error, got %q %v", out, err)
+	}
+	if strings.Contains(logs.String(), "CMD-ERROR") {
+		t.Fatalf("quiet probe polluted the log: %s", logs.String())
+	}
+	if e, _ := execStatFor("iptables"); e.Calls != 1 || e.Errors != 1 {
+		t.Fatalf("stats must still count the probe: %+v", e)
+	}
+}
+
 func TestRunCmdRealExec(t *testing.T) {
 	old := runner
 	runner = execRunner

@@ -760,8 +760,8 @@ func lbApplyRules(text string, oldChains []string) error {
 	}
 	for _, c := range oldChains {
 		if !keep[c] {
-			_, _ = runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-F", c)
-			_, _ = runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-X", c)
+			_, _ = runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-F", c)
+			_, _ = runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-X", c)
 		}
 	}
 	if strings.Contains(text, "-j MASQUERADE") {
@@ -777,7 +777,7 @@ func lbEnsureHooks() {
 	for _, h := range lbHooks {
 		tbl, chain, rule := h[:2], h[2], h[3:]
 		check := append(append([]string{"-w", "5"}, tbl...), append([]string{"-C", chain}, rule...)...)
-		if _, err := runCmdTimeout(5*time.Second, "iptables", check...); err != nil {
+		if _, err := runCmdQuiet(5*time.Second, "iptables", check...); err != nil {
 			ins := append(append([]string{"-w", "5"}, tbl...), append([]string{"-I", chain, "1"}, rule...)...)
 			_, _ = runCmdTimeout(5*time.Second, "iptables", ins...)
 		}
@@ -787,13 +787,15 @@ func lbEnsureHooks() {
 // lbClearRules removes every rule and chain the cluster made (also the v1
 // cluster's chains, which sent traffic straight to foreign IPs).
 func lbClearRules(oldChains []string) {
+	// Cleanup targets may be absent (first start, nothing left behind); their
+	// "No chain/target/match" exit is expected and must not be logged.
 	ipt := func(a ...string) {
-		_, _ = runCmdTimeout(5*time.Second, "iptables", append([]string{"-w", "5"}, a...)...)
+		_, _ = runCmdQuiet(5*time.Second, "iptables", append([]string{"-w", "5"}, a...)...)
 	}
 	for _, h := range lbHooks {
 		tbl, chain, rule := h[:2], h[2], h[3:]
 		for i := 0; i < 3; i++ { // a hook inserted twice by hand
-			if _, err := runCmdTimeout(5*time.Second, "iptables", append(append([]string{"-w", "5"}, tbl...), append([]string{"-D", chain}, rule...)...)...); err != nil {
+			if _, err := runCmdQuiet(5*time.Second, "iptables", append(append([]string{"-w", "5"}, tbl...), append([]string{"-D", chain}, rule...)...)...); err != nil {
 				break
 			}
 		}
@@ -813,9 +815,9 @@ func lbClearRules(oldChains []string) {
 func lbClearLegacyV1() {
 	for _, c := range []string{"HASHEM-CLUSTER-PREROUTING", "HASHEM-CLUSTER-POSTROUTING"} {
 		base := strings.TrimPrefix(c, "HASHEM-CLUSTER-")
-		_, _ = runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-D", base, "-j", c)
-		_, _ = runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-F", c)
-		_, _ = runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-X", c)
+		_, _ = runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-D", base, "-j", c)
+		_, _ = runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-F", c)
+		_, _ = runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-t", "nat", "-X", c)
 	}
 }
 

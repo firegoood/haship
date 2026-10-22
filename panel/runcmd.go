@@ -17,6 +17,10 @@ type cmdRunner func(ctx context.Context, name string, args ...string) ([]byte, e
 
 type stdoutOnlyKey struct{}
 
+// quietKey marks best-effort probes and cleanup: a non-zero exit is part of the
+// answer (an absent chain or rule), so it must not be logged as an error.
+type quietKey struct{}
+
 // runner is the single seam for external commands that go through runCmdTimeout.
 var runner cmdRunner = execRunner
 
@@ -99,7 +103,7 @@ func runCmdTimeoutCtx(ctx context.Context, timeout time.Duration, name string, a
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		}
-		if !expectedProbeExit(name, args, exitCode) {
+		if ctx.Value(quietKey{}) == nil && !expectedProbeExit(name, args, exitCode) {
 			trimmed := strings.TrimSpace(string(out))
 			if len(trimmed) > 120 {
 				trimmed = trimmed[:120] + "..."
@@ -123,6 +127,13 @@ func runCmdTimeout(timeout time.Duration, name string, args ...string) ([]byte, 
 // runCmdTimeoutOut is runCmdTimeout returning stdout only (stderr is dropped).
 func runCmdTimeoutOut(timeout time.Duration, name string, args ...string) ([]byte, error) {
 	return runCmdTimeoutCtx(context.WithValue(context.Background(), stdoutOnlyKey{}, true), timeout, name, args...)
+}
+
+// runCmdQuiet is runCmdTimeout without CMD-ERROR logging. Use it for existence
+// probes (iptables -C / -L) and best-effort cleanup, where the command fails
+// whenever the rule or chain does not exist yet.
+func runCmdQuiet(timeout time.Duration, name string, args ...string) ([]byte, error) {
+	return runCmdTimeoutCtx(context.WithValue(context.Background(), quietKey{}, true), timeout, name, args...)
 }
 
 type execStatJSON struct {

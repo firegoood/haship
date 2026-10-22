@@ -6736,8 +6736,9 @@ ensure_panel_pass() {
     fi
     echo -e "${YELLOW}[*] No panel config found — generating initial credentials...${NC}"
     local NEWPASS HASH
-    # Ask for password if running interactively
-    if [[ -t 0 && "${DEBIAN_FRONTEND:-}" != "noninteractive" ]]; then
+    # Ask for password only when the prompt is actually visible; with stdout
+    # redirected (auto-install) the question used to hang the install silently.
+    if [[ -t 0 && -t 1 && "${DEBIAN_FRONTEND:-}" != "noninteractive" ]]; then
         echo ""
         echo -e "${CYAN}=== Web Panel Password Setup ===${NC}"
         echo -e "${YELLOW}Enter custom panel password (minimum 8 characters), or press Enter for auto-generated:${NC}"
@@ -9868,16 +9869,19 @@ auto_install_and_show() {
     mkdir -p /etc/gre-panel "$CONFIG_DIR" >> "$INSTALL_LOG" 2>&1 || true
 
     render_install_progress 20 "Installing system dependencies..."
-    ensure_dependencies_smart >> "$INSTALL_LOG" 2>&1
+    ensure_dependencies_smart </dev/null >> "$INSTALL_LOG" 2>&1
 
     render_install_progress 45 "Downloading FRP tunnel binaries..."
-    install_frp_binaries "all" >> "$INSTALL_LOG" 2>&1 || {
-        install_frp_binaries "all" >> "$INSTALL_LOG" 2>&1 || true
+    install_frp_binaries "all" </dev/null >> "$INSTALL_LOG" 2>&1 || {
+        install_frp_binaries "all" </dev/null >> "$INSTALL_LOG" 2>&1 || true
     }
 
     render_install_progress 70 "Installing Web Panel & core assets..."
-    install_panel >> "$INSTALL_LOG" 2>&1 || {
-        install_panel >> "$INSTALL_LOG" 2>&1 || true
+    # stdin from /dev/null: ensure_panel_pass prompts on a tty even though only
+    # stdout is logged here, which used to block the installer at 70% with the
+    # prompt hidden in the log. Without a tty it auto-generates the password.
+    install_panel </dev/null >> "$INSTALL_LOG" 2>&1 || {
+        install_panel </dev/null >> "$INSTALL_LOG" 2>&1 || true
     }
 
     render_install_progress 88 "Configuring systemd service & port..."
@@ -9894,7 +9898,7 @@ auto_install_and_show() {
             fi
         fi
     fi
-    ensure_panel_pass >> "$INSTALL_LOG" 2>&1 || true
+    ensure_panel_pass </dev/null >> "$INSTALL_LOG" 2>&1 || true
 
     render_install_progress 95 "Starting Web Panel & validating health..."
     systemctl daemon-reload >> "$INSTALL_LOG" 2>&1 || true

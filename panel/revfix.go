@@ -402,15 +402,15 @@ func sysctlPersist(key, value string) (rollback func(), err error) {
 // referenced from INPUT and FORWARD. All auto-fix firewall rules live here;
 // user rules are never touched.
 func chainEnsure() error {
-	if _, err := runCmdTimeout(3*time.Second, "iptables", "-n", "-L", revChain); err != nil {
+	// -L and -C exit 1 while the chain or jump is absent; that is the probe
+	// answer, not a failure, so it must stay out of the activity stream.
+	if _, err := runCmdQuiet(3*time.Second, "iptables", "-n", "-L", revChain); err != nil {
 		if _, err := runCmdTimeout(3*time.Second, "iptables", "-N", revChain); err != nil {
 			return err
 		}
 	}
 	for _, parent := range []string{"INPUT", "FORWARD"} {
-		out, _ := runCmdTimeout(3*time.Second, "iptables", "-C", parent, "-j", revChain)
-		_ = out
-		if _, err := runCmdTimeout(3*time.Second, "iptables", "-C", parent, "-j", revChain); err != nil {
+		if _, err := runCmdQuiet(3*time.Second, "iptables", "-C", parent, "-j", revChain); err != nil {
 			if _, err := runCmdTimeout(3*time.Second, "iptables", "-I", parent, "1", "-j", revChain); err != nil {
 				return err
 			}
@@ -495,7 +495,7 @@ func fixPlan(p peerRecord, snap LocalSnapshot, d RevPathDiagnosis) []fixAction {
 					rules = append(rules, []string{"-i", p.GreIf, "-j", "ACCEPT"})
 				}
 				for _, r := range rules {
-					if _, err := runCmdTimeout(3*time.Second, "iptables", append([]string{"-C", revChain}, r...)...); err != nil {
+					if _, err := runCmdQuiet(3*time.Second, "iptables", append([]string{"-C", revChain}, r...)...); err != nil {
 						args := append([]string{"-A", revChain}, r...)
 						if _, err := runCmdTimeout(3*time.Second, "iptables", args...); err != nil {
 							return nil, err
@@ -505,7 +505,7 @@ func fixPlan(p peerRecord, snap LocalSnapshot, d RevPathDiagnosis) []fixAction {
 				}
 				return func() {
 					for _, r := range added {
-						_, _ = runCmdTimeout(3*time.Second, "iptables", append([]string{"-D", revChain}, r...)...)
+						_, _ = runCmdQuiet(3*time.Second, "iptables", append([]string{"-D", revChain}, r...)...)
 					}
 				}, nil
 			},
@@ -546,12 +546,12 @@ func fixPlan(p peerRecord, snap LocalSnapshot, d RevPathDiagnosis) []fixAction {
 					rule = []string{"-i", p.GreIf, "-p", "47", "-j", "NOTRACK"}
 				}
 				check := append([]string{"-t", "raw", "-C", "PREROUTING"}, rule...)
-				if _, err := runCmdTimeout(3*time.Second, "iptables", check...); err != nil {
+				if _, err := runCmdQuiet(3*time.Second, "iptables", check...); err != nil {
 					if _, err := runCmdTimeout(3*time.Second, "iptables", append([]string{"-t", "raw", "-A", "PREROUTING"}, rule...)...); err != nil {
 						return nil, err
 					}
 					return func() {
-						_, _ = runCmdTimeout(3*time.Second, "iptables", append([]string{"-t", "raw", "-D", "PREROUTING"}, rule...)...)
+						_, _ = runCmdQuiet(3*time.Second, "iptables", append([]string{"-t", "raw", "-D", "PREROUTING"}, rule...)...)
 					}, nil
 				}
 				return func() {}, nil
