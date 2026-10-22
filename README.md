@@ -279,8 +279,9 @@ The panel is one page with these tabs:
 - **Backhaul without GRE** (`backhaul`) [PRO] — Backhaul only, no GRE interface at all. Bundle prefix `bh1_`.
 - **Bagher** [PRO] — an SSH connection pool from Iran to the foreign server carrying FRP. Bundle prefix `BAGHER:`.
 - **Spoof** [PRO] — an IP-spoofing UDP pipe ([ParsaKSH/spoof-tunnel](https://github.com/ParsaKSH/spoof-tunnel)) with WireGuard on top (`wg-spoof`, 10.20.0.1 ↔ 10.20.0.2), for whitelist firewalls. Set up in its own Spoof tab; bundle prefix `spf1_`. Core: `hashem spoof install` (sha256-pinned).
+- **Xray** [PRO] — a port forward over Xray-core (VLESS): **direct** (Iran dials) or **reverse** (the foreign server dials Iran), with Reality, XHTTP, gRPC, mKCP or a CDN (Cloudflare). Its own Xray-core (`/usr/local/lib/hashem/xray`) and units (`hashem-xray-N`), so it runs next to 3x-ui or Marzban without touching them. Set up in the Xray tab; bundle prefix `xr1_`. Guide: [Xray tunnel](docs/XRAY_TUNNEL.md).
 
-**Hashem Pro** features: Bagher, the Spoof tunnel, setting up Backhaul (with or without GRE), the Path Test, Diagnostics, Performance, Watchdog, Benchmark and Cluster. A lock next to a tab in the sidebar marks the ones that need a license (Sentinel is a separate add-on). Every Pro license unlocks all of them, including features that became Pro after the key was issued, so an update never asks for a new key. Pro is checked on both servers. A Backhaul tunnel that already runs keeps running, restarting and being repaired without a license; only setting up a new one needs it. GRE + FRP stays free.
+**Hashem Pro** features: Bagher, the Spoof tunnel, the Xray tunnel, setting up Backhaul (with or without GRE), the Path Test, Diagnostics, Performance, Watchdog, Benchmark and Cluster. A lock next to a tab in the sidebar marks the ones that need a license (Sentinel is a separate add-on). Every Pro license unlocks all of them, including features that became Pro after the key was issued, so an update never asks for a new key. Pro is checked on both servers. A Backhaul tunnel that already runs keeps running, restarting and being repaired without a license; only setting up a new one needs it. GRE + FRP stays free.
 - **Carriers for the GRE layer** — **Direct GRE** (IP protocol 47) and **WSS** (TLS WebSocket, default `:8443`). The FOU carrier was removed.
 
 ---
@@ -373,6 +374,7 @@ hashem optimize       # BBR / MTU / sysctl tuning
 hashem doctor         # latency, jitter, MTU and speed diagnostics
 hashem doctor fix     # Quick Repair (same as the Diagnostics tab), then diagnose again
 hashem spoof install  # Spoof tunnel core + WireGuard tools (also: status, up, down)
+hashem xray install   # Xray tunnel core (also: status, start, stop, restart, logs, uninstall)
 hashem carrier        # carrier management / failover
 hashem dial status    # foreign side: route to the Iran hub
 hashem watchdog status

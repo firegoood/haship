@@ -5,7 +5,8 @@
 # a veth that is the hub's default route. Over it: a GRE main tunnel
 # (gre-tunnel), a GRE peer (gre-p2, key 2), a Backhaul peer without GRE (TCP
 # port 3090 on the veth, counted by the panel's iptables chains) and a Bagher
-# link (the hub dials the foreign server's SSH port 2222). The panel's own
+# link (the hub dials the foreign server's SSH port 2222) and an Xray link
+# (the hub dials the foreign tunnel port 4433). The panel's own
 # code (panel/traffic_lab_test.go: snapshot, /api/status, /api/dashboard,
 # /api/traffic/usage) runs in the hub namespace while this script moves exact
 # byte counts over each link, a paced 2 MB/s transfer, and traffic while the
@@ -110,6 +111,7 @@ ip netns exec $HUB python3 -I "$TMP/xfer.py" server 10.10.0.1 9000 >/dev/null 2>
 ip netns exec $HUB python3 -I "$TMP/xfer.py" server 10.11.0.1 9000 >/dev/null 2>&1 & pids+=($!)
 ip netns exec $HUB python3 -I "$TMP/xfer.py" server 0.0.0.0 3090 >/dev/null 2>&1 & pids+=($!)
 ip netns exec $FO python3 -I "$TMP/xfer.py" server $FO_IP 2222 >/dev/null 2>&1 & pids+=($!)
+ip netns exec $FO python3 -I "$TMP/xfer.py" server $FO_IP 4433 >/dev/null 2>&1 & pids+=($!)
 sleep 1
 
 # Bytes at the hub (rx = received from the foreign server, tx = sent to it).
@@ -117,6 +119,7 @@ MAIN_RX=$((4 << 20)); MAIN_TX=$((3 << 20))
 P2_RX=$((3 << 20));   P2_TX=$((2 << 20))
 P3_RX=$((2 << 20));   P3_TX=$((1 << 20))
 BG_RX=$((2 << 20));   BG_TX=$((1 << 20))
+XR_RX=$((3 << 20));   XR_TX=$((1 << 20))
 cat >"$TMP/traffic.sh" <<EOF
 set -e
 x() { ip netns exec "\$1" python3 -I "$TMP/xfer.py" client "\${@:2}"; }
@@ -125,7 +128,8 @@ case "\$1" in
           x $FO 10.10.0.1 9000 $MAIN_RX $MAIN_TX
           x $FO 10.11.0.1 9000 $P2_RX $P2_TX
           x $FO $HUB_IP 3090 $P3_RX $P3_TX
-          x $HUB $FO_IP 2222 $BG_TX $BG_RX ;;
+          x $HUB $FO_IP 2222 $BG_TX $BG_RX
+          x $HUB $FO_IP 4433 $XR_TX $XR_RX ;;
   paced)  x $FO 10.10.0.1 9000 34000000 0 2000000 ;;   # 2 MB/s for 17 s
   main3)  x $FO 10.10.0.1 9000 $((3 << 20)) 0 ;;
 esac
@@ -138,7 +142,7 @@ if [[ -z $BIN ]]; then
     BIN=$TMP/trafficlab.test
 fi
 (cd "$ROOT/panel" && ip netns exec $HUB env TRAFFIC_LAB_SCRIPT="$TMP/traffic.sh" TRAFFIC_LAB_FOREIGN=$FO_IP \
-    TRAFFIC_LAB_EXPECT="main=$MAIN_RX:$MAIN_TX,p2=$P2_RX:$P2_TX,p3=$P3_RX:$P3_TX,bagher=$BG_RX:$BG_TX" \
+    TRAFFIC_LAB_EXPECT="main=$MAIN_RX:$MAIN_TX,p2=$P2_RX:$P2_TX,p3=$P3_RX:$P3_TX,bagher=$BG_RX:$BG_TX,xray=$XR_RX:$XR_TX" \
     "$BIN" -test.run '^TestTrafficLab$' -test.v >"$TMP/lab.log" 2>&1)
 rc=$?
 sed -n '/traffic lab:/,/^---/p' "$TMP/lab.log" | grep -v '^---' | sed 's/^ *//' >> "$TMP/result.txt"

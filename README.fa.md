@@ -171,6 +171,7 @@ Backhaul در Setup و در `hashem backhaul` یک موتور است و «با G
 ```bash
 hashem backup now      # اختیاری: آرشیو رمزنگاری‌شده در /var/backups/hashem
 hashem spoof install   # هسته‌ی تونل اسپوف + ابزار WireGuard (همچنین: status، up، down)
+hashem xray install    # هسته‌ی تونل Xray (همچنین: status، start، stop، restart، logs، uninstall)
 hashem uninstall       # تأیید می‌گیرد؛ با --force بدون پرسش
 ```
 

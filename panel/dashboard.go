@@ -191,6 +191,7 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"system":      systemInfo(),
 		"conns":       snap.ActiveConns,
 		"bagher":      bagherStatus,
+		"xray":        xrayDashLinks(snap),
 		"checked":     time.Now().UTC().Format(time.RFC3339),
 	}
 	writeJSON(w, d)

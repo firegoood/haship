@@ -331,7 +331,7 @@ function goTab(name) {
     loadClusterStatus();
   }
   if (name === 'perf') loadPerf();
-  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); }
+  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); loadXray(true); }
   if (name === 'watchdog') loadWatchdog();
   if (name === 'doctor') loadDoctor();
   if (name === 'benchmark') { loadBenchmark(); loadPathTest(); }
@@ -2337,8 +2337,11 @@ async function refreshDash() {
     window._lastBagher = bObj;
     const bagherUp = !!(bObj.is_active || bObj.enabled || bObj.connected);
     // Fresh install: nothing to be "down" yet, so no red state (onboarding card explains next steps).
-    const unset = window._hashemEmpty === true && !on && !bagherUp;
-    const state = dashState(d, unset, bagherUp);
+    const xrLinks = d.xray || [];
+    const unset = window._hashemEmpty === true && !on && !bagherUp && !xrLinks.length;
+    // a server whose only tunnel is Xray is as healthy as its links
+    const xrOnly = xrLinks.length && !on && !(d.gre || {}).exists && !(d.frp || {}).svc;
+    const state = dashState(d, unset, bagherUp || (xrOnly && xrLinks.some(x => x.link === 'up' || x.link === 'listening')));
     const g = d.gre || {}, f = d.frp || {};
     const role = String(d.role || '').toLowerCase();
     const iran = /iran|master/.test(role), foreign = /foreign/.test(role);
@@ -2377,6 +2380,10 @@ async function refreshDash() {
       if (f.up || f.svc || !bagherUp) chips.push(chip(engName, f.up ? 'ok' : 'err'));
     }
     if (bagherUp) chips.push(chip('Bagher', bObj.connected ? 'ok' : 'warn'));
+    if (xrLinks.length) {
+      const xrUp = xrLinks.filter(x => x.link === 'up' || x.link === 'listening').length;
+      chips.push(chip('Xray ' + xrUp + '/' + xrLinks.length, xrUp === xrLinks.length ? 'ok' : xrUp ? 'warn' : 'err'));
+    }
     setHTML('kpiLinks', chips.join(''));
     const nPorts = (f.proxy_ports || []).length || (bObj.ports || []).length;
     const carrier = d.active_carrier && d.active_carrier !== 'direct' ? String(d.active_carrier).toUpperCase() : '';
@@ -2391,7 +2398,10 @@ async function refreshDash() {
       if (!host) { host = document.createElement('div'); host.className = 'hero-topo-host'; heroLinkEl.appendChild(host); }
       host.innerHTML = links.length ? heroTopo(links, tr('', iran ? 'Iran server' : foreign ? 'Foreign server' : 'This server'), d.local_pub || '—') : '';
       host.querySelectorAll('[data-goto-link]').forEach(b => {
-        b.onclick = () => { const k = b.dataset.gotoLink; if (k) gotoPeerCard(k); else goTab('tunnel'); };
+        b.onclick = () => {
+          const k = b.dataset.gotoLink;
+          if (/^xray\d+$/.test(k)) gotoXrayLink(k.slice(4)); else if (k) gotoPeerCard(k); else goTab('tunnel');
+        };
       });
     }
     let ms = null;
@@ -2848,7 +2858,23 @@ function dashLinks(d, bObj, iran, foreign) {
       ip: l.remote_host || '', state: l.connected ? 'ok' : (l.is_active ? 'warn' : 'down'), eng: 'SSH', gre: false,
       lat: l.latency_ms > 0 ? Math.round(l.latency_ms) + 'ms' : '', rate: null }));
   }
+  // Xray tunnel links (their foreign end: "listening" waits for Iran)
+  (d.xray || []).forEach(x => L.push({ key: 'xray' + x.id, name: x.name || ('Xray ' + x.id), ip: x.remote || '',
+    state: x.link === 'up' ? 'ok' : (x.link === 'listening' || x.link === 'checking') ? 'warn' : 'down',
+    eng: 'Xray · ' + xrWireName(x), gre: false, lat: x.ping_ms > 0 ? Math.round(x.ping_ms) + 'ms' : '',
+    rate: linkRate('xray-' + x.id, x.rx, x.tx, d.counters_at) }));
   return L;
+}
+// xrWireName: a link's transport in a word (Reality, XHTTP, CDN, mKCP...).
+function xrWireName(x) {
+  if (x.cdn) return 'CDN';
+  if (x.transport === 'raw' && x.security === 'reality') return 'Reality';
+  return { xhttp: 'XHTTP', grpc: 'gRPC', ws: 'WS', httpupgrade: 'HTTPUpgrade', kcp: 'mKCP', raw: 'RAW' }[x.transport] || x.transport || '';
+}
+// gotoXrayLink opens the Xray tab at one link's card.
+function gotoXrayLink(id) {
+  goTab('xray');
+  setTimeout(() => { const el = $('xrLink' + id); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 400);
 }
 function heroTopo(links, hubName, hubIp) {
   const shown = links.slice(0, links.length > HT_MAX ? HT_MAX - 1 : HT_MAX);
@@ -5501,14 +5527,19 @@ async function loadXray(quiet) {
   xrArm();
 }
 
-// xrArm refreshes the tab every 4 s (2 s while the core installs) while it is open.
+// xrArm refreshes every 4 s (2 s while the core installs) while the links are on screen.
+// xrShown: the Xray tab is open, or the Tunnel tab with Xray links on it.
+function xrShown() {
+  const x = $('tab-xray'), t = $('tab-tunnel');
+  return (x && !x.hidden) || (t && !t.hidden && !!(_xray && (_xray.links || []).length));
+}
+
 function xrArm() {
   clearTimeout(_xrTimer);
-  const t = $('tab-xray');
-  if (!t || t.hidden) return;
+  if (!xrShown()) return;
   _xrTimer = setTimeout(() => {
-    if (!$('tab-xray').hidden && !document.hidden) loadXray(true); else xrArm();
-  }, _xray && _xray.install && _xray.install.running ? 2000 : 4000);
+    if (xrShown() && !document.hidden) loadXray(true); else xrArm();
+  },_xray && _xray.install && _xray.install.running ? 2000 : 4000);
 }
 
 function renderXray() {
@@ -5524,7 +5555,8 @@ function renderXray() {
     b.textContent = txt;
   }
   $('xrayTop').innerHTML = xrTopHTML(d);
-  $('xrayLinks').innerHTML = links.length ? `<div class="xr-stack">${links.map(xrLinkCard).join('')}</div>` : '';
+  $('xrayLinks').innerHTML = links.length ? `<div class="xr-stack">${links.map(l => xrLinkCard(l)).join('')}</div>` : '';
+  if ($('tunXrayCards')) $('tunXrayCards').innerHTML = links.map(l => xrLinkCard(l, true)).join('');
   if (!_xrWiz) $('xrayWizard').innerHTML = xrStartHTML(links.length > 0);
 }
 
@@ -5614,7 +5646,7 @@ function xrTags(p) {
   return tags;
 }
 
-function xrLinkCard(l) {
+function xrLinkCard(l, compact) {
   const h = l.health || {};
   const iran = l.side === 'iran';
   const link = l.disabled ? 'off' : (h.link || 'checking');
@@ -5637,12 +5669,20 @@ function xrLinkCard(l) {
   const badge = { ok: ['ok', 'Connected'], warn: ['warn', link === 'listening' ? 'Ready' : 'Checking…'], down: ['err', 'No connection'], off: ['dim', 'Stopped'] }[state];
   const ports = (l.ports || []).map(p => `<span class="tv-port" data-no-i18n>${p}</span>`).join('');
   const err = (state === 'down' && h.error) ? `<div class="xr-err" data-no-i18n>${esc(tr('', h.error))}</div>` : '';
+  const head = `<b data-no-i18n>${esc(l.name || (tr('', 'Link') + ' ' + l.id))}</b>
+      <span class="badge ${badge[0]}"><span class="dot"></span>${esc(tr('', badge[1]))}</span>
+      <small>Xray · ${esc(tr('', l.mode === 'reverse' ? 'Reverse' : 'Direct'))} · ${esc(tr('', iran ? 'Iran end' : 'foreign end'))}</small>
+      <span class="xr-grow"></span>`;
+  // the Tunnel tab's copy: the picture, and the way to the full card
+  if (compact) {
+    return `<div class="xr-link">
+    <div class="xr-link-h">${head}
+      <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="gotoXrayLink(${l.id})">${esc(tr('', 'Open in the Xray tab'))}</button></div>
+    ${scene}${err}</div>`;
+  }
   return `<div class="xr-link" id="xrLink${l.id}">
     <div class="xr-link-h">
-      <b data-no-i18n>${esc(l.name || (tr('', 'Link') + ' ' + l.id))}</b>
-      <span class="badge ${badge[0]}"><span class="dot"></span>${esc(tr('', badge[1]))}</span>
-      <small>${esc(tr('', l.mode === 'reverse' ? 'Reverse' : 'Direct'))} · ${esc(tr('', iran ? 'Iran end' : 'foreign end'))}</small>
-      <span class="xr-grow"></span>
+      ${head}
       ${iran ? `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="xrShowBundle(${l.id})">${esc(tr('', 'Bundle'))}</button>
         <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="xrWizEdit(${l.id})">${esc(tr('', 'Edit'))}</button>` : ''}
       ${l.disabled

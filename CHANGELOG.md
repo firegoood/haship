@@ -20,7 +20,8 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 - **CDN mode (Cloudflare).** A CDN preset sends the link through Cloudflare: a censor sees only a Cloudflare site, and a blocked server IP stays reachable. You give a domain whose DNS is on Cloudflare and, if you like, a clean Cloudflare IP. The wizard lists the Cloudflare steps: an A record with the proxy on, and SSL/TLS mode Full. The tunnel port is limited to the ports Cloudflare passes (443, 2053, 2083, 2087, 2096, 8443). The panel makes the certificate for the domain, carried inside the config, so no file has to be set up. The link's picture shows the cloud on the way. XHTTP is the default; WebSocket, HTTPUpgrade and gRPC are in the advanced settings.
 - **TLS without a CDN** (advanced settings): the panel's certificate, pinned on the dialing end, so it is checked with no certificate authority. Your own certificate files can be used instead.
 - The Xray tab sits in the Tunnel group, right after Setup.
-- Coming next: the links on the dashboard map and the Tunnel tab.
+- **On the dashboard and the Tunnel tab.** Each Xray link is a node on the dashboard map, with its state, ping and live speed; clicking it opens its card in the Xray tab. The links bar shows `Xray n/m`. A server whose only tunnel is Xray shows as healthy when its links are. The Tunnel tab shows each link with the same live picture.
+- Guide: [docs/XRAY_TUNNEL.md](docs/XRAY_TUNNEL.md) ([فارسی](docs/XRAY_TUNNEL.fa.md)). The traffic lab now also checks an Xray link's counters against the exact bytes sent.
 
 ### Bagher: lower ping, and several foreign servers on one Iran server
 

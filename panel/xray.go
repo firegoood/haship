@@ -424,7 +424,11 @@ func xrayHealthDrop(id int) {
 // xrayCachedHealth is the link's last check; a check older than 5 s is
 // redone in the background, so a slow or broken link never holds up the page.
 // The first call waits up to a second for the first check.
-func xrayCachedHealth(l XrayLink) xrayHealth {
+func xrayCachedHealth(l XrayLink) xrayHealth { return xrayHealthWait(l, time.Second) }
+
+// xrayHealthWait is xrayCachedHealth waiting up to firstWait for a link never
+// checked before (0: answer "checking" at once).
+func xrayHealthWait(l XrayLink, firstWait time.Duration) xrayHealth {
 	xrayHealthCache.Lock()
 	h, ok := xrayHealthCache.m[l.ID]
 	stale := !ok || time.Since(time.UnixMilli(h.At)) >= 5*time.Second
@@ -445,7 +449,7 @@ func xrayCachedHealth(l XrayLink) xrayHealth {
 		if done != nil {
 			select {
 			case <-done:
-			case <-time.After(time.Second):
+			case <-time.After(firstWait):
 			}
 		}
 		xrayHealthCache.Lock()
@@ -772,6 +776,30 @@ func xrayLinkView(l XrayLink, snap *HubSnapshot, withHealth bool) map[string]any
 		}
 	}
 	return m
+}
+
+// xrayDashLinks are the links as the dashboard map shows them. It never
+// waits for a check: the map is drawn every few seconds anyway.
+func xrayDashLinks(snap *HubSnapshot) []map[string]any {
+	out := []map[string]any{}
+	for _, l := range loadXrayState().Links {
+		h := xrayHealthWait(l, 0)
+		if l.Disabled {
+			h = xrayHealth{Link: "off"}
+		}
+		m := map[string]any{
+			"id": l.ID, "name": l.Name, "mode": l.Mode, "side": l.Side, "remote": l.Remote,
+			"transport": l.Profile.Transport, "security": l.Profile.Security, "cdn": l.Profile.CDN,
+			"link": h.Link, "ping_ms": h.PingMS,
+		}
+		if snap != nil {
+			if c, ok := snap.CarrierTags[xrayTag(l.ID)]; ok {
+				m["rx"], m["tx"] = c[0], c[1]
+			}
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func handleXrayGet(w http.ResponseWriter, r *http.Request) {

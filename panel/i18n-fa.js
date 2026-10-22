@@ -2940,5 +2940,6 @@ window.FA_TEXT = {
 "Your own key file (optional)": "فایل کلید خودت (اختیاری)",
 "On the server end. Empty: the panel's own certificate.": "روی سمت سرور. خالی یعنی گواهی خود پنل.",
 "The panel makes a certificate for this name and the dialing end trusts only that one.": "پنل برای این نام گواهی می‌سازد و سمت وصل‌شونده فقط به همان اعتماد می‌کند.",
-"Connects to": "وصل می‌شود به"
+"Connects to": "وصل می‌شود به",
+"Open in the Xray tab": "باز کردن در تب Xray"
 };

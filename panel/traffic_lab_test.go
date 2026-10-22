@@ -76,6 +76,9 @@ func TestTrafficLab(t *testing.T) {
 	sshFwdMu.Lock()
 	must(saveSSHFwdConfigLocked(bcfg))
 	sshFwdMu.Unlock()
+	// an Xray link in direct mode: this server dials the foreign tunnel port
+	must(saveXrayState(xrayState{NextID: 2, Links: []XrayLink{{ID: 1, Mode: xrayModeDirect, Side: xraySideIran,
+		Remote: foreign, TunnelPort: 4433, Ports: []int{2053}, Profile: XrayProfile{Transport: "raw", Security: "reality"}}}}))
 
 	tick := func() *HubSnapshot {
 		resetCarrier()
@@ -179,6 +182,9 @@ func TestTrafficLab(t *testing.T) {
 	bg0, bg1 := s0.CarrierTags["bagher-1"], s1.CarrierTags["bagher-1"]
 	within("Bagher rx (SSH port)", float64(bg1[0])-float64(bg0[0]), expect["bagher"][0])
 	within("Bagher tx (SSH port)", float64(bg1[1])-float64(bg0[1]), expect["bagher"][1])
+	xr0, xr1 := s0.CarrierTags["xray-1"], s1.CarrierTags["xray-1"]
+	within("Xray rx (tunnel port)", float64(xr1[0])-float64(xr0[0]), expect["xray"][0])
+	within("Xray tx (tunnel port)", float64(xr1[1])-float64(xr0[1]), expect["xray"][1])
 	var wantRx, wantTx float64
 	for _, v := range expect {
 		wantRx, wantTx = wantRx+v[0], wantTx+v[1]
