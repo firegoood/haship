@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log"
+	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -93,6 +98,82 @@ func TestRunCmdConcurrent(t *testing.T) {
 	wg.Wait()
 	if e, _ := execStatFor("c"); e.Calls != 50 {
 		t.Fatalf("calls=%d", e.Calls)
+	}
+}
+
+func realExitError(t *testing.T, code int) error {
+	t.Helper()
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", fmt.Sprintf("exit %d", code))
+	} else {
+		cmd = exec.Command("sh", "-c", fmt.Sprintf("exit %d", code))
+	}
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("exit %d command unexpectedly succeeded", code)
+	}
+	return err
+}
+
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(old) })
+	return &buf
+}
+
+func TestExpectedProbeExit(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		code int
+		want bool
+	}{
+		{"systemctl", []string{"is-active", "frps"}, 3, true},
+		{"systemctl", []string{"is-active", "frps", "frpc"}, 4, true},
+		{"systemctl", []string{"is-active", "frps"}, 1, false},
+		{"systemctl", []string{"restart", "frps"}, 4, false},
+		{"systemctl", nil, 4, false},
+		{"ping", []string{"-c", "1", "1.1.1.1"}, 4, false},
+	}
+	for _, c := range cases {
+		if got := expectedProbeExit(c.name, c.args, c.code); got != c.want {
+			t.Errorf("expectedProbeExit(%q, %v, %d) = %v, want %v", c.name, c.args, c.code, got, c.want)
+		}
+	}
+}
+
+func TestRunCmdSilencesInactiveUnitProbe(t *testing.T) {
+	for _, code := range []int{3, 4} {
+		t.Run(fmt.Sprintf("exit_%d", code), func(t *testing.T) {
+			withRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+				return []byte("inactive"), realExitError(t, code)
+			})
+			logs := captureLog(t)
+			out, err := runCmdTimeoutOut(time.Second, "systemctl", "is-active", "frps")
+			if err == nil || string(out) != "inactive" {
+				t.Fatalf("probe must still return output and error, got %q %v", out, err)
+			}
+			if strings.Contains(logs.String(), "CMD-ERROR") {
+				t.Fatalf("exit %d polluted the log: %s", code, logs.String())
+			}
+		})
+	}
+}
+
+func TestRunCmdLogsUnexpectedSystemctlExit(t *testing.T) {
+	withRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return []byte("denied"), realExitError(t, 1)
+	})
+	logs := captureLog(t)
+	if _, err := runCmdTimeoutOut(time.Second, "systemctl", "is-active", "frps"); err == nil {
+		t.Fatal("expected the command error to pass through")
+	}
+	if !strings.Contains(logs.String(), "[CMD-ERROR]") {
+		t.Fatalf("unexpected systemctl failure must still be logged: %q", logs.String())
 	}
 }
 

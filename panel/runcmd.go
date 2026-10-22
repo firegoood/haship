@@ -76,6 +76,16 @@ func recordExec(name string, d time.Duration, err error, timedOut bool) {
 	b.n++
 }
 
+// expectedProbeExit reports a status query whose non-zero exit is a normal
+// answer, not a failure: systemctl is-active exits 3 for an inactive unit and
+// 4 for a unit that is not installed. The panel probes every engine that may
+// exist on a host, so those codes must not fill the activity stream with
+// CMD-ERROR entries on hosts that only run one engine.
+func expectedProbeExit(name string, args []string, exitCode int) bool {
+	return name == "systemctl" && len(args) > 0 && args[0] == "is-active" &&
+		(exitCode == 3 || exitCode == 4)
+}
+
 func runCmdTimeoutCtx(ctx context.Context, timeout time.Duration, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -89,14 +99,16 @@ func runCmdTimeoutCtx(ctx context.Context, timeout time.Duration, name string, a
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		}
-		trimmed := strings.TrimSpace(string(out))
-		if len(trimmed) > 120 {
-			trimmed = trimmed[:120] + "..."
-		}
-		if trimmed != "" {
-			log.Printf("[CMD-ERROR] command %q failed (exit %d): %v | output: %s", name, exitCode, err, trimmed)
-		} else {
-			log.Printf("[CMD-ERROR] command %q failed (exit %d): %v", name, exitCode, err)
+		if !expectedProbeExit(name, args, exitCode) {
+			trimmed := strings.TrimSpace(string(out))
+			if len(trimmed) > 120 {
+				trimmed = trimmed[:120] + "..."
+			}
+			if trimmed != "" {
+				log.Printf("[CMD-ERROR] command %q failed (exit %d): %v | output: %s", name, exitCode, err, trimmed)
+			} else {
+				log.Printf("[CMD-ERROR] command %q failed (exit %d): %v", name, exitCode, err)
+			}
 		}
 	}
 	return out, err
