@@ -241,7 +241,7 @@ Use everything together: every Iran hub has a pool over every foreign server, ev
 ### 4.14 Mixed engines and UDP
 
 - **Mixed engines:** FRP (tcp, kcp, quic, websocket, wss) and Backhaul tunnels can be members of the same pool. For KCP / QUIC / UDP transports, which hold no TCP session, the tunnel's own health from the dashboard is used.
-- **UDP pools** (Hysteria, TUIC, WireGuard over the tunnel…): choose protocol UDP or TCP and UDP. Balance and sticky work per flow. When a member leaves, its UDP flows are flushed from conntrack so they move at once; this needs the `conntrack` tool. The service check and least connections need TCP.
+- **UDP pools** (Hysteria, TUIC, WireGuard over the tunnel…): choose protocol UDP or TCP and UDP. Every member must forward UDP: FRP always does; a Backhaul or Bagher member needs **Also forward UDP** in its setup. Balance and sticky work per flow. When a member leaves, its UDP flows are flushed from conntrack so they move at once; this needs the `conntrack` tool. The service check and least connections need TCP.
 
 ---
 

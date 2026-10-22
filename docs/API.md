@@ -85,6 +85,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/peer/revpath-probe` | peer secret (or session) | `handlePeerRevPathProbe` |
 | `POST` | `/api/peer/sshfwd-install-key` | peer secret (or session) | `handlePeerSSHFwdInstallKey` |
 | `GET` | `/api/peer/status` | peer secret (or session) | `handlePeerStatus` |
+| `POST` | `/api/peer/swap-carrier` | peer secret (or session) | `handlePeerSwapCarrier` |
+| `GET` | `/api/peer/swap-status` | peer secret (or session) | `handlePeerSwapStatus` |
 | `GET` | `/api/peers` | session | `handlePeersGet` |
 | `PATCH` | `/api/peers` | session + CSRF | `handlePeersPatch` |
 | `POST` | `/api/peers` | session + CSRF | `handlePeersPost` |
@@ -104,6 +106,10 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/session-settings` | session + CSRF | `handleSessionSettingsPost` |
 | `GET` | `/api/setup` | session | `handleSetupGet` |
 | `POST` | `/api/setup` | session + CSRF | `handleSetupPost` |
+| `GET` | `/api/spoof` | session | `handleSpoofGet` |
+| `POST` | `/api/spoof` | session + CSRF | `handleSpoofPost` |
+| `GET` | `/api/spoof/tester` | session | `handleSpoofTester` |
+| `POST` | `/api/spoof/tester` | session + CSRF | `handleSpoofTester` |
 | `GET` | `/api/sshfwd` | session | `handleSSHFwdGet` |
 | `POST` | `/api/sshfwd` | session + CSRF | `handleSSHFwdPost` |
 | `GET` | `/api/status` | session | `handleStatus` |
@@ -129,6 +135,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/traffic/usage` | session | `handleUsageGet` |
 | `GET` | `/api/tunnel-health` | session | `handleTunnelHealthGet` |
 | `POST` | `/api/tunnel-health/run` | session + CSRF | `handleTunnelHealthRun` |
+| `GET` | `/api/tunnel/swap` | session | `handleSwapGet` |
+| `POST` | `/api/tunnel/swap` | session + CSRF | `handleSwapPost` |
 | `POST` | `/api/update` | session + CSRF | `handleUpdate` |
 | `GET` | `/api/update/channel` | session | `handleUpdateChannelGet` |
 | `POST` | `/api/update/channel` | session + CSRF | `handleUpdateChannelPost` |
@@ -140,4 +148,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 116 routes.
+Total: 124 routes.

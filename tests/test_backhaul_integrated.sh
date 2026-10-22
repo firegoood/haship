@@ -99,7 +99,7 @@ cli_backhaul_migrate >/dev/null 2>&1
 [[ -f "$T/systemd/backhaul-iran4040.service" && -f "$T/legacy/iran4040.toml" ]] || { echo "FAIL v2 tunnel touched"; fail=1; }
 
 # 7. a setup replaces the main tunnel: the other engine's units and configs go
-for f in engine_retire_others backhaul_wait_link; do
+for f in engine_retire_others backhaul_wait_link backhaul_udp_remove backhaul_udp_unit; do
   b="$(ext $f)"; [[ -n "$b" ]] || { echo "FAIL: $f missing"; exit 1; }; eval "$b"
 done
 CONFIG_DIR="$T/frp"; PANEL_CONFIG_DIR="$T/panel"; TUNNEL_NAME="gre-tunnel"; mkdir -p "$CONFIG_DIR" "$PANEL_CONFIG_DIR" "$BACKHAUL_CONFIG_DIR"
@@ -107,13 +107,14 @@ frps_wss_front_remove() { echo "wss-front-removed" >> "$T/calls"; }
 ip() { echo "ip $*" >> "$T/calls"; }
 reset_host() {
   : > "$T/calls"; rm -f "$T/systemd"/*.service
-  for u in frps frpc backhaul-server backhaul-client frps-2 backhaul-server-3 gre-tunnel gre-t2; do : > "$T/systemd/$u.service"; done
+  for u in frps frpc backhaul-server backhaul-client frps-2 backhaul-server-3 gre-tunnel gre-t2 backhaul-udp-server backhaul-udp-server-3; do : > "$T/systemd/$u.service"; done
   : > "$CONFIG_DIR/frps.toml"; : > "$CONFIG_DIR/frpc.toml"; : > "$CONFIG_DIR/frps-2.toml"
   : > "$BACKHAUL_CONFIG_DIR/config.toml"; : > "$BACKHAUL_CONFIG_DIR/client.toml"; : > "$PANEL_CONFIG_DIR/gre_mtu"
 }
 reset_host
 engine_retire_others backhaul-client >/dev/null
-for u in frps frpc backhaul-server; do [[ -f "$T/systemd/$u.service" ]] && { echo "FAIL $u unit left"; fail=1; }; done
+for u in frps frpc backhaul-server backhaul-udp-server; do [[ -f "$T/systemd/$u.service" ]] && { echo "FAIL $u unit left"; fail=1; }; done
+[[ -f "$T/systemd/backhaul-udp-server-3.service" ]] || { echo "FAIL a peer UDP companion removed"; fail=1; }
 [[ -f "$T/systemd/backhaul-client.service" && -f "$BACKHAUL_CONFIG_DIR/client.toml" ]] || { echo "FAIL kept engine touched"; fail=1; }
 [[ -f "$CONFIG_DIR/frps.toml" || -f "$CONFIG_DIR/frpc.toml" || -f "$BACKHAUL_CONFIG_DIR/config.toml" ]] && { echo "FAIL old configs left"; fail=1; }
 [[ -f "$T/systemd/frps-2.service" && -f "$CONFIG_DIR/frps-2.toml" && -f "$T/systemd/backhaul-server-3.service" ]] || { echo "FAIL extra peers touched"; fail=1; }

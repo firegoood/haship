@@ -264,10 +264,18 @@ func mountPeerRoutes(mux *http.ServeMux, base string) {
 		{"POST", "/api/peer/revpath-probe", handlePeerRevPathProbe},
 		{"POST", "/api/peer/sshfwd-install-key", handlePeerSSHFwdInstallKey},
 		{"GET", "/api/peer/status", handlePeerStatus},
+		{"POST", "/api/peer/swap-carrier", handlePeerSwapCarrier},
+		{"GET", "/api/peer/swap-status", handlePeerSwapStatus},
 	}
 	for _, rt := range routes {
 		mux.HandleFunc(rt.method+" "+base+rt.path, requirePeerAuth(rt.h))
-		mux.HandleFunc(rt.method+" "+peerRoutePrefix+rt.path, requirePeerSecretHidden(rt.h))
+		guard := requirePeerSecretHidden
+		if rt.path == "/api/peer/handshake" || rt.path == "/api/peer/ping" {
+			// A peer's foreign server knows its own tunnel token, not the
+			// Peer Link secret: it may still say where its panel answers.
+			guard = requireTunnelSecretHidden
+		}
+		mux.HandleFunc(rt.method+" "+peerRoutePrefix+rt.path, guard(rt.h))
 	}
 	mux.HandleFunc("GET "+peerRoutePrefix+"/api/peer/rescue-offer", requireRescuePeerHidden(handlePeerRescueOffer))
 	mux.HandleFunc("POST "+peerRoutePrefix+"/api/peer/rescue-ack", requireRescuePeerHidden(handlePeerRescueAck))
@@ -281,6 +289,10 @@ func handlePeerHandshake(w http.ResponseWriter, r *http.Request) {
 	var req PeerHandshakeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeAPIError(w, r, "E-ACTION-01", "invalid handshake json")
+		return
+	}
+	if id, _ := r.Context().Value(tunnelCtxKey{}).(int); id > 0 {
+		tunnelHandshake(w, id, req)
 		return
 	}
 

@@ -52,14 +52,15 @@ func TestInstallerArgsEngineMatrix(t *testing.T) {
 	}
 }
 
-// UDP forwarding is a Backhaul server option: never sent to a foreign setup.
+// UDP forwarding is a Backhaul option on both sides (the foreign client of a
+// TCP-only transport runs a UDP companion too); FRP always forwards UDP.
 func TestInstallerArgsUDP(t *testing.T) {
 	for _, c := range []struct {
 		engine, role string
 		want         bool
 	}{
 		{"backhaul", "iran", true}, {"gre-backhaul", "iran", true}, {"gre-backhaul", "add-peer", true},
-		{"gre-backhaul", "foreign", false}, {"frp", "iran", false},
+		{"gre-backhaul", "foreign", true}, {"backhaul", "foreign", true}, {"frp", "iran", false},
 	} {
 		b := setupRequest{Engine: c.engine, Role: c.role, AcceptUDP: true, Transport: "tcp", FrpPort: 3080}
 		args, _ := installerArgs(&b, []int{443}, []string{"443"})

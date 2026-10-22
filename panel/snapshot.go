@@ -305,9 +305,12 @@ type HubSnapshot struct {
 	LocalSession bool
 	LocalRTT     float64
 	ActiveConns  any
-	PublicIP     string
-	FrpSince     string
-	Bagher       map[string]any
+	// Carrier: the Backhaul/Bagher port counters (carrier_traffic.go).
+	CarrierRx, CarrierTx uint64
+	CarrierOK            bool
+	PublicIP             string
+	FrpSince             string
+	Bagher               map[string]any
 }
 
 // AgeMs is the snapshot age in milliseconds, -1 for the empty snapshot.
@@ -431,6 +434,7 @@ func buildSnapshot() *HubSnapshot {
 		s.Traffic = greTrafficFrom(v.devData)
 		s.DevData = v.devData
 		s.ActiveConns = activeConns()
+		s.CarrierRx, s.CarrierTx, s.CarrierOK = carrierCounters()
 	})
 	s.PublicIP = detectPublicIPCached()
 	s.FrpSince = frpSinceCached(local.FrpSvc)

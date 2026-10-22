@@ -40,6 +40,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -632,8 +633,18 @@ func ptSpeed(addr string, n int, timeout time.Duration) (float64, error) {
 	if !bytes.Equal(got, msg) {
 		return 0, fmt.Errorf("data came back changed")
 	}
-	sec := time.Since(start).Seconds()
-	return float64(int(float64(n)*8/sec/1e6*10+0.5)) / 10, nil
+	return ptMbps(n, time.Since(start)), nil
+}
+
+// ptMbps turns n bytes moved in d into Mbit/s, rounded to 0.1. Windows'
+// clock is coarse enough that a fast loopback run can read 0: dividing by
+// that gave +Inf, and int(+Inf) wrapped to a huge negative speed. A floor
+// of 1ms keeps the result finite and positive (a lower bound in that case).
+func ptMbps(n int, d time.Duration) float64 {
+	if d < time.Millisecond {
+		d = time.Millisecond
+	}
+	return math.Round(float64(n)*8/d.Seconds()/1e6*10) / 10
 }
 
 // ptSSH reads the SSH banner of host:port (Bagher dials it from Iran).

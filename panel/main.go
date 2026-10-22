@@ -9,7 +9,9 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -89,8 +91,8 @@ func effectiveTLSPort() int {
 var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
-	// go build -ldflags "-X main.panelVersion=v2.5.0"
-	panelVersion = "v2.5.0"
+	// go build -ldflags "-X main.panelVersion=v2.6.0"
+	panelVersion = "v2.6.0"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -528,7 +530,7 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | tls-proxy | pathtest | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate]]")
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | doctor [check|fix] | tls-proxy | pathtest | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate]]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
@@ -546,6 +548,8 @@ func main() {
 			os.Exit(cliTLS(os.Args[2:]))
 		case "settings":
 			os.Exit(cliSettings(os.Args[2:]))
+		case "doctor":
+			os.Exit(cliDoctor(os.Args[2:]))
 		}
 	}
 	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
@@ -667,6 +671,12 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/perf", requireAuth(requireCSRF(handlePerfPost)))
 	mux.HandleFunc("GET "+base+"/api/carrier", requireAuth(handleCarrierGet))
 	mux.HandleFunc("POST "+base+"/api/carrier", requireAuth(requireCSRF(handleCarrierPost)))
+	mux.HandleFunc("GET "+base+"/api/tunnel/swap", requireAuth(handleSwapGet))
+	mux.HandleFunc("POST "+base+"/api/tunnel/swap", requireAuth(requireCSRF(handleSwapPost)))
+	mux.HandleFunc("GET "+base+"/api/spoof", requireAuth(handleSpoofGet))
+	mux.HandleFunc("POST "+base+"/api/spoof", requireAuth(requireCSRF(handleSpoofPost)))
+	mux.HandleFunc("GET "+base+"/api/spoof/tester", requireAuth(handleSpoofTester))
+	mux.HandleFunc("POST "+base+"/api/spoof/tester", requireAuth(requireCSRF(handleSpoofTester)))
 	mux.HandleFunc("GET "+base+"/api/fleet", requireAuth(handleFleet))
 	mux.HandleFunc("GET "+base+"/api/selfstats", requireAuth(handleSelfStats))
 	mux.HandleFunc("GET "+base+"/api/tunnel-health", requireAuth(handleTunnelHealthGet))
@@ -851,6 +861,26 @@ func serveAsset(name, ctype string) http.HandlerFunc {
 	}
 }
 
+var (
+	assetTagOnce sync.Once
+	assetTagVal  string
+)
+
+// assetTag is the ?v= of the first-party assets: the version plus a hash of
+// their content, so a new build is fetched even under the same version (a dev
+// build, a rebuilt release). i18n-fa.js reuses app.js's query.
+func assetTag() string {
+	assetTagOnce.Do(func() {
+		h := sha256.New()
+		for _, f := range []string{"app.js", "i18n-fa.js", "tokens.css", "base.css", "enterprise.css"} {
+			b, _ := panelFS.ReadFile(f)
+			h.Write(b)
+		}
+		assetTagVal = panelVersion + "-" + hex.EncodeToString(h.Sum(nil)[:5])
+	})
+	return assetTagVal
+}
+
 func serveIndex(w http.ResponseWriter, r *http.Request) {
 	if authed(r) {
 		if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
@@ -864,11 +894,11 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := strings.ReplaceAll(string(data), "__BASE_PATH__", "/"+cfg.BasePath)
-	// Cache-bust first-party CSS per build: assets are served with a 24h cache.
+	// Cache-bust first-party assets per build: they are served with a 24h cache.
 	for _, f := range []string{"tokens.css", "base.css", "enterprise.css"} {
-		page = strings.ReplaceAll(page, `href="`+f+`"`, `href="`+f+`?v=`+panelVersion+`"`)
+		page = strings.ReplaceAll(page, `href="`+f+`"`, `href="`+f+`?v=`+assetTag()+`"`)
 	}
-	page = strings.ReplaceAll(page, `src="app.js"`, `src="app.js?v=`+panelVersion+`"`)
+	page = strings.ReplaceAll(page, `src="app.js"`, `src="app.js?v=`+assetTag()+`"`)
 	body := []byte(page)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && len(body) > 1024 {

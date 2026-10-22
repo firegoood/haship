@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +36,51 @@ var backhaulCoreVersion = func() string {
 // backhaulTransports mirrors BACKHAUL_TRANSPORTS in hashem.sh: what the
 // installed core accepts. All carry TCP except udp, which carries UDP only.
 var backhaulTransports = []string{"tcp", "tcpmux", "ws", "wss", "wsmux", "wssmux", "udp"}
+
+// backhaulUnitDir is where hashem.sh writes the Backhaul units; tests point it elsewhere.
+var backhaulUnitDir = "/etc/systemd/system"
+
+// backhaulUDPUnit names the UDP companion of a Backhaul unit (hashem.sh
+// backhaul_udp_unit): a udp-transport Backhaul on the same port number that
+// carries the UDP of a TCP-only transport (tcpmux, ws, wss and the mux kinds).
+func backhaulUDPUnit(unit string) string {
+	return "backhaul-udp-" + strings.TrimPrefix(unit, "backhaul-")
+}
+
+// backhaulUDPPort is the control port of a Backhaul unit's UDP companion: the
+// last field of its ExecCondition line (hashem backhaul-udp-conf MAIN OUT
+// PORT). 0 when the unit has no companion.
+func backhaulUDPPort(unit string) int {
+	if unit == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Join(backhaulUnitDir, backhaulUDPUnit(unit)+".service"))
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if f := strings.Fields(strings.TrimPrefix(line, "ExecCondition=")); strings.HasPrefix(line, "ExecCondition=") && len(f) > 0 {
+			if p, err := strconv.Atoi(f[len(f)-1]); err == nil && p > 0 && p <= 65535 {
+				return p
+			}
+		}
+	}
+	return 0
+}
+
+// udpPortRe finds the companion's port in hashem.sh's setup output.
+var udpPortRe = regexp.MustCompile(`UDP: backhaul-udp-\S+ .*control port (\d+)`)
+
+// udpPortFromSteps is the UDP companion port a setup just made (0: none).
+func udpPortFromSteps(steps []string) int {
+	for _, s := range steps {
+		if m := udpPortRe.FindStringSubmatch(s); m != nil {
+			p, _ := strconv.Atoi(m[1])
+			return p
+		}
+	}
+	return 0
+}
 
 func backhaulTransportOK(t string) bool {
 	for _, v := range backhaulTransports {

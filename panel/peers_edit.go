@@ -740,13 +740,13 @@ func generatePeerBundle(peer *peerRecord, req peerPatchRequest) string {
 		return ""
 	}
 	if engine == "backhaul" {
-		return MakeBackhaulBundle(localPub, peer.FrpPort, transport, token, rawPorts)
+		return MakeBackhaulBundle(localPub, peer.FrpPort, backhaulBundleTransport(transport, backhaulUDPPort(peer.FrpsSvc)), token, rawPorts)
 	}
 	if engine == "gre-backhaul" {
 		if peer.LocalGre == "" || peer.PeerGre == "" {
 			return ""
 		}
-		return MakeGreBackhaulBundle(localPub, peer.FrpPort, peer.LocalGre, peer.PeerGre, transport, token, rawPorts)
+		return MakeGreBackhaulBundle(localPub, peer.FrpPort, peer.LocalGre, peer.PeerGre, backhaulBundleTransport(transport, backhaulUDPPort(peer.FrpsSvc)), token, rawPorts)
 	}
 	if peer.LocalGre == "" || peer.PeerGre == "" {
 		return ""
@@ -829,10 +829,10 @@ func generateMainBundle(req peerPatchRequest, legacyPeer *peerRecord) string {
 		return ""
 	}
 	if engine == "backhaul" {
-		return MakeBackhaulBundle(iranPub, frpPort, transport, token, rawPorts)
+		return MakeBackhaulBundle(iranPub, frpPort, backhaulBundleTransport(transport, backhaulUDPPort("backhaul-server")), token, rawPorts)
 	}
 	if engine == "gre-backhaul" {
-		return MakeGreBackhaulBundle(iranPub, frpPort, iranGre, foreignGre, transport, token, rawPorts)
+		return MakeGreBackhaulBundle(iranPub, frpPort, iranGre, foreignGre, backhaulBundleTransport(transport, backhaulUDPPort("backhaul-server")), token, rawPorts)
 	}
 	frpTrans := ""
 	if req.FRPTransport != "" {

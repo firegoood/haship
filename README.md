@@ -26,6 +26,7 @@
 
 ## Table of contents
 
+- [What's new in v2.6.0](#whats-new-in-v260)
 - [What's new in v2.5.0](#whats-new-in-v250)
 - [What is Hashem?](#what-is-hashem)
 - [Why Hashem?](#why-hashem)
@@ -51,12 +52,21 @@
 
 ---
 
+## What's new in v2.6.0
+
+- 🎭 **Spoof Tunnel (new) [PRO].** For whitelist-based Layer-3 firewalls (the kind seen during Iran's blackouts): both servers forge their source IP and know the other's real one, from [ParsaKSH/spoof-tunnel](https://github.com/ParsaKSH/spoof-tunnel). The panel wraps the raw pipe with WireGuard for a real encrypted link, generates the keys for both sides, and hands the foreign server one bundle. Its own **Spoof** tab, with a built-in **spoof-IP tester** that finds which source IPs get through.
+- 🔀 **Swap the carrier of any tunnel.** Move the main tunnel or any foreign server between GRE + FRP, Backhaul over GRE and Backhaul without GRE from its card. Both servers switch, and a carrier that does not connect within 45 s is undone on both.
+- 📡 **UDP in every tunnel.** One tick (Also forward UDP) and Backhaul forwards UDP on any transport, tcpmux and wss included (a UDP companion on the next free port, managed with the tunnel), and Bagher forwards it through the SSH tunnel. FRP always did. For Hysteria, TUIC, WireGuard, QUIC and games.
+- 🗺️ **A map of every tunnel** on the dashboard and a link diagram on every tunnel card, with live speeds both ways; the traffic chart now counts Backhaul and Bagher too.
+
+Full list: [CHANGELOG](CHANGELOG.md).
+
 ## What's new in v2.5.0
 
 - 🕸️ **Cluster: no single point of failure.** One Iran port served by several foreign servers (failover, balance, sticky per user, lowest latency, least connections), a one-second health check plus a **service check through the tunnel** (catches a dead xray behind a live tunnel), standby servers and connection limits, drain for maintenance, manual failback. Several Iran servers can share the same foreign servers, Iran hubs back each other up, and DNS failover (Cloudflare or any provider by webhook) keeps a domain on the working hubs. Everything runs in the kernel: no speed loss, the real client IP is kept, and a panel restart drops nothing.
 - 🗺️ **Cluster map.** A live picture of the whole cluster. Line thickness is each server's share of traffic and color is its health. Click any server, pool, line, hub or DNS to change it in place.
 - 🧪 **Path test before any tunnel.** Benchmark tab: every transport between your two servers (TCP/UDP, GRE, SSH, FRP x 5, Backhaul x 7) with latency and speed, so you know what gets through before you build anything.
-- 🧩 **Every tunnel in Setup.** GRE + FRP, Backhaul (with or without GRE, now one engine with UDP support) and Bagher, all from the same Setup and Tunnel tabs. Old "Modified Backhaul" tunnels move in by themselves.
+- 🧩 **Every tunnel in Setup.** GRE + FRP, Backhaul (with or without GRE, now one engine) and Bagher, all from the same Setup and Tunnel tabs. Old "Modified Backhaul" tunnels move in by themselves.
 - 🔁 **Back to GRE by itself.** A foreign server that fell back to the hub's public IP returns to GRE once GRE carries the tunnel again.
 - 💻 **`hashem` is a terminal app** with arrow-key menus that follow the panel tabs; everything the panel does works from SSH too (TLS, settings, cluster, performance).
 - ⚙️ **FRP options where they apply:** PROXY protocol (v1/v2), bandwidth limit per port, health check, TCP multiplexing; Backhaul connection pool. Let's Encrypt in Settings fixed.
@@ -268,8 +278,9 @@ The panel is one page with these tabs:
 - **Backhaul with GRE** (`gre-backhaul`) [PRO] — the same GRE link, with Backhaul as the relay. Bundle prefix `gh1_`.
 - **Backhaul without GRE** (`backhaul`) [PRO] — Backhaul only, no GRE interface at all. Bundle prefix `bh1_`.
 - **Bagher** [PRO] — an SSH connection pool from Iran to the foreign server carrying FRP. Bundle prefix `BAGHER:`.
+- **Spoof** [PRO] — an IP-spoofing UDP pipe ([ParsaKSH/spoof-tunnel](https://github.com/ParsaKSH/spoof-tunnel)) with WireGuard on top (`wg-spoof`, 10.20.0.1 ↔ 10.20.0.2), for whitelist firewalls. Set up in its own Spoof tab; bundle prefix `spf1_`. Core: `hashem spoof install` (sha256-pinned).
 
-**Hashem Pro** features: Bagher, setting up Backhaul (with or without GRE), the Path Test, Diagnostics, Performance, Watchdog, Benchmark and Cluster. A lock next to a tab in the sidebar marks the ones that need a license (Sentinel is a separate add-on). Every Pro license unlocks all of them, including features that became Pro after the key was issued, so an update never asks for a new key. Pro is checked on both servers. A Backhaul tunnel that already runs keeps running, restarting and being repaired without a license; only setting up a new one needs it. GRE + FRP stays free.
+**Hashem Pro** features: Bagher, the Spoof tunnel, setting up Backhaul (with or without GRE), the Path Test, Diagnostics, Performance, Watchdog, Benchmark and Cluster. A lock next to a tab in the sidebar marks the ones that need a license (Sentinel is a separate add-on). Every Pro license unlocks all of them, including features that became Pro after the key was issued, so an update never asks for a new key. Pro is checked on both servers. A Backhaul tunnel that already runs keeps running, restarting and being repaired without a license; only setting up a new one needs it. GRE + FRP stays free.
 - **Carriers for the GRE layer** — **Direct GRE** (IP protocol 47) and **WSS** (TLS WebSocket, default `:8443`). The FOU carrier was removed.
 
 ---
@@ -360,6 +371,8 @@ hashem join-hub --bundle <bundle>   # foreign side: also serve another Iran hub 
 hashem logs           # relay logs
 hashem optimize       # BBR / MTU / sysctl tuning
 hashem doctor         # latency, jitter, MTU and speed diagnostics
+hashem doctor fix     # Quick Repair (same as the Diagnostics tab), then diagnose again
+hashem spoof install  # Spoof tunnel core + WireGuard tools (also: status, up, down)
 hashem carrier        # carrier management / failover
 hashem dial status    # foreign side: route to the Iran hub
 hashem watchdog status

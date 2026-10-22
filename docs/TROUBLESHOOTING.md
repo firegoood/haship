@@ -5,6 +5,7 @@ Start with the tools, then look up the code.
 ```bash
 hashem status          # tunnel health, peers, service status (and a tcpMux hint if it sees a mismatch)
 hashem doctor          # latency, jitter, MTU, speed; names the failing leg
+hashem doctor fix      # Quick Repair from the Diagnostics tab, then a new diagnosis
 hashem logs            # relay logs
 hashem dial status     # foreign side: how it reaches the hub (GRE inner IP or public IP)
 journalctl -u gre-panel -n 100 --no-pager

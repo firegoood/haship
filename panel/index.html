@@ -1364,6 +1364,7 @@
       <button role="tab" aria-selected="false" aria-controls="tab-watchdog" tabindex="-1" class="nav-item" data-tab="watchdog" id="watchdogNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span data-i18n="nav_watchdog">Watchdog</span><span class="nav-lock hidden" id="navWatchdogPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-doctor" tabindex="-1" class="nav-item" data-tab="doctor" id="doctorNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><span data-i18n="nav_doctor">Diagnostics</span><span class="nav-lock hidden" id="navDoctorPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span><span class="nav-badge hidden u-ml-auto"></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-benchmark" tabindex="-1" class="nav-item" data-tab="benchmark" id="benchmarkNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span data-i18n="nav_benchmark">Benchmark</span><span class="nav-lock hidden" id="navBenchmarkPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-spoof" tabindex="-1" class="nav-item" data-tab="spoof" id="spoofNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2l7 4v6c0 4-3 7-7 10-4-3-7-6-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg><span data-i18n="nav_spoof">Spoof</span><span class="nav-lock hidden" id="navSpoofPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-update" tabindex="-1" class="nav-item" data-tab="update"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg><span data-i18n="nav_update">Update</span><span class="badge info hidden u-ml-auto" id="updBadge" >new</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" class="nav-item" data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.06-.4.1-.8.1-1.2z"/></svg><span data-i18n="nav_settings">Settings</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-terminal" tabindex="-1" class="nav-item hidden" data-tab="terminal" id="termNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg><span data-i18n="nav_terminal">Terminal</span><span class="term-live hidden u-ml-auto" id="termLiveDot" ></span></button>
@@ -1615,7 +1616,7 @@
           <div id="peerCards" class="det-grid"></div>
           <div class="tun-acts hidden" id="tunnelActs">
             <div class="tun-acts-main">
-              <button class="hashem-btn hashem-btn-secondary hidden" id="tunnelCarrierCycleBtn" title="Switch how GRE packets are carried (Direct GRE or WSS)">Carrier: <span id="tunnelCarrierTxt" data-no-i18n>GRE</span></button>
+              <button class="hashem-btn hashem-btn-secondary hidden" id="tunnelCarrierCycleBtn" title="Switch how GRE packets are carried (Direct GRE or WSS)">GRE wrap: <span id="tunnelCarrierTxt" data-no-i18n>GRE</span></button>
               <button class="hashem-btn hashem-btn-secondary" id="optimizeBtn">Optimize Network</button>
               <button class="hashem-btn hashem-btn-secondary hidden" id="restoreBtn">Restore Previous Settings</button>
             </div>
@@ -1648,88 +1649,74 @@
           </div>
         </div>
 
-        <!-- Live Tunnel Engine Switcher -->
-        <div class="tunnel-card u-mt-4 hidden" id="liveEngineCard">
+        <!-- Carriers: how each tunnel travels; Swap moves one to another carrier on both servers -->
+        <div class="tunnel-card hidden" id="carriersCard">
           <div class="tc-header">
-            <p class="tc-title">Tunnel Engine</p>
-            <span class="badge info" id="activeEngineBadge" data-no-i18n>—</span>
-          </div>
-          <p class="qs-hint u-mb-12" id="liveEngineNote">Changes the engine that carries the tunnel. Token and forwarded ports are kept. The tunnel drops for a few seconds while both sides restart.</p>
-          <div class="u-grid u-gtc-fit-200 u-gap-12 u-mb-12">
             <div>
-              <label for="liveEngineSelect" class="u-fs-12 u-upper u-c-mu u-block u-mb-4">Target Engine</label>
-              <select class="hashem-input u-w-full" id="liveEngineSelect">
-                <option value="frp">GRE + FRP</option>
-                <option value="gre-backhaul">Backhaul (with GRE)</option>
-                <option value="backhaul">Backhaul (no GRE)</option>
-              </select>
-            </div>
-            <div id="liveTransportWrap">
-              <label for="liveTransportSelect" class="u-fs-12 u-upper u-c-mu u-block u-mb-4">Transport Protocol</label>
-              <select class="hashem-input u-w-full" id="liveTransportSelect">
-                <option value="tcpmux" selected>TCPMUX (recommended)</option>
-                <option value="wssmux">WSSMUX (TLS, looks like HTTPS)</option>
-                <option value="tcp">TCP</option>
-                <option value="ws">WS</option>
-                <option value="wsmux">WSMUX</option>
-                <option value="wss">WSS (TLS)</option>
-                <option value="udp">UDP (UDP only)</option>
-              </select>
+              <p class="tc-title">Carriers</p>
+              <div class="qs-hint" id="carriersHint">How each tunnel travels. When a network starts blocking or slowing one, swap it: both servers switch, and if the new carrier does not connect they go back on their own.</div>
             </div>
           </div>
-          <div class="u-flex u-ai-c u-gap-12 u-wrap">
-            <button class="hashem-btn hashem-btn-primary" id="liveSwitchEngineBtn">Switch Engine</button>
-            <span class="u-hint-12" id="liveEngineStatusTxt"></span>
-          </div>
+          <div class="cr-list" id="carriersList"></div>
         </div>
         <!-- Carrier: direct GRE or GRE inside WSS -->
         <div class="tunnel-card" id="carrierCard">
           <div class="tc-header">
             <div>
-              <p class="tc-title">Carrier</p>
-              <div class="qs-hint">How GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47).</div>
+              <p class="tc-title">GRE wrap</p>
+              <div class="qs-hint">How the main tunnel's GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47).</div>
             </div>
             <span class="badge info" id="carrierActiveBadge">Direct GRE</span>
           </div>
-          <div class="wd-hero-grid u-mt-12">
-            <div class="wd-stat-box">
-              <span class="wd-stat-label">Active carrier</span>
-              <div class="wd-stat-val u-fs-18" id="carrierActiveVal">—</div>
-              <span class="wd-stat-sub" id="carrierActiveSub">—</span>
+          <div class="gw-stats">
+            <div class="gw-stat">
+              <span class="gw-stat-k">Active wrap</span>
+              <b id="carrierActiveVal">—</b>
+              <small id="carrierActiveSub">—</small>
             </div>
-            <div class="wd-stat-box">
-              <span class="wd-stat-label">Link to other server</span>
-              <div class="wd-stat-val u-fs-18" id="carrierLinkVal">—</div>
-              <span class="wd-stat-sub" id="carrierLinkSub">—</span>
+            <div class="gw-stat">
+              <span class="gw-stat-k">Link to other server</span>
+              <b id="carrierLinkVal">—</b>
+              <small id="carrierLinkSub">—</small>
             </div>
-            <div class="wd-stat-box">
-              <span class="wd-stat-label">WSS carrier</span>
-              <div class="wd-stat-val u-fs-18" id="carrierWSSVal">—</div>
-              <span class="wd-stat-sub" id="carrierWSSTxt">—</span>
+            <div class="gw-stat">
+              <span class="gw-stat-k">WSS wrap</span>
+              <b id="carrierWSSVal">—</b>
+              <small id="carrierWSSTxt">—</small>
             </div>
           </div>
 
-          <div class="fg u-mt-16">
-            <label for="carrierModeSelect">Carrier</label>
-            <div class="u-flex-center-wrap10">
-              <select class="hashem-input u-max-w-260" id="carrierModeSelect">
-                <option value="direct" selected>Direct GRE (Protocol 47)</option>
-                <option value="wss:8443">WSS (TLS 8443)</option>
-              </select>
-              <button class="hashem-btn hashem-btn-secondary" id="carrierSaveModeBtn" disabled>Switch Carrier</button>
-              <button class="hashem-btn hashem-btn-ghost" id="carrierApplyBtn">Re-apply</button>
-            </div>
-            <div class="ent-help">Switching reconnects the tunnel for a few seconds. Re-apply sets up the current carrier again, which can fix a stuck link.</div>
+          <div class="gw-opts" role="radiogroup" aria-label="GRE wrap" id="gwOpts">
+            <button type="button" class="gw-opt" role="radio" aria-checked="true" data-gw="direct">
+              <span class="gw-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12h16M14 6l6 6-6 6"/></svg></span>
+              <span class="gw-txt"><b>Direct GRE</b><small>Raw GRE, protocol 47. The fastest, with the lowest latency.</small></span>
+              <span class="gw-badge">Active</span>
+            </button>
+            <button type="button" class="gw-opt" role="radio" aria-checked="false" data-gw="wss">
+              <span class="gw-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>
+              <span class="gw-txt"><b>WSS</b><small>GRE inside TLS on a web port. For networks that block or slow down protocol 47.</small></span>
+              <span class="gw-badge">Active</span>
+            </button>
+          </div>
+          <div class="gw-acts">
+            <button class="hashem-btn hashem-btn-primary" id="carrierSaveModeBtn" disabled>Switch Wrap</button>
+            <button class="hashem-btn hashem-btn-ghost" id="carrierApplyBtn">Re-apply</button>
+            <span class="ent-help">Switching reconnects the tunnel for a few seconds. Re-apply sets up the current carrier again, which can fix a stuck link.</span>
           </div>
 
-          <div class="fg u-mt-16">
-            <label for="carrierWSSPortInput">WSS port</label>
-            <div class="u-flex-center-wrap10">
-              <input type="number" class="hashem-input u-max-w-140" id="carrierWSSPortInput" min="1" max="65535" value="8443" inputmode="numeric">
-              <input type="text" class="hashem-input u-max-w-180" id="carrierWSSSNIInput" aria-label="SNI (optional)" placeholder="SNI (optional)" autocomplete="off" spellcheck="false">
+          <div class="gw-wss">
+            <div class="gw-wss-h"><b>WSS settings</b><span class="ent-help">Use the same port on both servers. The SNI is the host name shown in the TLS handshake; leave it empty to send none.</span></div>
+            <div class="gw-wss-f">
+              <div class="fg">
+                <label for="carrierWSSPortInput">WSS port</label>
+                <input type="number" class="hashem-input" id="carrierWSSPortInput" min="1" max="65535" value="8443" inputmode="numeric">
+              </div>
+              <div class="fg">
+                <label for="carrierWSSSNIInput">SNI (optional)</label>
+                <input type="text" class="hashem-input" id="carrierWSSSNIInput" placeholder="www.example.com" autocomplete="off" spellcheck="false">
+              </div>
               <button class="hashem-btn hashem-btn-secondary" id="carrierSaveWSSBtn">Save WSS Settings</button>
             </div>
-            <div class="ent-help">Use the same port on both servers. The SNI is the host name shown in the TLS handshake; leave it empty to send none.</div>
           </div>
         </div>
       </section>
@@ -1964,6 +1951,7 @@
                       <input type="checkbox" id="sAcceptUdp">
                       <span data-i18n="setup_bh_udp">Also forward UDP on these ports</span>
                     </label>
+                    <div class="qs-hint u-mt-4" id="iranUdpHint"></div>
                   </div>
                 </div>
               </fieldset>
@@ -1976,6 +1964,7 @@
                   <div class="fg"><label for="sshfwdRemoteHost" data-i18n="setup_bagher_host">Foreign server public IP</label><input class="hashem-input" id="sshfwdRemoteHost" inputmode="decimal" placeholder="e.g. 198.51.100.73"></div>
                   <div class="fg"><label for="sshfwdPorts" data-i18n="setup_forward_ports">Forwarded Ports (single, ranges, mappings)</label><input class="hashem-input" id="sshfwdPorts" placeholder="e.g. 443, 8443, 2083"></div>
                 </div>
+                <div class="fg"><label class="u-check-row"><input type="checkbox" id="sshfwdUdp"><span data-i18n="setup_bh_udp">Also forward UDP on these ports</span></label></div>
                 <details class="qs-adv u-mt-8">
                   <summary data-i18n="setup_bagher_adv">SSH port, pool size and internal FRP port</summary>
                   <div class="qs-row">
@@ -2108,6 +2097,7 @@
                   <div class="fg" id="wrapPeerPeerGre"><label for="pPeerGre">Foreign GRE IP</label><input class="hashem-input" id="pPeerGre" inputmode="decimal" placeholder="e.g. 10.11.0.1"></div>
                   <div class="fg"><label for="pFrpPort">Control port (unique per peer)</label><input class="hashem-input" id="pFrpPort" inputmode="numeric" placeholder="e.g. 7001"></div>
                   <div class="fg"><label for="pPorts">Reverse ports (ranges &amp; mappings allowed)</label><input class="hashem-input" id="pPorts" placeholder="443, 10000-10050, 2083=8443"></div>
+                  <div class="fg u-col-span-2 hidden" id="wrapPeerUdp"><label class="u-check-row"><input type="checkbox" id="pAcceptUdp"><span data-i18n="setup_bh_udp">Also forward UDP on these ports</span></label></div>
                 </div>
                 <div class="qs-hint">Each peer gets its own token. Ports already used by another tunnel are rejected — pick a different one.</div>
                 <div id="peerWarn" class="warnbox hidden"></div>
@@ -3033,6 +3023,19 @@
           </div>
         </div>
       </section>
+      <!-- Tab: Spoof Tunnel (IP-spoofing UDP pipe wrapped with WireGuard) -->
+      <section id="tab-spoof" role="tabpanel" hidden>
+        <div class="tunnel-card u-mb-20">
+          <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
+            <div>
+              <span class="tc-title u-fs-18 u-fw-700" data-i18n="spoof_title">Spoof Tunnel</span> <span class="eng-pro hidden" id="spoofPro" data-no-i18n>PRO</span>
+              <div class="qs-hint u-mt-4" data-i18n="spoof_sub">A tunnel that forges its source IP on both servers to cross whitelist-based Layer-3 firewalls, wrapped with WireGuard for a real encrypted link. Test which spoof IPs get through first, then bring the tunnel up.</div>
+            </div>
+            <span class="badge dim" id="spoofBadge" data-i18n="spoof_idle">Not configured</span>
+          </div>
+          <div id="spoofBody"><div class="ent-skel u-h-14"></div></div>
+        </div>
+      </section>
       <section id="tab-update" role="tabpanel" hidden>
         <div class="tunnel-card">
           <div class="tc-header"><p class="tc-title">Panel Update <span class="badge info hidden" id="updDevBadge" data-i18n="upd_dev_badge">DEV</span></p><span class="status-indicator" id="updDot"><span class="dot"></span><span id="updDotTxt">—</span></span></div>
@@ -3404,7 +3407,7 @@
       <button class="ent-x" id="editPortsClose" aria-label="Close" data-i18n-aria="aria_close">&#xD7;</button>
     </div>
     <div class="ent-modal-b u-gap-16">
-      <p class="u-m-0 u-c-mu u-fs-13" id="editPortsSub">Modify tunnel parameters, carrier protocol, or forwarded ports. Changes reload services immediately.</p>
+      <p class="u-m-0 u-c-mu u-fs-13" id="editPortsSub">Rename the tunnel or change its foreign IP and forwarded ports. To change how it travels, use Swap carrier.</p>
       
       <div class="u-grid-2col">
         <div class="fg">
@@ -3417,46 +3420,12 @@
         </div>
       </div>
 
-      <div class="u-grid-2col">
-        <div class="fg">
-          <label class="u-label-up" for="editPeerEngine">Tunnel Engine</label>
-          <select class="hashem-input u-mt-6" id="editPeerEngine">
-            <option value="frp">GRE + FRP</option>
-            <option value="gre-backhaul">Backhaul (with GRE)</option>
-            <option value="backhaul">Backhaul (no GRE)</option>
-          </select>
+      <div class="ep-carrier">
+        <div class="ep-carrier-txt">
+          <span class="u-label-up">Carrier</span>
+          <b id="editPeerCarrierNow" data-no-i18n>—</b>
         </div>
-        <div class="fg" id="wrapEditTransport">
-          <label class="u-label-up" for="editPeerTransport">Transport Protocol</label>
-          <select class="hashem-input u-mt-6" id="editPeerTransport">
-            <option value="tcpmux">TCPMUX</option>
-            <option value="wssmux">WSSMUX</option>
-            <option value="tcp">TCP</option>
-            <option value="ws">WS</option>
-            <option value="wsmux">WSMUX</option>
-            <option value="wss">WSS</option>
-            <option value="udp">UDP</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="fg" id="wrapEditCarrier">
-        <label class="u-label-up" for="editPeerCarrier">Carrier Mode</label>
-        <select class="hashem-input u-mt-6" id="editPeerCarrier">
-          <option value="direct">Direct GRE (Raw Protocol 47 — lowest latency)</option>
-          <option value="wss:8443">WSS :8443 (WebSocket over TLS Obfuscation)</option>
-        </select>
-      </div>
-
-      <div class="fg" id="wrapEditFRPTransport">
-        <label class="u-label-up" for="editPeerFRPTransport">FRP Transport Protocol</label>
-        <select class="hashem-input u-mt-6" id="editPeerFRPTransport">
-          <option value="tcp">TCP (Standard multiplexed stream)</option>
-          <option value="kcp">KCP (UDP with ARQ — Anti-packet-loss)</option>
-          <option value="quic">QUIC (UDP QUIC — 0-RTT fast stream)</option>
-          <option value="websocket">WebSocket (HTTP Upgrade protocol)</option>
-          <option value="wss">WSS (TLS-encrypted WebSocket obfuscation)</option>
-        </select>
+        <button class="hashem-btn hashem-btn-secondary u-btn-30" id="editPeerSwapBtn" type="button">Swap carrier</button>
       </div>
 
       <div class="qs-hint u-mt-2">Encryption, compression, PROXY protocol, bandwidth limit and health check are set on the foreign server, in its Performance tab: they live in its frpc.</div>
@@ -3476,7 +3445,7 @@
 
       <div class="u-flex u-ai-c u-jc-sb u-p-12x12 u-bg-s2 u-bd-ln u-r-10">
         <div class="u-hint-12">Foreign Setup Bundle for client sync:</div>
-        <button class="hashem-btn hashem-btn-ghost u-btn-28" id="editPeerCopyBundleBtn" type="button">&#x1F4CB; Copy Bundle</button>
+        <button class="hashem-btn hashem-btn-ghost u-btn-28" id="editPeerCopyBundleBtn" type="button">Copy Bundle</button>
       </div>
 
       <div id="editPortsWarn" class="warnbox hidden"></div>
@@ -3484,6 +3453,21 @@
     <div class="ent-modal-f">
       <button class="hashem-btn hashem-btn-ghost" id="editPortsCancel" type="button">Cancel</button>
       <button class="hashem-btn hashem-btn-primary" id="editPortsSave" type="button">Save &amp; Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Swap carrier: moves one tunnel to another engine / transport on both servers -->
+<div class="ent-modal-ov" id="swapModal" hidden>
+  <div class="ent-modal sw-modal u-w-full" role="dialog" aria-modal="true" aria-labelledby="swapTitle">
+    <div class="ent-modal-h">
+      <b id="swapTitle">Swap carrier</b>
+      <button class="ent-x" id="swapClose" aria-label="Close" data-i18n-aria="aria_close">&#xD7;</button>
+    </div>
+    <div class="ent-modal-b sw-body" id="swapBody" aria-live="polite"></div>
+    <div class="ent-modal-f">
+      <button class="hashem-btn hashem-btn-ghost" id="swapCancel" type="button">Cancel</button>
+      <button class="hashem-btn hashem-btn-primary" id="swapGo" type="button" disabled>Swap carrier</button>
     </div>
   </div>
 </div>
@@ -3674,10 +3658,11 @@
       </div>
       <div class="fg">
         <label for="bagherQuickPorts" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">
-          Forwarded Ports (TCP &amp; UDP):
+          Forwarded Ports:
         </label>
         <input class="hashem-input u-w-full u-mono" id="bagherQuickPorts" placeholder="e.g. 443, 8443, 1020, 1030, 1040">
         <div class="u-hint-11 u-mt-4">Comma-separated port numbers forwarded through the stealth tunnel.</div>
+        <label class="u-check-row u-mt-8"><input type="checkbox" id="bagherQuickUdp"><span data-i18n="setup_bh_udp">Also forward UDP on these ports</span></label>
       </div>
       <div class="u-grid u-gtc-1fr-1fr u-gap-12">
         <div class="fg">

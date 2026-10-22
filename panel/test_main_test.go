@@ -44,6 +44,8 @@ func TestMain(m *testing.M) {
 	// Engine switches: units "run" once restarted, and no post-start wait.
 	engineServiceActive = func(string) bool { return true }
 	engineVerifyDelay = 0
+	// Backhaul/Bagher port counters run iptables; tests opt in.
+	carrierCounters = func() (uint64, uint64, bool) { return 0, 0, false }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
