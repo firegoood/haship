@@ -2218,6 +2218,143 @@ cli_spoof() {
     esac
 }
 
+# ---- Xray Tunnel: the panel's own Xray-core, apart from any Xray panel ----
+# Installed to its own directory: never /usr/local/bin/xray (the official
+# installer's) nor a panel's (3x-ui, Marzban, ...), whose xray, units and ports
+# stay untouched. Units are hashem-xray-N only; nothing is killed by name.
+DEFAULT_XRAY_VERSION="v26.3.27"
+XRAY_DIR="${XRAY_DIR:-/usr/local/lib/hashem/xray}"
+# sha256 of the official v26.3.27 release archives (verified on download).
+XRAY_SHA256_amd64="23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
+XRAY_SHA256_arm64="4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"
+
+# xray_unzip ZIP DIR: unzip, else python3, else install unzip and retry.
+xray_unzip() {
+    unzip -oq "$1" -d "$2" 2>/dev/null && [[ -f "$2/xray" ]] && return 0
+    python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$1" "$2" 2>/dev/null \
+        && [[ -f "$2/xray" ]] && return 0
+    if command -v apt-get >/dev/null 2>&1; then
+        wait_for_package_manager_lock 2>/dev/null || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unzip >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q unzip >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y -q unzip >/dev/null 2>&1 || true
+    fi
+    unzip -oq "$1" -d "$2" 2>/dev/null && [[ -f "$2/xray" ]]
+}
+
+# install_xray_core [--force]: the pinned Xray-core, sha256 checked, into
+# XRAY_DIR. A running tunnel keeps its binary until the new one is in place.
+install_xray_core() {
+    local want="${DEFAULT_XRAY_VERSION#v}"
+    if [[ "${1:-}" != "--force" && -x "${XRAY_DIR}/xray" ]] \
+        && "${XRAY_DIR}/xray" version 2>/dev/null | head -1 | grep -q " ${want} "; then
+        return 0
+    fi
+    detect_arch
+    local ZIP_ARCH
+    case "$FRP_ARCH" in
+        amd64) ZIP_ARCH="64" ;;
+        arm64) ZIP_ARCH="arm64-v8a" ;;
+        *) echo -e "${RED}[!] The Xray tunnel supports amd64 and arm64 only (this is ${FRP_ARCH}).${NC}"; return 1 ;;
+    esac
+    local WANT_SHA GOT_SHA TMP_DIR
+    eval "WANT_SHA=\${XRAY_SHA256_${FRP_ARCH}}"
+    TMP_DIR=$(mktemp -d)
+    local URL="https://github.com/XTLS/Xray-core/releases/download/${DEFAULT_XRAY_VERSION}/Xray-linux-${ZIP_ARCH}.zip"
+    echo -e "${CYAN}[*] Downloading Xray-core ${DEFAULT_XRAY_VERSION} (${FRP_ARCH})...${NC}"
+    if ! download_with_fallback "${TMP_DIR}/xray.zip" "$URL" 180; then
+        echo -e "${RED}[!] Failed to download Xray-core from GitHub or mirrors.${NC}"
+        rm -rf "$TMP_DIR"; return 1
+    fi
+    GOT_SHA=$(sha256sum "${TMP_DIR}/xray.zip" 2>/dev/null | awk '{print $1}')
+    if [[ "$GOT_SHA" != "$WANT_SHA" ]]; then
+        echo -e "${RED}[!] Xray-core checksum mismatch — refusing to install.${NC}"
+        echo -e "    want ${WANT_SHA}\n    got  ${GOT_SHA}"
+        rm -rf "$TMP_DIR"; return 1
+    fi
+    mkdir -p "${TMP_DIR}/x"
+    if ! xray_unzip "${TMP_DIR}/xray.zip" "${TMP_DIR}/x"; then
+        echo -e "${RED}[!] Could not unpack Xray-core (install unzip or python3).${NC}"
+        rm -rf "$TMP_DIR"; return 1
+    fi
+    mkdir -p "$XRAY_DIR"
+    local f
+    for f in geoip.dat geosite.dat; do
+        [[ -f "${TMP_DIR}/x/$f" ]] && install -m 0644 "${TMP_DIR}/x/$f" "${XRAY_DIR}/$f"
+    done
+    # replace by rename: a running hashem-xray keeps the old file open
+    install -m 0755 "${TMP_DIR}/x/xray" "${XRAY_DIR}/xray.new" && mv -f "${XRAY_DIR}/xray.new" "${XRAY_DIR}/xray"
+    rm -rf "$TMP_DIR"
+    if "${XRAY_DIR}/xray" version >/dev/null 2>&1; then
+        echo -e "${GREEN}[OK] Xray-core ${DEFAULT_XRAY_VERSION} installed to ${XRAY_DIR}.${NC}"
+        return 0
+    fi
+    echo -e "${RED}[!] Xray-core was installed but does not run on this server.${NC}"
+    return 1
+}
+
+# xray_link_units: the Xray tunnel's units on this server (hashem-xray-N).
+xray_link_units() {
+    local f
+    for f in /etc/systemd/system/hashem-xray-[0-9]*.service; do
+        [[ -f $f ]] && basename "$f"
+    done
+}
+
+# xray_remove_all: stop and remove the tunnel's units and its Xray-core.
+# The panel's link settings stay, so installing again brings them back.
+xray_remove_all() {
+    xray_link_units | xargs -r systemctl disable --now >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/hashem-xray-[0-9]*.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    rm -rf "$XRAY_DIR"
+}
+
+# cli_xray: terminal entry for the Xray tunnel. Installing the core is a new
+# setup and needs Pro; status, logs, start, stop and restart of links that
+# exist never ask (see pro_ok).
+cli_xray() {
+    local SUB="${1:-status}" u
+    case "$SUB" in
+        install|core)
+            pro_ok xray "Xray Tunnel" || return 1
+            install_xray_core "${2:-}" ;;
+        status)
+            if [[ -x "${XRAY_DIR}/xray" ]]; then
+                echo -e "${GREEN}[OK] Xray-core:${NC} $("${XRAY_DIR}/xray" version 2>/dev/null | head -1)"
+            else
+                echo -e "${YELLOW}[!] Xray-core not installed. Run: hashem xray install${NC}"
+            fi
+            local n=0
+            for u in $(xray_link_units); do
+                n=$((n + 1))
+                if systemctl is-active --quiet "$u"; then
+                    echo -e "  ${u%.service}: ${GREEN}active${NC}"
+                else
+                    echo -e "  ${u%.service}: ${YELLOW}$(systemctl is-active "$u" 2>/dev/null)${NC}"
+                fi
+            done
+            (( n )) || echo "  No Xray tunnel links yet: set one up in the panel's Xray tab."
+            ;;
+        start|up)
+            xray_link_units | xargs -r systemctl start && echo -e "${GREEN}[OK] Xray tunnel links started.${NC}" ;;
+        stop|down)
+            xray_link_units | xargs -r systemctl stop; echo -e "${GREEN}[OK] Xray tunnel links stopped.${NC}" ;;
+        restart)
+            xray_link_units | xargs -r systemctl restart && echo -e "${GREEN}[OK] Xray tunnel links restarted.${NC}" ;;
+        logs)
+            journalctl -u 'hashem-xray-*' -n "${2:-100}" --no-pager ;;
+        uninstall|remove)
+            xray_remove_all
+            echo -e "${GREEN}[OK] Xray tunnel removed (its links stay in the panel; install again to bring them back).${NC}" ;;
+        *)
+            echo -e "Usage: hashem xray {install|status|start|stop|restart|logs [N]|uninstall}"
+            return 1 ;;
+    esac
+}
+
 backhaul_ensure_tls() {
     mkdir -p "$BACKHAUL_CONFIG_DIR"
     if [[ ! -f "${BACKHAUL_CONFIG_DIR}/server.crt" || ! -f "${BACKHAUL_CONFIG_DIR}/server.key" ]]; then
@@ -5736,6 +5873,9 @@ uninstall_all_force() {
         systemctl disable --now hashem-bagher hashem-bagher-frps hashem-bagher-frpc hashem-ssh-fwd hashem-ssh-frps >/dev/null 2>&1 || true
         rm -f /etc/systemd/system/hashem-bagher*.service /etc/systemd/system/hashem-ssh-fwd.service /etc/systemd/system/hashem-ssh-frps.service
         systemctl daemon-reload >/dev/null 2>&1 || true
+
+        # 6c. Xray tunnel: its units and its own Xray-core (never an Xray panel's)
+        xray_remove_all
 
         # 7. Remove all binaries (and the Spoof tunnel: its core, WireGuard link, configs)
         systemctl disable --now wg-quick@wg-spoof spoof-core >/dev/null 2>&1 || true
@@ -11185,6 +11325,7 @@ if [[ $# -gt 0 ]]; then
             menu_backhaul ;;
         backhaul-migrate) cli_backhaul_migrate ;;
         spoof|spoof-tunnel) shift; cli_spoof "$@" ;;
+        xray|xray-tunnel) shift; cli_xray "$@" ;;
         remove-tunnel)
             if [[ "${2:-}" == "--force" ]]; then remove_tunnel_force; else remove_tunnel; fi ;;
         uninstall)

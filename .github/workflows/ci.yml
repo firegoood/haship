@@ -32,6 +32,13 @@ jobs:
         run: cd panel && go build ./...
       - name: go test (race)
         run: cd panel && go test -race -count=1 ./...
+      - name: Xray tunnel configs load in the pinned Xray-core v26.3.27 (every preset, direct and reverse, both ends)
+        run: |
+          mkdir -p /tmp/xray-dl && cd /tmp/xray-dl
+          curl -fsSL -o xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip
+          echo "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae  xray.zip" | sha256sum -c -
+          unzip -oq xray.zip xray && ./xray version | head -1
+          cd "$GITHUB_WORKSPACE/panel" && XRAY_BIN=/tmp/xray-dl/xray go test -count=1 -v -run '^TestXrayConfigsLoad$' .
 
   shell:
     runs-on: ubuntu-latest
