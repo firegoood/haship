@@ -296,6 +296,58 @@ func removeViaInstaller() (string, error) {
 // many foreign servers hang off this Iran. Legacy single installs without
 // a registry fall back to the old single-tunnel view.
 
+// rawPorts is the registry's port spelling ("443, 10000-10050"). hashem.sh
+// writes one comma-separated string and the web UI reads it as one; panel
+// builds wrote an array. Accept both on read, emit the string form on write.
+// Decoding the old array-only struct from a script-written string failed the
+// whole peers.json unmarshal, which silently emptied the hub's tunnel list.
+type rawPorts []string
+
+func (r *rawPorts) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*r = nil
+		return nil
+	}
+	if strings.HasPrefix(trimmed, `"`) {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		var out []string
+		for _, part := range strings.FieldsFunc(s, func(c rune) bool {
+			return c == ',' || c == ' ' || c == '\t' || c == '\n'
+		}) {
+			if part = strings.TrimSpace(part); part != "" {
+				out = append(out, part)
+			}
+		}
+		*r = out
+		return nil
+	}
+	var items []any
+	if err := json.Unmarshal(data, &items); err != nil {
+		return err
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		switch v := item.(type) {
+		case string:
+			if v = strings.TrimSpace(v); v != "" {
+				out = append(out, v)
+			}
+		case float64:
+			out = append(out, strconv.FormatFloat(v, 'f', -1, 64))
+		}
+	}
+	*r = out
+	return nil
+}
+
+func (r rawPorts) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strings.Join(r, ","))
+}
+
 type peerRecord struct {
 	ID             int      `json:"id"`
 	Name           string   `json:"name"`
@@ -305,7 +357,7 @@ type peerRecord struct {
 	LocalGre       string   `json:"local_gre"`
 	PeerGre        string   `json:"peer_gre"`
 	Ports          []int    `json:"ports"`
-	RawPorts       []string `json:"raw_ports,omitempty"`
+	RawPorts       rawPorts `json:"raw_ports,omitempty"`
 	Token          string   `json:"token,omitempty"`
 	GreIf          string   `json:"gre_if"`
 	FrpsSvc        string   `json:"frps_svc"`

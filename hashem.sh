@@ -4451,7 +4451,8 @@ d.setdefault("peers", []).append({
   "id": int(iid), "name": name, "local_pub": lip, "remote_pub": rip,
   "frp_port": int(fport), "token": tok, "local_gre": lgre, "peer_gre": pgre,
   "ports": json.loads(pjson), "gre_if": gif, "frps_svc": svc, "legacy": False,
-  "engine": eng, "transport": trans, "no_gre": nogre == "1", "raw_ports": raw_p
+  "engine": eng, "transport": trans, "no_gre": nogre == "1",
+  "raw_ports": [p.strip() for p in raw_p.replace(",", " ").split() if p.strip()]
 })
 json.dump(d, open(f, "w"), indent=2)
 PYEOF
