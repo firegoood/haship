@@ -126,7 +126,10 @@ func bagherCarrierTargetFor(cfg SSHFwdConfig, id int) (bagherCarrierTarget, bool
 		if !ok {
 			return t, false
 		}
-		t.Host, t.Port, t.User = l.RemoteHost, l.RemoteSSHPort, l.RemoteUser
+		// an empty SSH port or user is the first foreign server's, as in
+		// the link's bundle
+		lc := bagherLinkCfg(cfg, l)
+		t.Host, t.Port, t.User = lc.RemoteHost, lc.RemoteSSHPort, lc.RemoteUser
 	}
 	if t.Port <= 0 {
 		t.Port = 22

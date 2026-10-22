@@ -277,14 +277,21 @@ func TestBagherHostKeyMismatchRefused(t *testing.T) {
 func TestBagherCarrierTargetFor(t *testing.T) {
 	cfg := defaultSSHFwdConfig()
 	cfg.RemoteHost, cfg.RemoteSSHPort = "198.51.100.1", 2222
-	cfg.Links = []BagherLink{{ID: 2, RemoteHost: "198.51.100.2", Ports: []int{8443}}}
+	cfg.RemoteUser = "tunnel"
+	cfg.Links = []BagherLink{{ID: 2, RemoteHost: "198.51.100.2", Ports: []int{8443}},
+		{ID: 3, RemoteHost: "198.51.100.3", Ports: []int{9443}, RemoteSSHPort: 2200, RemoteUser: "bagher"}}
 	t1, ok := bagherCarrierTargetFor(cfg, 1)
-	if !ok || t1.Host != "198.51.100.1" || t1.Port != 2222 || t1.User != "root" || t1.FRPPort != 55400 {
+	if !ok || t1.Host != "198.51.100.1" || t1.Port != 2222 || t1.User != "tunnel" || t1.FRPPort != 55400 {
 		t.Fatalf("link 1: %+v %v", t1, ok)
 	}
+	// no port or user of its own: the first foreign server's, as its bundle says
 	t2, ok := bagherCarrierTargetFor(cfg, 2)
-	if !ok || t2.Host != "198.51.100.2" || t2.Port != 22 {
+	if !ok || t2.Host != "198.51.100.2" || t2.Port != 2222 || t2.User != "tunnel" {
 		t.Fatalf("link 2: %+v %v", t2, ok)
+	}
+	t3, ok := bagherCarrierTargetFor(cfg, 3)
+	if !ok || t3.Port != 2200 || t3.User != "bagher" {
+		t.Fatalf("link 3: %+v %v", t3, ok)
 	}
 	if _, ok := bagherCarrierTargetFor(cfg, 7); ok {
 		t.Fatal("unknown link must not resolve")
