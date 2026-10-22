@@ -5301,7 +5301,7 @@ async function spoofGenBundle() {
   const btn = $('spBundleBtn');
   btn.disabled = true;
   try {
-    const r = await api('/api/spoof', Object.assign(spoofFormReq('bundle')));
+    const r = await api('/api/spoof', spoofFormReq('bundle'));
     _spoof = r.spoof || _spoof;
     $('spBundleOut').innerHTML = `<textarea class="hashem-input sw-bundle" readonly data-no-i18n>${esc(r.bundle)}</textarea>
       <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="spCopyBundle">${esc(tr('', 'Copy Bundle'))}</button>`;
@@ -5404,6 +5404,8 @@ function renderSpoofTester(t) {
     return;
   }
   if (t.status === 'error') { box.innerHTML = `<div class="sw-result err">${esc(t.error || tr('', 'The test failed.'))}</div>`; return; }
+  if (t.status === 'stopped') { box.innerHTML = `<div class="sw-result warn">${esc(tr('', 'Test stopped. The tester reports its results only when the timeout ends.'))}</div>`; return; }
+  if (t.status === 'done' && t.mode === 'sender') { box.innerHTML = `<div class="sw-result ok">${esc(tr('', 'Packets sent. The results are on the receiver server.'))}</div>`; return; }
   const passed = t.passed || [];
   if (t.status === 'done' && !passed.length) { box.innerHTML = `<div class="sw-result warn">${esc(tr('', 'No IPs passed. Try more sources or a higher loss threshold.'))}</div>`; return; }
   if (!passed.length) { box.innerHTML = ''; return; }

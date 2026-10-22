@@ -3,15 +3,13 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
-## v2.5.0 — 2026-10-19
+## v2.6.0 — 2026-10-22
 
-The cluster (several foreign servers behind one Iran port, several Iran hubs, DNS failover) with a live, clickable map; a path test before any tunnel; every tunnel engine in Setup; `hashem` as a terminal app. Update every server: the cluster needs the same version on all of them.
+A new tunnel type, **Spoof**, that crosses whitelist firewalls by forging its source IP on both servers, with a built-in tester that finds the source IPs that get through; every tunnel can **swap its carrier** from the panel; **UDP in every tunnel**; a map of every tunnel on the dashboard. Update both servers of a tunnel: the carrier swap and the Spoof tunnel need this version on each side.
 
 **Upgrade notes**
-- `cluster.json` from the first cluster is upgraded by itself: the hub id and linked hubs stay, the old foreign-server list goes (it sent users outside the tunnel). Make pools instead: add the first foreign server, New Pool on its port, then add the others with the same port.
-- Tunnels from the old `hashem-backhaul.sh` ("Modified Backhaul") move into Hashem by themselves at the first panel start.
-- Performance, Watchdog, Benchmark, the Path Test, Backhaul setup and Diagnostics are Hashem Pro. Every existing Pro key opens them; settings and tunnels that already run keep running without a license.
-- Bagher has no tab of its own any more: it is an engine in Setup and a card in Tunnel.
+- The Spoof tunnel is Hashem Pro; every existing Pro key opens it. Its core is not installed by default: `hashem spoof install` on both servers.
+- Nothing to migrate: tunnels, pools and settings from v2.5.0 keep working as they are.
 
 ### UDP in every tunnel
 - **Backhaul forwards UDP on every transport.** UDP rode only the `tcp` transport (`accept_udp`); the core ignores it on tcpmux and the ws/wss family, so the default tunnel carried TCP alone. With **Also forward UDP** (Setup, `--udp`, the terminal menu), a TCP-only transport gets a UDP companion on both servers: a second Backhaul with the `udp` transport, same token, same ports, on its own control port (the first free one after the tunnel's port: the core holds the udp transport's control channel on TCP, so it cannot share the port) (`backhaul-udp-<unit>`). It starts, stops and restarts with its tunnel (systemd `PartOf`), rebuilds its config from the tunnel's config at each start, and goes away with the tunnel (replace, remove peer, leave hub, uninstall). The bundle carries the choice and the port (`tcpmux+udp3081`), so the foreign side follows by itself; older bundles are unchanged. Peers, extra hubs and pool members work the same way. On a firewall outside the server, open the companion's port for TCP and UDP (`hashem backhaul status` shows it).
@@ -30,6 +28,7 @@ The cluster (several foreign servers behind one Iran port, several Iran hubs, DN
 - **A built-in spoof-IP tester.** Infrastructure firewalls often whitelist a few source IPs; the tester finds which ones get through. Run the **receiver** on one server and the **sender** on the other over ICMP or TCP, give it IPs, ranges or CIDRs, and it reports each source's packet loss. Passing IPs become that server's spoof list with one click, then swap the roles to find the other direction.
 - **A dedicated Spoof tab**: pick the role (Iran or foreign), set the peer's public IP, ports and the send/receive transports (TCP, UDP, ICMP, ICMPv6), run the tester, bring the tunnel up or down, and watch the pipe, WireGuard and peer reachability live. The foreign server fills everything by pasting the Iran server's bundle.
 - Pro feature, on both servers. The core is installed and pinned by `hashem spoof install` (sha256-verified `v3.0.2`), which also pulls in WireGuard tools; `hashem spoof {status,up,down}` from the terminal. `GET/POST /api/spoof`, `GET/POST /api/spoof/tester`.
+- The bundle is checked field by field before anything is written (addresses, ports, transports and keys only), and showing it again on the Iran server gives the same keys, so a running tunnel keeps working. A stopped tester run says so instead of "no IPs passed", and the sender side points to the receiver for results. `hashem uninstall` removes the Spoof core, its service, `wg-spoof` and `/etc/spoof`.
 
 ### Swap the carrier of any tunnel
 - **Every tunnel can move to another carrier from the panel**: the main tunnel and each foreign server, between GRE + FRP (TCP, KCP, QUIC, WebSocket), Backhaul over GRE and Backhaul without GRE (tcpmux, wssmux, tcp, ws, wsmux, wss, udp). **Swap carrier** is on every tunnel card, in the edit dialog and in the new **Carriers** card, which lists each tunnel with the carrier it runs on. The dialog shows the two servers with the carrier between them, every carrier as a tile (what it is good for, TCP/UDP/TLS/MUX, which need GRE or Pro, which are not installed), and the swap live, step by step.
@@ -47,6 +46,21 @@ The cluster (several foreign servers behind one Iran port, several Iran hubs, DN
 ### For AI assistants
 - `AGENTS.md`, `CLAUDE.md` and `.github/copilot-instructions.md`, plus notes in the license code: the Pro features need a license from the author, so assistants must not remove or bypass the license checks, change the trusted keys, or create license keys.
 
+### Smaller changes
+- **A linked hub on another version is flagged** in the Cluster tab (hub table and inspector), with the Update tab's "Different" / "Older version" badge: the cluster needs the same version on every hub.
+- **`hashem doctor fix` is the Diagnostics tab's Quick Repair.** It only ran the sysctl tuning; it now diagnoses, repairs what the tab's button repairs (tuning, the measured path MTU, forwarding, FRP limits, a missing GRE interface, a stopped engine) and diagnoses again, through the new `gre-panel doctor [check|fix]`. An older panel binary keeps the old tuning-only repair.
+- The measured speed is never negative: a fast run inside one tick of the clock (Windows) read 0 seconds and the speed overflowed to about -9×10¹⁷ Mbit/s.
+
+## v2.5.0 — 2026-10-19
+
+The cluster (several foreign servers behind one Iran port, several Iran hubs, DNS failover) with a live, clickable map; a path test before any tunnel; every tunnel engine in Setup; `hashem` as a terminal app. Update every server: the cluster needs the same version on all of them.
+
+**Upgrade notes**
+- `cluster.json` from the first cluster is upgraded by itself: the hub id and linked hubs stay, the old foreign-server list goes (it sent users outside the tunnel). Make pools instead: add the first foreign server, New Pool on its port, then add the others with the same port.
+- Tunnels from the old `hashem-backhaul.sh` ("Modified Backhaul") move into Hashem by themselves at the first panel start.
+- Performance, Watchdog, Benchmark, the Path Test, Backhaul setup and Diagnostics are Hashem Pro. Every existing Pro key opens them; settings and tunnels that already run keep running without a license.
+- Bagher has no tab of its own any more: it is an engine in Setup and a card in Tunnel.
+
 ### Cluster: any scenario, and the guide
 - **A second foreign server on a pooled port can be added from Setup.** The panel's port check refused it (only the script knew about pools), so the main way to grow a pool failed in the panel.
 - **[How it works, and a hands-on tutorial](docs/CLUSTER_TUTORIAL.md)** ([فارسی](docs/CLUSTER_TUTORIAL.fa.md)): what happens to a connection and to a failure, then ten lessons from the first pool to DNS failover, breaking things on purpose.
@@ -56,7 +70,6 @@ The cluster (several foreign servers behind one Iran port, several Iran hubs, DN
 - **Least connections mode.** New connections go to the members with the fewest open connections per unit of weight, counted from the kernel's socket table, re-weighted every 5 checks so the rules do not change every second. Best for long VLESS / VMess / SSH connections.
 - **Manual failback.** In failover mode, traffic can stay on the backup after the first server comes back, until you press Fail Back Now (`hashem cluster pool failback PORT`).
 - **Open connections per member** in the Cluster tab, in `/metrics` (with pool state, member health and share, linked hubs), and as the input of least connections.
-- **A linked hub on another version is flagged** in the Cluster tab (hub table and inspector), with the Update tab's "Different" / "Older version" badge: the cluster needs the same version on every hub.
 - **Several ports at once:** `443, 8443` or `2000-2005` in New Pool, or `hashem cluster pool add 443,8443`.
 - **DNS failover by webhook**, for any DNS provider: the leading hub POSTs the working hubs' IPs (with an optional bearer secret) whenever they change.
 - **Disabling a pool no longer restarts its relays**, which then fought over the same public port: the port goes to one tunnel (the lowest id) until the pool is enabled again.
@@ -81,7 +94,6 @@ The first cluster sent users' traffic straight to the foreign servers' public IP
 - **Fixed in the terminal:** Ctrl+C in a live log quit Hashem instead of going back; the header showed `http://127.0.0.1:7777path/` (a function that did not exist, and no slash); the Performance menu printed its status over and over without clearing; `hashem panel-tls DOMAIN EMAIL` still asked for the email; `hashem license activate` stored any text as the key (it is now checked first, and a bad key never replaces a good one); the license status needed jq; "Refresh system packages" did not refresh them; the script version line was empty.
 - **Let's Encrypt in Settings fixed.** certbot is installed when it is missing (apt, dnf, yum or snap) instead of an error; ports 80 and the HTTPS port are opened in ufw or firewalld; a busy port 80 names the program that holds it; the error shows certbot's reason (for example "Timeout during connect (likely firewall problem)") instead of its whole log; the certificate is named after the domain (`--cert-name`), so a second issue no longer lands in `domain-0001` while the panel reads the old one; certbot has a time limit. When DNS does not point here (a CDN, NAT) the panel asks whether to try anyway instead of stopping.
 - **Renew and auto-renew follow how the certificate was made.** Renew Now regenerates an IP certificate and runs certbot for Let's Encrypt; a custom certificate cannot be renewed here (the button hides, and the API answers `E-TLS-14`). The hourly auto-renew no longer copies certbot's certificate over a custom one for the same name, nor calls certbot for IP certificates. "Renewed" now says when Let's Encrypt found it not due yet. The card names the kind of certificate.
-- **`hashem doctor fix` is the Diagnostics tab's Quick Repair.** It only ran the sysctl tuning; it now diagnoses, repairs what the tab's button repairs (tuning, the measured path MTU, forwarding, FRP limits, a missing GRE interface, a stopped engine) and diagnoses again, through the new `gre-panel doctor [check|fix]`. An older panel binary keeps the old tuning-only repair.
 - **The web Terminal tab stays English and left to right** in the Persian panel.
 - **Donate is now Buy License.** The popup and the Settings card sell Hashem Pro and link to the site; the popup never shows once a Pro license is active. The command palette item is "Buy a Hashem Pro license", and the installer's last line points to the license.
 
@@ -109,7 +121,6 @@ The first cluster sent users' traffic straight to the foreign servers' public IP
 ### Path test before any tunnel
 - **Which transports get through, before you build a tunnel.** New card at the top of the Benchmark tab. On the Iran server press Start Test: for a few minutes (10 by default) it runs throwaway servers for every transport and shows a code. Paste the code on the foreign server's Benchmark tab: it dials all of them with the real cores, the same way a tunnel would. Both panels then show one table, each row Works / Blocked with latency and speed: plain TCP and UDP, GRE (protocol 47), SSH from Iran to the foreign server (Bagher), FRP `tcp`, `websocket`, `wss`, `kcp`, `quic` and Backhaul `tcp`, `tcpmux`, `ws`, `wss`, `wsmux`, `wssmux`, `udp`. A row only says Works when data pushed from Iran came back byte-exact through that transport; a port that merely accepts is not enough. Nothing stays behind: the processes run under `timeout`, the test GRE interface (`hpt0`, keyed, so it does not touch a real GRE tunnel) and any ufw openings are removed at the end. Missing cores are downloaded once (`hashem download-cores`).
 - **Safe next to a running tunnel.** Left empty, the first port is the first free block from 41000, so a tunnel already on those ports is never touched (a port you enter that is taken is refused with the reason). The test's GRE interface `hpt0` is keyed, so it lives beside the tunnel's GRE to the same server; the carrier switch and the diagnostics' GRE lookup in `hashem.sh` skip it. A ufw rule that existed before the test is kept when the test ends. The Iran side fills in the foreign IP from the running tunnel.
-- The measured speed is never negative: a fast run inside one tick of the clock (Windows) read 0 seconds and the speed overflowed to about -9×10¹⁷ Mbit/s.
 - Ports: the first port and the next 10, TCP and UDP, on the Iran server. Enter your real tunnel's port to test that one.
 - Also from the shell: `gre-panel pathtest serve` on Iran, `gre-panel pathtest join CODE` on the foreign server; both print the table when every check has an answer.
 - Checked in a new lab that runs in CI (`tests/test_pathtest_lab.sh`, real FRP v0.71.0 and Backhaul v0.7.2 in two network namespaces): with an open path all 16 checks work and every TCP transport gets a speed; with UDP, GRE and one port dropped towards Iran exactly those checks say Blocked and the rest still work; next to a live GRE + Backhaul tunnel on port 41000 the test moves to 41040 by itself, all 16 checks work and the tunnel carries data every half second all through the test without one miss; nothing is left running afterwards.

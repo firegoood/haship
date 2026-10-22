@@ -80,10 +80,13 @@ type spoofState struct {
 	WGPrivKey string `json:"wg_priv_key"`
 	WGPubKey  string `json:"wg_pub_key"`
 	WGPeerPub string `json:"wg_peer_pub"`
-	WGLocalIP string `json:"wg_local_ip"` // 10.20.0.1 (local) / 10.20.0.2 (remote)
-	WGPeerIP  string `json:"wg_peer_ip"`
-	WGListen  int    `json:"wg_listen"` // foreign WireGuard listen port
-	CorePort  int    `json:"core_port"` // local core UDP listen
+	// WGPeerPriv is the foreign private key, kept on the Iran side only so the
+	// bundle stays the same when it is shown again (never sent by GET).
+	WGPeerPriv string `json:"wg_peer_priv,omitempty"`
+	WGLocalIP  string `json:"wg_local_ip"` // 10.20.0.1 (local) / 10.20.0.2 (remote)
+	WGPeerIP   string `json:"wg_peer_ip"`
+	WGListen   int    `json:"wg_listen"` // foreign WireGuard listen port
+	CorePort   int    `json:"core_port"` // local core UDP listen
 
 	LastError string `json:"last_error,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty"`
@@ -227,8 +230,9 @@ func (s spoofState) coreConfig() map[string]any {
 		"send_transport": s.SendTransport,
 		"recv_transport": s.RecvTransport,
 	}
-	// A single spoof IP also arms the peer's receive filter; a list does not
-	// (the core filters by one IP only), so peer_spoof_ip stays empty then.
+	// One spoof IP goes inline, a list goes to a file (round-robin). The
+	// receive filter (peer_spoof_ip) stays off: the peer may spoof several
+	// IPs, and WireGuard on top authenticates every packet anyway.
 	if len(s.SpoofIPs) == 1 {
 		m["spoof_ip"] = s.SpoofIPs[0]
 	} else if len(s.SpoofIPs) > 1 {
@@ -309,8 +313,8 @@ func spoofCoreUnitPath() string {
 }
 
 func (s spoofState) writeCoreUnit() error {
-	exec := engineBinaryPath(spoofBinName) + " run -c " + spoofCoreConfigPath()
-	unit := engineUnit("Spoof Tunnel core ("+s.Role+")", "", exec)
+	cmd := engineBinaryPath(spoofBinName) + " run -c " + spoofCoreConfigPath()
+	unit := engineUnit("Spoof Tunnel core ("+s.Role+")", "", cmd)
 	return writeUnitFile(spoofCoreUnitPath(), unit)
 }
 
@@ -450,32 +454,25 @@ func makeSpoofBundle(s spoofState) (string, spoofState, error) {
 	if err := s.ensureSpoofKeys(); err != nil {
 		return "", s, err
 	}
-	// Generate the foreign keypair here if we have not already pinned its pub key.
-	foreignPriv := ""
-	if s.WGPeerPub == "" {
+	// The foreign keypair is made once and kept, so showing the bundle again
+	// gives the same keys and a running tunnel keeps working.
+	if pub, err := spoofPubFromPriv(s.WGPeerPriv); err != nil || pub != s.WGPeerPub {
 		priv, pub, err := spoofGenKeypair()
 		if err != nil {
 			return "", s, err
 		}
-		s.WGPeerPub = pub
-		foreignPriv = priv
-	} else {
-		// We only keep the foreign public key, so a re-shown bundle needs a
-		// fresh foreign keypair (and the foreign side re-imports it).
-		priv, pub, err := spoofGenKeypair()
-		if err != nil {
-			return "", s, err
-		}
-		s.WGPeerPub = pub
-		foreignPriv = priv
+		s.WGPeerPriv, s.WGPeerPub = priv, pub
 	}
 	if s.LocalPublic == "" {
 		s.LocalPublic = savedPublicIP()
 	}
+	if net.ParseIP(CleanHost(s.LocalPublic)) == nil {
+		return "", s, fmt.Errorf("this server's public IP is unknown, so the foreign server could not reach it")
+	}
 	b := spoofBundle{
-		V: 1, IranPublicIP: s.LocalPublic, ListenPort: s.ListenPort, RecvPort: s.RecvPort,
+		V: 1, IranPublicIP: CleanHost(s.LocalPublic), ListenPort: s.ListenPort, RecvPort: s.RecvPort,
 		SpoofPort: s.SpoofPort, SendTransport: s.SendTransport, RecvTransport: s.RecvTransport,
-		IranWGPub: s.WGPubKey, ForeignWGPriv: foreignPriv, WGIranIP: s.WGLocalIP,
+		IranWGPub: s.WGPubKey, ForeignWGPriv: s.WGPeerPriv, WGIranIP: s.WGLocalIP,
 		WGForeignIP: s.WGPeerIP, WGListen: s.WGListen, CorePort: s.CorePort,
 	}
 	raw, err := json.Marshal(b)
@@ -483,6 +480,30 @@ func makeSpoofBundle(s spoofState) (string, spoofState, error) {
 		return "", s, err
 	}
 	return "spf1_" + base64.RawURLEncoding.EncodeToString(raw), s, nil
+}
+
+// validate checks every field that ends up in a config file, so a damaged
+// or crafted bundle cannot write anything but addresses, ports and keys.
+func (b spoofBundle) validate() error {
+	ip4 := func(v string) bool { ip := net.ParseIP(v); return ip != nil && ip.To4() != nil }
+	port := func(p int) bool { return p > 0 && p <= 65535 }
+	key := func(v string) bool {
+		raw, err := base64.StdEncoding.DecodeString(v)
+		return err == nil && len(raw) == 32
+	}
+	switch {
+	case !ip4(b.IranPublicIP):
+		return fmt.Errorf("the bundle has no valid Iran server IP")
+	case !port(b.ListenPort) || !port(b.RecvPort) || !port(b.WGListen) || !port(b.CorePort):
+		return fmt.Errorf("the bundle has an invalid port")
+	case !spoofTransportOK(b.SendTransport) || !spoofTransportOK(b.RecvTransport):
+		return fmt.Errorf("the bundle has an unknown transport")
+	case !key(b.IranWGPub) || !key(b.ForeignWGPriv):
+		return fmt.Errorf("the bundle has an invalid WireGuard key")
+	case !ip4(b.WGIranIP) || !ip4(b.WGForeignIP) || b.WGIranIP == b.WGForeignIP:
+		return fmt.Errorf("the bundle has invalid WireGuard addresses")
+	}
+	return nil
 }
 
 // importSpoofBundle is called on the foreign server with the pasted bundle. It
@@ -502,6 +523,9 @@ func importSpoofBundle(bundle string, prev spoofState) (spoofState, error) {
 	if err := json.Unmarshal(raw, &b); err != nil || b.V != 1 {
 		return prev, fmt.Errorf("the bundle is not valid")
 	}
+	if err := b.validate(); err != nil {
+		return prev, err
+	}
 	foreignPub, err := spoofPubFromPriv(b.ForeignWGPriv)
 	if err != nil {
 		return prev, err
@@ -511,7 +535,10 @@ func importSpoofBundle(bundle string, prev spoofState) (spoofState, error) {
 	s.PeerPublicIP = b.IranPublicIP
 	s.ListenPort = b.ListenPort
 	s.RecvPort = b.RecvPort
-	s.SpoofPort = b.SpoofPort
+	// Our source port defaults to our listen port (the core's remote default);
+	// the Iran side's spoof port is its own.
+	s.SpoofPort = b.ListenPort
+	s.WGPeerPriv = ""
 	// Transports mirror the Iran side: our send is how the Iran side receives.
 	s.SendTransport = b.RecvTransport
 	s.RecvTransport = b.SendTransport
@@ -558,9 +585,6 @@ func handleSpoofGet(w http.ResponseWriter, r *http.Request) {
 	resp["transports"] = spoofTransports
 	resp["health"] = spoofRuntimeHealth(s)
 	resp["tester"] = spoofTesterView()
-	if s.Role == "local" {
-		resp["can_bundle"] = s.WGPubKey != "" || true
-	}
 	writeJSON(w, resp)
 }
 

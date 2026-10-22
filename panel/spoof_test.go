@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -113,6 +115,63 @@ func TestSpoofBundleRoundTrip(t *testing.T) {
 	// The foreign side keeps its own tester-found spoof IPs.
 	if len(foreign.SpoofIPs) != 1 || foreign.SpoofIPs[0] != "9.9.9.9" {
 		t.Fatalf("import must keep this server's spoof IPs, got %#v", foreign.SpoofIPs)
+	}
+	if foreign.WGPeerPriv != "" {
+		t.Fatal("the foreign side must not keep a peer private key")
+	}
+	if spoofView(iran2)["wg_peer_priv"] != nil {
+		t.Fatal("GET must never expose the foreign private key")
+	}
+
+	// Showing the bundle again keeps the keys, so a running tunnel survives.
+	again, iran3, err := makeSpoofBundle(iran2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != bundle || iran3.WGPeerPub != iran2.WGPeerPub {
+		t.Fatal("a re-shown bundle must carry the same keys")
+	}
+}
+
+func TestSpoofBundleNeedsPublicIP(t *testing.T) {
+	spoofLab(t)
+	s := spoofState{Role: "local", ListenPort: 8090, RecvPort: 5001, SendTransport: "tcp", RecvTransport: "udp",
+		CorePort: 5000, WGListen: 51820, LocalPublic: "not-an-ip"}
+	s.applyRoleDefaults()
+	if _, _, err := makeSpoofBundle(s); err == nil {
+		t.Fatal("a bundle without this server's public IP must be refused")
+	}
+}
+
+// A crafted bundle must not be able to put anything but keys, addresses and
+// ports into wg-spoof.conf (wg-quick runs PostUp lines as root).
+func TestSpoofImportRejectsInjection(t *testing.T) {
+	_, pub, _ := spoofGenKeypair()
+	priv, _, _ := spoofGenKeypair()
+	good := spoofBundle{V: 1, IranPublicIP: "198.51.100.10", ListenPort: 8090, RecvPort: 5001, SpoofPort: 443,
+		SendTransport: "tcp", RecvTransport: "udp", IranWGPub: pub, ForeignWGPriv: priv,
+		WGIranIP: "10.20.0.1", WGForeignIP: "10.20.0.2", WGListen: 51820, CorePort: 5000}
+	enc := func(b spoofBundle) string {
+		raw, _ := json.Marshal(b)
+		return "spf1_" + base64.RawURLEncoding.EncodeToString(raw)
+	}
+	if _, err := importSpoofBundle(enc(good), spoofState{}); err != nil {
+		t.Fatalf("good bundle refused: %v", err)
+	}
+	bad := []func(*spoofBundle){
+		func(b *spoofBundle) { b.IranWGPub = pub + "\nPostUp = touch /tmp/x" },
+		func(b *spoofBundle) { b.WGIranIP = "10.20.0.1/24\nPostUp = id" },
+		func(b *spoofBundle) { b.IranPublicIP = "" },
+		func(b *spoofBundle) { b.SendTransport = "gre" },
+		func(b *spoofBundle) { b.WGListen = 70000 },
+		func(b *spoofBundle) { b.WGForeignIP = b.WGIranIP },
+	}
+	for i, mut := range bad {
+		b := good
+		mut(&b)
+		if _, err := importSpoofBundle(enc(b), spoofState{}); err == nil {
+			t.Fatalf("case %d: crafted bundle accepted", i)
+		}
 	}
 }
 
@@ -290,11 +349,34 @@ func TestSpoofTesterStartStop(t *testing.T) {
 	}
 	stopSpoofTester()
 	spoofTesterWG.Wait() // the run goroutine must finish before cleanup
-	v := spoofTesterView()
-	if v.Status != "done" {
-		t.Fatalf("tester status %q (%s), want done", v.Status, v.Error)
+	if v := spoofTesterView(); v.Status != "stopped" {
+		t.Fatalf("tester status %q (%s), want stopped", v.Status, v.Error)
 	}
-	if len(v.Passed) != 1 || v.Passed[0].IP != "198.51.100.7" {
-		t.Fatalf("passed = %+v", v.Passed)
+
+	// A run that reaches its timeout reports the binary's passing IPs.
+	spoofTesterRun = func(ctx context.Context, args []string) (string, error) {
+		return "[tester] loaded 256 source IPs\n198.51.100.7 10/10 0.0%\n", nil
+	}
+	if err := startSpoofTester(spoofTesterRequest{Action: "start", Mode: "receiver", Protocol: "icmp",
+		Sources: []string{"198.51.100.0/24"}, Timeout: 30, PacketCount: 10, MaxLoss: 20}); err != nil {
+		t.Fatal(err)
+	}
+	spoofTesterWG.Wait()
+	v := spoofTesterView()
+	if v.Status != "done" || len(v.Passed) != 1 || v.Passed[0].IP != "198.51.100.7" {
+		t.Fatalf("finished run = %+v", v)
+	}
+
+	// A failing binary reports its own last log line, not "exit status 1".
+	spoofTesterRun = func(ctx context.Context, args []string) (string, error) {
+		return "2026/10/22 tester receiver: raw socket: operation not permitted\n", errors.New("exit status 1")
+	}
+	if err := startSpoofTester(spoofTesterRequest{Action: "start", Mode: "receiver", Protocol: "icmp",
+		Sources: []string{"198.51.100.0/24"}, Timeout: 30, PacketCount: 10, MaxLoss: 20}); err != nil {
+		t.Fatal(err)
+	}
+	spoofTesterWG.Wait()
+	if v := spoofTesterView(); v.Status != "error" || !strings.Contains(v.Error, "operation not permitted") {
+		t.Fatalf("failed run = %+v", v)
 	}
 }

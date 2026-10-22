@@ -5731,8 +5731,11 @@ uninstall_all_force() {
         rm -f /etc/sysctl.d/99-hashem.conf /etc/sysctl.d/99-gre-panel.conf
         command -v sysctl >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1 || true
 
-        # 7. Remove all binaries
-        rm -f "${INSTALL_DIR}/frps" "${INSTALL_DIR}/frpc" "${INSTALL_DIR}/backhaul"
+        # 7. Remove all binaries (and the Spoof tunnel: its core, WireGuard link, configs)
+        systemctl disable --now wg-quick@wg-spoof spoof-core >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/spoof-core.service /etc/wireguard/wg-spoof.conf
+        rm -rf /etc/spoof
+        rm -f "${INSTALL_DIR}/frps" "${INSTALL_DIR}/frpc" "${INSTALL_DIR}/backhaul" "${INSTALL_DIR}/spoof"
         rm -f /usr/local/bin/gre-panel /usr/local/bin/grepanel
 
         # 8. Remove configs, data, registries, logs, cron

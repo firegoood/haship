@@ -31,7 +31,7 @@ type spoofTesterResult struct {
 }
 
 type spoofTesterStatus struct {
-	Status   string              `json:"status"` // idle | running | done | error
+	Status   string              `json:"status"` // idle | running | done | stopped | error
 	Mode     string              `json:"mode"`   // sender | receiver
 	Protocol string              `json:"protocol"`
 	Error    string              `json:"error,omitempty"`
@@ -190,13 +190,18 @@ func startSpoofTester(req spoofTesterRequest) error {
 		passed := parseSpoofTesterOutput(out)
 		spoofTesterMu.Lock()
 		defer spoofTesterMu.Unlock()
+		if ctx.Err() != nil {
+			// Stopped: stopSpoofTester recorded it, and a newer run may own
+			// the state by now, so touch nothing.
+			return
+		}
 		spoofTesterCancel = nil
 		spoofTesterCur.Finished = time.Now().Format(time.RFC3339)
 		spoofTesterCur.Progress = 100
 		spoofTesterCur.Passed = passed
-		if err != nil && ctx.Err() == nil {
+		if err != nil {
 			spoofTesterCur.Status = "error"
-			spoofTesterCur.Error = err.Error()
+			spoofTesterCur.Error = spoofTesterErr(out, err)
 			return
 		}
 		spoofTesterCur.Status = "done"
@@ -204,11 +209,13 @@ func startSpoofTester(req spoofTesterRequest) error {
 	return nil
 }
 
+// stopSpoofTester aborts a run. The binary prints its results only when the
+// receiver's timeout ends, so a stopped run has none.
 func stopSpoofTester() {
 	spoofTesterMu.Lock()
 	cancel := spoofTesterCancel
 	if spoofTesterCur.Status == "running" {
-		spoofTesterCur.Status = "done"
+		spoofTesterCur.Status = "stopped"
 		spoofTesterCur.Finished = time.Now().Format(time.RFC3339)
 	}
 	spoofTesterMu.Unlock()
@@ -233,6 +240,15 @@ func parseSpoofTesterOutput(out string) []spoofTesterResult {
 		res = append(res, spoofTesterResult{IP: m[1], Received: recv, Sent: sent, LossPct: loss})
 	}
 	return res
+}
+
+// spoofTesterErr is the binary's last log line (its log.Fatalf reason) or err.
+func spoofTesterErr(out string, err error) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
+		return last
+	}
+	return err.Error()
 }
 
 // spoofTesterRunReal runs the tester binary and returns its combined output.

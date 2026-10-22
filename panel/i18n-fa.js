@@ -8,6 +8,8 @@
 // Technical names stay Latin: GRE, FRP, frps, frpc, Backhaul, WSS, KCP, QUIC, TCP,
 // UDP, MTU, MSS, BBR, IP, DNAT, SNI, TLS, HTTPS, Bagher's SSH, iPerf3, VLESS.
 window.FA_TEXT = {
+  "Test stopped. The tester reports its results only when the timeout ends.": "تست متوقف شد. تستر نتیجه‌ها را فقط وقتی زمان تست تمام شود گزارش می‌کند.",
+  "Packets sent. The results are on the receiver server.": "بسته‌ها ارسال شدند. نتیجه روی سرور گیرنده است.",
 "Spoof": "اسپوف",
 "Spoof Tunnel": "تونل اسپوف",
 "A tunnel that forges its source IP on both servers to cross whitelist-based Layer-3 firewalls, wrapped with WireGuard for a real encrypted link. Test which spoof IPs get through first, then bring the tunnel up.": "تونلی که روی هر دو سرور IP مبدأ را جعل می‌کند تا از فایروال‌های لایه ۳ مبتنی بر لیست‌سفید عبور کند، و با WireGuard برای یک لینک رمزگذاری‌شده واقعی پوشانده می‌شود. اول تست کنید کدام IPهای اسپوف عبور می‌کنند، بعد تونل را بالا بیاورید.",
