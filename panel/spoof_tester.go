@@ -47,6 +47,8 @@ var (
 	spoofTesterCancel context.CancelFunc
 	spoofTesterStart  time.Time
 	spoofTesterDur    time.Duration
+	// spoofTesterWG tracks the run goroutine so tests can wait for it.
+	spoofTesterWG sync.WaitGroup
 	// spoofTesterRun starts the process; a var so tests never spawn the binary.
 	spoofTesterRun = spoofTesterRunReal
 )
@@ -180,8 +182,11 @@ func startSpoofTester(req spoofTesterRequest) error {
 		args = append(args, "--dst-ip", CleanHost(req.DstIP), "--dst-port", strconv.Itoa(req.DstPort))
 	}
 
+	run := spoofTesterRun
+	spoofTesterWG.Add(1)
 	go func() {
-		out, err := spoofTesterRun(ctx, args)
+		defer spoofTesterWG.Done()
+		out, err := run(ctx, args)
 		passed := parseSpoofTesterOutput(out)
 		spoofTesterMu.Lock()
 		defer spoofTesterMu.Unlock()

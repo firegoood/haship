@@ -270,10 +270,10 @@ func TestSpoofTesterStartStop(t *testing.T) {
 		t.Skip("exec bit not settable here (verified in CI)")
 	}
 
-	done := make(chan struct{})
+	srcFile := filepath.Join(spoofDir, "tester-sources.txt")
 	spoofTesterRun = func(ctx context.Context, args []string) (string, error) {
 		// The sources file must have been written before we run.
-		if _, err := os.Stat(filepath.Join(spoofDir, "tester-sources.txt")); err != nil {
+		if _, err := os.Stat(srcFile); err != nil {
 			t.Errorf("sources file missing: %v", err)
 		}
 		<-ctx.Done() // wait for stop
@@ -288,15 +288,13 @@ func TestSpoofTesterStartStop(t *testing.T) {
 	if spoofTesterView().Status != "running" {
 		t.Fatal("tester should be running")
 	}
-	go func() { stopSpoofTester(); close(done) }()
-	<-done
-	// Give the goroutine a moment to record results.
-	deadline := 0
-	for spoofTesterView().Status == "running" && deadline < 50 {
-		deadline++
-	}
+	stopSpoofTester()
+	spoofTesterWG.Wait() // the run goroutine must finish before cleanup
 	v := spoofTesterView()
-	if v.Status == "error" {
-		t.Fatalf("tester errored: %s", v.Error)
+	if v.Status != "done" {
+		t.Fatalf("tester status %q (%s), want done", v.Status, v.Error)
+	}
+	if len(v.Passed) != 1 || v.Passed[0].IP != "198.51.100.7" {
+		t.Fatalf("passed = %+v", v.Passed)
 	}
 }

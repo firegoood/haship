@@ -403,7 +403,7 @@ func spoofRuntimeHealth(s spoofState) spoofHealth {
 	if runtime.GOOS != "linux" {
 		return h
 	}
-	if s.WGPeerIP != "" {
+	if s.Enabled && s.WGPeerIP != "" {
 		if err := exec.Command("ping", "-c", "1", "-W", "2", s.WGPeerIP).Run(); err == nil {
 			h.PeerPing = true
 		}
