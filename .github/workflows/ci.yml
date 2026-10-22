@@ -56,7 +56,7 @@ jobs:
           # the netns lab tests run in the separate `lab` job below.
           fail=0
           for t in tests/test_*.sh; do
-            case "$t" in *test_backhaul_e2e.sh|*test_backhaul_udp_lab.sh|*test_gre_backhaul_lab.sh|*test_revpath_lab.sh|*test_bagher_lab.sh|*test_traffic_lab.sh|*test_tunnel_combos_lab.sh|*test_pathtest_lab.sh|*test_cluster_lab.sh) continue;; esac
+            case "$t" in *test_backhaul_e2e.sh|*test_backhaul_udp_lab.sh|*test_gre_backhaul_lab.sh|*test_revpath_lab.sh|*test_bagher_lab.sh|*test_traffic_lab.sh|*test_tunnel_combos_lab.sh|*test_pathtest_lab.sh|*test_cluster_lab.sh|*test_xray_lab.sh) continue;; esac
             echo "== $t"
             bash "$t" || fail=1
           done
@@ -116,3 +116,11 @@ jobs:
         run: |
           (cd panel && go test -c -o /tmp/udplab.test .)
           sudo env "PATH=$PATH" GITHUB_ACTIONS="$GITHUB_ACTIONS" CARRIER_LAB_TEST_BIN=/tmp/udplab.test bash tests/test_backhaul_udp_lab.sh
+      - name: Xray tunnel lab (real Xray-core v26.3.27, Reality/XHTTP/gRPC/mKCP direct and reverse, TCP+UDP integrity, next to a fake 3x-ui, camouflage, no open proxy)
+        run: |
+          mkdir -p /tmp/xray-dl && cd /tmp/xray-dl
+          curl -fsSL -o xray.zip https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip
+          echo "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae  xray.zip" | sha256sum -c -
+          unzip -oq xray.zip xray
+          cd "$GITHUB_WORKSPACE" && (cd panel && go test -c -o /tmp/xraylab.test .)
+          sudo env "PATH=$PATH" GITHUB_ACTIONS="$GITHUB_ACTIONS" XRAY_BIN=/tmp/xray-dl/xray XRAY_LAB_TEST_BIN=/tmp/xraylab.test bash tests/test_xray_lab.sh

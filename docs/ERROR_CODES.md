@@ -235,6 +235,18 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-LIC-05` | 400 | license machine id mismatch | This license is bound to a different server. Machine hash does not match. |
 | `E-LIC-06` | 500 | failed saving license | Check that /etc/gre-panel is writable (disk full or read-only?). |
 
+## E-XRAY-xx — XRAY
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-XRAY-01` | 400 | bad Xray tunnel request | The detail names the field; fix it and try again. |
+| `E-XRAY-02` | 409 | Xray-core is not installed | Install it from the Xray tab (or: hashem xray install). |
+| `E-XRAY-03` | 409 | a port the link needs is taken | The detail names the program that holds it and a free port to use instead. |
+| `E-XRAY-04` | 500 | Xray rejected the config | The detail has Xray's own message. Undo the last expert change, or reset the link to its preset. |
+| `E-XRAY-05` | 500 | the Xray link did not stay up | Check: hashem xray logs |
+| `E-XRAY-06` | 404 | no such Xray link | Reload the page: the link may have been removed. |
+| `E-XRAY-07` | 409 | an Xray-core install is already running | Wait for it to finish; the tab shows its progress. |
+
 ## E-SSHFWD-xx — SSHFWD
 
 | Code | HTTP | Meaning | What to do |
@@ -272,4 +284,4 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
 | `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
 
-Total: 146 codes.
+Total: 153 codes.

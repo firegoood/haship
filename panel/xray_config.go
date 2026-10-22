@@ -44,6 +44,10 @@ const (
 	xrayTagFromIR  = "from-iran" // foreign in reverse mode: connections that arrive from Iran
 	xrayTagDirect  = "direct"
 	xrayTagBlock   = "block"
+	xrayTagProbe   = "probe"
+
+	// xrayProbeHost is the name the probe asks for; it never leaves Xray.
+	xrayProbeHost = "probe.hashem"
 )
 
 // XrayLink is one tunnel between this server and one other server. Both ends
@@ -66,6 +70,10 @@ type XrayLink struct {
 	Profile XrayProfile     `json:"profile"`
 	Keys    XrayKeys        `json:"keys"`
 	Expert  json.RawMessage `json:"expert,omitempty"` // merged over the generated config
+
+	// Iran only: the loopback port the panel probes the link through.
+	ProbePort int  `json:"probe_port,omitempty"`
+	Disabled  bool `json:"disabled,omitempty"` // stopped by the user
 }
 
 // XrayKeys are the link's secrets. The Reality private key lives only on the
@@ -177,6 +185,9 @@ func (l XrayLink) serverEnd() bool { return (l.Mode == xrayModeDirect) == (l.Sid
 func (l XrayLink) listens() (tcp, udp []int) {
 	if l.Side == xraySideIran {
 		tcp = append(tcp, l.Ports...)
+		if l.ProbePort > 0 {
+			tcp = append(tcp, l.ProbePort)
+		}
 		if l.UDP {
 			udp = append(udp, l.Ports...)
 		}
@@ -326,6 +337,9 @@ func (l XrayLink) validate() error {
 		if l.Mode == xrayModeReverse && q == l.TunnelPort {
 			return fmt.Errorf("port %d is the tunnel port: in reverse mode the Iran server listens on both, pick another", q)
 		}
+	}
+	if l.ProbePort != 0 && (!xrayPortOK(l.ProbePort) || seen[l.ProbePort] || l.ProbePort == l.TunnelPort) {
+		return fmt.Errorf("the probe port must be a free port of its own")
 	}
 	if l.Listen != "" && net.ParseIP(l.Listen) == nil {
 		return fmt.Errorf("the listen address must be an IP")
@@ -496,6 +510,15 @@ func buildXrayConfig(l XrayLink) (map[string]any, error) {
 			via = xrayTagReverse
 		}
 		rules = append(rules, map[string]any{"inboundTag": []string{xrayTagUsers}, "outboundTag": via})
+		// The panel's probe: a loopback port whose connections ask the other
+		// end for probe.hashem, which its Xray answers itself (xrayTagProbe).
+		if l.ProbePort > 0 {
+			inbounds = append(inbounds, map[string]any{
+				"tag": xrayTagProbe, "listen": "127.0.0.1", "port": l.ProbePort, "protocol": "dokodemo-door",
+				"settings": map[string]any{"address": xrayProbeHost, "port": 80, "network": "tcp"},
+			})
+			rules = append(rules, map[string]any{"inboundTag": []string{xrayTagProbe}, "outboundTag": via})
+		}
 	}
 
 	// The VLESS link.
@@ -545,10 +568,14 @@ func buildXrayConfig(l XrayLink) (map[string]any, error) {
 			from = xrayTagFromIR
 		}
 		rules = append(rules,
+			// the probe gets an HTTP 403 from Xray itself: one round trip
+			map[string]any{"inboundTag": []string{from}, "domain": []string{"full:" + xrayProbeHost}, "outboundTag": xrayTagProbe},
 			map[string]any{"inboundTag": []string{from}, "ip": []string{"127.0.0.1"}, "port": xrayPortList(l.Ports),
 				"network": l.network(), "outboundTag": xrayTagDirect},
 			map[string]any{"inboundTag": []string{from}, "outboundTag": xrayTagBlock})
 		outbounds = append(outbounds, map[string]any{"tag": xrayTagDirect, "protocol": "freedom"})
+		outbounds = append(outbounds, map[string]any{"tag": xrayTagProbe, "protocol": "blackhole",
+			"settings": map[string]any{"response": map[string]any{"type": "http"}}})
 	}
 	// blackhole first: the default for anything no rule matched.
 	outbounds = append([]any{map[string]any{"tag": xrayTagBlock, "protocol": "blackhole"}}, outbounds...)

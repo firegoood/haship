@@ -154,7 +154,7 @@ func carrierIPv4(host string) string {
 	return ip
 }
 
-// carrierEnds reads every Backhaul config and the Bagher config.
+// carrierEnds reads every Backhaul config, the Bagher config and the Xray links.
 func carrierEnds() []carrierEnd {
 	var ends []carrierEnd
 	for _, p := range carrierConfigs() {
@@ -172,6 +172,7 @@ func carrierEnds() []carrierEnd {
 	cfg := loadSSHFwdConfigLocked()
 	sshFwdMu.Unlock()
 	ends = append(ends, bagherCarrierEnds(cfg)...)
+	ends = append(ends, xrayCarrierEnds()...)
 	return dedupeEnds(ends)
 }
 

@@ -146,6 +146,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog` | session + CSRF | `handleWatchdogPost` |
 | `GET` | `/api/watchdog/backup-download` | session | `handleBackupDownload` |
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
+| `GET` | `/api/xray` | session | `handleXrayGet` |
+| `POST` | `/api/xray` | session + CSRF | `handleXrayPost` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 124 routes.
+Total: 126 routes.

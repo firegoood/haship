@@ -145,6 +145,16 @@ func TestProGatesAPIs(t *testing.T) {
 			handleBenchmarkAutoPilot(rr, httptest.NewRequest("POST", "/api/benchmark/autopilot", strings.NewReader(`{`)))
 			return rr
 		}},
+		{"Xray tunnel action", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleXrayPost(rr, httptest.NewRequest("POST", "/api/xray", strings.NewReader(`{"action":"nope"}`)))
+			return rr
+		}},
+		{"Xray SNI test", func() *httptest.ResponseRecorder {
+			rr := httptest.NewRecorder()
+			handleXrayPost(rr, httptest.NewRequest("POST", "/api/xray", strings.NewReader(`{"action":"snitest"}`)))
+			return rr
+		}},
 		{"Backhaul setup", func() *httptest.ResponseRecorder {
 			rr := httptest.NewRecorder()
 			handleSetupPost(rr, httptest.NewRequest("POST", "/api/setup", strings.NewReader(`{"role":"iran","engine":"backhaul","local_public":"bad"}`)))

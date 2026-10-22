@@ -52,7 +52,7 @@ func TestI18nFaCoversDictionary(t *testing.T) {
 	}
 	latin := map[string]bool{"CPU": true, "RAM": true, "GRE + FRP": true, "GRE + Backhaul": true, "FA / EN": true,
 		"Ctrl K": true, "Backhaul": true, "GRE+Backhaul": true, "Mux": true, "TCP/UDP": true, "UDP):": true,
-		"2FA": true, "PROXY Protocol v2": true, "(AES/TLS)": true, "(Snappy)": true, "HTTPS:": true}
+		"2FA": true, "PROXY Protocol v2": true, "Xray": true, "(AES/TLS)": true, "(Snappy)": true, "HTTPS:": true}
 	val := regexp.MustCompile(`(?m)\b[a-z_0-9]+: "((?:\\.|[^"\\])*)"`)
 	for _, mm := range val.FindAllStringSubmatch(js[start:start+end], -1) {
 		v := strings.NewReplacer(`\"`, `"`, `\'`, `'`).Replace(mm[1])
