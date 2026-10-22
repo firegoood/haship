@@ -534,6 +534,8 @@ func main() {
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
+		case "bagher-carrier":
+			os.Exit(bagherCarrierCmd(os.Args[2:]))
 		case "pathtest":
 			os.Exit(cliPathTest(os.Args[2:]))
 		case "cluster", "mesh":
@@ -571,6 +573,11 @@ func main() {
 		log.Printf("bagher: upgrading key restrictions in %s: %v", authorizedKeysPath, err)
 	} else if n > 0 {
 		log.Printf("bagher: locked down %d Bagher key(s) in %s (no commands, no -L forwards)", n, authorizedKeysPath)
+	}
+	if ok, err := migrateBagherCarrierUnit(bagherLinkUnitPath(1)); err != nil {
+		log.Printf("bagher: moving the carrier off ssh -N: %v", err)
+	} else if ok {
+		log.Printf("bagher: the carrier now runs in the panel (ssh -N held small packets back: high ping)")
 	}
 	if _, err := rand.Read(nonce[:]); err != nil {
 		log.Fatal(err)

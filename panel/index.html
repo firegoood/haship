@@ -493,6 +493,14 @@
   .det-row > :last-child { margin-inline-start:auto; max-width:100%; }
   .det-k { font-size:12px; color:var(--dim); font-weight:500; flex:0 1 auto; }
   .det-v.det-ports { flex:1 1 100%; } /* a port list gets its own line */
+  /* Bagher card: one row per extra foreign server */
+  #peer-card-bagher .det-grid { grid-template-columns:repeat(2,1fr); }
+  @media (max-width:900px) { #peer-card-bagher .det-grid { grid-template-columns:1fr; } }
+  .det-card.bagher-links { grid-column:1 / -1; }
+  .bagher-link + .bagher-link { border-top:1px solid var(--ln); padding-top:8px; }
+  .det-v.bagher-link-v { gap:8px 12px; }
+  .det-row > .det-v.bagher-link-err { flex:1 1 100%; margin-inline-start:0; justify-content:flex-start; text-align:start;
+    font-size:12px; color:var(--er); font-weight:500; }
   .det-v { font-size:13px; color:var(--tx); font-weight:600; font-variant-numeric:tabular-nums;
     display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:6px; min-width:0;
     text-align:end; overflow-wrap:anywhere; }
@@ -3685,6 +3693,48 @@
       <button type="button" class="hashem-btn hashem-btn-primary" onclick="saveBagherQuickEdit()">
         Save &amp; Apply Changes
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- Bagher: one more foreign server on this Iran server -->
+<div class="ent-modal-ov" id="bagherAddLinkModal" hidden>
+  <div class="ent-modal u-maxw-540 u-w-full u-bd-info u-lift" role="dialog" aria-modal="true" aria-labelledby="bagherAddLinkTitle">
+    <div class="ent-modal-h u-bb-info u-tint-info">
+      <b id="bagherAddLinkTitle" class="u-flex u-ai-c u-gap-8 u-c-info u-fs-16 u-fw-700">Add a Foreign Server to Bagher</b>
+      <button class="ent-x" onclick="closeBagherAddLink()" aria-label="Close">&#xD7;</button>
+    </div>
+    <div class="ent-modal-b u-gap-16 u-p-20" id="bagherAddLinkForm">
+      <div class="u-hint-11">This Iran server keeps its own SSH session to every foreign server. Each one forwards its own ports: a port can belong to one foreign server only.</div>
+      <div class="fg">
+        <label for="bagherLinkHost" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">Foreign Server Public IP / Host:</label>
+        <input class="hashem-input u-w-full u-mono" id="bagherLinkHost" placeholder="e.g. 198.51.100.74" autocomplete="off">
+      </div>
+      <div class="fg">
+        <label for="bagherLinkPorts" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">Forwarded Ports:</label>
+        <input class="hashem-input u-w-full u-mono" id="bagherLinkPorts" placeholder="e.g. 2053, 2083">
+        <label class="u-check-row u-mt-8"><input type="checkbox" id="bagherLinkUdp"><span data-i18n="setup_bh_udp">Also forward UDP on these ports</span></label>
+      </div>
+      <div class="u-grid u-gtc-1fr-1fr u-gap-12">
+        <div class="fg">
+          <label for="bagherLinkSSHPort" class="u-fs-12 u-fw-700 u-c-mu u-mb-8 u-block" data-i18n="setup_bagher_sshport">Foreign SSH port</label>
+          <input type="number" class="hashem-input u-w-full u-mono" id="bagherLinkSSHPort" placeholder="22" min="1" max="65535">
+        </div>
+        <div class="fg">
+          <label for="bagherLinkUser" class="u-fs-12 u-fw-700 u-c-mu u-mb-8 u-block" data-i18n="setup_bagher_sshuser">Foreign SSH user</label>
+          <input class="hashem-input u-w-full u-mono" id="bagherLinkUser" placeholder="root" autocomplete="off">
+        </div>
+      </div>
+      <div class="warnbox hidden u-mt-8" id="bagherAddLinkWarn"></div>
+    </div>
+    <div class="ent-modal-b u-gap-16 u-p-20" id="bagherAddLinkDone" hidden>
+      <label for="bagherLinkBundle" class="u-hint-11 u-block">Paste this bundle on the new foreign server: Setup → Foreign → Setup bundle. It carries the key and the ports; nothing else to fill in.</label>
+      <textarea id="bagherLinkBundle" class="hashem-input u-w-full u-mono u-fs-12" rows="4" readonly></textarea>
+    </div>
+    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeBagherAddLink()" id="bagherAddLinkCancel">Cancel</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="saveBagherAddLink()" id="bagherAddLinkSave">Add and Make the Bundle</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="copyBagherAddLinkBundle()" id="bagherAddLinkCopy" hidden>Copy Bundle</button>
     </div>
   </div>
 </div>

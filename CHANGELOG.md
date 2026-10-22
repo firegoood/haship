@@ -5,6 +5,17 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
 ## Unreleased
 
+### Bagher: lower ping, and several foreign servers on one Iran server
+
+- **Lower ping.** Bagher's SSH leg was `ssh -N -R`. An SSH connection that opens no session never gets `TCP_NODELAY` from the foreign server's sshd (OpenSSH up to 10.0, so Ubuntu 22.04 and 24.04 and Debian 12). Every small packet from the foreign server, such as a TLS reply or an HTTP header followed by its body, then waited for the ACK of the previous one. That added up to one Iran↔foreign round trip to each reply. The SSH leg is now the panel's own carrier (`gre-panel bagher-carrier`). It runs one exec request after connecting: the key's forced `/bin/false`, which makes sshd set `TCP_NODELAY`. The connection stays up after that request ends. In the lab, with 30 ms each way, a two-part reply now arrives one round trip after the request. The same key and the same foreign-side setup are used, and nothing changes on the foreign server.
+- **Real tunnel ping.** The Bagher card and the dashboard show the carrier's keepalive round trip, which waits behind the tunnel's own data. Before, they showed a TCP connect to the foreign SSH port.
+- **Several foreign servers.** On the Tunnel tab, the Bagher card has **Add Foreign Server**. Each foreign server gets its own SSH carrier (`hashem-bagher-N.service`), its own ports and its own bundle. All of them use the one frps on the Iran server. A port can belong to only one foreign server, and one foreign server can be added only once. Each one shows its own status and ping on the card and on the dashboard map, and the CLI's `hashem bagher start|stop|restart|status` covers all of them.
+- **Upgrade.** After `hashem update` on the Iran server, a running Bagher tunnel moves to the new carrier by itself. The foreign server needs no update.
+- Quick Edit no longer resets a custom foreign SSH port to 22 and user to root.
+- `hashem uninstall` now removes the Bagher units.
+
+### Smaller changes
+
 - The Live Activity stream no longer shows `command "systemctl" failed (exit 4) | output: inactive` every few seconds. `systemctl is-active` exits non-zero for a stopped or uninstalled unit, which is the answer the status pollers ask for, not an error; these calls are no longer logged or counted as errors. A failed command's multi-line output is now logged on one line.
 
 ## v2.6.0 — 2026-10-22

@@ -66,14 +66,15 @@ func TestSSHFwdBuildService(t *testing.T) {
 	}
 
 	svc := buildSSHFwdService(cfg)
-	if !strings.Contains(svc, "-R 127.0.0.1:55400:127.0.0.1:55400") {
-		t.Fatalf("bagher service missing -R forward: %s", svc)
-	}
-	if !strings.Contains(svc, "root@1.2.3.4") {
-		t.Fatalf("service missing remote target: %s", svc)
+	if !strings.Contains(svc, "ExecStart=/usr/local/bin/gre-panel bagher-carrier -link 1\n") {
+		t.Fatalf("bagher service must run the panel's carrier for link 1: %s", svc)
 	}
 	if !strings.Contains(svc, "Hashem Bagher Engine") {
 		t.Fatalf("service description missing Bagher Engine: %s", svc)
+	}
+	cfg.Links = []BagherLink{{ID: 3, RemoteHost: "5.6.7.8", Ports: []int{9443}}}
+	if svc3 := buildBagherCarrierUnit(cfg, 3); !strings.Contains(svc3, "bagher-carrier -link 3\n") || !strings.Contains(svc3, "to 5.6.7.8") {
+		t.Fatalf("link 3 unit: %s", svc3)
 	}
 
 	// Direct mode test
@@ -328,8 +329,8 @@ func TestSSHFwdServiceBackoff(t *testing.T) {
 	if !strings.Contains(svc, "StartLimitIntervalSec=120") {
 		t.Fatalf("expected StartLimitIntervalSec=120 in service unit, got:\n%s", svc)
 	}
-	if !strings.Contains(svc, "ConnectTimeout=8") {
-		t.Fatalf("expected ConnectTimeout=8 in ssh command, got:\n%s", svc)
+	if !strings.Contains(svc, "After=network-online.target hashem-bagher-frps.service") {
+		t.Fatalf("the carrier must start after frps, got:\n%s", svc)
 	}
 }
 

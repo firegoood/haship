@@ -5731,6 +5731,12 @@ uninstall_all_force() {
         rm -f /etc/sysctl.d/99-hashem.conf /etc/sysctl.d/99-gre-panel.conf
         command -v sysctl >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1 || true
 
+        # 6b. Bagher: the SSH carriers (one per foreign server), frps or frpc
+        bagher_link_units | xargs -r systemctl disable --now >/dev/null 2>&1 || true
+        systemctl disable --now hashem-bagher hashem-bagher-frps hashem-bagher-frpc hashem-ssh-fwd hashem-ssh-frps >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/hashem-bagher*.service /etc/systemd/system/hashem-ssh-fwd.service /etc/systemd/system/hashem-ssh-frps.service
+        systemctl daemon-reload >/dev/null 2>&1 || true
+
         # 7. Remove all binaries (and the Spoof tunnel: its core, WireGuard link, configs)
         systemctl disable --now wg-quick@wg-spoof spoof-core >/dev/null 2>&1 || true
         rm -f /etc/systemd/system/spoof-core.service /etc/wireguard/wg-spoof.conf
@@ -10291,6 +10297,16 @@ cli_carrier() {
     esac
 }
 
+# bagher_link_units: the carrier units of the foreign servers after the first
+# (hashem-bagher-2.service, ...), one per line.
+bagher_link_units() {
+    local f
+    for f in /etc/systemd/system/hashem-bagher-[0-9]*.service; do
+        [[ -f $f ]] && basename "$f"
+    done
+    return 0
+}
+
 cli_bagher() {
     local SUB="${1:-status}"
     case "$SUB" in
@@ -10305,6 +10321,14 @@ cli_bagher() {
                 SVC_ACT="${YELLOW}inactive${NC}"
             fi
             echo -e "Bagher Service:     $SVC_ACT"
+            local LU
+            for LU in $(bagher_link_units); do
+                if systemctl is-active "$LU" >/dev/null 2>&1; then
+                    echo -e "  ${LU%.service}: ${GREEN}active (running)${NC} [$(sed -n 's/^Description=.* to //p' "/etc/systemd/system/$LU")]"
+                else
+                    echo -e "  ${LU%.service}: ${YELLOW}inactive${NC} [$(sed -n 's/^Description=.* to //p' "/etc/systemd/system/$LU")]"
+                fi
+            done
 
             local FRPC_ACT="inactive"
             if systemctl is-active hashem-bagher-frpc.service >/dev/null 2>&1; then
@@ -10516,26 +10540,30 @@ EOF
             systemctl disable --now hashem-bagher-frps.service >/dev/null 2>&1 || true
             systemctl disable --now hashem-ssh-fwd.service >/dev/null 2>&1 || true
             systemctl disable --now hashem-ssh-frps.service >/dev/null 2>&1 || true
+            bagher_link_units | xargs -r systemctl disable --now >/dev/null 2>&1 || true
             echo -e "${YELLOW}[*] Bagher Engine service disabled.${NC}"
             ;;
         start)
-            systemctl start hashem-bagher.service 2>/dev/null || systemctl start hashem-ssh-fwd.service 2>/dev/null || true
             systemctl start hashem-bagher-frps.service 2>/dev/null || true
+            systemctl start hashem-bagher.service 2>/dev/null || systemctl start hashem-ssh-fwd.service 2>/dev/null || true
+            bagher_link_units | xargs -r systemctl start 2>/dev/null || true
             echo -e "${GREEN}[OK] Bagher Engine service started.${NC}"
             ;;
         stop)
             systemctl stop hashem-bagher.service 2>/dev/null || true
             systemctl stop hashem-ssh-fwd.service 2>/dev/null || true
+            bagher_link_units | xargs -r systemctl stop 2>/dev/null || true
             systemctl stop hashem-bagher-frps.service 2>/dev/null || true
             echo -e "${YELLOW}[*] Bagher Engine service stopped.${NC}"
             ;;
         restart)
-            systemctl restart hashem-bagher.service 2>/dev/null || systemctl restart hashem-ssh-fwd.service 2>/dev/null || true
             systemctl restart hashem-bagher-frps.service 2>/dev/null || true
+            systemctl restart hashem-bagher.service 2>/dev/null || systemctl restart hashem-ssh-fwd.service 2>/dev/null || true
+            bagher_link_units | xargs -r systemctl restart 2>/dev/null || true
             echo -e "${GREEN}[OK] Bagher Engine service restarted.${NC}"
             ;;
         logs)
-            journalctl -u hashem-bagher.service -u hashem-ssh-fwd.service -n 50 --no-pager
+            journalctl -u 'hashem-bagher*' -u hashem-ssh-fwd.service -n 50 --no-pager
             ;;
         gen-key)
             mkdir -p /root/.ssh

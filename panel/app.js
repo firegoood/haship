@@ -1285,6 +1285,27 @@ function renderPeers(peers) {
   if (bagherHasCfg) {
     const fwdPorts = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
     const roleLabel = b.role === 'foreign' ? 'Foreign Client' : 'Iran Hub';
+    // foreign servers after the first, each with its own SSH carrier
+    const links = b.role === 'foreign' ? [] : (Array.isArray(b.links) ? b.links : []);
+    const linkRow = l => {
+      const st = l.connected ? ['ok', 'Connected'] : (l.is_active ? ['warn', 'Waiting for the other server'] : ['err', 'Stopped']);
+      return `<div class="det-row bagher-link">
+        <span class="det-k"><bdi class="mono" data-no-i18n>${esc(l.remote_host || '—')}</bdi></span>
+        <span class="det-v bagher-link-v">
+          <span class="badge ${st[0]}"><span class="dot"></span>${esc(tr('', st[1]))}</span>
+          <span class="mono" data-no-i18n>${esc((l.ports || []).join(', '))}${l.udp ? ' +UDP' : ''}</span>
+          ${l.latency_ms > 0 ? `<span class="mono" data-no-i18n>${l.latency_ms.toFixed(1)} ms</span>` : ''}
+          <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="bagherLinkCopyBundle(${+l.id})">${esc(tr('', 'Copy Bundle'))}</button>
+          <button class="hashem-btn hashem-btn-ghost u-btn-30" onclick="bagherLinkRemove(${+l.id})">${esc(tr('', 'Remove'))}</button>
+        </span>
+        ${l.last_error && !l.connected ? `<span class="det-v det-ports bagher-link-err" data-no-i18n>${esc(String(l.last_error).slice(0, 160))}</span>` : ''}
+      </div>`;
+    };
+    const linksHtml = b.role === 'foreign' ? '' : `<div class="det-card bagher-links">
+        <div class="det-card-head">${ICO_SRV} <span>${esc(tr('', 'More foreign servers'))}</span></div>
+        ${links.length ? links.map(linkRow).join('') : `<p class="u-hint-11">${esc(tr('', 'One Iran server can carry several foreign servers over Bagher, each on its own ports.'))}</p>`}
+        <div class="u-mt-8"><button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openBagherAddLink()">${esc(tr('', 'Add Foreign Server'))}</button></div>
+      </div>`;
     bagherCardHtml = `<div class="tunnel-card peer-card u-peer-card-wide u-bd-ok u-bg-s1" id="peer-card-bagher">
       <div class="tc-header u-flex-wrap-gap8">
         <div class="u-flex-center-gap10">
@@ -1317,6 +1338,7 @@ function renderPeers(peers) {
           <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : '—'}</span></div>
           ${b.last_error && !bagherLinked ? `<div class="det-row"><span class="det-k">Last error</span><span class="det-v det-ports" data-no-i18n>${esc(String(b.last_error).slice(0, 160))}</span></div>` : ''}
         </div>
+        ${linksHtml}
       </div>
       <div class="tc-acts u-flex u-wrap u-gap-8 u-mt-4">
         ${b.role === 'foreign' ? '' : `<button class="hashem-btn hashem-btn-secondary" onclick="openBagherQuickEdit()">${esc(tr('', 'Quick Edit'))}</button>
@@ -2805,6 +2827,10 @@ function dashLinks(d, bObj, iran, foreign) {
     L.push({ key: 'bagher', name: 'Bagher', ip: bObj.remote_host || '',
       state: bObj.connected ? 'ok' : (bObj.is_active ? 'warn' : 'down'), eng: 'SSH', gre: false,
       lat: bObj.latency_ms > 0 ? Math.round(bObj.latency_ms) + 'ms' : '', rate: null });
+    // more foreign servers on the same Bagher hub
+    (Array.isArray(bObj.links) ? bObj.links : []).forEach(l => L.push({ key: 'bagher' + l.id, name: 'Bagher ' + l.id,
+      ip: l.remote_host || '', state: l.connected ? 'ok' : (l.is_active ? 'warn' : 'down'), eng: 'SSH', gre: false,
+      lat: l.latency_ms > 0 ? Math.round(l.latency_ms) + 'ms' : '', rate: null }));
   }
   return L;
 }
@@ -8505,6 +8531,72 @@ function closeBagherQuickEdit() {
   modalHide($('bagherQuickEditModal'));
 }
 
+// More foreign servers on this Bagher hub: each gets its own SSH carrier and
+// its own bundle; the ports of two foreign servers may not overlap.
+function bagherAddLinkStep(done) {
+  $('bagherAddLinkForm').hidden = done;
+  $('bagherAddLinkDone').hidden = !done;
+  $('bagherAddLinkSave').hidden = done;
+  $('bagherAddLinkCopy').hidden = !done;
+  $('bagherAddLinkCancel').textContent = tr('', done ? 'Done' : 'Cancel');
+}
+function openBagherAddLink() {
+  ['bagherLinkHost', 'bagherLinkPorts', 'bagherLinkSSHPort', 'bagherLinkUser'].forEach(id => { $(id).value = ''; });
+  $('bagherLinkUdp').checked = !!(_sshfwdData || {}).udp;
+  $('bagherAddLinkWarn').classList.add('hidden');
+  bagherAddLinkStep(false);
+  modalShow($('bagherAddLinkModal'), closeBagherAddLink);
+}
+function closeBagherAddLink() {
+  modalHide($('bagherAddLinkModal'));
+}
+async function saveBagherAddLink() {
+  const warn = $('bagherAddLinkWarn');
+  const say = m => { warn.textContent = m; warn.classList.remove('hidden'); };
+  const remote_host = $('bagherLinkHost').value.trim(), ports = $('bagherLinkPorts').value.trim();
+  if (!remote_host) return say(tr('', 'Enter the foreign server address.'));
+  if (!ports) return say(tr('', 'Enter at least one port.'));
+  warn.classList.add('hidden');
+  const btn = $('bagherAddLinkSave');
+  btn.disabled = true;
+  try {
+    const res = await api('/api/sshfwd', {
+      action: 'add_link', remote_host, ports, udp: $('bagherLinkUdp').checked,
+      ssh_port: parseInt($('bagherLinkSSHPort').value, 10) || 0, remote_user: $('bagherLinkUser').value.trim(),
+    });
+    if (res.status_data) { _sshfwdData = res.status_data; renderSSHFwd(); }
+    $('bagherLinkBundle').value = res.bundle || '';
+    bagherAddLinkStep(true);
+    toastOk(tr('', 'Foreign server added'), tr('', 'Paste the bundle on that server.'));
+  } catch (err) {
+    say(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+  }
+}
+function copyBagherAddLinkBundle() {
+  copyTextSafe($('bagherLinkBundle').value, tr('', 'Bundle copied'), tr('', 'Paste it on the foreign server.'));
+}
+function bagherLinkCopyBundle(id) {
+  const l = (((_sshfwdData || {}).links) || []).find(x => x.id === id);
+  if (!l || !l.bundle) { toastErr(tr('', 'No bundle yet'), tr('', 'Open the Tunnel tab again in a moment.')); loadSSHFwd(); return; }
+  copyTextSafe(l.bundle, tr('', 'Bundle copied'), tr('', 'Paste it on the foreign server.'));
+}
+async function bagherLinkRemove(id) {
+  const l = (((_sshfwdData || {}).links) || []).find(x => x.id === id) || {};
+  const ok = await entConfirm(tr('', 'Remove foreign server'),
+    tr('', 'Stop the Bagher link to {host} and remove it from this server? Its ports stop working here. On the foreign server, remove Bagher from its Tunnel tab.').replace('{host}', l.remote_host || ('#' + id)),
+    tr('', 'Remove'));
+  if (!ok) return;
+  try {
+    const res = await api('/api/sshfwd', { action: 'remove_link', id });
+    if (res.status_data) { _sshfwdData = res.status_data; renderSSHFwd(); }
+    toastOk(tr('', 'Foreign server removed'), l.remote_host || '');
+  } catch (err) {
+    toastErr(tr('', 'Remove failed'), err.message || String(err));
+  }
+}
+
 async function saveBagherQuickEdit() {
   const remote_host = $('bagherQuickRemoteHost') ? $('bagherQuickRemoteHost').value.trim() : '';
   const ports = $('bagherQuickPorts') ? $('bagherQuickPorts').value.trim() : '';
@@ -8529,9 +8621,7 @@ async function saveBagherQuickEdit() {
       action: 'enable',
       mode: 'bagher',
       role: 'iran',
-      remote_host,
-      remote_user: 'root',
-      ssh_port: 22,
+      remote_host, // SSH port and user stay as set up (this used to reset them to 22 / root)
       ports,
       pool_count,
       frp_bind_port,
@@ -8562,6 +8652,12 @@ window.cleanBagherTunnelClick = cleanBagherTunnelClick;
 window.openBagherQuickEdit = openBagherQuickEdit;
 window.closeBagherQuickEdit = closeBagherQuickEdit;
 window.saveBagherQuickEdit = saveBagherQuickEdit;
+window.openBagherAddLink = openBagherAddLink;
+window.closeBagherAddLink = closeBagherAddLink;
+window.saveBagherAddLink = saveBagherAddLink;
+window.copyBagherAddLinkBundle = copyBagherAddLinkBundle;
+window.bagherLinkCopyBundle = bagherLinkCopyBundle;
+window.bagherLinkRemove = bagherLinkRemove;
 window.sshfwdClearDnatClick = sshfwdClearDnatClick;
 window.sshfwdCopyForeignClick = sshfwdCopyForeignClick;
 window.sshfwdCopyAuthClick = sshfwdCopyAuthClick;

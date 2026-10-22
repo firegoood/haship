@@ -19,23 +19,27 @@ import (
 
 // SSHFwdConfig stores configuration for the Bagher Engine / SSH carrier.
 type SSHFwdConfig struct {
-	Role                string `json:"role"` // "client" (Iran entry) or "server" (Foreign origin)
-	Mode                string `json:"mode"` // "bagher" (default stealth hybrid) or "direct" (pure ssh)
-	RemoteHost          string `json:"remote_host"`
-	RemoteUser          string `json:"remote_user"`
-	RemoteSSHPort       int    `json:"remote_ssh_port"`
-	KeyPath             string `json:"key_path"`
-	Ports               []int  `json:"ports"`
-	BindAddr            string `json:"bind_addr"`
-	FRPBindPort         int    `json:"frp_bind_port"`
-	PoolCount           int    `json:"pool_count"`
-	UDP                 bool   `json:"udp,omitempty"` // Bagher mode: also forward UDP (frp udp proxies); direct SSH cannot
-	Enabled             bool   `json:"enabled"`
-	ServerAliveInterval int    `json:"server_alive_interval"`
-	ServerAliveCountMax int    `json:"server_alive_count_max"`
-	LastStatus          string `json:"last_status"`
-	LastError           string `json:"last_error"`
-	UpdatedAt           string `json:"updated_at"`
+	Role          string `json:"role"` // "client" (Iran entry) or "server" (Foreign origin)
+	Mode          string `json:"mode"` // "bagher" (default stealth hybrid) or "direct" (pure ssh)
+	RemoteHost    string `json:"remote_host"`
+	RemoteUser    string `json:"remote_user"`
+	RemoteSSHPort int    `json:"remote_ssh_port"`
+	KeyPath       string `json:"key_path"`
+	Ports         []int  `json:"ports"`
+	BindAddr      string `json:"bind_addr"`
+	FRPBindPort   int    `json:"frp_bind_port"`
+	PoolCount     int    `json:"pool_count"`
+	UDP           bool   `json:"udp,omitempty"` // Bagher mode: also forward UDP (frp udp proxies); direct SSH cannot
+	// Links are the foreign servers after the first (link 1, the fields
+	// above). They share the Iran server's frps and SSH key; each has its own
+	// carrier unit and its own ports.
+	Links               []BagherLink `json:"links,omitempty"`
+	Enabled             bool         `json:"enabled"`
+	ServerAliveInterval int          `json:"server_alive_interval"`
+	ServerAliveCountMax int          `json:"server_alive_count_max"`
+	LastStatus          string       `json:"last_status"`
+	LastError           string       `json:"last_error"`
+	UpdatedAt           string       `json:"updated_at"`
 }
 
 var (
@@ -256,36 +260,55 @@ func upgradeBagherKeyLocks() (int, error) {
 	return changed, nil
 }
 
-// buildSSHFwdService generates the systemd service file content for Bagher Engine.
-func buildSSHFwdService(cfg SSHFwdConfig) string {
-	remoteTarget := fmt.Sprintf("%s@%s", cfg.RemoteUser, cfg.RemoteHost)
-	portArg := ""
-	if cfg.RemoteSSHPort > 0 && cfg.RemoteSSHPort != 22 {
-		portArg = fmt.Sprintf("-p %d ", cfg.RemoteSSHPort)
+// bagherCarrierBin is the panel binary, which runs the Bagher carrier.
+func bagherCarrierBin() string {
+	if exe, err := os.Executable(); err == nil {
+		if p, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = p
+		}
+		if b := filepath.Base(exe); strings.HasSuffix(b, ".test") || strings.HasSuffix(b, ".test.exe") { // unit tests
+			return "/usr/local/bin/gre-panel"
+		}
+		return exe
 	}
+	return "/usr/local/bin/gre-panel"
+}
 
-	var fwArgs string
+// buildSSHFwdService generates the systemd unit of link 1's carrier.
+func buildSSHFwdService(cfg SSHFwdConfig) string {
+	return buildBagherCarrierUnit(cfg, 1)
+}
+
+// buildBagherCarrierUnit is the unit of one link's carrier. In Bagher mode
+// that is the panel's own SSH client (bagher_carrier.go); direct mode, which
+// the panel no longer offers, keeps plain ssh -L.
+func buildBagherCarrierUnit(cfg SSHFwdConfig, id int) string {
+	var execCmd, desc string
 	if cfg.Mode == "bagher" || cfg.Mode == "frp_ssh" {
-		fwArgs = fmt.Sprintf("-R 127.0.0.1:%d:127.0.0.1:%d -o Ciphers=aes128-gcm@openssh.com,chacha20-poly1305@openssh.com -o TCPKeepAlive=yes", cfg.FRPBindPort, cfg.FRPBindPort)
+		execCmd = fmt.Sprintf("%s bagher-carrier -link %d", bagherCarrierBin(), id)
+		desc = "Hashem Bagher Engine (Stealth Hybrid Tunnel)"
+		if id > 1 {
+			if l, ok := findBagherLink(cfg, id); ok {
+				desc += " to " + l.RemoteHost
+			}
+		}
 	} else {
+		portArg := ""
+		if cfg.RemoteSSHPort > 0 && cfg.RemoteSSHPort != 22 {
+			portArg = fmt.Sprintf("-p %d ", cfg.RemoteSSHPort)
+		}
 		forwards := make([]string, 0, len(cfg.Ports))
 		for _, p := range cfg.Ports {
 			forwards = append(forwards, fmt.Sprintf("-L %s:%d:127.0.0.1:%d", cfg.BindAddr, p, p))
 		}
-		fwArgs = strings.Join(forwards, " ")
-	}
-
-	execCmd := fmt.Sprintf("/usr/bin/ssh -N -i %s -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o ServerAliveInterval=%d -o ServerAliveCountMax=%d -o StrictHostKeyChecking=accept-new %s%s %s",
-		cfg.KeyPath, cfg.ServerAliveInterval, cfg.ServerAliveCountMax, portArg, fwArgs, remoteTarget)
-
-	desc := "Hashem Direct SSH Forward Carrier"
-	if cfg.Mode == "bagher" || cfg.Mode == "frp_ssh" {
-		desc = "Hashem Bagher Engine (Stealth Hybrid Tunnel)"
+		execCmd = fmt.Sprintf("/usr/bin/ssh -N -i %s -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o ServerAliveInterval=%d -o ServerAliveCountMax=%d -o StrictHostKeyChecking=accept-new %s%s %s@%s",
+			cfg.KeyPath, cfg.ServerAliveInterval, cfg.ServerAliveCountMax, portArg, strings.Join(forwards, " "), cfg.RemoteUser, cfg.RemoteHost)
+		desc = "Hashem Direct SSH Forward Carrier"
 	}
 
 	return fmt.Sprintf(`[Unit]
 Description=%s
-After=network-online.target
+After=network-online.target hashem-bagher-frps.service
 Wants=network-online.target
 
 [Service]
@@ -668,8 +691,10 @@ func getBagherLiveMetrics(cfg SSHFwdConfig) BagherLiveMetrics {
 		return BagherLiveMetrics{Connected: false, StatusText: "inactive", RxFormatted: "0 B", TxFormatted: "0 B", TotalFormatted: "0 B"}
 	}
 
-	var lat float64
-	if cfg.RemoteHost != "" {
+	// The carrier's keepalive round trip is the tunnel's own ping; a TCP
+	// connect to the SSH port is only the path's, used until it reports.
+	lat, _ := bagherCarrierRTT(cfg, 1)
+	if lat <= 0 && cfg.RemoteHost != "" {
 		remoteSSHPort := cfg.RemoteSSHPort
 		if remoteSSHPort <= 0 {
 			remoteSSHPort = 22
@@ -720,7 +745,14 @@ func getBagherLiveMetrics(cfg SSHFwdConfig) BagherLiveMetrics {
 
 	connected := false
 	statusText := "waiting_for_peer"
-	if gotDashboard {
+	if online, ok := bagherProxiesOnline(cfg); ok && len(cfg.Links) > 0 {
+		// several foreign servers share this frps: link 1 is up when its own
+		// ports are registered, not when any frpc is connected
+		if bagherLinkUp(online, cfg.Ports) {
+			connected = true
+			statusText = "connected"
+		}
+	} else if gotDashboard {
 		if clientCount > 0 {
 			connected = true
 			statusText = "connected"
@@ -805,9 +837,16 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 			return fmt.Errorf("failed starting hashem-bagher-frps: %w", err)
 		}
 	}
+	// restart, not enable --now: a running carrier read the old settings
 	go func() {
-		_, _ = runCmd("systemctl", "enable", "--now", "hashem-bagher.service")
+		_, _ = runCmd("systemctl", "enable", "hashem-bagher.service")
+		_, _ = runCmd("systemctl", "restart", "hashem-bagher.service")
 	}()
+	if isBagher && len(cfg.Links) > 0 {
+		if err := installBagherLinkUnits(cfg, true); err != nil {
+			return err
+		}
+	}
 
 	cfg.Enabled = true
 	cfg.LastStatus = "active"
@@ -818,6 +857,7 @@ func enableSSHFwd(cfg SSHFwdConfig) error {
 // disableSSHFwd stops and disables the systemd services.
 func disableSSHFwd() error {
 	cfg := loadSSHFwdConfigLocked()
+	stopBagherLinkUnits(cfg, false)
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-bagher.service")
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-bagher-frps.service")
 	_, _ = runCmd("systemctl", "disable", "--now", "hashem-bagher-frpc.service")
@@ -831,6 +871,8 @@ func disableSSHFwd() error {
 // cleanSSHFwd completely purges Bagher services, units, configs, and firewall rules while preserving SSH keys.
 func cleanSSHFwd() error {
 	_ = disableSSHFwd()
+	stopBagherLinkUnits(loadSSHFwdConfigLocked(), true)
+	_ = os.Remove(bagherCarrierStatusPath(1))
 	units := []string{
 		"/etc/systemd/system/hashem-bagher.service",
 		"/etc/systemd/system/hashem-bagher-frps.service",
@@ -852,6 +894,7 @@ func cleanSSHFwd() error {
 	cfg.Enabled = false
 	cfg.RemoteHost = ""
 	cfg.Ports = nil
+	cfg.Links = nil
 	cfg.Mode = "bagher"
 	cfg.LastStatus = "inactive"
 	cfg.LastError = ""
@@ -881,7 +924,7 @@ func bagherUnitInstalled() bool {
 			return true
 		}
 	}
-	return false
+	return len(staleBagherLinkUnits(nil)) > 0
 }
 
 // getSSHFwdSnapshotStatus is the cheap status the 5s snapshot collects (M9).
@@ -906,6 +949,7 @@ func getSSHFwdSnapshotStatus() map[string]any {
 	}
 	metrics := getBagherLiveMetrics(cfg)
 	return map[string]any{
+		"links":           bagherLinksStatus(cfg, "", false),
 		"has_config":      true,
 		"enabled":         cfg.Enabled || isActive,
 		"is_active":       isActive,
@@ -994,6 +1038,7 @@ func getSSHFwdStatusLocked() map[string]any {
 	hasConfig := (len(strings.TrimSpace(cfg.RemoteHost)) > 0 && len(cfg.Ports) > 0) || cfg.Enabled || isActive
 
 	return map[string]any{
+		"links":             bagherLinksStatus(cfg, pubKey, true),
 		"has_config":        hasConfig,
 		"enabled":           cfg.Enabled || isActive,
 		"is_active":         isActive,
@@ -1053,6 +1098,7 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		PoolCount   int    `json:"pool_count"`
 		Bundle      string `json:"bundle"`
 		UDP         *bool  `json:"udp"`
+		ID          int    `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAPIError(w, r, "E-SSHFWD-01", "invalid json payload")
@@ -1188,6 +1234,16 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, r, "E-SSHFWD-02", "At least one port must be specified in Forwarded Ports")
 			return
 		}
+		if err := checkBagherLinkPorts(cfg, cfg.Ports, 1); err != nil {
+			writeAPIError(w, r, "E-SSHFWD-02", err.Error())
+			return
+		}
+		for _, l := range cfg.Links {
+			if l.RemoteHost == cfg.RemoteHost {
+				writeAPIError(w, r, "E-SSHFWD-01", cfg.RemoteHost+" is already Bagher foreign server "+strconv.Itoa(l.ID))
+				return
+			}
+		}
 
 		if err := enableSSHFwd(cfg); err != nil {
 			writeAPIError(w, r, "E-SSHFWD-04", err.Error())
@@ -1244,12 +1300,62 @@ func handleSSHFwdPost(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]any{"status": "ok", "peer_response": string(respBytes)})
 
+	case "add_link", "add-link":
+		if !(HasFeature("bagher") || HasFeature("frp_ssh")) {
+			writeAPIError(w, r, "E-LIC-01", "Bagher Engine requires a valid Premium license (Machine: "+getMachineHash()+")")
+			return
+		}
+		l, err := addBagherLink(&cfg, BagherLink{
+			RemoteHost: body.RemoteHost, RemoteUser: strings.TrimSpace(body.RemoteUser),
+			RemoteSSHPort: body.SSHPort, Ports: parsePorts(body.Ports), UDP: body.UDP != nil && *body.UDP,
+		})
+		if err != nil {
+			writeAPIError(w, r, "E-SSHFWD-02", err.Error())
+			return
+		}
+		pub, err := ensureSSHFwdKey(cfg.KeyPath)
+		if err != nil {
+			writeAPIError(w, r, "E-SSHFWD-03", err.Error())
+			return
+		}
+		if err := saveSSHFwdConfigLocked(cfg); err != nil {
+			writeAPIError(w, r, "E-SSHFWD-04", err.Error())
+			return
+		}
+		if cfg.Enabled {
+			if err := installBagherLinkUnits(cfg, false); err != nil {
+				writeAPIError(w, r, "E-SSHFWD-04", err.Error())
+				return
+			}
+		}
+		bundleStr, err := MakeBagherBundle(bagherLinkCfg(cfg, l), pub)
+		if err != nil {
+			writeAPIError(w, r, "E-SSHFWD-07", fmt.Sprintf("failed generating bundle: %v", err))
+			return
+		}
+		writeJSON(w, map[string]any{"status": "ok", "id": l.ID, "bundle": bundleStr, "status_data": getSSHFwdStatusLocked()})
+
+	case "remove_link", "remove-link":
+		if !removeBagherLink(&cfg, body.ID) {
+			writeAPIError(w, r, "E-SSHFWD-01", fmt.Sprintf("no Bagher foreign server %d", body.ID))
+			return
+		}
+		_, _ = runCmd("systemctl", "disable", "--now", bagherLinkUnit(body.ID)+".service")
+		_ = os.Remove(bagherLinkUnitPath(body.ID))
+		_ = os.Remove(bagherCarrierStatusPath(body.ID))
+		_, _ = runCmd("systemctl", "daemon-reload")
+		if err := saveSSHFwdConfigLocked(cfg); err != nil {
+			writeAPIError(w, r, "E-SSHFWD-04", err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"status": "ok", "status_data": getSSHFwdStatusLocked()})
+
 	case "clear_dnat", "clear-dnat":
 		_ = cleanDnatConflict(cfg.Ports)
 		writeJSON(w, map[string]any{"status": "ok", "message": "dnat table cleared"})
 
 	default:
-		writeAPIError(w, r, "E-SSHFWD-01", "unknown action: want enable, disable, gen_key, sync_peer, clear_dnat, apply_bundle, get_bundle, or clean")
+		writeAPIError(w, r, "E-SSHFWD-01", "unknown action: want enable, disable, gen_key, sync_peer, clear_dnat, apply_bundle, get_bundle, add_link, remove_link, or clean")
 	}
 }
 
