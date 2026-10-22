@@ -38,8 +38,9 @@ func TestTrafficLab(t *testing.T) {
 		expect[k] = [2]float64{rx, tx}
 	}
 
-	oldRunner, oldCfg, oldBh, oldFrp, oldUsage := runner, configDir, backhaulDir, frpDir, trafficUsage
-	runner = execRunner // the real host: this test runs inside the lab's namespace
+	oldRunner, oldCfg, oldBh, oldFrp, oldUsage, oldCC := runner, configDir, backhaulDir, frpDir, trafficUsage, carrierCounters
+	runner = execRunner                   // the real host: this test runs inside the lab's namespace
+	carrierCounters = readCarrierCounters // TestMain stubs it for the unit tests
 	configDir, backhaulDir, frpDir = t.TempDir(), t.TempDir(), t.TempDir()
 	trafficUsage = newUsage()
 	resetCarrier := func() {
@@ -49,7 +50,7 @@ func TestTrafficLab(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		carrierDrop()
-		runner, configDir, backhaulDir, frpDir, trafficUsage = oldRunner, oldCfg, oldBh, oldFrp, oldUsage
+		runner, configDir, backhaulDir, frpDir, trafficUsage, carrierCounters = oldRunner, oldCfg, oldBh, oldFrp, oldUsage, oldCC
 		carrierState.Lock()
 		carrierState.sig, carrierState.at, carrierState.tags, carrierState.ok = "", time.Time{}, nil, false
 		carrierState.Unlock()
@@ -192,6 +193,10 @@ func TestTrafficLab(t *testing.T) {
 
 	// ---- 2. live speed: 2 MB/s paced over the main tunnel ----------------
 	const rate = 2_000_000.0
+	// a fresh speed window: the bulk phase took under a second, too short
+	// for one, so its bytes would be averaged into the first paced sample
+	time.Sleep(1100 * time.Millisecond)
+	tick()
 	paced := exec.Command("bash", script, "paced")
 	must(paced.Start())
 	time.Sleep(2 * time.Second)
