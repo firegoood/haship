@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -98,19 +99,37 @@ func TestLimitsLab(t *testing.T) {
 	}
 	t.Logf("no limit: up %.0f Mbit/s, down %.0f Mbit/s", up, down)
 
+	// how the policer's bucket size changes what TCP gets of 20 Mbit/s
+	// (reported, not checked: it picks limitsTCArgs's burst)
+	ifn := limitsIface()
+	_, _ = limitsRun("tc", "qdisc", "add", "dev", ifn, "clsact")
+	for _, ms := range []int64{100, 250, 500, 1000} {
+		limitsTCClear(ifn)
+		burst := strconv.FormatInt(20000*1000/8*ms/1000, 10)
+		for _, d := range [][2]string{{"egress", "dst"}, {"ingress", "src"}} {
+			if out, err := limitsRun("tc", "filter", "add", "dev", ifn, d[0], "pref", limitsTCPref, "protocol", "ip", "u32", "match", "ip", d[1], fo+"/32",
+				"action", "police", "rate", "20000kbit", "burst", burst, "mtu", "65535", "conform-exceed", "drop/pass"); err != nil {
+				t.Fatalf("tc: %v %s", err, out)
+			}
+		}
+		up, down, err := xfer(16e6, 16e6)
+		t.Logf("burst %d ms: up %.1f, down %.1f Mbit/s (%v)", ms, up, down, err)
+	}
+	limitsTCClear(ifn)
+
 	// speed: 20 Mbit/s both ways
 	post(`{"action":"set","ip":"` + fo + `","rate_mbit":20,"reset":"never"}`)
 	if n := limitsTCPresent(limitsIface()); n != 2 {
 		out, _ := runCmdTimeout(5*time.Second, "tc", "filter", "show", "dev", limitsIface(), "egress")
 		t.Fatalf("filters on %q: %d, want 2\n%s", limitsIface(), n, out)
 	}
-	up, down, err = xfer(8e6, 8e6)
+	up, down, err = xfer(16e6, 16e6)
 	if err != nil {
 		t.Fatalf("20 Mbit/s: %v", err)
 	}
 	t.Logf("20 Mbit/s: up %.1f, down %.1f", up, down)
 	for _, v := range []float64{up, down} {
-		if v < 10 || v > 24 {
+		if v < 13 || v > 25 {
 			t.Errorf("rate %.1f Mbit/s with a 20 Mbit/s limit", v)
 		}
 	}

@@ -78,6 +78,8 @@ fi
     "$BIN" -test.run '^TestLimitsLab$' -test.v >"$TMP/lab.log" 2>&1)
 rc=$?
 grep -E "limits_lab_test.go|^(--- |ok|FAIL|PASS)" "$TMP/lab.log"
+# the measured rates, as notices on the CI run
+[[ -n ${GITHUB_ACTIONS:-} && $rc -eq 0 ]] && grep -E "limits_lab_test.go:[0-9]+:" "$TMP/lab.log" | sed 's/^ *//; s/^/::notice title=limits lab::/'
 if [[ $rc -ne 0 ]]; then
     tail -40 "$TMP/lab.log"
     [[ -n ${GITHUB_ACTIONS:-} ]] && grep -E "limits_lab_test.go:[0-9]+:" "$TMP/lab.log" | sed 's/^ *//; s/^/::error title=limits lab::/'

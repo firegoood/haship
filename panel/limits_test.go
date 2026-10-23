@@ -202,8 +202,8 @@ func TestLimitsTCArgs(t *testing.T) {
 	want := []string{
 		"filter add dev eth0 egress pref 4917 protocol ip u32 match ip dst 198.51.100.2/32 action police rate 500kbit burst 65536 mtu 65535 conform-exceed drop/pass",
 		"filter add dev eth0 ingress pref 4917 protocol ip u32 match ip src 198.51.100.2/32 action police rate 500kbit burst 65536 mtu 65535 conform-exceed drop/pass",
-		"filter add dev eth0 egress pref 4917 protocol ip u32 match ip dst 203.0.113.7/32 action police rate 100000kbit burst 1250000 mtu 65535 conform-exceed drop/pass",
-		"filter add dev eth0 ingress pref 4917 protocol ip u32 match ip src 203.0.113.7/32 action police rate 100000kbit burst 1250000 mtu 65535 conform-exceed drop/pass",
+		"filter add dev eth0 egress pref 4917 protocol ip u32 match ip dst 203.0.113.7/32 action police rate 100000kbit burst 6250000 mtu 65535 conform-exceed drop/pass",
+		"filter add dev eth0 ingress pref 4917 protocol ip u32 match ip src 203.0.113.7/32 action police rate 100000kbit burst 6250000 mtu 65535 conform-exceed drop/pass",
 	}
 	for i := range want {
 		if got[i] != want[i] {

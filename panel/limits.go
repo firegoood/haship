@@ -271,8 +271,10 @@ func limitsDropChain() {
 }
 
 // limitsTCArgs are the tc commands that give each server its rate (Mbit/s),
-// after the old filters are deleted. The burst is 100 ms at the rate (at
-// least 64 KB) and mtu 64k lets GSO/GRO packets through the policer.
+// after the old filters are deleted. The burst is 500 ms at the rate (at
+// least 64 KB): a smaller bucket drops TCP into backoff, well under the
+// rate (the lab saw 9 of 20 Mbit/s at 100 ms). mtu 64k lets GSO/GRO packets
+// through the policer.
 func limitsTCArgs(ifname string, rates map[string]float64) [][]string {
 	ips := make([]string, 0, len(rates))
 	for ip := range rates {
@@ -282,7 +284,7 @@ func limitsTCArgs(ifname string, rates map[string]float64) [][]string {
 	var cmds [][]string
 	for _, ip := range ips {
 		kbit := int64(math.Round(rates[ip] * 1000))
-		burst := kbit * 1000 / 8 / 10
+		burst := kbit * 1000 / 8 / 2
 		if burst < 65536 {
 			burst = 65536
 		}
