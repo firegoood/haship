@@ -324,22 +324,24 @@ func limitsTCApply(ifname string, rates map[string]float64) error {
 }
 
 // limitsTCPresent counts our filters on the interface (a reboot or someone
-// else's `tc qdisc del` removes them): one "match" line per u32 filter
-// ("police" shows more than once per filter in newer iproute2).
+// else's `tc qdisc del` removes them) by their distinct match lines: "dst
+// IP" is "match <hex>/ffffffff at 16", "src IP" "at 12". Some iproute2
+// versions list both clsact directions for either one, and print "police"
+// more than once per filter, so neither lines nor words are counted.
 func limitsTCPresent(ifname string) int {
-	n := 0
+	seen := map[string]bool{}
 	for _, dir := range []string{"egress", "ingress"} {
 		out, err := limitsRun("tc", "filter", "show", "dev", ifname, dir, "pref", limitsTCPref)
 		if err != nil {
 			return -1
 		}
 		for _, l := range strings.Split(string(out), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(l), "match ") {
-				n++
+			if l = strings.TrimSpace(l); strings.HasPrefix(l, "match ") {
+				seen[l] = true
 			}
 		}
 	}
-	return n
+	return len(seen)
 }
 
 type limitEvent struct{ ip, to, why string }

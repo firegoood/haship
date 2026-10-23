@@ -58,14 +58,16 @@ func useFakeLimits(t *testing.T, servers ...string) *fakeLimitsKernel {
 		case "tc":
 			k.tc = append(k.tc, strings.Join(args, " "))
 			if args[0] == "filter" && args[1] == "show" {
-				n := 0
+				// like some iproute2 versions: both directions for either,
+				// "police" twice per filter
+				var b strings.Builder
 				for _, c := range k.tc {
-					if strings.HasPrefix(c, "filter add") && strings.Contains(c, " "+args[4]+" ") {
-						n++
+					if f := strings.Fields(c); f[0] == "filter" && f[1] == "add" {
+						at := map[string]string{"dst": "16", "src": "12"}[f[12]]
+						fmt.Fprintf(&b, "filter protocol ip pref 4917 u32 fh 800::800\n  match %s at %s\n\taction order 1:  police 0x1 rate 20Mbit\n\t police 0x1\n", f[13], at)
 					}
 				}
-				// newer iproute2 prints "police" twice per filter
-				return []byte(strings.Repeat("filter protocol ip pref 4917 u32 fh 800::800\n  match 0a130002/ffffffff at 16\n\taction order 1:  police 0x1 rate 20Mbit\n\t police 0x1\n", n)), nil
+				return []byte(b.String()), nil
 			}
 		}
 		return nil, nil
