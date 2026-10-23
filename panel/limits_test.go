@@ -64,7 +64,8 @@ func useFakeLimits(t *testing.T, servers ...string) *fakeLimitsKernel {
 						n++
 					}
 				}
-				return []byte(strings.Repeat("action order 1: police 0x1\n", n)), nil
+				// newer iproute2 prints "police" twice per filter
+				return []byte(strings.Repeat("filter protocol ip pref 4917 u32 fh 800::800\n  match 0a130002/ffffffff at 16\n\taction order 1:  police 0x1 rate 20Mbit\n\t police 0x1\n", n)), nil
 			}
 		}
 		return nil, nil

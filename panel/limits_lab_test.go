@@ -101,7 +101,8 @@ func TestLimitsLab(t *testing.T) {
 	// speed: 20 Mbit/s both ways
 	post(`{"action":"set","ip":"` + fo + `","rate_mbit":20,"reset":"never"}`)
 	if n := limitsTCPresent(limitsIface()); n != 2 {
-		t.Fatalf("policers on %q: %d, want 2", limitsIface(), n)
+		out, _ := runCmdTimeout(5*time.Second, "tc", "filter", "show", "dev", limitsIface(), "egress")
+		t.Fatalf("filters on %q: %d, want 2\n%s", limitsIface(), n, out)
 	}
 	up, down, err = xfer(8e6, 8e6)
 	if err != nil {

@@ -323,8 +323,9 @@ func limitsTCApply(ifname string, rates map[string]float64) error {
 	return nil
 }
 
-// limitsTCPresent counts our policers on the interface (a reboot or someone
-// else's `tc qdisc del` removes them).
+// limitsTCPresent counts our filters on the interface (a reboot or someone
+// else's `tc qdisc del` removes them): one "match" line per u32 filter
+// ("police" shows more than once per filter in newer iproute2).
 func limitsTCPresent(ifname string) int {
 	n := 0
 	for _, dir := range []string{"egress", "ingress"} {
@@ -332,7 +333,11 @@ func limitsTCPresent(ifname string) int {
 		if err != nil {
 			return -1
 		}
-		n += strings.Count(string(out), "police")
+		for _, l := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(l), "match ") {
+				n++
+			}
+		}
 	}
 	return n
 }
