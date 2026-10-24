@@ -587,6 +587,11 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Engine != "backhaul" {
+		// GRE runs between the two IPv4 addresses
+		if !isV4(body.LocalPub) || !isV4(body.RemotePub) {
+			writeAPIError(w, r, "E-SETUP-04", "a tunnel over GRE needs the IPv4 addresses of both servers; for IPv6 use Backhaul without GRE")
+			return
+		}
 		if net.ParseIP(body.LocalGre) == nil || !isV4(body.LocalGre) {
 			writeAPIError(w, r, "E-SETUP-05", "")
 			return

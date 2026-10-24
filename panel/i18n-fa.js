@@ -8,6 +8,10 @@
 // Technical names stay Latin: GRE, FRP, frps, frpc, Backhaul, WSS, KCP, QUIC, TCP,
 // UDP, MTU, MSS, BBR, IP, DNAT, SNI, TLS, HTTPS, Bagher's SSH, iPerf3, VLESS.
 window.FA_TEXT = {
+  "Connect the two servers over": "اتصال دو سرور از طریق",
+  "The foreign server dials the IPv6 address of this server. Both servers need a public IPv6 address.": "سرور خارج به آدرس IPv6 این سرور وصل می‌شود. هر دو سرور باید IPv6 عمومی داشته باشند.",
+  "No public IPv6 address was found on this server: enter it by hand, or connect over IPv4.": "روی این سرور آدرس IPv6 عمومی پیدا نشد: آن را دستی وارد کنید، یا از IPv4 وصل شوید.",
+  "Enter a valid IP address for Remote Public IP.": "یک آدرس IP معتبر برای IP عمومی سرور مقابل وارد کنید.",
   "More foreign servers": "سرورهای خارج بیشتر",
   "One Iran server can carry several foreign servers over Bagher, each on its own ports.": "یک سرور ایران می‌تواند چند سرور خارج را با باقر وصل کند، هر کدام روی پورت‌های خودش.",
   "Add Foreign Server": "افزودن سرور خارج",

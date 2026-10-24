@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -86,5 +87,49 @@ func TestNoBareHostPort(t *testing.T) {
 				t.Errorf("%s:%d builds host:port without brackets: %s", f, i+1, strings.TrimSpace(line))
 			}
 		}
+	}
+}
+
+func TestBundlesAndSetupIPv6(t *testing.T) {
+	// Backhaul without GRE carries either family; the GRE bundles stay IPv4
+	b, err := ParseBundle(MakeBackhaulBundle("2001:db8::1", 3080, "tcpmux", "tok", []string{"443"}))
+	if err != nil || b.IranPub != "2001:db8::1" || b.FrpPort != 3080 {
+		t.Fatalf("bh1 over IPv6: %+v %v", b, err)
+	}
+	if _, err := ParseBundle(MakeGreBackhaulBundle("2001:db8::1", 3080, "10.10.10.2", "10.10.10.1", "tcpmux", "tok", nil)); err == nil {
+		t.Fatal("gh1 with an IPv6 Iran address accepted")
+	}
+	if _, err := ParseBundle(MakeBundle("2001:db8::1", 7000, "10.10.10.2", "10.10.10.1", "tok", nil)); err == nil {
+		t.Fatal("hsh1 with an IPv6 Iran address accepted")
+	}
+
+	// setup: GRE needs IPv4 at both ends, with a clear message
+	withPro(t)
+	for _, engine := range []string{"frp", "gre-backhaul"} {
+		rr := httptest.NewRecorder()
+		handleSetupPost(rr, httptest.NewRequest("POST", "/api/setup", strings.NewReader(
+			`{"role":"iran","engine":"`+engine+`","local_public":"2001:db8::1","remote_public":"2001:db8::2","local_gre":"10.10.10.2","peer_gre":"10.10.10.1","frp_port":7000}`)))
+		if rr.Code != 400 || !strings.Contains(rr.Body.String(), "IPv4") {
+			t.Errorf("%s over IPv6: %d %s", engine, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestPeerPatchIPv6(t *testing.T) {
+	old := configDir
+	configDir = t.TempDir()
+	defer func() { configDir = old }()
+	_ = os.WriteFile(peersFile(), []byte(`{"peers":[
+	 {"id":1,"name":"gre","local_pub":"1.2.3.4","remote_pub":"198.51.100.1","frp_port":25000,"local_gre":"10.10.10.2","peer_gre":"10.10.10.1","ports":[80],"token":"t1","gre_if":"gre-t1","frps_svc":"frps"},
+	 {"id":2,"name":"bh","engine":"backhaul","local_pub":"1.2.3.4","remote_pub":"198.51.100.2","frp_port":25001,"ports":[81],"token":"t2","gre_if":"none","frps_svc":"backhaul-server-2"}]}`), 0600)
+	rr := httptest.NewRecorder()
+	handlePeersPatch(rr, httptest.NewRequest("PATCH", "/api/peers", strings.NewReader(`{"id":1,"remote_pub":"2001:db8::9"}`)))
+	if rr.Code != 400 || !strings.Contains(rr.Body.String(), "IPv4") {
+		t.Errorf("GRE peer to IPv6: %d %s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	handlePeersPatch(rr, httptest.NewRequest("PATCH", "/api/peers", strings.NewReader(`{"id":2,"remote_pub":"2001:db8::9"}`)))
+	if strings.Contains(rr.Body.String(), "E-PEER-07") {
+		t.Errorf("Backhaul peer without GRE to IPv6 rejected: %d %s", rr.Code, rr.Body.String())
 	}
 }

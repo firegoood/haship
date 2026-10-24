@@ -3227,6 +3227,8 @@ function setIranEngine(eng) {
     ? tr('', 'The foreign server uses GRE when it works and the public IP while GRE is blocked, then goes back to GRE by itself.')
     : tr('', 'No GRE interface at all: for servers where GRE (protocol 47) is blocked for good.');
   const noGre = api_eng === 'backhaul';
+  if ($('bhFamWrap')) $('bhFamWrap').classList.toggle('hidden', !noGre);
+  if (!noGre && _bhFam === 6) { _bhFam = 4; syncBhFam(); }
   if ($('iranFields')) $('iranFields').hidden = isBagher;
   if ($('bagherFields')) $('bagherFields').hidden = !isBagher;
   if ($('wrapLocalGre')) $('wrapLocalGre').classList.toggle('hidden', noGre);
@@ -3276,6 +3278,22 @@ if ($('sshfwdUdp')) $('sshfwdUdp').addEventListener('change', e => { e.target.da
 if ($('engGreFrp')) $('engGreFrp').onclick = () => setIranEngine('frp');
 if ($('engBh')) $('engBh').onclick = () => setIranEngine('backhaul');
 if ($('engBagher')) $('engBagher').onclick = () => setIranEngine('bagher');
+// Backhaul without GRE connects the servers over IPv4 or IPv6 (GRE needs IPv4).
+let _bhFam = 4;
+function syncBhFam() {
+  const six = _bhFam === 6, d = setupDefaults || {};
+  if ($('bhFam4')) $('bhFam4').setAttribute('aria-pressed', !six);
+  if ($('bhFam6')) $('bhFam6').setAttribute('aria-pressed', six);
+  for (const id of ['sLocalPub', 'sRemotePub']) if ($(id)) $(id).setAttribute('inputmode', six ? 'text' : 'decimal');
+  if ($('sRemotePub')) $('sRemotePub').placeholder = six ? 'e.g. 2001:db8::10' : 'e.g. 203.0.113.10';
+  const cur = $('sLocalPub') ? $('sLocalPub').value.trim() : '';
+  if ($('sLocalPub') && (!cur || (six ? isIPv4(cur) : isIPv6(cur)))) $('sLocalPub').value = (six ? d.local_public6 : d.local_public) || '';
+  if ($('bhFamHint')) $('bhFamHint').textContent = !six ? ''
+    : d.local_public6 ? tr('', 'The foreign server dials the IPv6 address of this server. Both servers need a public IPv6 address.')
+    : tr('', 'No public IPv6 address was found on this server: enter it by hand, or connect over IPv4.');
+}
+if ($('bhFam4')) $('bhFam4').onclick = () => { _bhFam = 4; syncBhFam(); };
+if ($('bhFam6')) $('bhFam6').onclick = () => { _bhFam = 6; syncBhFam(); };
 if ($('bhGreOn')) $('bhGreOn').onclick = () => { _bhGre = true; setIranEngine('backhaul'); };
 if ($('bhGreOff')) $('bhGreOff').onclick = () => { _bhGre = false; setIranEngine('backhaul'); };
 if ($('bagherLicOpenBtn')) $('bagherLicOpenBtn').onclick = () => openBagherLicModal();
@@ -3342,7 +3360,7 @@ function parseBundleClient(s) {
     const parts = s.slice(4).split('_');
     if (parts.length < 4 || parts.length > 5) return {error: 'bh1 bundle must have 4 or 5 parts'};
     const [iranPub, portS, transport, token] = parts;
-    if (!v4(iranPub)) return {error: 'bad Iran public IP in bundle'};
+    if (!isIP(iranPub)) return {error: 'bad Iran public IP in bundle'};
     const port = parseInt(portS, 10);
     if (!/^\d+$/.test(portS) || port < 1 || port > 65535) return {error: 'bad port in bundle'};
     if (!token || token.length > 128) return {error: 'bad token in bundle'};
@@ -8370,8 +8388,8 @@ async function saveEditPorts() {
   const compVal      = $('editPeerCompression') && $('editPeerCompression').checked;
 
   if (remoteVal) {
-    if (!isIPv4(remoteVal) || remoteVal.split('.').some(o => String(+o) !== o)) {
-      warnEl.textContent = 'Enter a valid IPv4 address for Remote Public IP.';
+    if (!isIPv6(remoteVal) && (!isIPv4(remoteVal) || remoteVal.split('.').some(o => String(+o) !== o))) {
+      warnEl.textContent = tr('', 'Enter a valid IP address for Remote Public IP.');
       warnEl.classList.remove('hidden');
       return;
     }

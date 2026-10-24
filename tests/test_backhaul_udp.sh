@@ -6,7 +6,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/units" "$T/bh"
-for fn in is_valid_ip is_valid_port backhaul_udp_wanted backhaul_udp_companion_wanted backhaul_udp_unit \
+for fn in is_valid_ip is_valid_ip6 is_valid_ip_any is_valid_port backhaul_udp_wanted backhaul_udp_companion_wanted backhaul_udp_unit \
           backhaul_conf_transport backhaul_conf_port backhaul_udp_conf backhaul_udp_port backhaul_udp_pick_port \
           backhaul_udp_remove backhaul_udp_on backhaul_udp_apply \
           backhaul_bundle_transport bundle_make_backhaul bundle_make_gre_backhaul bundle_parse; do

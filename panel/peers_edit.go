@@ -277,8 +277,20 @@ func handlePeersPatch(w http.ResponseWriter, r *http.Request) {
 
 	// Validate remote public IP if provided
 	if body.RemotePub != "" {
-		if !isV4(body.RemotePub) {
-			writeAPIError(w, r, "E-PEER-07", "invalid remote public IP")
+		// a tunnel over GRE needs IPv4 at both ends; Backhaul without GRE
+		// takes either family
+		v6ok := false
+		for _, p := range loadPeers() {
+			if p.ID == body.ID {
+				v6ok = p.NoGre || p.GreIf == "none"
+			}
+		}
+		if f := ipFamily(body.RemotePub); f == 0 || f == 6 && !v6ok {
+			msg := "invalid remote public IP"
+			if f == 6 {
+				msg = "a tunnel over GRE needs the foreign server's IPv4 address"
+			}
+			writeAPIError(w, r, "E-PEER-07", msg)
 			return
 		}
 		if clash := peerDuplicateIPClash(body.RemotePub, body.ID); clash != "" {

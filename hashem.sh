@@ -1531,7 +1531,7 @@ bundle_parse() {
         local a b c d e
         IFS=_ read -r a b c d e <<<"$rest"
         [[ -n "$a" && -n "$b" && -n "$c" && -n "$d" ]] || return 1
-        is_valid_ip "$a" || return 1
+        is_valid_ip_any "$a" || return 1
         is_valid_port "$b" || return 1
         [[ ${#d} -ge 1 && ${#d} -le 128 ]] || return 1
         B_IRAN_PUB="$a"
@@ -4827,9 +4827,14 @@ cli_add_backhaul_peer() {
     backhaul_setup_guard "$TRANSPORT" "$PORTS" || return 1
     PORTS=$BH_PORTS_NORM
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     PORT=${PORT:-$(gen_random_port)}
-    is_valid_ip "$LOCAL_PUB" || { echo -e "${RED}[!] Invalid local IP: '$LOCAL_PUB'${NC}"; return 1; }
+    if [[ "$NO_GRE" -eq 1 ]]; then
+        is_valid_ip_any "$LOCAL_PUB" || { echo -e "${RED}[!] Invalid local IP: '$LOCAL_PUB'${NC}"; return 1; }
+    else
+        is_valid_ip "$LOCAL_PUB" || { echo -e "${RED}[!] GRE needs this server's IPv4 address, got '$LOCAL_PUB'${NC}"; return 1; }
+        [[ -z "$REMOTE_PUB" ]] || is_valid_ip "$REMOTE_PUB" || { echo -e "${RED}[!] GRE needs the foreign server's IPv4 address, got '$REMOTE_PUB'${NC}"; return 1; }
+    fi
     is_valid_port "$PORT" || { echo -e "${RED}[!] Invalid control port: '$PORT'${NC}"; return 1; }
     if grep -q "\"remote_pub\": *\"${REMOTE_PUB}\"" "$PEERS_FILE" 2>/dev/null; then
         echo -e "${RED}[!] Foreign IP ${REMOTE_PUB} is already used by another tunnel.${NC}"; return 1
@@ -4968,7 +4973,11 @@ cli_edit_peer() {
 
     # Validate remote public IP if provided
     if [[ -n "$REMOTE_PUB" ]]; then
-        is_valid_ip "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: ${REMOTE_PUB}${NC}"; return 1; }
+        if [[ "$CUR_GIF" == "none" ]]; then # Backhaul without GRE: either family
+            is_valid_ip_any "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: ${REMOTE_PUB}${NC}"; return 1; }
+        else
+            is_valid_ip "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: ${REMOTE_PUB} (GRE needs IPv4)${NC}"; return 1; }
+        fi
         PEERS_F="$PEERS_FILE" PEER_ID="$ID" NEW_IP="$REMOTE_PUB" python3 <<'PYEOF'
 import json, os, sys
 f = os.environ["PEERS_F"]
@@ -5149,7 +5158,7 @@ setup_iran_server() {
     echo -e "${YELLOW}====================================================${NC}"
 
     MY_PUBLIC_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    [[ -z "$MY_PUBLIC_IP" ]] && MY_PUBLIC_IP=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$MY_PUBLIC_IP" ]] && MY_PUBLIC_IP=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     prompt_ip IP_IRAN "Enter IRAN Server Public IP" "$MY_PUBLIC_IP"
     prompt_ip IP_FOREIGN "Enter FOREIGN Server Public IP" ""
 
@@ -5250,7 +5259,7 @@ setup_foreign_server() {
     echo -e "${YELLOW}   STEP 2: CONFIGURING FOREIGN SERVER (GRE + FRPC)  ${NC}"
     echo -e "${YELLOW}====================================================${NC}"
     MY_PUBLIC_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    [[ -z "$MY_PUBLIC_IP" ]] && MY_PUBLIC_IP=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$MY_PUBLIC_IP" ]] && MY_PUBLIC_IP=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
 
     echo -e "Do you have a Setup Bundle from the Iran server? (${CYAN}hsh1_...${NC})"
     read -p "Enter Setup Bundle [Press Enter to configure manually]: " BUNDLE_IN
@@ -8995,7 +9004,7 @@ setup_backhaul_iran_interactive() {
         echo -e "\n${YELLOW}=== Setup Backhaul Iran Server (no GRE) ===${NC}"
     fi
     MYIP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    [[ -z "$MYIP" ]] && MYIP=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$MYIP" ]] && MYIP=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     prompt_ip LOCAL_PUB "Enter IRAN Server Public IP" "$MYIP"
     prompt_ip REMOTE_PUB "Enter FOREIGN Server Public IP" ""
     prompt_port PORT "Enter Backhaul Server Port" "$(gen_random_port)"
@@ -10063,7 +10072,7 @@ cli_setup_iran() {
         esac
     done
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     FRP_PORT=${FRP_PORT:-$(gen_random_port)}
     validate_setup_common "$LOCAL_PUB" "$REMOTE_PUB" "$FRP_PORT" "$LOCAL_GRE" || return 1
     is_valid_ip "$PEER_GRE" || { echo -e "${RED}[!] Invalid peer GRE IP: '$PEER_GRE'${NC}"; return 1; }
@@ -10143,7 +10152,7 @@ cli_setup_foreign() {
     # --bundle replaces --token as the required secret
     [[ -z "$TOKEN" && -n "$BUNDLE" ]] && TOKEN=$B_TOKEN
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     FRP_PORT=${FRP_PORT:-$(gen_random_port)}
     LOCAL_GRE=${LOCAL_GRE:-$FOREIGN_GRE_DEF}
     PEER_GRE=${PEER_GRE:-$IRAN_GRE_DEF}
@@ -10196,9 +10205,9 @@ cli_setup_backhaul_iran() {
         esac
     done
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     PORT=${PORT:-$(gen_random_port)}
-    is_valid_ip "$LOCAL_PUB" || { echo -e "${RED}[!] Invalid local IP: '$LOCAL_PUB'${NC}"; return 1; }
+    is_valid_ip_any "$LOCAL_PUB" || { echo -e "${RED}[!] Invalid local IP: '$LOCAL_PUB'${NC}"; return 1; }
     is_valid_port "$PORT" || { echo -e "${RED}[!] Invalid port: '$PORT'${NC}"; return 1; }
     if [[ -z "$TOKEN" ]]; then
         TOKEN=$(gen_token32)
@@ -10237,8 +10246,8 @@ cli_setup_backhaul_foreign() {
     fi
     [[ -z "$TOKEN" && -n "$BUNDLE" ]] && TOKEN=$B_TOKEN
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
-    is_valid_ip "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: '$REMOTE_PUB'${NC}"; return 1; }
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    is_valid_ip_any "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: '$REMOTE_PUB'${NC}"; return 1; }
     is_valid_port "$PORT" || { echo -e "${RED}[!] Invalid port: '$PORT'${NC}"; return 1; }
     [[ -n "$TOKEN" ]] || { echo -e "${RED}[!] --token or --bundle is required.${NC}"; return 1; }
     if [[ "$FORCE" -ne 1 ]] && systemctl is-active --quiet backhaul-client 2>/dev/null; then
@@ -10268,7 +10277,7 @@ cli_setup_gre_backhaul_iran() {
         esac
     done
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     PORT=${PORT:-$(gen_random_port)}
     validate_setup_common "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$LOCAL_GRE" || return 1
     is_valid_ip "$PEER_GRE" || { echo -e "${RED}[!] Invalid peer GRE IP: '$PEER_GRE'${NC}"; return 1; }
@@ -10315,7 +10324,7 @@ cli_setup_gre_backhaul_foreign() {
     fi
     [[ -z "$TOKEN" && -n "$BUNDLE" ]] && TOKEN=$B_TOKEN
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     LOCAL_GRE=${LOCAL_GRE:-$FOREIGN_GRE_DEF}
     PEER_GRE=${PEER_GRE:-$IRAN_GRE_DEF}
     validate_setup_common "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$LOCAL_GRE" || return 1
