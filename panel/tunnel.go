@@ -1313,7 +1313,7 @@ remotePort = %d
 			}
 			conf := filepath.Join(backhaulDir, "client.toml")
 			tx.backup(conf)
-			if err := writeBackhaulClientConfig(conf, fmt.Sprintf("%s:%d", dial, port), targetTransport, token); err != nil {
+			if err := writeBackhaulClientConfig(conf, hostPort(dial, port), targetTransport, token); err != nil {
 				return outMsg.String(), tx.rollback(fmt.Errorf("write backhaul config: %w", err))
 			}
 			if err := tx.start("backhaul-client"); err != nil {

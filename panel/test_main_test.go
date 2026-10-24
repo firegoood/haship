@@ -41,6 +41,7 @@ func TestMain(m *testing.M) {
 	tunnelHealthAutoRun = false
 	// detectPublicIP's "what is my IP" fallback must not reach the internet.
 	externalIPLookup = func() string { return "" }
+	externalIP6Lookup = func() string { return "" }
 	// Engine switches: units "run" once restarted, and no post-start wait.
 	engineServiceActive = func(string) bool { return true }
 	engineVerifyDelay = 0

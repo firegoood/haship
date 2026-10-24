@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -187,7 +188,10 @@ func backhaulClientConfigV2(remoteAddr, transport, token string) string {
 		sb.WriteString("[mux]\nmux_version = 1\n\n")
 	}
 	if transport == "wss" || transport == "wssmux" {
-		host, _, _ := strings.Cut(remoteAddr, ":")
+		host, _, err := net.SplitHostPort(remoteAddr)
+		if err != nil {
+			host, _, _ = strings.Cut(remoteAddr, ":")
+		}
 		fmt.Fprintf(&sb, "[tls]\nsni = %q\n\n", host)
 	}
 	sb.WriteString("[logging]\nlog_level = \"info\"\n")

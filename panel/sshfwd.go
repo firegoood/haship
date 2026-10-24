@@ -299,7 +299,7 @@ func buildBagherCarrierUnit(cfg SSHFwdConfig, id int) string {
 		}
 		forwards := make([]string, 0, len(cfg.Ports))
 		for _, p := range cfg.Ports {
-			forwards = append(forwards, fmt.Sprintf("-L %s:%d:127.0.0.1:%d", cfg.BindAddr, p, p))
+			forwards = append(forwards, fmt.Sprintf("-L %s:127.0.0.1:%d", hostPort(cfg.BindAddr, p), p))
 		}
 		execCmd = fmt.Sprintf("/usr/bin/ssh -N -i %s -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o ServerAliveInterval=%d -o ServerAliveCountMax=%d -o StrictHostKeyChecking=accept-new %s%s %s@%s",
 			cfg.KeyPath, cfg.ServerAliveInterval, cfg.ServerAliveCountMax, portArg, strings.Join(forwards, " "), cfg.RemoteUser, cfg.RemoteHost)
@@ -461,7 +461,7 @@ func isPrivateIP(ipStr string) bool {
 	}
 	ip4 := ip.To4()
 	if ip4 == nil {
-		return false
+		return ip.IsPrivate() || ip.IsMulticast() // fc00::/7 unique local
 	}
 	if ip4[0] == 10 {
 		return true
@@ -703,7 +703,7 @@ func getBagherLiveMetrics(cfg SSHFwdConfig) BagherLiveMetrics {
 			remoteSSHPort = 22
 		}
 		tRemote := time.Now()
-		rConn, rErr := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", cfg.RemoteHost, remoteSSHPort), 600*time.Millisecond)
+		rConn, rErr := net.DialTimeout("tcp", hostPort(cfg.RemoteHost, remoteSSHPort), 600*time.Millisecond)
 		if rErr == nil {
 			lat = float64(time.Since(tRemote).Microseconds()) / 1000.0
 			_ = rConn.Close()

@@ -970,7 +970,7 @@ func rescuePullOffer() {
 	for h, ports := range hosts {
 		for _, port := range ports {
 			for _, base := range bases {
-				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s:%d%s/api/peer/rescue-offer", h, port, base), nil)
+				req, err := http.NewRequest("GET", "http://"+hostPort(h, port)+base+"/api/peer/rescue-offer", nil)
 				if err != nil {
 					continue
 				}
@@ -1003,7 +1003,7 @@ func rescuePullOffer() {
 					LogSecurityAudit("rescue_auto_joined", "system", h, fmt.Sprintf("ports=%d", len(c.Ports)))
 					log.Printf("[rescue] auto-joined rescue offer from %s (%d ports)", h, len(c.Ports))
 
-					ack, _ := http.NewRequest("POST", fmt.Sprintf("http://%s:%d%s/api/peer/rescue-ack", h, port, base), nil)
+					ack, _ := http.NewRequest("POST", "http://"+hostPort(h, port)+base+"/api/peer/rescue-ack", nil)
 					if pc.PeerSecret != "" {
 						ack.Header.Set("X-Peer-Secret", pc.PeerSecret)
 					}

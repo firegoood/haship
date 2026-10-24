@@ -894,6 +894,37 @@ is_valid_ip() {
     done
 }
 
+# is_valid_ip6 ADDR: an IPv6 literal, without brackets, zone or prefix length.
+is_valid_ip6() {
+    local s=$1 g n=0
+    [[ "$s" == *:* && "$s" =~ ^[0-9A-Fa-f:]+$ && "$s" != *:::* && "$s" != *::*::* ]] || return 1
+    [[ "$s" == :* && "$s" != ::* ]] && return 1
+    [[ "$s" == *: && "$s" != *:: ]] && return 1
+    local IFS=:
+    for g in $s; do
+        [[ -z "$g" ]] && continue
+        ((${#g} <= 4)) || return 1
+        n=$((n + 1))
+    done
+    if [[ "$s" == *::* ]]; then ((n <= 7)); else ((n == 8)); fi
+}
+
+is_valid_ip_any() { is_valid_ip "$1" || is_valid_ip6 "$1"; }
+
+# hostport HOST PORT: "HOST:PORT", with an IPv6 literal in brackets.
+hostport() {
+    local h=${1#[}
+    h=${h%]}
+    if [[ "$h" == *:* ]]; then echo "[$h]:$2"; else echo "$h:$2"; fi
+}
+
+# hostonly HOST:PORT: the host, without the brackets of an IPv6 literal.
+hostonly() {
+    local h=${1%:*}
+    h=${h#[}
+    echo "${h%]}"
+}
+
 is_valid_port() {
     [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535))
 }
@@ -1674,7 +1705,7 @@ dial_current_addr() { # $1=kind -> host currently dialled
     local f; f="$(dial_conf_file "$1")"
     [[ -f "$f" ]] || return 1
     if [[ "$1" == "backhaul" ]]; then
-        sed -n 's/^remote_addr[[:space:]]*=[[:space:]]*"\([^":]*\):[0-9]*".*/\1/p' "$f" | head -n1
+        hostonly "$(sed -n -E 's/^remote_addr[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$f" | head -n1)"
     else
         sed -n 's/^serverAddr[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -n1
     fi
@@ -1684,7 +1715,7 @@ dial_current_port() { # $1=kind
     local f; f="$(dial_conf_file "$1")"
     [[ -f "$f" ]] || return 1
     if [[ "$1" == "backhaul" ]]; then
-        sed -n 's/^remote_addr[[:space:]]*=[[:space:]]*"[^":]*:\([0-9]*\)".*/\1/p' "$f" | head -n1
+        sed -n -E 's/^remote_addr[[:space:]]*=[[:space:]]*".*:([0-9]+)".*/\1/p' "$f" | head -n1
     else
         sed -n 's/^serverPort[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' "$f" | head -n1
     fi
@@ -1709,7 +1740,7 @@ dial_apply_addr() { # $1=kind $2=addr $3=port
     local f; f="$(dial_conf_file "$1")"
     [[ -f "$f" ]] || return 1
     if [[ "$1" == "backhaul" ]]; then
-        sed -i -E "s|^remote_addr[[:space:]]*=.*|remote_addr = \"$2:$3\"|" "$f"
+        sed -i -E "s|^remote_addr[[:space:]]*=.*|remote_addr = \"$(hostport "$2" "$3")\"|" "$f"
     else
         sed -i -E "s|^serverAddr[[:space:]]*=.*|serverAddr = \"$2\"|" "$f"
     fi
@@ -2723,7 +2754,7 @@ backhaul_write_client_conf_v2() {
             printf '[mux]\nmux_version = 1\n\n'
         fi
         if [[ "$TRANSPORT" == "wss" || "$TRANSPORT" == "wssmux" ]]; then
-            printf '[tls]\nsni = "%s"\n\n' "${REMOTE_ADDR%%:*}"
+            printf '[tls]\nsni = "%s"\n\n' "$(hostonly "$REMOTE_ADDR")"
         fi
         printf '[logging]\nlog_level = "info"\n'
     } > "$CONF_FILE"
@@ -4094,7 +4125,7 @@ setup_backhaul_foreign_server_noninteractive() {
 
     if [[ "$STATUS_BH" == "OK" ]]; then
         mkdir -p "${BACKHAUL_CONFIG_DIR}"
-        backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "${IP_IRAN}:${SERVER_PORT}" "$TRANSPORT" "$TOKEN"
+        backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "$(hostport "$IP_IRAN" "$SERVER_PORT")" "$TRANSPORT" "$TOKEN"
         _bh_since=$(date '+%Y-%m-%d %H:%M:%S')
         setup_backhaul_client_systemd "backhaul-client" "${BACKHAUL_CONFIG_DIR}/client.toml"
 
@@ -4328,7 +4359,7 @@ setup_gre_backhaul_foreign_server_noninteractive() {
         # In GRE+Backhaul, foreign client dials Iran via the GRE internal IP (PEER_GRE)
         BH_DIAL=$(dial_pick "${FRP_DIAL:-auto}" "$PEER_GRE" "$IP_IRAN" "$SERVER_PORT")
         dial_env_write "${FRP_DIAL:-auto}" backhaul "$PEER_GRE" "$IP_IRAN"
-        backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "${BH_DIAL}:${SERVER_PORT}" "$TRANSPORT" "$TOKEN"
+        backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "$(hostport "$BH_DIAL" "$SERVER_PORT")" "$TRANSPORT" "$TOKEN"
         _bh_since=$(date '+%Y-%m-%d %H:%M:%S')
         setup_backhaul_client_systemd "backhaul-client" "${BACKHAUL_CONFIG_DIR}/client.toml"
         sed -i "s/After=network.target/After=network.target ${TUNNEL_NAME}.service/" /etc/systemd/system/backhaul-client.service 2>/dev/null || true
@@ -11187,7 +11218,7 @@ cli_join_hub() {
         install_backhaul_binaries || return 1
         [[ "$GRE_IF" != "none" ]] && DIAL_ADDR=$(dial_pick "$DIAL" "$B_IRAN_GRE" "$B_IRAN_PUB" "$B_FRP_PORT")
         SVC="backhaul-client-h${ID}"; CONF="${BACKHAUL_CONFIG_DIR}/client-h${ID}.toml"
-        backhaul_write_client_conf "$CONF" "${DIAL_ADDR}:${B_FRP_PORT}" "${B_TRANSPORT:-tcpmux}" "$B_TOKEN"
+        backhaul_write_client_conf "$CONF" "$(hostport "$DIAL_ADDR" "$B_FRP_PORT")" "${B_TRANSPORT:-tcpmux}" "$B_TOKEN"
         setup_backhaul_client_systemd "$SVC" "$CONF" >/dev/null
         if [[ "$GRE_IF" != "none" ]]; then
             sed -i "s/After=network.target/After=network.target ${GRE_IF}.service/" "/etc/systemd/system/${SVC}.service" 2>/dev/null || true

@@ -71,7 +71,7 @@ func cliTLS(args []string) int {
 		if host == "" {
 			host = "<server-ip>"
 		}
-		httpURL := fmt.Sprintf("http://%s:%d/%s/", host, cfg.Port, cfg.BasePath)
+		httpURL := fmt.Sprintf("http://%s/%s/", hostPort(host, cfg.Port), cfg.BasePath)
 		m := tlsMetaLoad()
 		exp, _, err := tlsCertExpiry()
 		if !tlsHasCert() || err != nil {

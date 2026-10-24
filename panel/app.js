@@ -3,6 +3,15 @@ const at = p => BASE + p;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const escapeHtml = esc;
+// IP literals, the same rules as the panel's ipFamily: no brackets, zone or prefix.
+const isIPv4 = ip => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(o => +o <= 255);
+const isIPv6 = ip => {
+  if (!/^[0-9a-f:]+$/i.test(ip) || !ip.includes(':') || /:::/.test(ip) || (ip.match(/::/g) || []).length > 1) return false;
+  if (/^:[^:]/.test(ip) || /[^:]:$/.test(ip)) return false;
+  const groups = ip.split(':').filter(g => g !== '');
+  return groups.every(g => g.length <= 4) && (ip.includes('::') ? groups.length <= 7 : groups.length === 8);
+};
+const isIP = ip => isIPv4(ip) || isIPv6(ip);
 // jsArg renders a value as a JS string literal for inline handlers
 // (onclick="fn(${jsArg(x)})"). esc() alone is not enough there: the browser
 // decodes &#39; back to ' before running the handler, so a quote in the value
@@ -3328,7 +3337,7 @@ if ($('pTransport')) $('pTransport').addEventListener('change', syncPeerUdp);
 // Foreign join: bundle-first UX supporting hsh1_, bh1_, and gh1_ bundles.
 function parseBundleClient(s) {
   s = (s || '').trim();
-  const v4 = ip => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(o => +o <= 255);
+  const v4 = isIPv4;
   if (s.startsWith('bh1_')) {
     const parts = s.slice(4).split('_');
     if (parts.length < 4 || parts.length > 5) return {error: 'bh1 bundle must have 4 or 5 parts'};
@@ -8361,12 +8370,7 @@ async function saveEditPorts() {
   const compVal      = $('editPeerCompression') && $('editPeerCompression').checked;
 
   if (remoteVal) {
-    const parts = remoteVal.split('.');
-    const valid = parts.length === 4 && parts.every(p => {
-      const n = parseInt(p, 10);
-      return !isNaN(n) && n >= 0 && n <= 255 && String(n) === p;
-    });
-    if (!valid) {
+    if (!isIPv4(remoteVal) || remoteVal.split('.').some(o => String(+o) !== o)) {
       warnEl.textContent = 'Enter a valid IPv4 address for Remote Public IP.';
       warnEl.classList.remove('hidden');
       return;

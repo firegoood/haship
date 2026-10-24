@@ -305,7 +305,7 @@ func handlePeerHandshake(w http.ResponseWriter, r *http.Request) {
 			if req.PanelPort == 443 {
 				scheme = "https"
 			}
-			c.PeerURL = fmt.Sprintf("%s://%s:%d", scheme, req.PublicIP, req.PanelPort)
+			c.PeerURL = scheme + "://" + hostPort(req.PublicIP, req.PanelPort)
 		}
 		if req.PanelPort > 0 && req.PanelPort <= 65535 {
 			c.InternalPort = req.PanelPort
@@ -702,7 +702,7 @@ func peerTargetURLs(c PeerConfig, path string) []string {
 			ports = append(ports, cfg.Port)
 		}
 		for _, p := range ports {
-			bases = append(bases, fmt.Sprintf("http://%s:%d", c.InternalIP, p))
+			bases = append(bases, "http://"+hostPort(c.InternalIP, p))
 		}
 	}
 	if c.PeerURL != "" {
@@ -719,7 +719,7 @@ func peerTargetURLs(c PeerConfig, path string) []string {
 				for _, p := range []int{c.InternalPort, cfg.Port, effectiveTLSPort(), 7443, 7777, 8080} {
 					if p > 0 && !seen[p] {
 						seen[p] = true
-						bases = append(bases, fmt.Sprintf("%s://%s:%d", parsed.Scheme, host, p))
+						bases = append(bases, parsed.Scheme+"://"+hostPort(host, p))
 					}
 				}
 			}

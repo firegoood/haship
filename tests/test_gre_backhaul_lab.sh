@@ -76,7 +76,7 @@ $S python3 "$TMP/echo.py" & pids+=($!)
 INSTALL_DIR=$(dirname "$BIN"); BACKHAUL_CONFIG_DIR=$TMP; RED=""; GREEN=""; YELLOW=""; CYAN=""; NC=""
 ext() { awk -v n="$1" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "$ROOT/hashem.sh"; }
 eval "$(grep -E '^(BACKHAUL_TRANSPORTS|backhaul_transport_ok|backhaul_udp_wanted)' "$ROOT/hashem.sh")"
-for f in backhaul_is_v2 backhaul_write_server_conf_v1 backhaul_write_client_conf_v1 backhaul_write_server_conf \
+for f in hostonly backhaul_is_v2 backhaul_write_server_conf_v1 backhaul_write_client_conf_v1 backhaul_write_server_conf \
          backhaul_write_client_conf dial_gre_usable dial_pick backhaul_wait_link; do
     b="$(ext $f)"; [[ -n "$b" ]] || { echo "FAIL: $f missing from hashem.sh"; exit 1; }; eval "$b"
 done

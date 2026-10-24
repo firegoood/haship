@@ -288,7 +288,7 @@ func tlsHTTPURL() string {
 	if ip == "" {
 		ip = "<this-server-ip>"
 	}
-	return fmt.Sprintf("http://%s:%d/%s", ip, cfg.Port, cfg.BasePath)
+	return fmt.Sprintf("http://%s/%s", hostPort(ip, cfg.Port), cfg.BasePath)
 }
 
 func tlsHTTPSURL() string {
@@ -303,7 +303,7 @@ func tlsHTTPSURL() string {
 			host = "<this-server-ip>"
 		}
 	}
-	return fmt.Sprintf("https://%s:%d/%s", host, effectiveTLSPort(), cfg.BasePath)
+	return fmt.Sprintf("https://%s/%s", hostPort(host, effectiveTLSPort()), cfg.BasePath)
 }
 
 // GET /api/tls — status (enabled/domain/expiry/urls/ports).

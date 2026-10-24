@@ -11,7 +11,7 @@ BACKHAUL_LEGACY_DIR="$T/legacy"; RED=""; GREEN=""; YELLOW=""; CYAN=""; NC=""
 fail=0
 ext() { awk -v n="$1" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "$ROOT/hashem.sh"; }
 eval "$(grep -E '^(BACKHAUL_TRANSPORTS|backhaul_transport_ok|backhaul_udp_wanted)' "$ROOT/hashem.sh")"
-for f in is_valid_port backhaul_is_v2 backhaul_ports_normalize backhaul_setup_guard backhaul_write_server_conf_v1 \
+for f in hostonly is_valid_port backhaul_is_v2 backhaul_ports_normalize backhaul_setup_guard backhaul_write_server_conf_v1 \
          backhaul_write_client_conf_v1 backhaul_write_server_conf_v2 backhaul_write_server_conf backhaul_write_client_conf \
          backhaul_legacy_units bh_legacy_get bh_legacy_ports cli_backhaul_migrate; do
   b="$(ext $f)"; [[ -n "$b" ]] || { echo "FAIL: $f missing"; exit 1; }; eval "$b"
