@@ -20,6 +20,7 @@ for c in ip tc python3 iptables-save iptables-restore; do
 done
 HUB=lm-hub; FO=lm-fo
 HUB_IP=10.19.0.1; FO_IP=10.19.0.2
+HUB_IP6=2001:db8:19::1; FO_IP6=2001:db8:19::2
 TMP=$(mktemp -d /tmp/limits-lab.XXXXXX)
 chmod 755 "$TMP"
 cleanup() {
@@ -34,6 +35,12 @@ ip link add lm-hub0 netns $HUB type veth peer name lm-fo0 netns $FO || { echo "S
 ip -n $HUB addr add $HUB_IP/24 dev lm-hub0; ip -n $FO addr add $FO_IP/24 dev lm-fo0
 for l in "$HUB lm-hub0" "$HUB lo" "$FO lm-fo0" "$FO lo"; do set -- $l; ip -n "$1" link set "$2" up; done
 ip -n $HUB route add default via $FO_IP dev lm-hub0   # the panel polices on the default-route interface
+V6=1
+for a in "$HUB lm-hub0 $HUB_IP6" "$FO lm-fo0 $FO_IP6"; do
+    set -- $a
+    ip netns exec "$1" sysctl -qw net.ipv6.conf.all.disable_ipv6=0 2>/dev/null
+    ip -n "$1" -6 addr add "$3/64" dev "$2" nodad 2>/dev/null || V6=
+done
 
 cat >"$TMP/sink.py" <<'PY'
 import socket, struct, threading
@@ -59,8 +66,9 @@ def serve(c):
             down -= n
     finally:
         c.close()
-s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(("0.0.0.0", 9000)); s.listen(16)
+s = socket.socket(socket.AF_INET6); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)   # IPv4 and IPv6
+s.bind(("::", 9000)); s.listen(16)
 while True:
     c, _ = s.accept()
     threading.Thread(target=serve, args=(c,), daemon=True).start()
@@ -77,12 +85,19 @@ fi
 (cd "$ROOT/panel" && ip netns exec $HUB env LIMITS_LAB_FOREIGN=$FO_IP \
     "$BIN" -test.run '^TestLimitsLab$' -test.v >"$TMP/lab.log" 2>&1)
 rc=$?
-grep -E "limits_lab_test.go|^(--- |ok|FAIL|PASS)" "$TMP/lab.log"
+# the same on IPv6: ip6tables, tc protocol ipv6 (pref 4918)
+if [[ -n $V6 && $rc -eq 0 ]]; then
+    echo "-- IPv6 round (foreign server $FO_IP6)" >>"$TMP/lab.log"
+    (cd "$ROOT/panel" && ip netns exec $HUB env LIMITS_LAB_FOREIGN=$FO_IP6 \
+        "$BIN" -test.run '^TestLimitsLab$' -test.v 2>&1 | sed 's/limits_lab_test.go:/limits_lab_test.go(IPv6):/' >>"$TMP/lab.log")
+    grep -q "^--- FAIL" "$TMP/lab.log" && rc=1
+fi
+grep -E "limits_lab_test.go|^(--- |ok|FAIL|PASS|-- IPv6)" "$TMP/lab.log"
 # the measured rates, as notices on the CI run
-[[ -n ${GITHUB_ACTIONS:-} && $rc -eq 0 ]] && grep -E "limits_lab_test.go:[0-9]+:" "$TMP/lab.log" | sed 's/^ *//; s/^/::notice title=limits lab::/'
+[[ -n ${GITHUB_ACTIONS:-} && $rc -eq 0 ]] && grep -E "limits_lab_test.go(\(IPv6\))?:[0-9]+:" "$TMP/lab.log" | sed 's/^ *//; s/^/::notice title=limits lab::/'
 if [[ $rc -ne 0 ]]; then
     tail -40 "$TMP/lab.log"
-    [[ -n ${GITHUB_ACTIONS:-} ]] && grep -E "limits_lab_test.go:[0-9]+:" "$TMP/lab.log" | sed 's/^ *//; s/^/::error title=limits lab::/'
+    [[ -n ${GITHUB_ACTIONS:-} ]] && grep -E "limits_lab_test.go(\(IPv6\))?:[0-9]+:" "$TMP/lab.log" | sed 's/^ *//; s/^/::error title=limits lab::/'
     echo "FAIL: test_limits_lab"
     exit 1
 fi

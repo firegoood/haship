@@ -100,10 +100,15 @@ func TestLimitsLab(t *testing.T) {
 	t.Logf("no limit: up %.0f Mbit/s, down %.0f Mbit/s", up, down)
 
 	// how the policer's bucket size changes what TCP gets of 20 Mbit/s
-	// (reported, not checked: it picks limitsTCArgs's burst)
+	// (reported, not checked: it picks limitsTCArgs's burst; IPv4 round only)
 	ifn := limitsIface()
 	_, _ = limitsRun("tc", "qdisc", "add", "dev", ifn, "clsact")
-	for _, ms := range []int64{100, 250, 500, 1000} {
+	bursts := []int64{100, 250, 500, 1000}
+	pref, ipt := limitsTCPref, "iptables-save"
+	if isV6(fo) {
+		bursts, pref, ipt = nil, limitsTCPref6, "ip6tables-save"
+	}
+	for _, ms := range bursts {
 		limitsTCClear(ifn)
 		burst := strconv.FormatInt(20000*1000/8*ms/1000, 10)
 		for _, d := range [][2]string{{"egress", "dst"}, {"ingress", "src"}} {
@@ -137,7 +142,7 @@ func TestLimitsLab(t *testing.T) {
 	// volume: 30 MB, counted both ways, then cut
 	post(`{"action":"set","ip":"` + fo + `","rate_mbit":0,"quota_gb":0.03,"reset":"never"}`)
 	post(`{"action":"reset","ip":"` + fo + `"}`) // the speed test above was counted too
-	if out, _ := runCmdTimeout(5*time.Second, "tc", "filter", "show", "dev", limitsIface(), "egress", "pref", limitsTCPref); strings.Contains(string(out), "police") {
+	if out, _ := runCmdTimeout(5*time.Second, "tc", "filter", "show", "dev", limitsIface(), "egress", "pref", pref); strings.Contains(string(out), "police") {
 		t.Errorf("a policer is left after the speed limit was removed:\n%s", out)
 	}
 	limitsTick(time.Now())
@@ -177,7 +182,7 @@ func TestLimitsLab(t *testing.T) {
 
 	// remove leaves nothing in the kernel
 	post(`{"action":"remove","ip":"` + fo + `"}`)
-	out, _ := runCmdTimeoutOut(5*time.Second, "iptables-save", "-t", "filter")
+	out, _ := runCmdTimeoutOut(5*time.Second, ipt, "-t", "filter")
 	if strings.Contains(string(out), limitsChain) {
 		t.Errorf("chain left after remove:\n%s", out)
 	}

@@ -503,8 +503,8 @@ var xrayConns = func(l XrayLink) int {
 	if !l.serverEnd() {
 		// only to the other server: other programs dial port 443 too
 		filter = fmt.Sprintf("( dport = :%d )", l.TunnelPort)
-		if ip := carrierIPv4(xrayDialAddress(l)); ip != "" {
-			filter = fmt.Sprintf("( dport = :%d and dst %s )", l.TunnelPort, ip)
+		if ip := carrierIP(xrayDialAddress(l)); ip != "" {
+			filter = fmt.Sprintf("( dport = :%d and dst %s )", l.TunnelPort, urlHost(ip))
 		}
 	}
 	out, err := runCmdTimeoutOut(3*time.Second, "ss", "-Htn", "state", "established", filter)
@@ -611,12 +611,12 @@ func xrayCarrierEnds() []carrierEnd {
 			continue
 		}
 		udp := l.Profile.Transport == "kcp"
-		ip := carrierIPv4(xrayDialAddress(l))
+		ip := carrierIP(xrayDialAddress(l))
 		if l.serverEnd() {
 			// listening: count only the other server, when its address is known
 			from := ""
 			if l.Remote != "" && !l.Profile.CDN { // through a CDN they come from its addresses
-				from = carrierIPv4(l.Remote)
+				from = carrierIP(l.Remote)
 			}
 			ends = append(ends, carrierEnd{Port: l.TunnelPort, From: from, UDP: udp, Tag: xrayTag(l.ID)})
 		} else if ip != "" {

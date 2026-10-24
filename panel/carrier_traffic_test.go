@@ -34,7 +34,7 @@ func TestBackhaulCarrierEnd(t *testing.T) {
 		{"client dials", "[client]\nremote_addr = \"203.0.113.5:3080\"\n", []carrierEnd{{Port: 3080, Remote: "203.0.113.5", UDP: true}}},
 		{"client by name", "[client]\nremote_addr = \"hub.example:3080\"\n", []carrierEnd{{Port: 3080, Remote: "198.51.100.7", UDP: true}}},
 		{"name that does not resolve", "[client]\nremote_addr = \"nowhere.example:3080\"\n", nil},
-		{"IPv6 is not counted", "[client]\nremote_addr = \"[2001:db8::1]:3080\"\n", nil},
+		{"client dials IPv6", "[client]\nremote_addr = \"[2001:db8::1]:3080\"\n", []carrierEnd{{Port: 3080, Remote: "2001:db8::1", UDP: true}}},
 		{"no port", "[client]\nremote_addr = \"203.0.113.5\"\n", nil},
 	}
 	for _, c := range cases {
@@ -333,5 +333,41 @@ func TestCarrierLab(t *testing.T) {
 	carrierDrop()
 	if save, _ := exec.Command("iptables-save", "-t", "filter").CombinedOutput(); strings.Contains(string(save), acctIn) || strings.Contains(string(save), acctOut) {
 		t.Fatalf("chains left after carrierDrop:\n%s", save)
+	}
+}
+
+func TestCarrierRulesIPv6(t *testing.T) {
+	old := acctIPv6
+	t.Cleanup(func() { acctIPv6 = old })
+	ends := []carrierEnd{{Port: 3080}, {Port: 22, Remote: "203.0.113.5"}, {Port: 3081, Remote: "2001:db8::5"}, {Port: 8443, From: "2001:db8::6"}}
+
+	// IPv4: the IPv6 peers stay out
+	if v4 := carrierRules(ends, "eth0"); strings.Contains(v4, "2001:") || !strings.Contains(v4, "-s 203.0.113.5/32") {
+		t.Fatalf("IPv4 table:\n%s", v4)
+	}
+	// IPv6, on a server with an IPv6 address: the IPv6 peers and the port
+	// listening for anyone
+	acctIPv6 = func() bool { return true }
+	v6 := carrierRules6(ends, "eth0")
+	for _, want := range []string{
+		"-A HASHEM_ACCT_IN -i eth0 -p tcp --dport 3080\n",
+		"-A HASHEM_ACCT_IN -i eth0 -s 2001:db8::5/128 -p tcp --sport 3081\n",
+		"-A HASHEM_ACCT_OUT -o eth0 -d 2001:db8::6/128 -p tcp --sport 8443\n",
+	} {
+		if !strings.Contains(v6, want) {
+			t.Errorf("IPv6 table lacks %q:\n%s", want, v6)
+		}
+	}
+	if strings.Contains(v6, "203.0.113.5") {
+		t.Errorf("an IPv4 peer in the IPv6 table:\n%s", v6)
+	}
+	// counters of both tables land on the same ends
+	if k, ok := acctRuleKey("-A HASHEM_ACCT_IN -i eth0 -s 2001:db8::5/128 -p tcp -m tcp --sport 3081", true); !ok || k != (acctKey{Port: 3081, Peer: "2001:db8::5"}) {
+		t.Errorf("IPv6 rule key: %+v %v", k, ok)
+	}
+	// no IPv6 address and no IPv6 peer: no IPv6 table at all
+	acctIPv6 = func() bool { return false }
+	if r := carrierRules6([]carrierEnd{{Port: 3080}}, "eth0"); r != "" {
+		t.Errorf("IPv6 table on an IPv4-only server:\n%s", r)
 	}
 }

@@ -3206,28 +3206,37 @@ purge_legacy_obfuscation() {
 # The panel counts Backhaul/Bagher traffic with two iptables chains (rules
 # without a target: they count, never drop). Removed with the tunnels.
 acct_chains_drop() {
-    local h
-    for h in INPUT:HASHEM_ACCT_IN OUTPUT:HASHEM_ACCT_OUT; do
-        iptables -D "${h%%:*}" -j "${h#*:}" 2>/dev/null || true
-        iptables -F "${h#*:}" 2>/dev/null || true
-        iptables -X "${h#*:}" 2>/dev/null || true
+    local h b
+    for b in iptables ip6tables; do
+        command -v "$b" >/dev/null 2>&1 || continue
+        for h in INPUT:HASHEM_ACCT_IN OUTPUT:HASHEM_ACCT_OUT; do
+            "$b" -D "${h%%:*}" -j "${h#*:}" 2>/dev/null || true
+            "$b" -F "${h#*:}" 2>/dev/null || true
+            "$b" -X "${h#*:}" 2>/dev/null || true
+        done
     done
 }
 
 # The per-server speed and volume limits (panel/limits.go): the HASHEM_LIMIT
-# chain and the tc policers (pref 4917) on every interface.
+# chain (iptables and ip6tables) and the tc policers (pref 4917, IPv6 4918)
+# on every interface.
 limits_drop() {
-    local h d n
-    for h in INPUT OUTPUT FORWARD; do
-        iptables -D "$h" -j HASHEM_LIMIT 2>/dev/null || true
+    local h d n b p
+    for b in iptables ip6tables; do
+        command -v "$b" >/dev/null 2>&1 || continue
+        for h in INPUT OUTPUT FORWARD; do
+            "$b" -D "$h" -j HASHEM_LIMIT 2>/dev/null || true
+        done
+        "$b" -F HASHEM_LIMIT 2>/dev/null || true
+        "$b" -X HASHEM_LIMIT 2>/dev/null || true
     done
-    iptables -F HASHEM_LIMIT 2>/dev/null || true
-    iptables -X HASHEM_LIMIT 2>/dev/null || true
     command -v tc >/dev/null 2>&1 || return 0
     for d in /sys/class/net/*; do
         n=${d##*/}
-        tc filter del dev "$n" egress pref 4917 2>/dev/null || true
-        tc filter del dev "$n" ingress pref 4917 2>/dev/null || true
+        for p in 4917 4918; do
+            tc filter del dev "$n" egress pref "$p" 2>/dev/null || true
+            tc filter del dev "$n" ingress pref "$p" 2>/dev/null || true
+        done
     done
 }
 

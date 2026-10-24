@@ -2,28 +2,31 @@ package main
 
 // Speed and volume limits per foreign server (Hashem Pro).
 //
-// A server is its public IPv4: every tunnel to it (GRE, FRP, Backhaul,
-// Bagher, Xray) leaves and arrives on the default-route interface with that
-// address, so one rule covers them all.
+// A server is its public address (IPv4 or IPv6): every tunnel to it (GRE,
+// FRP, Backhaul, Bagher, Xray) leaves and arrives on the default-route
+// interface with that address, so one rule covers them all. A GRE tunnel on
+// the 4in6 carrier reaches the server's IPv6 instead: that address is the
+// rule's Alias and counts towards the same speed and volume.
 //
 //   - Speed: a tc policer on the interface's clsact hooks, egress for
 //     dst IP and ingress for src IP, one rate for both directions. The root
-//     qdisc (fq for BBR) is not touched. Filters carry pref limitsTCPref.
-//   - Volume: the HASHEM_LIMIT filter chain, jumped to from INPUT, OUTPUT and
-//     FORWARD, holds two counting rules per server (-s IP in, -d IP out).
-//     The panel adds the counters up in limits.json. When a server's quota is
-//     used up both rules become DROP: the server's links are cut until the
-//     next reset (monthly on a day, or by hand). Other servers are untouched.
+//     qdisc (fq for BBR) is not touched. Filters carry pref limitsTCPref
+//     (IPv4) or limitsTCPref6 (IPv6).
+//   - Volume: the HASHEM_LIMIT filter chain (iptables, and ip6tables for
+//     IPv6 addresses), jumped to from INPUT, OUTPUT and FORWARD, holds two
+//     counting rules per address (-s IP in, -d IP out). The panel adds the
+//     counters up in limits.json. When a server's quota is used up the rules
+//     become DROP: the server's links are cut until the next reset (monthly
+//     on a day, or by hand). Other servers are untouched.
 //
 // Rules are enforced with or without a license (and limits can always be
-// removed); setting them needs Pro. IPv4 only. hashem.sh limits_drop removes
-// the chain and the filters on uninstall.
+// removed); setting them needs Pro. hashem.sh limits_drop removes the chains
+// and the filters on uninstall.
 
 import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,10 +38,11 @@ import (
 )
 
 const (
-	limitsChain  = "HASHEM_LIMIT"
-	limitsTCPref = "4917"
-	proLimitsTxt = "Speed and volume limits"
-	gb           = 1e9
+	limitsChain   = "HASHEM_LIMIT"
+	limitsTCPref  = "4917"
+	limitsTCPref6 = "4918"
+	proLimitsTxt  = "Speed and volume limits"
+	gb            = 1e9
 )
 
 type limitRule struct {
@@ -53,9 +57,20 @@ type limitRule struct {
 	PeriodStart int64  `json:"period_start"`
 	Blocked     bool   `json:"blocked,omitempty"`
 	Warned      bool   `json:"warned,omitempty"` // the 90% alert went out this period
+	// Alias is the server's other address that a tunnel uses (the IPv6 of a
+	// 4in6 GRE tunnel), counted and limited with IP. Kept up to date by the tick.
+	Alias string `json:"alias,omitempty"`
 }
 
 func (r limitRule) used() uint64 { return r.UsedRx + r.UsedTx }
+
+// addrs are the addresses the rule covers.
+func (r limitRule) addrs() []string {
+	if r.Alias != "" && r.Alias != r.IP {
+		return []string{r.IP, r.Alias}
+	}
+	return []string{r.IP}
+}
 
 func (r limitRule) quotaBytes() uint64 { return uint64(math.Round(r.QuotaGB * gb)) }
 
@@ -73,8 +88,8 @@ func (r limitRule) nextReset(start time.Time) time.Time {
 }
 
 func (r limitRule) validate() error {
-	if ip := net.ParseIP(r.IP); ip == nil || ip.To4() == nil {
-		return fmt.Errorf("server address must be an IPv4 address")
+	if ipFamily(r.IP) == 0 || (r.Alias != "" && ipFamily(r.Alias) == 0) {
+		return fmt.Errorf("server address must be an IP address")
 	}
 	if r.RateMbit < 0 || r.RateMbit > 100000 || (r.RateMbit > 0 && r.RateMbit < 0.1) {
 		return fmt.Errorf("speed: 0.1 to 100000 Mbit/s, or 0 for unlimited")
@@ -117,9 +132,9 @@ var limitsTickMu sync.Mutex
 
 // limitsApplied is what is loaded in the kernel; only the tick touches it.
 var limitsApplied = struct {
-	ipt, tc, tcIf string
-	tcCheck       time.Time
-	cleaned       bool
+	ipt, ipt6, tc, tcIf string
+	tcCheck             time.Time
+	cleaned             bool
 }{}
 
 func limitsLoadLocked() {
@@ -175,19 +190,39 @@ func limitKey(ip string, out bool) string {
 	return ip + "<"
 }
 
-// limitsRules renders the chain as iptables-restore input.
-func limitsRules(rules []limitRule) string {
+// limitsRules renders the IPv4 chain as iptables-restore input.
+func limitsRules(rules []limitRule) string { return limitsRulesFam(rules, 4) }
+
+// limitsRules6 is the IPv6 chain for ip6tables-restore, "" when no rule has
+// an IPv6 address.
+func limitsRules6(rules []limitRule) string { return limitsRulesFam(rules, 6) }
+
+func limitsRulesFam(rules []limitRule, fam int) string {
 	var b strings.Builder
+	n := 0
 	fmt.Fprintf(&b, "*filter\n:%s - [0:0]\n-F %s\n", limitsChain, limitsChain)
+	mask := "/32"
+	if fam == 6 {
+		mask = "/128"
+	}
 	for _, r := range rules {
 		target := ""
 		if r.Blocked {
 			target = " -j DROP"
 		}
-		fmt.Fprintf(&b, "-A %s -s %s/32%s\n", limitsChain, r.IP, target)
-		fmt.Fprintf(&b, "-A %s -d %s/32%s\n", limitsChain, r.IP, target)
+		for _, a := range r.addrs() {
+			if ipFamily(a) != fam {
+				continue
+			}
+			fmt.Fprintf(&b, "-A %s -s %s%s%s\n", limitsChain, a, mask, target)
+			fmt.Fprintf(&b, "-A %s -d %s%s%s\n", limitsChain, a, mask, target)
+			n++
+		}
 	}
 	b.WriteString("COMMIT\n")
+	if fam == 6 && n == 0 {
+		return ""
+	}
 	return b.String()
 }
 
@@ -227,7 +262,8 @@ func parseLimitsSave(out string) (map[string]uint64, bool) {
 		f := strings.Fields(rule)
 		for i := 0; i+1 < len(f); i++ {
 			if f[i] == "-s" || f[i] == "-d" {
-				m[limitKey(strings.TrimSuffix(f[i+1], "/32"), f[i] == "-d")] += n
+				a := strings.TrimSuffix(strings.TrimSuffix(f[i+1], "/32"), "/128")
+				m[limitKey(a, f[i] == "-d")] += n
 				break
 			}
 		}
@@ -237,37 +273,46 @@ func parseLimitsSave(out string) (map[string]uint64, bool) {
 
 // Commands, swappable for tests.
 var (
-	limitsRun     = func(name string, args ...string) ([]byte, error) { return runCmdTimeout(10*time.Second, name, args...) }
-	limitsSaveOut = func() ([]byte, error) { return runCmdTimeoutOut(5*time.Second, "iptables-save", "-c", "-t", "filter") }
-	limitsIface   = primaryInterface
-	limitsAlert   = sendLimitAlert
+	limitsRun      = func(name string, args ...string) ([]byte, error) { return runCmdTimeout(10*time.Second, name, args...) }
+	limitsSaveOut  = func() ([]byte, error) { return runCmdTimeoutOut(5*time.Second, "iptables-save", "-c", "-t", "filter") }
+	limitsSave6Out = func() ([]byte, error) { return runCmdTimeoutOut(5*time.Second, "ip6tables-save", "-c", "-t", "filter") }
+	limitsIface    = primaryInterface
+	limitsAlert    = sendLimitAlert
 )
 
-func limitsLoadChain(rules string) error {
+func limitsLoadChain(rules string) error { return limitsLoadChainFam("iptables", rules) }
+
+// limitsLoadChainFam loads the chain with bin ("iptables" or "ip6tables").
+func limitsLoadChainFam(bin, rules string) error {
 	_ = os.MkdirAll(configDir, 0o700)
 	f := filepath.Join(configDir, "limits.v4")
+	if bin == "ip6tables" {
+		f = filepath.Join(configDir, "limits.v6")
+	}
 	if err := os.WriteFile(f, []byte(rules), 0o600); err != nil {
 		return err
 	}
-	if out, err := limitsRun("iptables-restore", "-w", "5", "-n", f); err != nil {
-		return fmt.Errorf("iptables-restore: %s", strings.TrimSpace(string(out)))
+	if out, err := limitsRun(bin+"-restore", "-w", "5", "-n", f); err != nil {
+		return fmt.Errorf("%s-restore: %s", bin, strings.TrimSpace(string(out)))
 	}
 	for _, h := range []string{"INPUT", "OUTPUT", "FORWARD"} {
-		if _, err := limitsRun("iptables", "-w", "5", "-C", h, "-j", limitsChain); err != nil {
-			if out, err := limitsRun("iptables", "-w", "5", "-I", h, "1", "-j", limitsChain); err != nil {
-				return fmt.Errorf("iptables -I %s: %s", h, strings.TrimSpace(string(out)))
+		if _, err := limitsRun(bin, "-w", "5", "-C", h, "-j", limitsChain); err != nil {
+			if out, err := limitsRun(bin, "-w", "5", "-I", h, "1", "-j", limitsChain); err != nil {
+				return fmt.Errorf("%s -I %s: %s", bin, h, strings.TrimSpace(string(out)))
 			}
 		}
 	}
 	return nil
 }
 
-func limitsDropChain() {
+func limitsDropChain() { limitsDropChainFam("iptables") }
+
+func limitsDropChainFam(bin string) {
 	for _, h := range []string{"INPUT", "OUTPUT", "FORWARD"} {
-		_, _ = limitsRun("iptables", "-w", "5", "-D", h, "-j", limitsChain)
+		_, _ = limitsRun(bin, "-w", "5", "-D", h, "-j", limitsChain)
 	}
-	_, _ = limitsRun("iptables", "-w", "5", "-F", limitsChain)
-	_, _ = limitsRun("iptables", "-w", "5", "-X", limitsChain)
+	_, _ = limitsRun(bin, "-w", "5", "-F", limitsChain)
+	_, _ = limitsRun(bin, "-w", "5", "-X", limitsChain)
 }
 
 // limitsTCArgs are the tc commands that give each server its rate (Mbit/s),
@@ -289,8 +334,12 @@ func limitsTCArgs(ifname string, rates map[string]float64) [][]string {
 			burst = 65536
 		}
 		police := []string{"action", "police", "rate", fmt.Sprintf("%dkbit", kbit), "burst", strconv.FormatInt(burst, 10), "mtu", "65535", "conform-exceed", "drop/pass"}
+		pref, proto, match, mask := limitsTCPref, "ip", "ip", "/32"
+		if isV6(ip) { // a tc priority holds one protocol: IPv6 has its own
+			pref, proto, match, mask = limitsTCPref6, "ipv6", "ip6", "/128"
+		}
 		for _, dir := range [][2]string{{"egress", "dst"}, {"ingress", "src"}} {
-			c := []string{"filter", "add", "dev", ifname, dir[0], "pref", limitsTCPref, "protocol", "ip", "u32", "match", "ip", dir[1], ip + "/32"}
+			c := []string{"filter", "add", "dev", ifname, dir[0], "pref", pref, "protocol", proto, "u32", "match", match, dir[1], ip + mask}
 			cmds = append(cmds, append(c, police...))
 		}
 	}
@@ -302,7 +351,9 @@ func limitsTCClear(ifname string) {
 		return
 	}
 	for _, dir := range []string{"egress", "ingress"} {
-		_, _ = limitsRun("tc", "filter", "del", "dev", ifname, dir, "pref", limitsTCPref)
+		for _, pref := range []string{limitsTCPref, limitsTCPref6} {
+			_, _ = limitsRun("tc", "filter", "del", "dev", ifname, dir, "pref", pref)
+		}
 	}
 }
 
@@ -326,21 +377,41 @@ func limitsTCApply(ifname string, rates map[string]float64) error {
 }
 
 // limitsTCPresent counts our filters on the interface (a reboot or someone
-// else's `tc qdisc del` removes them) by their distinct match lines: "dst
-// IP" is "match <hex>/ffffffff at 16", "src IP" "at 12". Some iproute2
-// versions list both clsact directions for either one, and print "police"
-// more than once per filter, so neither lines nor words are counted.
+// else's `tc qdisc del` removes them). A filter is its "fh" line with the
+// match lines under it: "dst IP" matches "at 16" (IPv6: four words from
+// "at 24"), "src IP" "at 12" (IPv6: from "at 8"). Some iproute2 versions
+// list both clsact directions for either one, and print "police" more than
+// once per filter, so distinct filters are counted, not lines or words.
 func limitsTCPresent(ifname string) int {
 	seen := map[string]bool{}
 	for _, dir := range []string{"egress", "ingress"} {
-		out, err := limitsRun("tc", "filter", "show", "dev", ifname, dir, "pref", limitsTCPref)
-		if err != nil {
-			return -1
-		}
-		for _, l := range strings.Split(string(out), "\n") {
-			if l = strings.TrimSpace(l); strings.HasPrefix(l, "match ") {
-				seen[l] = true
+		for _, pref := range []string{limitsTCPref, limitsTCPref6} {
+			out, err := limitsRun("tc", "filter", "show", "dev", ifname, dir, "pref", pref)
+			if err != nil {
+				if pref == limitsTCPref6 {
+					continue // no IPv6 filters
+				}
+				return -1
 			}
+			key := ""
+			flush := func() {
+				if strings.Contains(key, "match ") {
+					seen[pref+key] = true
+				}
+				key = ""
+			}
+			for _, l := range strings.Split(string(out), "\n") {
+				l = strings.TrimSpace(l)
+				switch {
+				case strings.HasPrefix(l, "filter ") && strings.Contains(l, " fh ") && !strings.Contains(l, "divisor"):
+					flush()
+					f := strings.Fields(l[strings.Index(l, " fh ")+4:])
+					key = "fh " + f[0]
+				case strings.HasPrefix(l, "match ") && key != "":
+					key += "|" + l
+				}
+			}
+			flush()
 		}
 	}
 	return len(seen)
@@ -359,13 +430,16 @@ func limitsTick(now time.Time) {
 	n := len(limits.rules)
 	limits.Unlock()
 	if n == 0 {
-		if limitsApplied.ipt != "" || !limitsApplied.cleaned {
+		if limitsApplied.ipt != "" || limitsApplied.ipt6 != "" || !limitsApplied.cleaned {
 			limitsDropChain()
+			if limitsApplied.ipt6 != "" || !limitsApplied.cleaned {
+				limitsDropChainFam("ip6tables")
+			}
 			limitsTCClear(limitsApplied.tcIf)
 			if ifn := limitsIface(); ifn != limitsApplied.tcIf {
 				limitsTCClear(ifn)
 			}
-			limitsApplied.ipt, limitsApplied.tc, limitsApplied.tcIf, limitsApplied.cleaned = "", "", "", true
+			limitsApplied.ipt, limitsApplied.ipt6, limitsApplied.tc, limitsApplied.tcIf, limitsApplied.cleaned = "", "", "", "", true
 		}
 		limits.Lock()
 		limits.err = ""
@@ -374,8 +448,39 @@ func limitsTick(now time.Time) {
 	}
 	limitsApplied.cleaned = false
 
+	// a server's other address (4in6) is counted and limited with it
+	alias := map[string]string{}
+	for _, s := range limitServers() {
+		if s.Alias != "" {
+			alias[s.IP] = s.Alias
+		}
+	}
+	want6 := limitsApplied.ipt6 != ""
+	limits.Lock()
+	for ip, r := range limits.rules {
+		if a, ok := alias[ip]; ok && r.Alias != a {
+			r.Alias, limits.dirty = a, true
+		}
+		for _, a := range r.addrs() {
+			want6 = want6 || isV6(a)
+		}
+	}
+	limits.Unlock()
+
 	out, saveErr := limitsSaveOut()
 	counters, ready := parseLimitsSave(string(out))
+	ready6 := true
+	if want6 {
+		out6, err6 := limitsSave6Out()
+		c6, r6 := parseLimitsSave(string(out6))
+		ready6 = r6
+		if err6 != nil && saveErr == nil {
+			saveErr = fmt.Errorf("ip6tables-save: %v", err6)
+		}
+		for k, v := range c6 {
+			counters[k] += v
+		}
+	}
 
 	var events []limitEvent
 	limits.Lock()
@@ -386,17 +491,19 @@ func limitsTick(now time.Time) {
 	rates := map[string]float64{}
 	for ip, r := range limits.rules {
 		var d [2]uint64
-		for i, out := range []bool{false, true} {
-			k := limitKey(ip, out)
-			cur, ok := counters[k]
-			prev := limits.last[k]
-			if ok {
-				if cur >= prev {
-					d[i] = cur - prev
-				} else {
-					d[i] = cur
+		for _, a := range r.addrs() {
+			for i, out := range []bool{false, true} {
+				k := limitKey(a, out)
+				cur, ok := counters[k]
+				prev := limits.last[k]
+				if ok {
+					if cur >= prev {
+						d[i] += cur - prev
+					} else {
+						d[i] += cur
+					}
+					limits.last[k] = cur
 				}
-				limits.last[k] = cur
 			}
 		}
 		if saveErr == nil && !r.Blocked && !first {
@@ -430,7 +537,9 @@ func limitsTick(now time.Time) {
 		}
 		rules = append(rules, *r)
 		if r.RateMbit > 0 && !r.Blocked {
-			rates[ip] = r.RateMbit
+			for _, a := range r.addrs() {
+				rates[a] = r.RateMbit
+			}
 		}
 	}
 	sort.Slice(rules, func(i, j int) bool { return rules[i].IP < rules[j].IP })
@@ -440,19 +549,33 @@ func limitsTick(now time.Time) {
 	if saveErr != nil {
 		errs = append(errs, "iptables-save: "+saveErr.Error())
 	}
-	text := limitsRules(rules)
+	text, text6 := limitsRules(rules), limitsRules6(rules)
+	reloaded := false
 	if saveErr == nil && (!ready || text != limitsApplied.ipt) {
 		if err := limitsLoadChain(text); err != nil {
 			errs = append(errs, err.Error())
 			limitsApplied.ipt = ""
 		} else {
-			limitsApplied.ipt = text
-			limits.Lock()
-			for k := range limits.last {
-				limits.last[k] = 0 // the rebuilt chain counts from zero
-			}
-			limits.Unlock()
+			limitsApplied.ipt, reloaded = text, true
 		}
+	}
+	if saveErr == nil && text6 == "" && limitsApplied.ipt6 != "" {
+		limitsDropChainFam("ip6tables")
+		limitsApplied.ipt6 = ""
+	} else if saveErr == nil && text6 != "" && (!ready6 || text6 != limitsApplied.ipt6) {
+		if err := limitsLoadChainFam("ip6tables", text6); err != nil {
+			errs = append(errs, err.Error())
+			limitsApplied.ipt6 = ""
+		} else {
+			limitsApplied.ipt6, reloaded = text6, true
+		}
+	}
+	if reloaded {
+		limits.Lock()
+		for k := range limits.last {
+			limits.last[k] = 0 // the rebuilt chain counts from zero
+		}
+		limits.Unlock()
 	}
 
 	ifname := limitsIface()
@@ -529,17 +652,33 @@ func startLimitsLoop() {
 
 type limitServer struct {
 	IP    string   `json:"ip"`
+	Alias string   `json:"alias,omitempty"` // the server's IPv6 a 4in6 GRE tunnel uses
 	Name  string   `json:"name"`
 	Links []string `json:"links"` // "main", "peer-2", "bagher-1", "xray-3"
 }
 
+// gre6Remote is the other server's IPv6 that the 4in6 carrier of GRE
+// interface ifname uses (hashem.sh keeps it in gre6/IF.env), or "".
+func gre6Remote(ifname string) string {
+	data, err := os.ReadFile(filepath.Join(configDir, "gre6", ifname+".env"))
+	if err != nil {
+		return ""
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(l), "REMOTE6="); ok && validPublicIP(v, 6) {
+			return v
+		}
+	}
+	return ""
+}
+
 // limitServers lists the other servers this server has tunnels to, one per
-// IPv4 (links through a CDN have no address of their own and are left out).
+// address (links through a CDN have no address of their own and are left out).
 var limitServers = func() []limitServer {
 	byIP := map[string]*limitServer{}
 	var order []string
-	add := func(host, link, name string) {
-		ip := carrierIPv4(host)
+	add := func(host, link, name string, alias ...string) {
+		ip := carrierIP(host)
 		if ip == "" {
 			return
 		}
@@ -553,12 +692,15 @@ var limitServers = func() []limitServer {
 		if s.Name == "" {
 			s.Name = name
 		}
+		if len(alias) > 0 && alias[0] != "" && alias[0] != ip && s.Alias == "" {
+			s.Alias = alias[0]
+		}
 	}
 	if snap := currentSnapshot(); snap != nil && snap.Local.RemotePub != "" {
-		add(snap.Local.RemotePub, "main", linkLabel("main"))
+		add(snap.Local.RemotePub, "main", linkLabel("main"), gre6Remote("gre-tunnel"))
 	}
 	for _, p := range loadPeers() {
-		add(p.RemotePub, fmt.Sprintf("peer-%d", p.ID), p.Name)
+		add(p.RemotePub, fmt.Sprintf("peer-%d", p.ID), p.Name, gre6Remote(p.GreIf))
 	}
 	sshFwdMu.Lock()
 	cfg := loadSSHFwdConfigLocked()

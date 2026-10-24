@@ -128,6 +128,15 @@ type carrierDNSEntry struct {
 	at time.Time
 }
 
+// carrierIP is host as an IP address: an IPv6 literal stays IPv6, a name is
+// resolved like carrierIPv4.
+func carrierIP(host string) string {
+	if h := normHost(host); isV6(h) {
+		return net.ParseIP(h).String()
+	}
+	return carrierIPv4(host)
+}
+
 // carrierIPv4 is host as an IPv4 address ("" for IPv6 or a name that does not
 // resolve). Names are looked up at most every 10 minutes.
 func carrierIPv4(host string) string {
@@ -191,13 +200,13 @@ func bagherCarrierEnds(cfg SSHFwdConfig) []carrierEnd {
 		return 22
 	}
 	if cfg.Role == "foreign" || cfg.Role == "server" {
-		if ip := carrierIPv4(cfg.RemoteHost); ip != "" {
+		if ip := carrierIP(cfg.RemoteHost); ip != "" {
 			return []carrierEnd{{Port: port(cfg.RemoteSSHPort), From: ip, Tag: "bagher-1"}}
 		}
 		return nil
 	}
 	var ends []carrierEnd
-	if ip := carrierIPv4(cfg.RemoteHost); ip != "" {
+	if ip := carrierIP(cfg.RemoteHost); ip != "" {
 		ends = append(ends, carrierEnd{Port: port(cfg.RemoteSSHPort), Remote: ip, Tag: "bagher-1"})
 	}
 	for _, l := range cfg.Links {
@@ -205,7 +214,7 @@ func bagherCarrierEnds(cfg SSHFwdConfig) []carrierEnd {
 		if p <= 0 {
 			p = cfg.RemoteSSHPort
 		}
-		if ip := carrierIPv4(l.RemoteHost); ip != "" {
+		if ip := carrierIP(l.RemoteHost); ip != "" {
 			ends = append(ends, carrierEnd{Port: port(p), Remote: ip, Tag: fmt.Sprintf("bagher-%d", l.ID)})
 		}
 	}
@@ -225,7 +234,7 @@ func backhaulCarrierEnd(c backhaulConf) []carrierEnd {
 	if c.RemoteAddr != "" {
 		if h, p, err := net.SplitHostPort(c.RemoteAddr); err == nil {
 			n, err := strconv.Atoi(p)
-			if ip := carrierIPv4(h); err == nil && n > 0 && n <= 65535 && ip != "" {
+			if ip := carrierIP(h); err == nil && n > 0 && n <= 65535 && ip != "" {
 				return []carrierEnd{{Port: n, Remote: ip, UDP: true}}
 			}
 		}
@@ -260,14 +269,51 @@ func dedupeEnds(ends []carrierEnd) []carrierEnd {
 
 // carrierRules renders the two chains as iptables-restore input. ifname is the
 // default-route interface ("" matches any).
-func carrierRules(ends []carrierEnd, ifname string) string {
+func carrierRules(ends []carrierEnd, ifname string) string { return carrierRulesFam(ends, ifname, 4) }
+
+// carrierRules6 is the IPv6 table for ip6tables-restore: the ends with an
+// IPv6 peer, and the ports this server listens on for anyone (they are
+// reached over IPv6 too) when it has an IPv6 address. "" when there is
+// nothing to count over IPv6.
+func carrierRules6(ends []carrierEnd, ifname string) string {
+	return carrierRulesFam(ends, ifname, 6)
+}
+
+// acctIPv6 reports whether this server has a global IPv6 address; swappable
+// for tests.
+var acctIPv6 = func() bool {
+	data, err := os.ReadFile("/proc/net/if_inet6")
+	if err != nil {
+		return false
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if f := strings.Fields(l); len(f) >= 4 && f[3] == "00" { // scope global
+			return true
+		}
+	}
+	return false
+}
+
+func carrierRulesFam(ends []carrierEnd, ifname string, fam int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "*filter\n:%s - [0:0]\n:%s - [0:0]\n-F %s\n-F %s\n", acctIn, acctOut, acctIn, acctOut)
 	in, out := "", ""
 	if ifname != "" {
 		in, out = " -i "+ifname, " -o "+ifname
 	}
+	mask, v6host, n := "/32", fam == 6 && acctIPv6(), 0
+	if fam == 6 {
+		mask = "/128"
+	}
 	for _, e := range ends {
+		peer := e.Remote
+		if peer == "" {
+			peer = e.From
+		}
+		if peer != "" && ipFamily(peer) != fam || peer == "" && fam == 6 && !v6host {
+			continue
+		}
+		n++
 		protos := []string{"tcp"}
 		if e.UDP {
 			protos = append(protos, "udp")
@@ -275,18 +321,21 @@ func carrierRules(ends []carrierEnd, ifname string) string {
 		for _, pr := range protos {
 			switch {
 			case e.Remote == "" && e.From != "": // listens, for one peer only
-				fmt.Fprintf(&b, "-A %s%s -s %s/32 -p %s --dport %d\n", acctIn, in, e.From, pr, e.Port)
-				fmt.Fprintf(&b, "-A %s%s -d %s/32 -p %s --sport %d\n", acctOut, out, e.From, pr, e.Port)
+				fmt.Fprintf(&b, "-A %s%s -s %s%s -p %s --dport %d\n", acctIn, in, e.From, mask, pr, e.Port)
+				fmt.Fprintf(&b, "-A %s%s -d %s%s -p %s --sport %d\n", acctOut, out, e.From, mask, pr, e.Port)
 			case e.Remote == "": // this server listens on the port
 				fmt.Fprintf(&b, "-A %s%s -p %s --dport %d\n", acctIn, in, pr, e.Port)
 				fmt.Fprintf(&b, "-A %s%s -p %s --sport %d\n", acctOut, out, pr, e.Port)
 			default: // this server dials Remote:Port
-				fmt.Fprintf(&b, "-A %s%s -s %s/32 -p %s --sport %d\n", acctIn, in, e.Remote, pr, e.Port)
-				fmt.Fprintf(&b, "-A %s%s -d %s/32 -p %s --dport %d\n", acctOut, out, e.Remote, pr, e.Port)
+				fmt.Fprintf(&b, "-A %s%s -s %s%s -p %s --sport %d\n", acctIn, in, e.Remote, mask, pr, e.Port)
+				fmt.Fprintf(&b, "-A %s%s -d %s%s -p %s --dport %d\n", acctOut, out, e.Remote, mask, pr, e.Port)
 			}
 		}
 	}
 	b.WriteString("COMMIT\n")
+	if fam == 6 && n == 0 {
+		return ""
+	}
 	return b.String()
 }
 
@@ -314,7 +363,7 @@ func acctRuleKey(rule string, in bool) (acctKey, bool) {
 			lport, _ = strconv.Atoi(f[i+1])
 		case "-s", "-d":
 			if (f[i] == "-s") == in {
-				peer = strings.TrimSuffix(f[i+1], "/32")
+				peer = strings.TrimSuffix(strings.TrimSuffix(f[i+1], "/32"), "/128")
 			}
 		}
 	}
@@ -390,6 +439,7 @@ func parseAcctSaveEnds(out string) (rx, tx uint64, ends map[acctKey][2]uint64, r
 var carrierState = struct {
 	sync.Mutex
 	sig        string // the rules last loaded by this process
+	sig6       string // the IPv6 ones
 	at         time.Time
 	rx, tx     uint64
 	tags       map[string][2]uint64 // per tunnel: [0] received, [1] sent
@@ -430,9 +480,9 @@ func readCarrierCounters() (rx, tx uint64, ok bool) {
 
 	ends := carrierEnds()
 	if len(ends) == 0 {
-		if carrierState.sig != "" { // the tunnels are gone: remove the chains once
+		if carrierState.sig != "" || carrierState.sig6 != "" { // the tunnels are gone: remove the chains once
 			carrierDrop()
-			carrierState.sig = ""
+			carrierState.sig, carrierState.sig6 = "", ""
 		}
 		return 0, 0, false
 	}
@@ -458,6 +508,29 @@ func readCarrierCounters() (rx, tx uint64, ok bool) {
 		carrierState.sig = rules
 		rx, tx, byEnd = 0, 0, nil
 	}
+	// IPv6: a failing ip6tables leaves the IPv4 counts alone
+	if rules6 := carrierRules6(ends, primaryInterface()); rules6 == "" && carrierState.sig6 != "" {
+		carrierDropFam("ip6tables")
+		carrierState.sig6 = ""
+	} else if rules6 != "" {
+		if out6, err := runCmdTimeoutOut(5*time.Second, "ip6tables-save", "-c", "-t", "filter"); err == nil {
+			rx6, tx6, byEnd6, ready6 := parseAcctSaveEnds(string(out6))
+			if !ready6 || rules6 != carrierState.sig6 {
+				if carrierLoadFam("ip6tables", rules6) == nil {
+					carrierState.sig6 = rules6
+				}
+				rx6, tx6, byEnd6 = 0, 0, nil
+			}
+			rx, tx = rx+rx6, tx+tx6
+			if byEnd == nil {
+				byEnd = map[acctKey][2]uint64{}
+			}
+			for k, v := range byEnd6 {
+				c := byEnd[k]
+				byEnd[k] = [2]uint64{c[0] + v[0], c[1] + v[1]}
+			}
+		}
+	}
 	tags := map[string][2]uint64{}
 	for _, e := range ends {
 		c, t := byEnd[e.key()], tags[e.Tag]
@@ -469,31 +542,42 @@ func readCarrierCounters() (rx, tx uint64, ok bool) {
 }
 
 // carrierLoad replaces both chains and makes sure INPUT and OUTPUT jump to them.
-func carrierLoad(rules string) error {
+func carrierLoad(rules string) error { return carrierLoadFam("iptables", rules) }
+
+// carrierLoadFam is carrierLoad with bin ("iptables" or "ip6tables").
+func carrierLoadFam(bin, rules string) error {
 	_ = os.MkdirAll(configDir, 0o700)
 	f := filepath.Join(configDir, "carrier-acct.v4")
+	if bin == "ip6tables" {
+		f = filepath.Join(configDir, "carrier-acct.v6")
+	}
 	if err := os.WriteFile(f, []byte(rules), 0o600); err != nil {
 		return err
 	}
-	if out, err := runCmdTimeout(10*time.Second, "iptables-restore", "-w", "5", "-n", f); err != nil {
-		return fmt.Errorf("iptables-restore: %s", strings.TrimSpace(string(out)))
+	if out, err := runCmdTimeout(10*time.Second, bin+"-restore", "-w", "5", "-n", f); err != nil {
+		return fmt.Errorf("%s-restore: %s", bin, strings.TrimSpace(string(out)))
 	}
 	for _, h := range [][2]string{{"INPUT", acctIn}, {"OUTPUT", acctOut}} {
-		if _, err := runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-C", h[0], "-j", h[1]); err != nil {
-			if out, err := runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-I", h[0], "1", "-j", h[1]); err != nil {
-				return fmt.Errorf("iptables -I %s: %s", h[0], strings.TrimSpace(string(out)))
+		if _, err := runCmdTimeout(5*time.Second, bin, "-w", "5", "-C", h[0], "-j", h[1]); err != nil {
+			if out, err := runCmdTimeout(5*time.Second, bin, "-w", "5", "-I", h[0], "1", "-j", h[1]); err != nil {
+				return fmt.Errorf("%s -I %s: %s", bin, h[0], strings.TrimSpace(string(out)))
 			}
 		}
 	}
 	return nil
 }
 
-// carrierDrop removes both chains and the jumps to them (hashem.sh
-// acct_chains_drop does the same on uninstall).
+// carrierDrop removes both chains and the jumps to them, IPv4 and IPv6
+// (hashem.sh acct_chains_drop does the same on uninstall).
 func carrierDrop() {
+	carrierDropFam("iptables")
+	carrierDropFam("ip6tables")
+}
+
+func carrierDropFam(bin string) {
 	for _, h := range [][2]string{{"INPUT", acctIn}, {"OUTPUT", acctOut}} {
-		_, _ = runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-D", h[0], "-j", h[1])
-		_, _ = runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-F", h[1])
-		_, _ = runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-X", h[1])
+		_, _ = runCmdTimeout(5*time.Second, bin, "-w", "5", "-D", h[0], "-j", h[1])
+		_, _ = runCmdTimeout(5*time.Second, bin, "-w", "5", "-F", h[1])
+		_, _ = runCmdTimeout(5*time.Second, bin, "-w", "5", "-X", h[1])
 	}
 }
