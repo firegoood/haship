@@ -50,15 +50,19 @@ You can switch the engine of an existing tunnel from the panel; the switch check
 | --- | --- | --- | --- |
 | **Direct GRE** (default) | IP protocol 47 packets | none (protocol 47) | the path between the servers passes protocol 47 |
 | **WSS** | GRE inside a TLS WebSocket | TCP `8443` (default) | protocol 47 is dropped, but outbound TCP/443-style traffic passes |
+| **6to4** | GRE (as ip6gre) on a private IPv6 /64, inside IP protocol 41 between the IPv4 addresses | none (protocol 41) | protocol 47 is dropped but 41 passes |
+| **4in6** | GRE (as ip6gre) between the servers' public IPv6 addresses | none (protocol 47 over IPv6) | both servers have IPv6 and the IPv4 path is blocked or slow |
+
+With 6to4 and 4in6 the tunnel interface keeps its name, its inner IPv4 /30 and its routes, so FRP and Backhaul over GRE work unchanged. Switching from the panel's GRE wrap card changes both servers over the Peer Link and waits up to 45 seconds for the inner address to answer; otherwise both go back to the previous carrier. See [IPV6.md](IPV6.md).
 
 The FOU carrier was removed. The carrier is **never switched automatically**: the *carrier advisor* in the panel can tell you the active carrier keeps failing and suggest another, and `hashem carrier` changes it when you decide to.
 
-The GRE interface MTU is set to 1380 (1360 for WSS) so tunnelled TCP does not fragment.
+The GRE interface MTU is set to 1380 (1360 for WSS) so tunnelled TCP does not fragment. 1380 also fits 6to4 (64 bytes of headers) and 4in6 (44 bytes).
 
 ## A simple decision path
 
 1. Try **GRE + FRP** with **Direct GRE**. Check the Dashboard: *Healthy* means done.
-2. If the badge says **FRP only** or GRE never comes up, protocol 47 is probably filtered. Switch the carrier to **WSS** (`hashem carrier`).
+2. If the badge says **FRP only** or GRE never comes up, protocol 47 is probably filtered. Switch the carrier to **WSS** or **6to4** (`hashem carrier`), or to **4in6** when both servers have IPv6.
 3. If GRE is still unusable, or you do not need it, use **Backhaul without GRE**.
 4. Run the **Benchmark** tab to compare carriers on your real path before you commit.
 

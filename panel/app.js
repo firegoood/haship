@@ -7388,7 +7388,7 @@ function limRow(s) {
   if (r && (used > 0 || r.blocked)) acts.push(`<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="limitAction('reset', ${jsArg(ip)})">${esc(tr('', 'Reset usage'))}</button>`);
   if (r) acts.push(`<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="limitAction('remove', ${jsArg(ip)})">${esc(tr('', 'Remove limits'))}</button>`);
   return `<div class="lm-row${r && r.blocked ? ' cut' : cls === 'warn' ? ' warn' : ''}">
-    <div class="lm-head"><div class="lm-name"><b class="lm-num">${esc(s.name || ip)}</b>${s.name ? '<small class="lm-num">' + esc(ip) + '</small>' : ''}</div>
+    <div class="lm-head"><div class="lm-name"><b class="lm-num">${esc(s.name || ip)}</b>${s.name || s.alias ? '<small class="lm-num">' + esc([s.name ? ip : '', s.alias || ''].filter(Boolean).join(' · ')) + '</small>' : ''}</div>
       <div class="lm-links">${(s.links || []).map(k => '<span>' + esc(limLinkName(k)) + '</span>').join('')}</div>
       <span class="badge ${cls}">${esc(label)}</span></div>
     <div class="lm-grid">${speed}${vol}</div>

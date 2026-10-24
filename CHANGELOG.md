@@ -5,6 +5,20 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
 ## Unreleased
 
+### New: IPv6 in every tunnel, and the 6to4 / 4in6 carriers
+
+- **Users over IPv6.** Users can reach the Iran server's forwarded ports over IPv6 as well as IPv4, on Backhaul, FRP, Bagher and Xray. Bagher's direct mode now listens on every address of both families.
+- **The two servers over IPv6.** Backhaul without GRE, Bagher and Xray can connect the Iran and foreign servers over IPv6. In Setup, Backhaul without GRE has **Connect the two servers over IPv4 / IPv6**, which fills in this server's public IPv6. `bh1_` bundles may carry an IPv6 address. GRE setups still need IPv4 on both ends, and say so instead of failing later.
+- **Two new GRE wraps: 6to4 and 4in6.** 6to4 builds a private IPv6 between the servers' IPv4 addresses (IP protocol 41) and runs GRE on it, for networks that drop protocol 47 but pass 41. 4in6 runs GRE between the servers' public IPv6 addresses. The tunnel interface keeps its name, inner address and routes, so FRP and Backhaul over GRE keep working unchanged. If a new wrap cannot be built, the tunnel goes back to plain GRE instead of being left without an interface.
+- **A switch changes both servers and is undone if the tunnel goes quiet.** The GRE wrap card switches this server, then the other one over the Peer Link (for 4in6 the other server's IPv6 is asked for you), and waits up to 45 seconds for the tunnel to answer; if it does not, both servers go back to the wrap they had.
+- `hashem carrier set 6to4|4in6 [--if IF] [--local6 IP --remote6 IP]`; `hashem edit-peer --carrier 6to4|4in6 [--remote6 IP]` for one foreign server.
+- **Limits and traffic counters cover IPv6.** A foreign server can be limited by its IPv6 address, and a GRE tunnel on 4in6 counts the server's IPv6 towards the same speed and volume (ip6tables, and tc with `protocol ipv6`). The dashboard's per-tunnel counters count links over IPv6 too.
+- Rescue mode accepts an IPv6 peer; then every port goes through frp, since kernel DNAT cannot hand IPv4 users to an IPv6 origin.
+- Fixed: changing one foreign server's GRE wrap switched every GRE interface on the server, and its WSS branch used the wrong port.
+- Fixed: on a server with both IPv4 and IPv6, the "what is my IP" lookups in `hashem.sh` could get the IPv6 address and reject it. They now ask over IPv4.
+- **Tested in CI** with the real kernel: Backhaul on all 8 transport setups and FRP, users over IPv6 and IPv4 at once, and the two servers over IPv6 only, all byte-exact over TCP and UDP. The carrier lab drives `hashem.sh`'s own carrier code from direct GRE to 6to4 with protocol 47 dropped, then to 4in6 with no IPv4 between the servers, then back to direct, with Backhaul running over the tunnel each time. The Bagher lab reaches its second foreign server over IPv6 only, the Xray lab runs Reality and XHTTP in both modes over IPv6, and the limits lab runs again against an IPv6 server.
+- Guide: [docs/IPV6.md](docs/IPV6.md) ([فارسی](docs/IPV6.fa.md)). Not yet over IPv6: the Spoof tunnel (it spoofs IPv4 by design), the cluster's DNS records and load balancer, and the Benchmark's path test.
+
 ### New: Xray tunnel (Hashem Pro, first part)
 
 - **A new Xray tab.** It forwards ports from the Iran server to a foreign server over Xray-core (VLESS), so users connect to the Iran server and reach your 3x-ui inbounds on the foreign server. **Direct**: the Iran server connects to the foreign server. **Reverse**: the foreign server connects to the Iran server (Xray's VLESS reverse proxy), for when the Iran server cannot reach the foreign one. One Iran server can have several links, each to its own foreign server.
@@ -26,11 +40,11 @@ Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
 ### New: speed and volume limits per foreign server (Hashem Pro)
 
-- **A Limits card in the Tunnel tab.** Each foreign server gets one speed for both directions (Mbit/s) and a volume (GB, download and upload together), or stays unlimited. A server is its IPv4, so a limit covers every tunnel to it: GRE, FRP, Backhaul, Bagher and Xray.
+- **A Limits card in the Tunnel tab.** Each foreign server gets one speed for both directions (Mbit/s) and a volume (GB, download and upload together), or stays unlimited. A server is its address, so a limit covers every tunnel to it: GRE, FRP, Backhaul, Bagher and Xray.
 - **When the volume is used up, that server's links are cut** until the next reset; the other servers keep working. The reset is monthly on a day you pick (1 to 28), or only by hand (**Reset usage**). Raising the volume or removing the limit brings a cut server back at once. With alerts on (Watchdog tab), a webhook or Telegram message goes out at 90%, at the cut and at the reset.
 - **Live view.** Each server shows its speed against its limit and its used volume against its quota, with the date of the next reset.
 - **How it works.** The speed is a tc policer on the default-route interface (clsact, egress to the server and ingress from it); the root qdisc and BBR are not touched. The volume is counted by the `HASHEM_LIMIT` iptables chain (from INPUT, OUTPUT and FORWARD), added up every 10 seconds and saved in `limits.json`, so it survives restarts, updates and reboots. A cut is a DROP for that address. `hashem uninstall` removes the chain and the policers.
-- Limits keep working without a license and can always be removed; setting them needs Hashem Pro. IPv4 only; links through a CDN cannot be limited by address.
+- Limits keep working without a license and can always be removed; setting them needs Hashem Pro. Links through a CDN cannot be limited by address.
 - **Tested in CI** with the real kernel: a 20 Mbit/s limit holds both ways, 20 MB is counted within a few percent, the cut stops new connections, and reset and remove bring the server back and leave nothing behind.
 
 ### Bagher: lower ping, and several foreign servers on one Iran server

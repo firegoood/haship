@@ -133,3 +133,23 @@ func TestPeerPatchIPv6(t *testing.T) {
 		t.Errorf("Backhaul peer without GRE to IPv6 rejected: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestRescueIPv6(t *testing.T) {
+	if ip, err := validRemoteIP(" 2001:DB8::5 "); err != nil || ip != "2001:db8::5" {
+		t.Errorf("IPv6 rescue peer: %q %v", ip, err)
+	}
+	for _, bad := range []string{"fe80::1", "::1", "ff02::1", "::"} {
+		if _, err := validRemoteIP(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+	if fw := rescueFwNft(7000, "2001:db8::5"); !strings.Contains(fw, "tcp dport 7000 ip6 saddr != 2001:db8::5 counter drop") {
+		t.Errorf("IPv6 firewall rule:\n%s", fw)
+	}
+	if fw := rescueFwNft(7000, "203.0.113.5"); !strings.Contains(fw, "ip saddr != 203.0.113.5") {
+		t.Errorf("IPv4 firewall rule:\n%s", fw)
+	}
+	if d := rescueDnatNft("2001:db8::5", []int{443}); !strings.Contains(d, "dnat ip6 to 2001:db8::5") || !strings.Contains(d, "ip6 daddr 2001:db8::5") {
+		t.Errorf("IPv6 DNAT:\n%s", d)
+	}
+}

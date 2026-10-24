@@ -163,17 +163,28 @@ func parsePortList(s string) ([]int, error) {
 	return out, nil
 }
 
-// validRemoteIP: a routable IPv4 only. The firewall rule and bind address are
-// IPv4; loopback/unspecified/multicast/link-local would be nonsense or unsafe.
+// validRemoteIP: a routable IPv4 or IPv6 address, in its canonical form;
+// loopback/unspecified/multicast/link-local would be nonsense or unsafe.
 func validRemoteIP(s string) (string, error) {
 	ip := net.ParseIP(strings.TrimSpace(s))
-	if ip == nil || ip.To4() == nil {
-		return "", errors.New("remote address must be an IPv4 address")
+	if ip == nil {
+		return "", errors.New("remote address must be an IP address")
 	}
 	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
 		return "", errors.New("remote address is not a routable host")
 	}
-	return ip.To4().String(), nil
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String(), nil
+	}
+	return ip.String(), nil
+}
+
+// nftFam is the nftables address family keyword for ip: "ip" or "ip6".
+func nftFam(ip string) string {
+	if isV6(ip) {
+		return "ip6"
+	}
+	return "ip"
 }
 
 // reservedPorts: never forwarded or shadowed on this host.
@@ -247,7 +258,7 @@ func rescueEntryFrpcTomlMux(originIP string, cport int, token, secret string, po
 }
 
 func rescueFwNft(cport int, entryIP string) string {
-	return fmt.Sprintf("table inet hashem_rescue {\n  chain input {\n    type filter hook input priority -5; policy accept;\n    iifname \"lo\" accept\n    tcp dport %d ip saddr != %s counter drop\n  }\n}\n", cport, entryIP)
+	return fmt.Sprintf("table inet hashem_rescue {\n  chain input {\n    type filter hook input priority -5; policy accept;\n    iifname \"lo\" accept\n    tcp dport %d %s saddr != %s counter drop\n  }\n}\n", cport, nftFam(entryIP), entryIP)
 }
 
 func rescueUnit(desc, exec, after, before string) string {
@@ -268,7 +279,8 @@ func rescueDnatNft(originIP string, ports []int) string {
 		ps = append(ps, strconv.Itoa(p))
 	}
 	pl := strings.Join(ps, ", ")
-	return fmt.Sprintf("table inet hashem_dnat {\n  chain prerouting {\n    type nat hook prerouting priority dstnat - 5; policy accept;\n    fib daddr type local meta l4proto { tcp, udp } th dport { %s } dnat ip to %s\n  }\n  chain postrouting {\n    type nat hook postrouting priority srcnat + 5; policy accept;\n    ip daddr %s meta l4proto { tcp, udp } th dport { %s } masquerade\n  }\n}\n", pl, originIP, originIP, pl)
+	fam := nftFam(originIP)
+	return fmt.Sprintf("table inet hashem_dnat {\n  chain prerouting {\n    type nat hook prerouting priority dstnat - 5; policy accept;\n    fib daddr type local meta l4proto { tcp, udp } th dport { %s } dnat %s to %s\n  }\n  chain postrouting {\n    type nat hook postrouting priority srcnat + 5; policy accept;\n    %s daddr %s meta l4proto { tcp, udp } th dport { %s } masquerade\n  }\n}\n", pl, fam, originIP, fam, originIP, pl)
 }
 
 // rescueSplitDirect dials every port on the origin from here. A port that
@@ -514,6 +526,10 @@ func rescueApplyCode(code string) (rescueState, error) {
 		return st, errors.New("none of the ports can be used here (reserved or already in use)")
 	}
 	direct, relay := rescueSplitDirect(c.IP, use)
+	if isV6(c.IP) {
+		// kernel DNAT cannot hand IPv4 users to an IPv6 origin: frp carries all
+		direct, relay = nil, use
+	}
 	st = rescueState{Role: "entry", RemoteIP: c.IP, CtrlPort: c.CPort, Token: c.Token, Secret: c.Secret, Ports: use, Skipped: skipped, Direct: direct, Relay: relay, Since: time.Now().Unix()}
 	d := rescueDir()
 	frpc := filepath.Join(rescueBinDir, "frpc")

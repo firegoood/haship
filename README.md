@@ -112,7 +112,8 @@ If you need one relay on one server pair and are happy editing TOML, plain frp o
 - 🧩 **Three tunnel engines** — `GRE + FRP`, `Backhaul` (with or without GRE, TCP and UDP) and `Bagher` (SSH pool + FRP), all from the Setup tab. See [Choosing an engine](#choosing-an-engine).
 - 🕸️ **Cluster** [PRO] — pools of foreign servers behind one Iran port (failover, balance, sticky, latency, least connections), service check through the tunnel, standby servers, connection limits, several Iran hubs, hub-to-hub forwarding and DNS failover, on an interactive map. See [Cluster](#cluster).
 - 🧪 **Path test** [PRO] — which transports get through between two servers, before any tunnel exists.
-- 🛰️ **Two GRE carriers** — Direct GRE (IP protocol 47) and WSS (TLS WebSocket, port `8443` by default).
+- 🛰️ **Four GRE carriers** — Direct GRE (IP protocol 47), WSS (TLS WebSocket, port `8443` by default), 6to4 (GRE on a private IPv6 inside IP protocol 41) and 4in6 (GRE over the servers' IPv6). A switch changes both servers and is undone if the tunnel does not answer within 45 s.
+- 🌐 **IPv6** — users reach the ports over IPv6, and Backhaul without GRE, Bagher and Xray connect the two servers over IPv6. See [docs/IPV6.md](docs/IPV6.md).
 - 🔌 **FRP transports** — `tcp`, `kcp`, `quic`, `websocket`, `wss`, with payload encryption, compression and PROXY Protocol v2. See the [FRP Transports Guide](docs/FRP_TUNNELS_GUIDE.md).
 - 📦 **Setup bundles** — one string carries keys, IPs, transport and ports: `hsh1_…` (FRP), `bh1_…` (Backhaul), `gh1_…` (GRE+Backhaul). Paste it on the foreign server and the form fills itself.
 - 🔀 **Port management** — single ports (`443`), lists (`80,443`), ranges (`1000-1010`) and mappings (`8080=80`).
@@ -193,6 +194,8 @@ An interactive version with the layers, data path, join flow, automation and def
   | --- | --- |
   | Direct GRE carrier | IP protocol **47** (not TCP/UDP) |
   | WSS carrier | TCP `8443` (default) |
+  | 6to4 carrier | IP protocol **41** (not TCP/UDP) |
+  | 4in6 carrier | IP protocol **47** over IPv6 |
   | FRP / Backhaul control | the control port you choose; the `wss` front uses `control_port+2` |
   | KCP / QUIC transports | UDP, on the ports shown in the panel |
   | Panel | TCP `7777` (moves to the next free port if busy); HTTPS `7443` once a certificate is issued |
@@ -284,7 +287,7 @@ The panel is one page with these tabs:
 **Speed and volume limits** [PRO] — in the Tunnel tab, each foreign server (by its IPv4, so every tunnel to it) gets one speed for both directions and/or a volume, or stays unlimited. The speed is a tc policer on the default-route interface (the root qdisc and BBR are not touched); the volume is counted by the `HASHEM_LIMIT` iptables chain and kept in `limits.json`. When a server's volume is used up its links are cut (DROP) until the reset, monthly on a chosen day or by hand; the other servers keep working, and an alert goes out when alerts are on. Limits keep working without a license and can always be removed. IPv4 only; links through a CDN cannot be limited by address.
 
 **Hashem Pro** features: Bagher, the Spoof tunnel, the Xray tunnel, the speed and volume limits, setting up Backhaul (with or without GRE), the Path Test, Diagnostics, Performance, Watchdog, Benchmark and Cluster. A lock next to a tab in the sidebar marks the ones that need a license (Sentinel is a separate add-on). Every Pro license unlocks all of them, including features that became Pro after the key was issued, so an update never asks for a new key. Pro is checked on both servers. A Backhaul tunnel that already runs keeps running, restarting and being repaired without a license; only setting up a new one needs it. GRE + FRP stays free.
-- **Carriers for the GRE layer** — **Direct GRE** (IP protocol 47) and **WSS** (TLS WebSocket, default `:8443`). The FOU carrier was removed.
+- **Carriers for the GRE layer** — **Direct GRE** (IP protocol 47), **WSS** (TLS WebSocket, default `:8443`), **6to4** (protocol 41) and **4in6** (over IPv6). The FOU carrier was removed.
 
 ---
 
@@ -451,7 +454,7 @@ Ideas and bug reports are welcome — see [Contributing](#contributing).
 ## Documentation map
 
 - **Start here** — [Quick install](#quick-install) · [Choosing an engine](docs/ENGINES.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
-- **Guides** — [Cluster: how it works and tutorial](docs/CLUSTER_TUTORIAL.md) ([فارسی](docs/CLUSTER_TUTORIAL.fa.md)) · [Cluster guide](docs/CLUSTER.md) ([فارسی](docs/CLUSTER.fa.md)) · [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md) (Persian + English) · [Secure deployment](docs/DEPLOYMENT.md)
+- **Guides** — [Cluster: how it works and tutorial](docs/CLUSTER_TUTORIAL.md) ([فارسی](docs/CLUSTER_TUTORIAL.fa.md)) · [Cluster guide](docs/CLUSTER.md) ([فارسی](docs/CLUSTER.fa.md)) · [FRP transports guide](docs/FRP_TUNNELS_GUIDE.md) (Persian + English) · [IPv6](docs/IPV6.md) ([فارسی](docs/IPV6.fa.md)) · [Secure deployment](docs/DEPLOYMENT.md)
 - **Reference** — [HTTP API](docs/API.md) · [Error codes](docs/ERROR_CODES.md) · [CHANGELOG](CHANGELOG.md) · [Architecture (interactive)](docs/hashem-architecture.html)
 - **Project** — [CONTRIBUTING](CONTRIBUTING.md) · [Development guide](docs/dev/DEVELOPMENT.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [SECURITY](SECURITY.md)
 - **Audits and plans** — [docs/audit/](docs/audit/) · [r24 improvement plan](docs/PLAN_IMPROVEMENTS_R24.md)
