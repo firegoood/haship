@@ -51,6 +51,14 @@ ip link add xf0 netns $IR type veth peer name xf1 netns $FO
 ip -n $USR addr add $USR_IP/24 dev xu0; ip -n $IR addr add $IR_U/24 dev xu1
 ip -n $IR addr add $IR_IP/24 dev xf0; ip -n $FO addr add $FO_IP/24 dev xf1
 for l in "$USR xu0" "$USR lo" "$IR xu1" "$IR xf0" "$IR lo" "$FO xf1" "$FO lo"; do set -- $l; ip -n "$1" link set "$2" up; done
+# IPv6 next to IPv4 on both links, for the IPv6 round at the end
+USR_IP6=2001:db8:31:1::2; IR_U6=2001:db8:31:1::1; IR_IP6=2001:db8:31:2::1; FO_IP6=2001:db8:31:2::2
+V6=1
+for a in "$USR xu0 $USR_IP6" "$IR xu1 $IR_U6" "$IR xf0 $IR_IP6" "$FO xf1 $FO_IP6"; do
+    set -- $a
+    ip netns exec "$1" sysctl -qw net.ipv6.conf.all.disable_ipv6=0 2>/dev/null
+    ip -n "$1" -6 addr add "$3/64" dev "$2" nodad 2>/dev/null || V6=
+done
 NETEM=""
 if ip netns exec $IR tc qdisc add dev xf0 root netem delay 15ms 2>/dev/null && ip netns exec $FO tc qdisc add dev xf1 root netem delay 15ms 2>/dev/null; then
     NETEM="30 ms"
@@ -138,7 +146,7 @@ def par(host, port, k, n):
     sys.exit(0 if len(res) == k and all(res) else 1)
 
 def udp(host, port, count, size):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(0.2)
+    s = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(0.2)
     got = set()
     for i in range(count):
         s.sendto(struct.pack("!I", i) + os.urandom(size - 4), (host, port))
@@ -220,10 +228,10 @@ else
     bad "the panel did not see the fake 3x-ui on $TAKEN"; grep -v CMD-ERROR "$TMP/ports.log" | tail -20
 fi
 
-# start_link NAME [IRAN_CONFIG]: both ends of one link; sets IRX and FOX
+# start_link NAME [IRAN_CONFIG [CONFIG_DIR]]: both ends of one link; sets IRX and FOX
 start_link() {
-    local ic=${2:-$TMP/cfg/iran-$1.json}
-    ip netns exec $FO "$XRAY" run -c "$TMP/cfg/fo-$1.json" >"$TMP/fo-$1.log" 2>&1 & FOX=$!; pids+=($FOX)
+    local ic=${2:-$TMP/cfg/iran-$1.json} dir=${3:-$TMP/cfg}
+    ip netns exec $FO "$XRAY" run -c "$dir/fo-$1.json" >"$TMP/fo-$1.log" 2>&1 & FOX=$!; pids+=($FOX)
     ip netns exec $IR "$XRAY" run -c "$ic" >"$TMP/iran-$1.log" 2>&1 & IRX=$!; pids+=($IRX)
 }
 stop_link() { kill -9 "$IRX" "$FOX" 2>/dev/null; wait "$IRX" "$FOX" 2>/dev/null; sleep 0.3; }
@@ -276,6 +284,34 @@ while read -r name; do
 done <"$TMP/cfg/combos"
 unblock_iran_out
 note "a request through each link and back${NETEM:+ over a $NETEM round trip}: ${probes%, }"
+
+# ---- IPv6: the servers connect over IPv6 only (IPv4 between them dropped)
+# and the user comes in over IPv6
+if [[ -n $V6 ]]; then
+    mkdir -p "$TMP/cfg6"
+    if (cd "$ROOT/panel" && env XRAY_LAB_DIR="$TMP/cfg6" XRAY_LAB_IRAN=$IR_IP6 XRAY_LAB_FOREIGN=$FO_IP6 XRAY_LAB_TARGET=127.0.0.1:9443             XRAY_LAB_PORT=$PORT XRAY_LAB_TUNNEL=$TUNNEL XRAY_LAB_PROBE=$PROBE XRAY_LAB_EVIL=$EVIL XRAY_LAB_PRESETS="reality xhttp"             "$BIN" -test.run '^TestXrayLabGen$' >"$TMP/gen6.log" 2>&1); then
+        ip netns exec $IR iptables -A OUTPUT -d $FO_IP -j DROP; ip netns exec $FO iptables -A OUTPUT -d $IR_IP -j DROP
+        for name in reality-direct reality-reverse xhttp-direct xhttp-reverse; do
+            start_link "$name" "$TMP/cfg6/iran-$name.json" "$TMP/cfg6"
+            if ! wait_probe 20 >/dev/null; then
+                bad "IPv6 $name: the link never answered the probe"
+                echo "--- Iran:"; tail -n 15 "$TMP/iran-$name.log"; echo "--- foreign:"; tail -n 15 "$TMP/fo-$name.log"
+                stop_link; continue
+            fi
+            sent=ok
+            py $USR tcp $IR_U6 $PORT $((8 << 20)) || { bad "IPv6 $name: 8 MiB each way, user over IPv6 (sha256)"; sent=; }
+            py $USR tcp $IR_U $PORT $((1 << 20)) || { bad "IPv6 $name: user over IPv4 next to IPv6"; sent=; }
+            n=$(py $USR udp $IR_U6 $PORT 30 1200) || { bad "IPv6 $name: UDP over IPv6, $n of 30 came back"; sent=; }
+            [[ -n $sent ]] && ok "IPv6 $name: servers over IPv6 only, a user over IPv6: 8 MiB each way (sha256), UDP $n/30, and IPv4 users too"
+            stop_link
+        done
+        ip netns exec $IR iptables -D OUTPUT -d $FO_IP -j DROP; ip netns exec $FO iptables -D OUTPUT -d $IR_IP -j DROP
+    else
+        bad "generating the IPv6 configs"; cat "$TMP/gen6.log"
+    fi
+else
+    note "IPv6 round skipped: no IPv6 in the namespaces"
+fi
 
 # ---- the foreign end reaches only what it forwards
 start_link reality-direct "$TMP/cfg/iran-evil.json"

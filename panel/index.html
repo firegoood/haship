@@ -1987,7 +1987,7 @@
                   <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="bagherLicOpenBtn" data-i18n="setup_bagher_lic_btn">Activate License</button>
                 </div>
                 <div class="qs-row">
-                  <div class="fg"><label for="sshfwdRemoteHost" data-i18n="setup_bagher_host">Foreign server public IP</label><input class="hashem-input" id="sshfwdRemoteHost" inputmode="decimal" placeholder="e.g. 198.51.100.73"></div>
+                  <div class="fg"><label for="sshfwdRemoteHost" data-i18n="setup_bagher_host">Foreign server public IP</label><input class="hashem-input" id="sshfwdRemoteHost" inputmode="text" spellcheck="false" autocapitalize="off" placeholder="e.g. 198.51.100.73"></div>
                   <div class="fg"><label for="sshfwdName">Name of the foreign server (optional)</label><input class="hashem-input" id="sshfwdName" maxlength="40" autocomplete="off" placeholder="e.g. Frankfurt"></div>
                   <div class="fg"><label for="sshfwdPorts" data-i18n="setup_forward_ports">Forwarded Ports (single, ranges, mappings)</label><input class="hashem-input" id="sshfwdPorts" placeholder="e.g. 443, 8443, 2083"></div>
                 </div>
@@ -2084,8 +2084,8 @@
                 <summary>Manual addresses &amp; control port</summary>
                 <div class="qs-hint u-my-8" >Leave everything here empty to auto-join — the panel discovers Iran's settings from the live tunnel. Only fill these in if auto-join fails.</div>
                 <div class="qs-row">
-                  <div class="fg"><label for="fLocalPub">Foreign public IP (auto, editable)</label><input class="hashem-input" id="fLocalPub" inputmode="decimal"></div>
-                  <div class="fg"><label for="fRemotePub">Iran public IP</label><input class="hashem-input" id="fRemotePub" inputmode="decimal" placeholder="e.g. 203.0.113.10"></div>
+                  <div class="fg"><label for="fLocalPub">Foreign public IP (auto, editable)</label><input class="hashem-input" id="fLocalPub" inputmode="text" spellcheck="false" autocapitalize="off"></div>
+                  <div class="fg"><label for="fRemotePub">Iran public IP</label><input class="hashem-input" id="fRemotePub" inputmode="text" spellcheck="false" autocapitalize="off" placeholder="e.g. 203.0.113.10"></div>
                   <div class="fg"><label for="fLocalGre">Local GRE IP</label><input class="hashem-input" id="fLocalGre" inputmode="decimal" placeholder="e.g. 10.10.10.1"></div>
                   <div class="fg"><label for="fPeerGre">Iran GRE IP</label><input class="hashem-input" id="fPeerGre" inputmode="decimal" placeholder="e.g. 10.10.10.2"></div>
                   <div class="fg"><label for="fFrpPort">Control port</label><input class="hashem-input" id="fFrpPort" inputmode="numeric" placeholder="7000"></div>
@@ -2119,8 +2119,8 @@
                       <option value="wss">WSS TLS (Obfuscated)</option>
                     </select>
                   </div>
-                  <div class="fg"><label for="pRemotePub">Foreign public IP</label><input class="hashem-input" id="pRemotePub" inputmode="decimal" placeholder="e.g. 203.0.113.10"></div>
-                  <div class="fg"><label for="pLocalPub">Iran public IP (auto, editable)</label><input class="hashem-input" id="pLocalPub" inputmode="decimal"></div>
+                  <div class="fg"><label for="pRemotePub">Foreign public IP</label><input class="hashem-input" id="pRemotePub" inputmode="text" spellcheck="false" autocapitalize="off" placeholder="e.g. 203.0.113.10"></div>
+                  <div class="fg"><label for="pLocalPub">Iran public IP (auto, editable)</label><input class="hashem-input" id="pLocalPub" inputmode="text" spellcheck="false" autocapitalize="off"></div>
                   <div class="fg" id="wrapPeerLocalGre"><label for="pLocalGre">Iran GRE IP (unique)</label><input class="hashem-input" id="pLocalGre" inputmode="decimal" placeholder="e.g. 10.11.0.2"></div>
                   <div class="fg" id="wrapPeerPeerGre"><label for="pPeerGre">Foreign GRE IP</label><input class="hashem-input" id="pPeerGre" inputmode="decimal" placeholder="e.g. 10.11.0.1"></div>
                   <div class="fg"><label for="pFrpPort">Control port (unique per peer)</label><input class="hashem-input" id="pFrpPort" inputmode="numeric" placeholder="e.g. 7001"></div>

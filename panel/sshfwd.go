@@ -500,6 +500,11 @@ func MakeBagherBundle(cfg SSHFwdConfig, pubKey string) (string, error) {
 		return "", fmt.Errorf("remote host IP is required before generating bundle")
 	}
 	iranIP := resolvePublicIP()
+	if isV6(cfg.RemoteHost) { // the link runs over IPv6: the foreign server sees this one's IPv6
+		if v6 := detectPublicIP6(); v6 != "" {
+			iranIP = v6
+		}
+	}
 	if iranIP == "" || iranIP == "0.0.0.0" {
 		iranIP = cfg.BindAddr
 	}

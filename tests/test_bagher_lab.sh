@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests/test_bagher_lab.sh — real Bagher stealth tunnel in network namespaces.
 #
-# Iran (bg-ir) keeps an SSH session to each foreign server (bg-fo, bg-fo2)
+# Iran (bg-ir) keeps an SSH session to each foreign server (bg-fo, and bg-fo2,
+# which Iran reaches over IPv6 only)
 # with the panel's own carrier (gre-panel bagher-carrier: a reverse forward of
 # 127.0.0.1:FRP). frps on Iran listens on loopback and publishes the user
 # ports; the frpc on each foreign server reaches it through its SSH session
@@ -35,7 +36,7 @@ SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 
 IR=bg-ir; FO=bg-fo; FO2=bg-fo2; US=bg-us
 IR_FO=198.51.100.1;  FO_IP=198.51.100.2    # Iran <-> Foreign 1
-IR_FO2=192.0.2.1;    FO2_IP=192.0.2.2      # Iran <-> Foreign 2
+IR_FO2=2001:db8:22::1; FO2_IP=2001:db8:22::2 # Iran <-> Foreign 2, over IPv6 only
 IR_US=203.0.113.1;   US_IP=203.0.113.2     # user <-> Iran link
 P1=18080; P2=18081; PL=18083               # Foreign 1: two web servers, the ping service
 P3=18082                                   # Foreign 2: a web server
@@ -58,8 +59,8 @@ ip netns add $FO && ip netns add $FO2 && ip netns add $US || { echo "SKIP test_b
 ip link add vg-ir netns $IR type veth peer name vg-fo netns $FO || { echo "SKIP test_bagher_lab (veth unsupported)"; exit 0; }
 ip link add vg-ir2 netns $IR type veth peer name vg-fo2 netns $FO2
 ip link add vg-irus netns $IR type veth peer name vg-us netns $US
-ip -n $IR addr add $IR_FO/24 dev vg-ir;    ip -n $IR addr add $IR_FO2/24 dev vg-ir2;  ip -n $IR addr add $IR_US/24 dev vg-irus
-ip -n $FO addr add $FO_IP/24 dev vg-fo;    ip -n $FO2 addr add $FO2_IP/24 dev vg-fo2; ip -n $US addr add $US_IP/24 dev vg-us
+ip -n $IR addr add $IR_FO/24 dev vg-ir;    ip -n $IR -6 addr add $IR_FO2/64 dev vg-ir2 nodad;  ip -n $IR addr add $IR_US/24 dev vg-irus
+ip -n $FO addr add $FO_IP/24 dev vg-fo;    ip -n $FO2 -6 addr add $FO2_IP/64 dev vg-fo2 nodad; ip -n $US addr add $US_IP/24 dev vg-us
 for l in "$IR vg-ir" "$IR vg-ir2" "$IR vg-irus" "$IR lo" "$FO vg-fo" "$FO lo" "$FO2 vg-fo2" "$FO2 lo" "$US vg-us" "$US lo"; do
     set -- $l; ip -n "$1" link set "$2" up
 done
