@@ -80,31 +80,26 @@ func recordExec(name string, d time.Duration, err error, timedOut bool) {
 	b.n++
 }
 
-// expectedProbeExit reports a status query whose non-zero exit is a normal
-// answer, not a failure: systemctl is-active exits 3 for an inactive unit and
-// 4 for a unit that is not installed. The panel probes every engine that may
-// exist on a host, so those codes must not fill the activity stream with
-// CMD-ERROR entries on hosts that only run one engine.
-func expectedProbeExit(name string, args []string, exitCode int) bool {
-	return name == "systemctl" && len(args) > 0 && args[0] == "is-active" &&
-		(exitCode == 3 || exitCode == 4)
-}
-
 func runCmdTimeoutCtx(ctx context.Context, timeout time.Duration, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
 	out, err := runner(ctx, name, args...)
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
-	recordExec(name, time.Since(start), err, timedOut)
-	if err != nil && !timedOut {
+	var exitErr *exec.ExitError
+	answer := errors.As(err, &exitErr) && exitIsAnswer(name, args)
+	if answer {
+		recordExec(name, time.Since(start), nil, false)
+	} else {
+		recordExec(name, time.Since(start), err, timedOut)
+	}
+	if err != nil && !timedOut && !answer {
 		var exitCode = -1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr != nil {
 			exitCode = exitErr.ExitCode()
 		}
-		if ctx.Value(quietKey{}) == nil && !expectedProbeExit(name, args, exitCode) {
-			trimmed := strings.TrimSpace(string(out))
+		if ctx.Value(quietKey{}) == nil {
+			trimmed := strings.Join(strings.Fields(string(out)), " ") // one journal line
 			if len(trimmed) > 120 {
 				trimmed = trimmed[:120] + "..."
 			}
@@ -116,6 +111,21 @@ func runCmdTimeoutCtx(ctx context.Context, timeout time.Duration, name string, a
 		}
 	}
 	return out, err
+}
+
+// exitIsAnswer reports whether a non-zero exit of this command is its answer
+// rather than a failure: `systemctl is-active` exits 3 for a stopped unit and
+// 4 for one that is not installed, which the status pollers ask every few
+// seconds. Logging those filled the activity stream with false errors.
+func exitIsAnswer(name string, args []string) bool {
+	if name != "systemctl" || len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "is-active", "is-enabled", "is-failed":
+		return true
+	}
+	return false
 }
 
 // runCmdTimeout runs name with a hard timeout (combined stdout+stderr), counting the

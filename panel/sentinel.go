@@ -286,7 +286,7 @@ func GetSentinelStatus() SentinelConfig {
 		}
 		cleanPath := "/" + strings.Trim(cfg.Path, "/") + "/"
 		cfg.Path = cleanPath
-		cfg.URL = fmt.Sprintf("http://%s:%d%s", pubHost, cfg.Port, cleanPath)
+		cfg.URL = "http://" + hostPort(pubHost, cfg.Port) + cleanPath
 	}
 
 	return cfg

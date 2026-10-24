@@ -54,7 +54,10 @@ type PeerHandshakeRequest struct {
 const peerRoutePrefix = "/_hp"
 
 type PeerApplyCarrierRequest struct {
-	Carrier string `json:"carrier"` // "direct", "fou:443", "wss:8443", etc.
+	Carrier string `json:"carrier"` // "direct", "wss:8443", "6to4", "4in6", etc.
+	// 4in6: the receiver's own IPv6 (Local6) and the sender's (Remote6)
+	Local6  string `json:"local6,omitempty"`
+	Remote6 string `json:"remote6,omitempty"`
 }
 
 type PeerApplyEngineRequest struct {
@@ -259,6 +262,7 @@ func mountPeerRoutes(mux *http.ServeMux, base string) {
 	}{
 		{"POST", "/api/peer/handshake", handlePeerHandshake},
 		{"POST", "/api/peer/apply-carrier", handlePeerApplyCarrier},
+		{"POST", "/api/peer/carrier-info", handlePeerCarrierInfo},
 		{"POST", "/api/peer/apply-engine", handlePeerApplyEngine},
 		{"POST", "/api/peer/ping", handlePeerPing},
 		{"POST", "/api/peer/revpath-probe", handlePeerRevPathProbe},
@@ -266,13 +270,19 @@ func mountPeerRoutes(mux *http.ServeMux, base string) {
 		{"GET", "/api/peer/status", handlePeerStatus},
 		{"POST", "/api/peer/swap-carrier", handlePeerSwapCarrier},
 		{"GET", "/api/peer/swap-status", handlePeerSwapStatus},
+		{"GET", "/api/peer/swap-request", handlePeerSwapRequestGet},
+		{"POST", "/api/peer/swap-request", handlePeerSwapRequest},
+		{"GET", "/api/peer/wrap-request", handlePeerWrapStatus},
+		{"POST", "/api/peer/wrap-request", handlePeerWrapRequest},
 	}
 	for _, rt := range routes {
 		mux.HandleFunc(rt.method+" "+base+rt.path, requirePeerAuth(rt.h))
 		guard := requirePeerSecretHidden
-		if rt.path == "/api/peer/handshake" || rt.path == "/api/peer/ping" {
+		switch rt.path {
+		case "/api/peer/handshake", "/api/peer/ping", "/api/peer/swap-request", "/api/peer/wrap-request":
 			// A peer's foreign server knows its own tunnel token, not the
-			// Peer Link secret: it may still say where its panel answers.
+			// Peer Link secret: it may still say where its panel answers,
+			// and ask for a swap of its own tunnel.
 			guard = requireTunnelSecretHidden
 		}
 		mux.HandleFunc(rt.method+" "+peerRoutePrefix+rt.path, guard(rt.h))
@@ -305,7 +315,7 @@ func handlePeerHandshake(w http.ResponseWriter, r *http.Request) {
 			if req.PanelPort == 443 {
 				scheme = "https"
 			}
-			c.PeerURL = fmt.Sprintf("%s://%s:%d", scheme, req.PublicIP, req.PanelPort)
+			c.PeerURL = scheme + "://" + hostPort(req.PublicIP, req.PanelPort)
 		}
 		if req.PanelPort > 0 && req.PanelPort <= 65535 {
 			c.InternalPort = req.PanelPort
@@ -377,7 +387,15 @@ func handlePeerApplyCarrier(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[PeerSync] Received remote carrier apply command: %s", target)
-	out, err := applyCarrierMode(target)
+	o := carrier6Opts{Local6: strings.TrimSpace(req.Local6), Remote6: strings.TrimSpace(req.Remote6)}
+	if target == carrier4in6 && o.Local6 == "" {
+		o.Local6 = detectPublicIP6()
+	}
+	if err := o.validate(); err != nil {
+		writeAPIError(w, r, "E-ACTION-01", err.Error())
+		return
+	}
+	out, err := applyCarrierModeOpts(target, o)
 	if err != nil {
 		log.Printf("[PeerSync] Error applying carrier %s: %v (%s)", target, err, out)
 		writeAPIError(w, r, "E-CARRIER-01", fmt.Sprintf("failed applying carrier: %v", err))
@@ -702,7 +720,7 @@ func peerTargetURLs(c PeerConfig, path string) []string {
 			ports = append(ports, cfg.Port)
 		}
 		for _, p := range ports {
-			bases = append(bases, fmt.Sprintf("http://%s:%d", c.InternalIP, p))
+			bases = append(bases, "http://"+hostPort(c.InternalIP, p))
 		}
 	}
 	if c.PeerURL != "" {
@@ -719,7 +737,7 @@ func peerTargetURLs(c PeerConfig, path string) []string {
 				for _, p := range []int{c.InternalPort, cfg.Port, effectiveTLSPort(), 7443, 7777, 8080} {
 					if p > 0 && !seen[p] {
 						seen[p] = true
-						bases = append(bases, fmt.Sprintf("%s://%s:%d", parsed.Scheme, host, p))
+						bases = append(bases, parsed.Scheme+"://"+hostPort(host, p))
 					}
 				}
 			}

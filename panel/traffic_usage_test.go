@@ -327,9 +327,29 @@ func TestUsageHostSeriesOnSpoke(t *testing.T) {
 		t.Fatal("host series must exist on a spoke")
 	}
 	d := l.Days[dayOf(time.Now().Unix())]
-	// 1300->1500 is rx +200; 2400->2100 is a tx *decrease* (gre-p2 vanished), treated as a reset: tx += 2100
-	if d.Rx != 200 {
-		t.Fatalf("rx delta = %d, want 200", d.Rx)
+	// Per interface: gre-tunnel moved 1000->1500 rx and 2000->2100 tx; gre-p2
+	// vanished and counts nothing. The old raw sum (1300->1500, 2400->2100)
+	// booked rx +200 and took the smaller tx sum for a reset: tx +2100.
+	if d.Rx != 500 || d.Tx != 100 {
+		t.Fatalf("delta = %d/%d, want 500/100", d.Rx, d.Tx)
+	}
+}
+
+// A new interface (a peer added) brings its existing counter: a baseline,
+// not traffic. The raw sum counted it in full.
+func TestUsageHostNewInterfaceIsBaseline(t *testing.T) {
+	old := trafficUsage
+	trafficUsage = newUsage()
+	defer func() { trafficUsage = old }()
+	usageOnSnapshot(&HubSnapshot{DevData: devLines(map[string][2]uint64{"gre-tunnel": {1000, 2000}})})
+	usageOnSnapshot(&HubSnapshot{DevData: devLines(map[string][2]uint64{"gre-tunnel": {1010, 2020}, "gre-p9": {77777, 88888}})})
+	both := devLines(map[string][2]uint64{"gre-tunnel": {1010, 2020}, "gre-p9": {77787, 88898}})
+	usageOnSnapshot(&HubSnapshot{DevData: both, CarrierOK: true, CarrierRx: 500, CarrierTx: 600})
+	usageOnSnapshot(&HubSnapshot{DevData: both, CarrierOK: true, CarrierRx: 540, CarrierTx: 660})
+	d := trafficUsage.links[usageHostKey].Days[dayOf(time.Now().Unix())]
+	// gre-tunnel +10/+20, gre-p9 +10/+10 after its baseline, carrier +40/+60 after its baseline
+	if d.Rx != 60 || d.Tx != 90 {
+		t.Fatalf("host = %d/%d, want 60/90", d.Rx, d.Tx)
 	}
 }
 

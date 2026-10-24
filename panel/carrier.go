@@ -41,6 +41,7 @@ type carrierStatusResponse struct {
 	StatusText    string           `json:"status_text"`
 	GREExists     bool             `json:"gre_exists"`
 	WSSSNI        string           `json:"wss_sni"`
+	WSSRemote     string           `json:"wss_remote"` // the other server's WSS host: IPv4, IPv6 or a name
 	WSS           wssCarrierStatus `json:"wss"`
 }
 
@@ -53,8 +54,19 @@ type carrierPostRequest struct {
 	FOUPort2  int    `json:"fou_port2,omitempty"`
 	WSSPort   int    `json:"wss_port,omitempty"`
 	WSSRemote string `json:"wss_remote,omitempty"`
+	Local6    string `json:"local6,omitempty"`  // switch to 4in6: this server's IPv6 (default: detected)
+	Remote6   string `json:"remote6,omitempty"` // switch to 4in6: the other server's IPv6 (default: asked over the Peer Link)
 	// WSSSNI: nil leaves the SNI as it is, "" clears it.
 	WSSSNI *string `json:"wss_sni,omitempty"`
+}
+
+// wssRemoteHost is the host of a WSS remote address ("host:port", "[v6]:port"
+// or a bare host).
+func wssRemoteHost(addr string) string {
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return strings.Trim(addr, "[]")
 }
 
 func carrierConfigPath() string {
@@ -195,6 +207,7 @@ func handleCarrierGet(w http.ResponseWriter, r *http.Request) {
 			statusText = "Peer not replying"
 		}
 	}
+	wc := loadWSSConfig()
 	resp := carrierStatusResponse{
 		Mode:          cfg.Mode,
 		Active:        cfg.ActiveCarrier,
@@ -210,7 +223,8 @@ func handleCarrierGet(w http.ResponseWriter, r *http.Request) {
 		PingRTT:       rtt,
 		StatusText:    statusText,
 		GREExists:     greExists,
-		WSSSNI:        loadWSSConfig().SNI,
+		WSSSNI:        wc.SNI,
+		WSSRemote:     wssRemoteHost(wc.RemoteAddr),
 		WSS:           getWSSStatus(),
 	}
 	writeJSON(w, resp)
@@ -247,6 +261,18 @@ func handleCarrierPost(w http.ResponseWriter, r *http.Request) {
 		_, _ = runHashemCarrierCmd("set", m)
 		_ = saveCarrierConfig(cfg)
 		writeJSON(w, map[string]any{"status": "ok", "mode": cfg.Mode, "active": cfg.ActiveCarrier, "active_carrier": cfg.ActiveCarrier})
+
+	case "switch":
+		// both servers over the Peer Link, checked, undone when the tunnel
+		// does not answer
+		t := strings.TrimSpace(req.Target)
+		detail, err := switchCarrier(t, carrier6Opts{Local6: strings.TrimSpace(req.Local6), Remote6: strings.TrimSpace(req.Remote6)})
+		if err != nil {
+			writeAPIError(w, r, "E-CARRIER-01", err.Error())
+			return
+		}
+		cfg = loadCarrierConfig()
+		writeJSON(w, map[string]any{"status": "ok", "detail": detail, "active": cfg.ActiveCarrier, "active_carrier": cfg.ActiveCarrier})
 
 	case "set_active", "set-active", "apply", "set":
 		t := strings.TrimSpace(req.Target)
@@ -336,7 +362,12 @@ func handleCarrierPost(w http.ResponseWriter, r *http.Request) {
 			_ = saveCarrierConfig(cfg)
 		}
 		if req.WSSRemote != "" {
-			wssCfg.RemoteAddr = req.WSSRemote
+			h := wssRemoteHost(strings.TrimSpace(req.WSSRemote))
+			if !validBagherHost(h) {
+				writeAPIError(w, r, "E-ACTION-01", "invalid address of the other server: an IPv4, an IPv6 or a host name")
+				return
+			}
+			wssCfg.RemoteAddr = net.JoinHostPort(h, strconv.Itoa(wssCfg.ListenPort))
 		}
 		if req.WSSSNI != nil {
 			wssCfg.SNI = strings.TrimSpace(*req.WSSSNI)
@@ -515,7 +546,7 @@ func ensureFrpsUDPListeners() error {
 func carrierApplicable(t string) error {
 	t = strings.TrimSpace(t)
 	switch {
-	case t == "direct", strings.HasPrefix(t, "fou:"), t == "wss", strings.HasPrefix(t, "wss:"):
+	case t == "direct", strings.HasPrefix(t, "fou:"), t == "wss", strings.HasPrefix(t, "wss:"), isCarrier6(t):
 		return nil
 	case strings.HasPrefix(t, "frp:"):
 		switch strings.TrimPrefix(t, "frp:") {
@@ -529,13 +560,15 @@ func carrierApplicable(t string) error {
 	return fmt.Errorf("unknown carrier %q", t)
 }
 
-func applyCarrierMode(t string) (string, error) {
+func applyCarrierMode(t string) (string, error) { return applyCarrierModeOpts(t, carrier6Opts{}) }
+
+func applyCarrierModeOpts(t string, o carrier6Opts) (string, error) {
 	cfg := loadCarrierConfig()
 	t = strings.TrimSpace(t)
 	if strings.HasPrefix(t, "backhaul:") || strings.HasPrefix(t, "bagher:") {
 		return "", carrierApplicable(t)
 	}
-	if t != "direct" && !strings.HasPrefix(t, "fou:") && !strings.HasPrefix(t, "wss") && !strings.HasPrefix(t, "frp:") {
+	if t != "direct" && !strings.HasPrefix(t, "fou:") && !strings.HasPrefix(t, "wss") && !strings.HasPrefix(t, "frp:") && !isCarrier6(t) {
 		t = cfg.ActiveCarrier
 	}
 	cfg.ActiveCarrier = t
@@ -566,6 +599,6 @@ func applyCarrierMode(t string) (string, error) {
 		}
 		return "switched to " + t, nil
 	}
-	out, err := runHashemCarrierCmd("set", t)
+	out, err := runHashemCarrierCmd(append([]string{"set", t}, o.args()...)...)
 	return string(out), err
 }

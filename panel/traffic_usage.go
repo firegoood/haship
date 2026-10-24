@@ -65,7 +65,10 @@ type usageLink struct {
 	LastRx uint64 `json:"last_rx"`
 	LastTx uint64 `json:"last_tx"`
 	Have   bool   `json:"have"`
-	Seen   int64  `json:"seen"` // last unix time this link produced a sample
+	// LastIf: per-interface raw counters of a link made of several
+	// (the "host" series), each delta taken on its own.
+	LastIf map[string][2]uint64 `json:"last_if,omitempty"`
+	Seen   int64                `json:"seen"` // last unix time this link produced a sample
 }
 
 type usageDay struct {
@@ -136,6 +139,47 @@ func (s *usageStore) observe(key, name string, now time.Time, rx, tx *uint64) {
 	dRx := usageDelta(l.LastRx, *rx, l.Have)
 	dTx := usageDelta(l.LastTx, *tx, l.Have)
 	l.LastRx, l.LastTx, l.Have = *rx, *tx, true
+	s.addLocked(l, now, dRx, dTx)
+}
+
+// observeIfs feeds the raw counters of several interfaces that make up one
+// link. Summing them first went wrong: when one interface went away (a peer
+// removed, GRE recreated) the smaller sum was taken for a counter reset and
+// every other interface's whole counter was counted again, and a new
+// interface's existing counter was counted as traffic.
+func (s *usageStore) observeIfs(key, name string, now time.Time, cur map[string][2]uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l := s.links[key]
+	if l == nil {
+		if len(s.links) >= usageMaxLinks {
+			return
+		}
+		l = &usageLink{Days: map[string]usageDay{}}
+		s.links[key] = l
+	}
+	if name != "" {
+		l.Name = name
+	}
+	if len(cur) == 0 {
+		return // nothing readable now: keep the baselines for when it comes back
+	}
+	var dRx, dTx uint64
+	for ifname, c := range cur {
+		if prev, ok := l.LastIf[ifname]; ok {
+			dRx += counterDelta(prev[0], c[0])
+			dTx += counterDelta(prev[1], c[1])
+		}
+	}
+	l.LastIf = make(map[string][2]uint64, len(cur))
+	for k, v := range cur {
+		l.LastIf[k] = v
+	}
+	s.addLocked(l, now, dRx, dTx)
+}
+
+// addLocked books dRx/dTx in the link's minute and day.
+func (s *usageStore) addLocked(l *usageLink, now time.Time, dRx, dTx uint64) {
 	l.Seen = now.Unix()
 	if dRx == 0 && dTx == 0 {
 		// still advance "seen" and make sure a minute bucket exists lazily
@@ -450,13 +494,13 @@ func usageOnSnapshot(s *HubSnapshot) {
 	for _, l := range s.All() {
 		trafficUsage.observe(usageKey(l), linkName(l), now, l.Rx, l.Tx)
 	}
-	rx, tx := tunnelRawTotals(s.DevData)
-	if rx == nil { // Backhaul or Bagher only: their port counters (carrier_traffic.go)
-		if r, t, ok := carrierCounters(); ok {
-			rx, tx = &r, &t
-		}
+	// every tunnel interface, plus the Backhaul/Bagher port counters, each
+	// on its own (the chains count only what no interface does)
+	cur := trafficTunnelIfs(s.DevData)
+	if s.CarrierOK {
+		cur[carrierKey] = [2]uint64{s.CarrierRx, s.CarrierTx}
 	}
-	trafficUsage.observe(usageHostKey, "This server (all tunnels)", now, rx, tx)
+	trafficUsage.observeIfs(usageHostKey, "This server (all tunnels)", now, cur)
 }
 
 // tunnelRawTotals sums rx/tx over every tunnel interface in a /proc/net/dev

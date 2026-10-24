@@ -125,27 +125,6 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-func TestExpectedProbeExit(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		code int
-		want bool
-	}{
-		{"systemctl", []string{"is-active", "frps"}, 3, true},
-		{"systemctl", []string{"is-active", "frps", "frpc"}, 4, true},
-		{"systemctl", []string{"is-active", "frps"}, 1, false},
-		{"systemctl", []string{"restart", "frps"}, 4, false},
-		{"systemctl", nil, 4, false},
-		{"ping", []string{"-c", "1", "1.1.1.1"}, 4, false},
-	}
-	for _, c := range cases {
-		if got := expectedProbeExit(c.name, c.args, c.code); got != c.want {
-			t.Errorf("expectedProbeExit(%q, %v, %d) = %v, want %v", c.name, c.args, c.code, got, c.want)
-		}
-	}
-}
-
 func TestRunCmdSilencesInactiveUnitProbe(t *testing.T) {
 	for _, code := range []int{3, 4} {
 		t.Run(fmt.Sprintf("exit_%d", code), func(t *testing.T) {
@@ -161,19 +140,6 @@ func TestRunCmdSilencesInactiveUnitProbe(t *testing.T) {
 				t.Fatalf("exit %d polluted the log: %s", code, logs.String())
 			}
 		})
-	}
-}
-
-func TestRunCmdLogsUnexpectedSystemctlExit(t *testing.T) {
-	withRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		return []byte("denied"), realExitError(t, 1)
-	})
-	logs := captureLog(t)
-	if _, err := runCmdTimeoutOut(time.Second, "systemctl", "is-active", "frps"); err == nil {
-		t.Fatal("expected the command error to pass through")
-	}
-	if !strings.Contains(logs.String(), "[CMD-ERROR]") {
-		t.Fatalf("unexpected systemctl failure must still be logged: %q", logs.String())
 	}
 }
 
@@ -205,5 +171,23 @@ func TestRunCmdRealExec(t *testing.T) {
 	out, _ = runCmdTimeoutOut(5*time.Second, "sh", "-c", "echo out; echo err 1>&2")
 	if strings.Contains(string(out), "err") {
 		t.Fatalf("stdout-only leaked stderr: %q", out)
+	}
+}
+
+func TestExitIsAnswer(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"systemctl", []string{"is-active", "frps", "frpc"}, true},
+		{"systemctl", []string{"is-enabled", "frps"}, true},
+		{"systemctl", []string{"restart", "frps"}, false},
+		{"systemctl", nil, false},
+		{"ip", []string{"is-active"}, false},
+	} {
+		if got := exitIsAnswer(c.name, c.args); got != c.want {
+			t.Errorf("exitIsAnswer(%s %v) = %v, want %v", c.name, c.args, got, c.want)
+		}
 	}
 }

@@ -277,8 +277,20 @@ func handlePeersPatch(w http.ResponseWriter, r *http.Request) {
 
 	// Validate remote public IP if provided
 	if body.RemotePub != "" {
-		if !isV4(body.RemotePub) {
-			writeAPIError(w, r, "E-PEER-07", "invalid remote public IP")
+		// a tunnel over GRE needs IPv4 at both ends; Backhaul without GRE
+		// takes either family
+		v6ok := false
+		for _, p := range loadPeers() {
+			if p.ID == body.ID {
+				v6ok = p.NoGre || p.GreIf == "none"
+			}
+		}
+		if f := ipFamily(body.RemotePub); f == 0 || f == 6 && !v6ok {
+			msg := "invalid remote public IP"
+			if f == 6 {
+				msg = "a tunnel over GRE needs the foreign server's IPv4 address"
+			}
+			writeAPIError(w, r, "E-PEER-07", msg)
 			return
 		}
 		if clash := peerDuplicateIPClash(body.RemotePub, body.ID); clash != "" {
@@ -308,6 +320,22 @@ func handlePeersPatch(w http.ResponseWriter, r *http.Request) {
 
 	// Case 1: ID == 0 -> Edit Main / Base Tunnel
 	if body.ID == 0 {
+		// The main tunnel's name lives in link_names.json (it has no record of
+		// its own); a rename alone does not touch the running tunnel.
+		if err := validLinkName(body.Name); err != nil {
+			writeAPIError(w, r, "E-PEER-07", err.Error())
+			return
+		}
+		if body.Name != "" {
+			if err := setLinkName("main", body.Name); err != nil {
+				writeAPIError(w, r, "E-PEER-07", err.Error())
+				return
+			}
+		}
+		if body.RemotePub == "" && body.Carrier == "" && body.Engine == "" && body.Transport == "" && body.Ports == nil && body.RawPorts == nil {
+			writeJSON(w, map[string]any{"status": "ok", "output": "main tunnel renamed"})
+			return
+		}
 		excludeID := 0
 		var legacyPeer *peerRecord
 		for _, p := range loadPeers() {
@@ -843,24 +871,13 @@ func generateMainBundle(req peerPatchRequest, legacyPeer *peerRecord) string {
 	return MakeBundle(iranPub, frpPort, iranGre, foreignGre, token, ports, frpTrans)
 }
 
+// applyPeerCarrierDirect switches one tunnel interface: hashem.sh's
+// carrier_apply does the device, encap, firewall and MTU (it used to switch
+// every GRE interface, then this patched the encap by hand with the wrong
+// WSS port).
 func applyPeerCarrierDirect(greIf string, carrier string) error {
-	script, err := greScriptPath()
-	if err == nil {
-		cmd := exec.Command("bash", script, "carrier", "set", carrier)
-		cmd.Env = append(os.Environ(), "GRE_SKIP_PANEL=1")
-		_ = cmd.Run()
-	}
-	if carrier == "direct" {
-		exec.Command("ip", "link", "set", "dev", greIf, "type", "gre", "encap", "none").CombinedOutput()
-	} else if strings.HasPrefix(carrier, "fou:") {
-		port := strings.TrimPrefix(carrier, "fou:")
-		exec.Command("ip", "fou", "add", "port", port, "ipproto", "47").CombinedOutput()
-		exec.Command("ip", "link", "set", "dev", greIf, "type", "gre", "encap", "fou", "encap-sport", "auto", "encap-dport", port).CombinedOutput()
-	} else if strings.HasPrefix(carrier, "wss") {
-		exec.Command("ip", "fou", "add", "port", "19998", "ipproto", "47").CombinedOutput()
-		exec.Command("ip", "link", "set", "dev", greIf, "type", "gre", "encap", "fou", "encap-sport", "auto", "encap-dport", "19998").CombinedOutput()
-	}
-	return nil
+	_, err := runHashemCarrierCmd("set", carrier, "--if", greIf)
+	return err
 }
 
 func updateServiceRemoteIP(serviceFile string, oldIP string, newIP string) {

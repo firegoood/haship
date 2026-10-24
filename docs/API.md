@@ -66,6 +66,9 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/history` | session | `handleHistoryGet` |
 | `GET` | `/api/license` | session | `handleLicenseGet` |
 | `POST` | `/api/license` | session + CSRF | `handleLicensePost` |
+| `GET` | `/api/limits` | session | `handleLimitsGet` |
+| `POST` | `/api/limits` | session + CSRF | `handleLimitsPost` |
+| `POST` | `/api/link-name` | session + CSRF | `handleLinkName` |
 | `POST` | `/api/login` | none | `handleLogin` |
 | `POST` | `/api/logout` | none | `handleLogout` |
 | `GET` | `/api/logs` | session | `handleLogs` |
@@ -76,6 +79,7 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/pathtest` | session + CSRF | `handlePathTestPost` |
 | `POST` | `/api/peer/apply-carrier` | peer secret (or session) | `handlePeerApplyCarrier` |
 | `POST` | `/api/peer/apply-engine` | peer secret (or session) | `handlePeerApplyEngine` |
+| `POST` | `/api/peer/carrier-info` | peer secret (or session) | `handlePeerCarrierInfo` |
 | `GET` | `/api/peer/config` | session | `handlePeerConfigGet` |
 | `POST` | `/api/peer/config` | session + CSRF | `handlePeerConfigPost` |
 | `POST` | `/api/peer/handshake` | peer secret (or session) | `handlePeerHandshake` |
@@ -86,7 +90,11 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/peer/sshfwd-install-key` | peer secret (or session) | `handlePeerSSHFwdInstallKey` |
 | `GET` | `/api/peer/status` | peer secret (or session) | `handlePeerStatus` |
 | `POST` | `/api/peer/swap-carrier` | peer secret (or session) | `handlePeerSwapCarrier` |
+| `GET` | `/api/peer/swap-request` | peer secret (or session) | `handlePeerSwapRequestGet` |
+| `POST` | `/api/peer/swap-request` | peer secret (or session) | `handlePeerSwapRequest` |
 | `GET` | `/api/peer/swap-status` | peer secret (or session) | `handlePeerSwapStatus` |
+| `GET` | `/api/peer/wrap-request` | peer secret (or session) | `handlePeerWrapStatus` |
+| `POST` | `/api/peer/wrap-request` | peer secret (or session) | `handlePeerWrapRequest` |
 | `GET` | `/api/peers` | session | `handlePeersGet` |
 | `PATCH` | `/api/peers` | session + CSRF | `handlePeersPatch` |
 | `POST` | `/api/peers` | session + CSRF | `handlePeersPost` |
@@ -146,6 +154,8 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/watchdog` | session + CSRF | `handleWatchdogPost` |
 | `GET` | `/api/watchdog/backup-download` | session | `handleBackupDownload` |
 | `POST` | `/api/watchdog/backup-download` | session + CSRF | `handleBackupDownload` |
+| `GET` | `/api/xray` | session | `handleXrayGet` |
+| `POST` | `/api/xray` | session + CSRF | `handleXrayPost` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 124 routes.
+Total: 134 routes.

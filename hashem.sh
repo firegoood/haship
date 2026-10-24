@@ -894,6 +894,37 @@ is_valid_ip() {
     done
 }
 
+# is_valid_ip6 ADDR: an IPv6 literal, without brackets, zone or prefix length.
+is_valid_ip6() {
+    local s=$1 g n=0
+    [[ "$s" == *:* && "$s" =~ ^[0-9A-Fa-f:]+$ && "$s" != *:::* && "$s" != *::*::* ]] || return 1
+    [[ "$s" == :* && "$s" != ::* ]] && return 1
+    [[ "$s" == *: && "$s" != *:: ]] && return 1
+    local IFS=:
+    for g in $s; do
+        [[ -z "$g" ]] && continue
+        ((${#g} <= 4)) || return 1
+        n=$((n + 1))
+    done
+    if [[ "$s" == *::* ]]; then ((n <= 7)); else ((n == 8)); fi
+}
+
+is_valid_ip_any() { is_valid_ip "$1" || is_valid_ip6 "$1"; }
+
+# hostport HOST PORT: "HOST:PORT", with an IPv6 literal in brackets.
+hostport() {
+    local h=${1#[}
+    h=${h%]}
+    if [[ "$h" == *:* ]]; then echo "[$h]:$2"; else echo "$h:$2"; fi
+}
+
+# hostonly HOST:PORT: the host, without the brackets of an IPv6 literal.
+hostonly() {
+    local h=${1%:*}
+    h=${h#[}
+    echo "${h%]}"
+}
+
 is_valid_port() {
     [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535))
 }
@@ -1106,7 +1137,7 @@ except Exception:
 carrier_set_mode() {
     local M="$1"
     [[ "$M" == "auto" ]] && M="direct"
-    [[ "$M" == "direct" || "$M" == fou:* || "$M" == wss* ]] || return 1
+    [[ "$M" == "direct" || "$M" == fou:* || "$M" == wss* || "$M" == 6to4 || "$M" == 4in6 ]] || return 1
     init_carrier_json
     python3 -c '
 import json, sys
@@ -1179,6 +1210,9 @@ carrier_init_kernel() {
     fi
     iptables -C INPUT -p tcp --dport "$WP" -j ACCEPT >/dev/null 2>&1 || \
         iptables -I INPUT 1 -p tcp --dport "$WP" -j ACCEPT >/dev/null 2>&1 || true
+    # WSS can come in over IPv6 too
+    ip6tables -C INPUT -p tcp --dport "$WP" -j ACCEPT >/dev/null 2>&1 || \
+        ip6tables -I INPUT 1 -p tcp --dport "$WP" -j ACCEPT >/dev/null 2>&1 || true
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
         ufw allow "$WP"/tcp >/dev/null 2>&1 || true
     fi
@@ -1227,6 +1261,136 @@ mss_clamp_drop() {
     done
 }
 
+# ---- 6to4 / 4in6: the GRE device rides on IPv6 ----
+# 6to4: a sit tunnel (IP protocol 41) between the servers' IPv4 addresses
+# carries a private IPv6 /64, and an ip6gre device on it keeps the tunnel's
+# name and inner IPv4. 4in6: the ip6gre device runs between the servers'
+# public IPv6 addresses. FRP, Backhaul, the inner /30, the MTU keeper and the
+# counters see the same interface either way. Each tunnel's ends are kept in
+# $PANEL_CONFIG_DIR/gre6/IF.env (REMOTE4, LOCAL4, REMOTE6, LOCAL6), since an
+# ip6gre device no longer shows its IPv4 ends.
+gre6_env_file() { echo "$PANEL_CONFIG_DIR/gre6/$1.env"; }
+
+gre6_get() { # IF KEY
+    local f; f=$(gre6_env_file "$1")
+    [[ -r "$f" ]] || return 0
+    sed -n "s/^$2=//p" "$f" | head -n1
+}
+
+gre6_set() { # IF KEY VALUE
+    local f; f=$(gre6_env_file "$1")
+    mkdir -p "$(dirname "$f")"
+    { grep -v "^$2=" "$f" 2>/dev/null; echo "$2=$3"; } > "$f.tmp" && mv "$f.tmp" "$f"
+    chmod 600 "$f" 2>/dev/null || true
+}
+
+gre6_sit_name() { local n="hs6-$1"; echo "${n:0:15}"; }
+
+# gre_dev_kind IF: gre, ip6gre, sit or empty (a sit prints its proto first:
+# "sit ip6ip remote ...")
+gre_dev_kind() {
+    ip -d -o link show dev "$1" 2>/dev/null | grep -oE ' (ip6gre|gre|sit) ([a-z0-9]+ )?remote ' | head -n1 | awk '{print $1}'
+}
+
+# gre_dev_ends IF: "REMOTE LOCAL" of a tunnel device
+gre_dev_ends() {
+    ip -d -o link show dev "$1" 2>/dev/null | awk '{for (i = 1; i < NF; i++) {if ($i == "remote") r = $(i + 1); if ($i == "local") l = $(i + 1)}} END {print r, l}'
+}
+
+# gre6_ula INNER: "LOCAL REMOTE", the sit's private IPv6 ends. They come from
+# the tunnel's inner /30 (10.10.10.2 and .1 -> fd68:6173:a0a:a00::2 and ::1),
+# so both servers pick the same /64 without exchanging anything.
+gre6_ula() {
+    local a b c d base peer
+    IFS=. read -r a b c d <<<"${1%/*}"
+    [[ -n "$d" ]] || return 1
+    base=$((d & ~3))
+    if ((d == base + 1)); then peer=$((base + 2)); else peer=$((base + 1)); fi
+    printf 'fd68:6173:%x:%x::%x fd68:6173:%x:%x::%x\n' $((a * 256 + b)) $((c * 256 + base)) "$d" $((a * 256 + b)) $((c * 256 + base)) "$peer"
+}
+
+# gre6_firewall TARGET IF: let the carrier's packets in from the other server
+gre6_firewall() {
+    local r
+    if [[ "$1" == 6to4 ]]; then
+        r=$(gre6_get "$2" REMOTE4)
+        [[ -n "$r" ]] && { iptables -C INPUT -p 41 -s "$r" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p 41 -s "$r" -j ACCEPT 2>/dev/null; }
+    elif [[ "$1" == 4in6 ]]; then
+        r=$(gre6_get "$2" REMOTE6)
+        [[ -n "$r" ]] && command -v ip6tables >/dev/null 2>&1 && \
+            { ip6tables -C INPUT -p 47 -s "$r" -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p 47 -s "$r" -j ACCEPT 2>/dev/null; }
+    fi
+    true
+}
+
+# gre6_rebuild IF TARGET INNER: delete IF and create it again as the device
+# TARGET needs: ip6gre over a sit (6to4), ip6gre over IPv6 (4in6), or a plain
+# gre (any other carrier, which then sets its own encap). The routes on IF
+# come back afterwards; the caller restores the inner address and MTU.
+gre6_rebuild() {
+    local dev=$1 target=$2 inner=$3 kind r4 l4 r6 l6 sit ul ur routes
+    kind=$(gre_dev_kind "$dev")
+    if [[ "$kind" == gre ]]; then # remember the IPv4 ends before the device goes
+        read -r r4 l4 <<<"$(gre_dev_ends "$dev")"
+        [[ -n "$r4" && "$r4" != any ]] && gre6_set "$dev" REMOTE4 "$r4"
+        [[ -n "$l4" && "$l4" != any ]] && gre6_set "$dev" LOCAL4 "$l4"
+    fi
+    r4=$(gre6_get "$dev" REMOTE4); l4=$(gre6_get "$dev" LOCAL4)
+    r6=$(gre6_get "$dev" REMOTE6); l6=$(gre6_get "$dev" LOCAL6)
+    sit=$(gre6_sit_name "$dev")
+    case "$target" in
+        6to4) [[ -n "$r4" ]] || { echo "6to4: the IPv4 address of the other server is unknown" >&2; return 1; }
+              read -r ul ur <<<"$(gre6_ula "$inner")"
+              [[ -n "$ur" ]] || { echo "6to4: no inner IPv4 on $dev" >&2; return 1; } ;;
+        4in6) [[ -n "$r6" ]] || { echo "4in6: the IPv6 address of the other server is unknown" >&2; return 1; }
+              # an ip6gre without a local address cannot send (the kernel
+              # gives it no xmit capability): take the route's source
+              [[ -n "$l6" ]] || l6=$(ip -6 route get "$r6" 2>/dev/null | sed -n 's/.* src \([0-9a-fA-F:]*\).*/\1/p' | head -n1)
+              [[ -n "$l6" ]] || { echo "4in6: this server has no IPv6 route to $r6" >&2; return 1; } ;;
+        *)    [[ -n "$r4" ]] || { echo "$target: the IPv4 address of the other server is unknown" >&2; return 1; } ;;
+    esac
+    [[ "$target" == 6to4 || "$target" == 4in6 ]] && { [[ -d /proc/sys/net/ipv6 ]] || { echo "$target: IPv6 is disabled in this kernel" >&2; return 1; }; }
+    routes=$(ip -4 route show dev "$dev" 2>/dev/null | grep -v ' proto kernel ')
+    ip link del "$dev" >/dev/null 2>&1 || ip tunnel del "$dev" >/dev/null 2>&1 || true
+    ip link del "$sit" >/dev/null 2>&1 || true
+    local rc=0
+    case "$target" in
+        6to4)
+            modprobe sit >/dev/null 2>&1; modprobe ip6_gre >/dev/null 2>&1
+            if ip link add "$sit" type sit ${l4:+local "$l4"} remote "$r4" ttl 255; then
+                sysctl -qw "net.ipv6.conf.$sit.disable_ipv6=0" >/dev/null 2>&1 || true
+                ip link set "$sit" up mtu 1480
+                ip -6 addr add "$ul/64" dev "$sit" nodad 2>/dev/null || true
+                ip link add "$dev" type ip6gre local "$ul" remote "$ur" hoplimit 255 encaplimit none || rc=1
+            else
+                rc=1
+            fi
+            ;;
+        4in6)
+            modprobe ip6_gre >/dev/null 2>&1
+            ip link add "$dev" type ip6gre ${l6:+local "$l6"} remote "$r6" hoplimit 255 encaplimit none || rc=1
+            ;;
+        *)
+            ip link add "$dev" type gre ${l4:+local "$l4"} remote "$r4" ttl 255 2>/dev/null || \
+                ip link add "$dev" type gre remote "$r4" ttl 255 || rc=1
+            ;;
+    esac
+    if ((rc)); then # never leave the tunnel without its device: plain GRE again
+        ip link del "$sit" >/dev/null 2>&1 || true
+        ip link del "$dev" >/dev/null 2>&1 || true
+        [[ -n "$r4" ]] && ip link add "$dev" type gre ${l4:+local "$l4"} remote "$r4" ttl 255 2>/dev/null
+    fi
+    ip link set "$dev" up
+    [[ -n "$inner" ]] && ip addr replace "$inner" dev "$dev" 2>/dev/null
+    local r
+    while read -r r; do
+        [[ -n "$r" ]] && ip route replace $r dev "$dev" 2>/dev/null
+    done <<<"$routes"
+    ((rc)) && return 1
+    gre6_firewall "$target" "$dev"
+    return 0
+}
+
 carrier_apply() {
     local TARGET="$1"
     local SPECIFIC_IF="${2:-}"
@@ -1238,9 +1402,9 @@ carrier_apply() {
         IFS_TO_APPLY+=("$SPECIFIC_IF")
     else
         local dev
-        for dev in $(ip -o link show type gre 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1); do
+        for dev in $( (ip -o link show type gre; ip -o link show type ip6gre) 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1); do
             # hpt0: the panel's path test, never a tunnel (keyed GRE, removed after the test)
-            [[ "$dev" == "gre0" || "$dev" == "gretap0" || "$dev" == hpt* ]] && continue
+            [[ "$dev" == "gre0" || "$dev" == "gretap0" || "$dev" == "ip6gre0" || "$dev" == hpt* ]] && continue
             IFS_TO_APPLY+=("$dev")
         done
         if [[ ${#IFS_TO_APPLY[@]} -eq 0 ]]; then
@@ -1269,7 +1433,18 @@ carrier_apply() {
             TARGET_MTU=$(gre_mtu_for "$TARGET_MTU")
 
             local CHANGED=0
-            if [[ "$TARGET" == "direct" ]]; then
+            # 6to4 / 4in6, or back from them: another kind of device
+            if [[ "$TARGET" == 6to4 || "$TARGET" == 4in6 || "$(gre_dev_kind "$dev")" == ip6gre ]]; then
+                if gre6_rebuild "$dev" "$TARGET" "$DEV_IP"; then
+                    [[ "$TARGET" == 6to4 || "$TARGET" == 4in6 ]] && CHANGED=1
+                    ANY_APPLIED=1
+                elif [[ "$TARGET" == 6to4 || "$TARGET" == 4in6 ]]; then
+                    return 1
+                fi
+            fi
+            if [[ "$TARGET" == 6to4 || "$TARGET" == 4in6 ]]; then
+                :
+            elif [[ "$TARGET" == "direct" ]]; then
                 iptables -t nat -D OUTPUT -p udp --dport 19999 -j DNAT --to-destination 127.0.0.1:19999 >/dev/null 2>&1 || true
                 if ip link set dev "$dev" type gre encap none >/dev/null 2>&1; then
                     CHANGED=1
@@ -1300,6 +1475,8 @@ carrier_apply() {
                 [[ "$TARGET" == wss:* ]] && WPORT="${TARGET#wss:}"
                 iptables -C INPUT -p tcp --dport "$WPORT" -j ACCEPT >/dev/null 2>&1 || \
                     iptables -I INPUT 1 -p tcp --dport "$WPORT" -j ACCEPT >/dev/null 2>&1 || true
+                ip6tables -C INPUT -p tcp --dport "$WPORT" -j ACCEPT >/dev/null 2>&1 || \
+                    ip6tables -I INPUT 1 -p tcp --dport "$WPORT" -j ACCEPT >/dev/null 2>&1 || true
                 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
                     ufw allow "$WPORT"/tcp >/dev/null 2>&1 || true
                 fi
@@ -1500,7 +1677,7 @@ bundle_parse() {
         local a b c d e
         IFS=_ read -r a b c d e <<<"$rest"
         [[ -n "$a" && -n "$b" && -n "$c" && -n "$d" ]] || return 1
-        is_valid_ip "$a" || return 1
+        is_valid_ip_any "$a" || return 1
         is_valid_port "$b" || return 1
         [[ ${#d} -ge 1 && ${#d} -le 128 ]] || return 1
         B_IRAN_PUB="$a"
@@ -1674,7 +1851,7 @@ dial_current_addr() { # $1=kind -> host currently dialled
     local f; f="$(dial_conf_file "$1")"
     [[ -f "$f" ]] || return 1
     if [[ "$1" == "backhaul" ]]; then
-        sed -n 's/^remote_addr[[:space:]]*=[[:space:]]*"\([^":]*\):[0-9]*".*/\1/p' "$f" | head -n1
+        hostonly "$(sed -n -E 's/^remote_addr[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$f" | head -n1)"
     else
         sed -n 's/^serverAddr[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -n1
     fi
@@ -1684,7 +1861,7 @@ dial_current_port() { # $1=kind
     local f; f="$(dial_conf_file "$1")"
     [[ -f "$f" ]] || return 1
     if [[ "$1" == "backhaul" ]]; then
-        sed -n 's/^remote_addr[[:space:]]*=[[:space:]]*"[^":]*:\([0-9]*\)".*/\1/p' "$f" | head -n1
+        sed -n -E 's/^remote_addr[[:space:]]*=[[:space:]]*".*:([0-9]+)".*/\1/p' "$f" | head -n1
     else
         sed -n 's/^serverPort[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' "$f" | head -n1
     fi
@@ -1709,7 +1886,7 @@ dial_apply_addr() { # $1=kind $2=addr $3=port
     local f; f="$(dial_conf_file "$1")"
     [[ -f "$f" ]] || return 1
     if [[ "$1" == "backhaul" ]]; then
-        sed -i -E "s|^remote_addr[[:space:]]*=.*|remote_addr = \"$2:$3\"|" "$f"
+        sed -i -E "s|^remote_addr[[:space:]]*=.*|remote_addr = \"$(hostport "$2" "$3")\"|" "$f"
     else
         sed -i -E "s|^serverAddr[[:space:]]*=.*|serverAddr = \"$2\"|" "$f"
     fi
@@ -2218,6 +2395,152 @@ cli_spoof() {
     esac
 }
 
+# ---- Xray Tunnel: the panel's own Xray-core, apart from any Xray panel ----
+# Installed to its own directory: never /usr/local/bin/xray (the official
+# installer's) nor a panel's (3x-ui, Marzban, ...), whose xray, units and ports
+# stay untouched. Units are hashem-xray-N only; nothing is killed by name.
+DEFAULT_XRAY_VERSION="v26.3.27"
+XRAY_DIR="${XRAY_DIR:-/usr/local/lib/hashem/xray}"
+# sha256 of the official v26.3.27 release archives (verified on download).
+XRAY_SHA256_amd64="23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
+XRAY_SHA256_arm64="4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"
+
+# xray_unzip ZIP DIR: unzip, else python3, else install unzip and retry.
+xray_unzip() {
+    unzip -oq "$1" -d "$2" 2>/dev/null && [[ -f "$2/xray" ]] && return 0
+    python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$1" "$2" 2>/dev/null \
+        && [[ -f "$2/xray" ]] && return 0
+    if command -v apt-get >/dev/null 2>&1; then
+        wait_for_package_manager_lock 2>/dev/null || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unzip >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q unzip >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y -q unzip >/dev/null 2>&1 || true
+    fi
+    unzip -oq "$1" -d "$2" 2>/dev/null && [[ -f "$2/xray" ]]
+}
+
+# install_xray_core [--force]: the pinned Xray-core, sha256 checked, into
+# XRAY_DIR. A running tunnel keeps its binary until the new one is in place.
+install_xray_core() {
+    local want="${DEFAULT_XRAY_VERSION#v}"
+    if [[ "${1:-}" != "--force" && -x "${XRAY_DIR}/xray" ]] \
+        && "${XRAY_DIR}/xray" version 2>/dev/null | head -1 | grep -q " ${want} "; then
+        return 0
+    fi
+    detect_arch
+    local ZIP_ARCH
+    case "$FRP_ARCH" in
+        amd64) ZIP_ARCH="64" ;;
+        arm64) ZIP_ARCH="arm64-v8a" ;;
+        *) echo -e "${RED}[!] The Xray tunnel supports amd64 and arm64 only (this is ${FRP_ARCH}).${NC}"; return 1 ;;
+    esac
+    local WANT_SHA GOT_SHA TMP_DIR
+    eval "WANT_SHA=\${XRAY_SHA256_${FRP_ARCH}}"
+    TMP_DIR=$(mktemp -d)
+    local URL="https://github.com/XTLS/Xray-core/releases/download/${DEFAULT_XRAY_VERSION}/Xray-linux-${ZIP_ARCH}.zip"
+    echo -e "${CYAN}[*] Downloading Xray-core ${DEFAULT_XRAY_VERSION} (${FRP_ARCH})...${NC}"
+    if ! download_with_fallback "${TMP_DIR}/xray.zip" "$URL" 180; then
+        echo -e "${RED}[!] Failed to download Xray-core from GitHub or mirrors.${NC}"
+        rm -rf "$TMP_DIR"; return 1
+    fi
+    GOT_SHA=$(sha256sum "${TMP_DIR}/xray.zip" 2>/dev/null | awk '{print $1}')
+    if [[ "$GOT_SHA" != "$WANT_SHA" ]]; then
+        echo -e "${RED}[!] Xray-core checksum mismatch — refusing to install.${NC}"
+        echo -e "    want ${WANT_SHA}\n    got  ${GOT_SHA}"
+        rm -rf "$TMP_DIR"; return 1
+    fi
+    mkdir -p "${TMP_DIR}/x"
+    if ! xray_unzip "${TMP_DIR}/xray.zip" "${TMP_DIR}/x"; then
+        echo -e "${RED}[!] Could not unpack Xray-core (install unzip or python3).${NC}"
+        rm -rf "$TMP_DIR"; return 1
+    fi
+    mkdir -p "$XRAY_DIR"
+    local f
+    for f in geoip.dat geosite.dat; do
+        [[ -f "${TMP_DIR}/x/$f" ]] && install -m 0644 "${TMP_DIR}/x/$f" "${XRAY_DIR}/$f"
+    done
+    # replace by rename: a running hashem-xray keeps the old file open
+    install -m 0755 "${TMP_DIR}/x/xray" "${XRAY_DIR}/xray.new" && mv -f "${XRAY_DIR}/xray.new" "${XRAY_DIR}/xray"
+    rm -rf "$TMP_DIR"
+    if "${XRAY_DIR}/xray" version >/dev/null 2>&1; then
+        echo -e "${GREEN}[OK] Xray-core ${DEFAULT_XRAY_VERSION} installed to ${XRAY_DIR}.${NC}"
+        return 0
+    fi
+    echo -e "${RED}[!] Xray-core was installed but does not run on this server.${NC}"
+    return 1
+}
+
+# xray_link_units: the Xray tunnel's units on this server (hashem-xray-N).
+xray_link_units() {
+    local f
+    for f in /etc/systemd/system/hashem-xray-[0-9]*.service; do
+        [[ -f $f ]] && basename "$f"
+    done
+}
+
+# xray_enabled_units: the links that should run (a link stopped in the panel
+# is disabled and stays stopped on `hashem xray start`).
+xray_enabled_units() {
+    local u
+    for u in $(xray_link_units); do
+        systemctl is-enabled --quiet "$u" 2>/dev/null && echo "$u"
+    done
+}
+
+# xray_remove_all: stop and remove the tunnel's units and its Xray-core.
+# The panel's link settings stay, so installing again brings them back.
+xray_remove_all() {
+    xray_link_units | xargs -r systemctl disable --now >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/hashem-xray-[0-9]*.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    rm -rf "$XRAY_DIR"
+}
+
+# cli_xray: terminal entry for the Xray tunnel. Installing the core is a new
+# setup and needs Pro; status, logs, start, stop and restart of links that
+# exist never ask (see pro_ok).
+cli_xray() {
+    local SUB="${1:-status}" u
+    case "$SUB" in
+        install|core)
+            pro_ok xray "Xray Tunnel" || return 1
+            install_xray_core "${2:-}" ;;
+        status)
+            if [[ -x "${XRAY_DIR}/xray" ]]; then
+                echo -e "${GREEN}[OK] Xray-core:${NC} $("${XRAY_DIR}/xray" version 2>/dev/null | head -1)"
+            else
+                echo -e "${YELLOW}[!] Xray-core not installed. Run: hashem xray install${NC}"
+            fi
+            local n=0
+            for u in $(xray_link_units); do
+                n=$((n + 1))
+                if systemctl is-active --quiet "$u"; then
+                    echo -e "  ${u%.service}: ${GREEN}active${NC}"
+                else
+                    echo -e "  ${u%.service}: ${YELLOW}$(systemctl is-active "$u" 2>/dev/null)${NC}"
+                fi
+            done
+            (( n )) || echo "  No Xray tunnel links yet: set one up in the panel's Xray tab."
+            ;;
+        start|up)
+            xray_enabled_units | xargs -r systemctl start && echo -e "${GREEN}[OK] Xray tunnel links started.${NC}" ;;
+        stop|down)
+            xray_link_units | xargs -r systemctl stop; echo -e "${GREEN}[OK] Xray tunnel links stopped.${NC}" ;;
+        restart)
+            xray_enabled_units | xargs -r systemctl restart && echo -e "${GREEN}[OK] Xray tunnel links restarted.${NC}" ;;
+        logs)
+            journalctl -u 'hashem-xray-*' -n "${2:-100}" --no-pager ;;
+        uninstall|remove)
+            xray_remove_all
+            echo -e "${GREEN}[OK] Xray tunnel removed (its links stay in the panel; install again to bring them back).${NC}" ;;
+        *)
+            echo -e "Usage: hashem xray {install|status|start|stop|restart|logs [N]|uninstall}"
+            return 1 ;;
+    esac
+}
+
 backhaul_ensure_tls() {
     mkdir -p "$BACKHAUL_CONFIG_DIR"
     if [[ ! -f "${BACKHAUL_CONFIG_DIR}/server.crt" || ! -f "${BACKHAUL_CONFIG_DIR}/server.key" ]]; then
@@ -2577,7 +2900,7 @@ backhaul_write_client_conf_v2() {
             printf '[mux]\nmux_version = 1\n\n'
         fi
         if [[ "$TRANSPORT" == "wss" || "$TRANSPORT" == "wssmux" ]]; then
-            printf '[tls]\nsni = "%s"\n\n' "${REMOTE_ADDR%%:*}"
+            printf '[tls]\nsni = "%s"\n\n' "$(hostonly "$REMOTE_ADDR")"
         fi
         printf '[logging]\nlog_level = "info"\n'
     } > "$CONF_FILE"
@@ -2893,11 +3216,37 @@ purge_legacy_obfuscation() {
 # The panel counts Backhaul/Bagher traffic with two iptables chains (rules
 # without a target: they count, never drop). Removed with the tunnels.
 acct_chains_drop() {
-    local h
-    for h in INPUT:HASHEM_ACCT_IN OUTPUT:HASHEM_ACCT_OUT; do
-        iptables -D "${h%%:*}" -j "${h#*:}" 2>/dev/null || true
-        iptables -F "${h#*:}" 2>/dev/null || true
-        iptables -X "${h#*:}" 2>/dev/null || true
+    local h b
+    for b in iptables ip6tables; do
+        command -v "$b" >/dev/null 2>&1 || continue
+        for h in INPUT:HASHEM_ACCT_IN OUTPUT:HASHEM_ACCT_OUT; do
+            "$b" -D "${h%%:*}" -j "${h#*:}" 2>/dev/null || true
+            "$b" -F "${h#*:}" 2>/dev/null || true
+            "$b" -X "${h#*:}" 2>/dev/null || true
+        done
+    done
+}
+
+# The per-server speed and volume limits (panel/limits.go): the HASHEM_LIMIT
+# chain (iptables and ip6tables) and the tc policers (pref 4917, IPv6 4918)
+# on every interface.
+limits_drop() {
+    local h d n b p
+    for b in iptables ip6tables; do
+        command -v "$b" >/dev/null 2>&1 || continue
+        for h in INPUT OUTPUT FORWARD; do
+            "$b" -D "$h" -j HASHEM_LIMIT 2>/dev/null || true
+        done
+        "$b" -F HASHEM_LIMIT 2>/dev/null || true
+        "$b" -X HASHEM_LIMIT 2>/dev/null || true
+    done
+    command -v tc >/dev/null 2>&1 || return 0
+    for d in /sys/class/net/*; do
+        n=${d##*/}
+        for p in 4917 4918; do
+            tc filter del dev "$n" egress pref "$p" 2>/dev/null || true
+            tc filter del dev "$n" ingress pref "$p" 2>/dev/null || true
+        done
     done
 }
 
@@ -3931,7 +4280,7 @@ setup_backhaul_foreign_server_noninteractive() {
 
     if [[ "$STATUS_BH" == "OK" ]]; then
         mkdir -p "${BACKHAUL_CONFIG_DIR}"
-        backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "${IP_IRAN}:${SERVER_PORT}" "$TRANSPORT" "$TOKEN"
+        backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "$(hostport "$IP_IRAN" "$SERVER_PORT")" "$TRANSPORT" "$TOKEN"
         _bh_since=$(date '+%Y-%m-%d %H:%M:%S')
         setup_backhaul_client_systemd "backhaul-client" "${BACKHAUL_CONFIG_DIR}/client.toml"
 
@@ -4165,7 +4514,7 @@ setup_gre_backhaul_foreign_server_noninteractive() {
         # In GRE+Backhaul, foreign client dials Iran via the GRE internal IP (PEER_GRE)
         BH_DIAL=$(dial_pick "${FRP_DIAL:-auto}" "$PEER_GRE" "$IP_IRAN" "$SERVER_PORT")
         dial_env_write "${FRP_DIAL:-auto}" backhaul "$PEER_GRE" "$IP_IRAN"
-        backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "${BH_DIAL}:${SERVER_PORT}" "$TRANSPORT" "$TOKEN"
+        backhaul_write_client_conf "${BACKHAUL_CONFIG_DIR}/client.toml" "$(hostport "$BH_DIAL" "$SERVER_PORT")" "$TRANSPORT" "$TOKEN"
         _bh_since=$(date '+%Y-%m-%d %H:%M:%S')
         setup_backhaul_client_systemd "backhaul-client" "${BACKHAUL_CONFIG_DIR}/client.toml"
         sed -i "s/After=network.target/After=network.target ${TUNNEL_NAME}.service/" /etc/systemd/system/backhaul-client.service 2>/dev/null || true
@@ -4358,6 +4707,7 @@ remove_hashem_tunnel_ifaces() {
     for gif in $names; do
         [[ -n "$gif" && "$gif" != gre0 && "$gif" != gretap0 ]] || continue
         ip link del "$gif" >/dev/null 2>&1 || ip tunnel del "$gif" >/dev/null 2>&1 || true
+        ip link del "$(gre6_sit_name "$gif")" >/dev/null 2>&1 || true
     done
     ip fou show 2>/dev/null | awk '$0 ~ /ipproto 47/ {for (i = 1; i < NF; i++) if ($i == "port") print $(i + 1)}' | while read -r fp; do
         [[ -n "$fp" ]] && ip fou del port "$fp" 2>/dev/null || true
@@ -4633,9 +4983,14 @@ cli_add_backhaul_peer() {
     backhaul_setup_guard "$TRANSPORT" "$PORTS" || return 1
     PORTS=$BH_PORTS_NORM
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     PORT=${PORT:-$(gen_random_port)}
-    is_valid_ip "$LOCAL_PUB" || { echo -e "${RED}[!] Invalid local IP: '$LOCAL_PUB'${NC}"; return 1; }
+    if [[ "$NO_GRE" -eq 1 ]]; then
+        is_valid_ip_any "$LOCAL_PUB" || { echo -e "${RED}[!] Invalid local IP: '$LOCAL_PUB'${NC}"; return 1; }
+    else
+        is_valid_ip "$LOCAL_PUB" || { echo -e "${RED}[!] GRE needs this server's IPv4 address, got '$LOCAL_PUB'${NC}"; return 1; }
+        [[ -z "$REMOTE_PUB" ]] || is_valid_ip "$REMOTE_PUB" || { echo -e "${RED}[!] GRE needs the foreign server's IPv4 address, got '$REMOTE_PUB'${NC}"; return 1; }
+    fi
     is_valid_port "$PORT" || { echo -e "${RED}[!] Invalid control port: '$PORT'${NC}"; return 1; }
     if grep -q "\"remote_pub\": *\"${REMOTE_PUB}\"" "$PEERS_FILE" 2>/dev/null; then
         echo -e "${RED}[!] Foreign IP ${REMOTE_PUB} is already used by another tunnel.${NC}"; return 1
@@ -4736,7 +5091,7 @@ PYEOF
 
 # edit full configuration of one peer ($1=id, [--name], [--remote-pub], [--carrier], [--ports])
 cli_edit_peer() {
-    local ID="" NAME="" REMOTE_PUB="" CARRIER="" PORTS="" PROXY_PROTOCOL=""
+    local ID="" NAME="" REMOTE_PUB="" CARRIER="" PORTS="" PROXY_PROTOCOL="" REMOTE6=""
     local FRP_TRANSPORT="" FRP_ENCRYPTION="" FRP_COMPRESSION=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -4744,6 +5099,7 @@ cli_edit_peer() {
             --name) NAME="$2"; shift 2 ;;
             --remote-pub) REMOTE_PUB="$2"; shift 2 ;;
             --carrier) CARRIER="$2"; shift 2 ;;
+            --remote6) REMOTE6="$2"; shift 2 ;;
             --ports) PORTS="$2"; shift 2 ;;
             --proxy-protocol) PROXY_PROTOCOL="$2"; shift 2 ;;
             --frp-transport) FRP_TRANSPORT="$2"; shift 2 ;;
@@ -4751,7 +5107,7 @@ cli_edit_peer() {
             --compress) FRP_COMPRESSION="on"; shift ;;
             --frp-encryption) FRP_ENCRYPTION="$2"; shift 2 ;;
             --frp-compression) FRP_COMPRESSION="$2"; shift 2 ;;
-            -h|--help) echo 'Usage: hashem.sh edit-peer --id N [--name LABEL] [--remote-pub IP] [--carrier direct|wss:P] [--ports "443, 2083"] [--proxy-protocol off|v1|v2] [--frp-transport tcp|kcp|quic|websocket|wss] [--encrypt] [--compress]'; return 0 ;;
+            -h|--help) echo 'Usage: hashem.sh edit-peer --id N [--name LABEL] [--remote-pub IP] [--carrier direct|wss:P|6to4|4in6 [--remote6 IP]] [--ports "443, 2083"] [--proxy-protocol off|v1|v2] [--frp-transport tcp|kcp|quic|websocket|wss] [--encrypt] [--compress]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
         esac
     done
@@ -4775,7 +5131,11 @@ cli_edit_peer() {
 
     # Validate remote public IP if provided
     if [[ -n "$REMOTE_PUB" ]]; then
-        is_valid_ip "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: ${REMOTE_PUB}${NC}"; return 1; }
+        if [[ "$CUR_GIF" == "none" ]]; then # Backhaul without GRE: either family
+            is_valid_ip_any "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: ${REMOTE_PUB}${NC}"; return 1; }
+        else
+            is_valid_ip "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: ${REMOTE_PUB} (GRE needs IPv4)${NC}"; return 1; }
+        fi
         PEERS_F="$PEERS_FILE" PEER_ID="$ID" NEW_IP="$REMOTE_PUB" python3 <<'PYEOF'
 import json, os, sys
 f = os.environ["PEERS_F"]
@@ -4794,10 +5154,14 @@ PYEOF
 
     # Validate carrier if provided
     if [[ -n "$CARRIER" ]]; then
-        if [[ "$CARRIER" != "direct" && "$CARRIER" != fou:* && "$CARRIER" != wss:* && "$CARRIER" != "fou" && "$CARRIER" != "wss" ]]; then
-            echo -e "${RED}[!] Invalid carrier mode: ${CARRIER} (must be direct, fou:PORT, or wss:PORT)${NC}"
+        if [[ "$CARRIER" != "direct" && "$CARRIER" != fou:* && "$CARRIER" != wss:* && "$CARRIER" != "fou" && "$CARRIER" != "wss" && "$CARRIER" != 6to4 && "$CARRIER" != 4in6 ]]; then
+            echo -e "${RED}[!] Invalid carrier mode: ${CARRIER} (must be direct, wss:PORT, 6to4 or 4in6)${NC}"
             return 1
         fi
+    fi
+    if [[ -n "$REMOTE6" ]]; then
+        is_valid_ip6 "$REMOTE6" || { echo -e "${RED}[!] Invalid --remote6: ${REMOTE6}${NC}"; return 1; }
+        gre6_set "$CUR_GIF" REMOTE6 "$REMOTE6"
     fi
 
     # Validate ports if provided
@@ -4956,7 +5320,7 @@ setup_iran_server() {
     echo -e "${YELLOW}====================================================${NC}"
 
     MY_PUBLIC_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    [[ -z "$MY_PUBLIC_IP" ]] && MY_PUBLIC_IP=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$MY_PUBLIC_IP" ]] && MY_PUBLIC_IP=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     prompt_ip IP_IRAN "Enter IRAN Server Public IP" "$MY_PUBLIC_IP"
     prompt_ip IP_FOREIGN "Enter FOREIGN Server Public IP" ""
 
@@ -5032,13 +5396,15 @@ menu_edit_peer() {
     local NEW_NAME NEW_REMOTE CAR_OPT NEW_CARRIER="" NEW_PORTS
     read -p "Name [${CUR_NAME}]: " NEW_NAME
     read -p "Remote Public IP [${CUR_REMOTE}]: " NEW_REMOTE
-    echo -e "Carrier mode options: 1) Direct GRE  2) FOU:443  3) FOU:55555  4) WSS:8443  (Enter to keep '${CUR_CARRIER}')"
+    echo -e "Carrier options: 1) Direct GRE  2) WSS:8443  3) 6to4  4) 4in6  (Enter to keep '${CUR_CARRIER}')"
     read -p "Select carrier [1-4]: " CAR_OPT
+    local NEW_R6=""
     case "$CAR_OPT" in
         1) NEW_CARRIER="direct" ;;
-        2) NEW_CARRIER="fou:443" ;;
-        3) NEW_CARRIER="fou:55555" ;;
-        4) NEW_CARRIER="wss:8443" ;;
+        2) NEW_CARRIER="wss:8443" ;;
+        3) NEW_CARRIER="6to4" ;;
+        4) NEW_CARRIER="4in6"
+           read -p "IPv6 of the other server (Enter to keep the saved one): " NEW_R6 ;;
         *) NEW_CARRIER="" ;;
     esac
     read -p "Forwarded ports (comma-separated) [${CUR_PORTS}]: " NEW_PORTS
@@ -5047,6 +5413,7 @@ menu_edit_peer() {
     [[ -n "$NEW_NAME" ]] && ARGS+=(--name "$NEW_NAME")
     [[ -n "$NEW_REMOTE" ]] && ARGS+=(--remote-pub "$NEW_REMOTE")
     [[ -n "$NEW_CARRIER" ]] && ARGS+=(--carrier "$NEW_CARRIER")
+    [[ -n "$NEW_R6" ]] && ARGS+=(--remote6 "$NEW_R6")
     [[ -n "$NEW_PORTS" ]] && ARGS+=(--ports "$NEW_PORTS")
 
     cli_edit_peer "${ARGS[@]}"
@@ -5057,7 +5424,7 @@ setup_foreign_server() {
     echo -e "${YELLOW}   STEP 2: CONFIGURING FOREIGN SERVER (GRE + FRPC)  ${NC}"
     echo -e "${YELLOW}====================================================${NC}"
     MY_PUBLIC_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    [[ -z "$MY_PUBLIC_IP" ]] && MY_PUBLIC_IP=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$MY_PUBLIC_IP" ]] && MY_PUBLIC_IP=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
 
     echo -e "Do you have a Setup Bundle from the Iran server? (${CYAN}hsh1_...${NC})"
     read -p "Enter Setup Bundle [Press Enter to configure manually]: " BUNDLE_IN
@@ -5723,6 +6090,7 @@ uninstall_all_force() {
             # cluster pools and hub forwarding
             [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" cluster reset >/dev/null 2>&1 || true
             acct_chains_drop
+            limits_drop
         fi
         ip link del hashem-lb >/dev/null 2>&1 || true
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"
@@ -5731,6 +6099,15 @@ uninstall_all_force() {
         tune_restore >/dev/null 2>&1 || true
         rm -f /etc/sysctl.d/99-hashem.conf /etc/sysctl.d/99-gre-panel.conf
         command -v sysctl >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1 || true
+
+        # 6b. Bagher: the SSH carriers (one per foreign server), frps or frpc
+        bagher_link_units | xargs -r systemctl disable --now >/dev/null 2>&1 || true
+        systemctl disable --now hashem-bagher hashem-bagher-frps hashem-bagher-frpc hashem-ssh-fwd hashem-ssh-frps >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/hashem-bagher*.service /etc/systemd/system/hashem-ssh-fwd.service /etc/systemd/system/hashem-ssh-frps.service
+        systemctl daemon-reload >/dev/null 2>&1 || true
+
+        # 6c. Xray tunnel: its units and its own Xray-core (never an Xray panel's)
+        xray_remove_all
 
         # 7. Remove all binaries (and the Spoof tunnel: its core, WireGuard link, configs)
         systemctl disable --now wg-quick@wg-spoof spoof-core >/dev/null 2>&1 || true
@@ -5802,6 +6179,7 @@ remove_tunnel_force() {
             # cluster pools and hub forwarding
             [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" cluster reset >/dev/null 2>&1 || true
             acct_chains_drop
+            limits_drop
         fi
         ip link del hashem-lb >/dev/null 2>&1 || true
         rm -f "$PANEL_CONFIG_DIR/gre_mtu"
@@ -8444,74 +8822,70 @@ cli_carrier() {
     init_carrier_json
     local SUB="${1:-status}"
     case "$SUB" in
+        set|set-active|apply)
+            shift
+            local T="${1:-}" GIF="" L6="" R6=""
+            if [[ -z "$T" ]]; then
+                echo -e "${RED}[!] Usage: hashem carrier set <direct|wss[:PORT]|6to4|4in6> [--if IF] [--local6 IP --remote6 IP]${NC}"
+                return 1
+            fi
+            shift
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --if) GIF="$2"; shift 2 ;;
+                    --local6) L6="$2"; shift 2 ;;
+                    --remote6) R6="$2"; shift 2 ;;
+                    *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
+                esac
+            done
+            [[ -z "$L6" ]] || is_valid_ip6 "$L6" || { echo -e "${RED}[!] Invalid --local6: $L6${NC}"; return 1; }
+            [[ -z "$R6" ]] || is_valid_ip6 "$R6" || { echo -e "${RED}[!] Invalid --remote6: $R6${NC}"; return 1; }
+            [[ -n "$L6" ]] && gre6_set "${GIF:-$TUNNEL_NAME}" LOCAL6 "$L6"
+            [[ -n "$R6" ]] && gre6_set "${GIF:-$TUNNEL_NAME}" REMOTE6 "$R6"
+            carrier_apply "$T" "$GIF" || return 1
+            echo -e "${GREEN}[OK] Carrier now: ${T}${NC}"
+            ;;
+        mode|set-mode)
+            local T="${2:-direct}"
+            [[ "$T" == "auto" ]] && T="direct" # automatic switching was removed
+            carrier_set_mode "$T" || { echo -e "${RED}[!] Invalid carrier: $T${NC}"; return 1; }
+            carrier_apply "$T" || return 1
+            echo -e "${GREEN}[OK] Carrier mode set to: ${T}${NC}"
+            ;;
+        cycle|next)
+            carrier_cycle_next
+            ;;
+        set-ports)
+            shift
+            carrier_set_fou_ports "${1:-443}" "${2:-55555}"
+            ;;
+        init|kernel-init)
+            carrier_init_kernel
+            ;;
         status)
-            local MODE ACT P1 P2
-            MODE=$(carrier_get_mode)
+            local ACT KIND PGRE PING_OUT="no peer"
             ACT=$(carrier_get_active)
-            read -r P1 P2 <<< "$(carrier_get_fou_ports)"
-            local PGRE PING_OUT="no peer"
+            KIND=$(gre_dev_kind "$TUNNEL_NAME")
             PGRE=$(watchdog_get_peer_gre 2>/dev/null)
             if [[ -n "$PGRE" ]]; then
-                if ping -c 1 -W 2 "$PGRE" >/dev/null 2>&1; then
-                    local RTT
-                    RTT=$(ping -c 1 -W 2 "$PGRE" 2>/dev/null | sed -n 's/.*time=\([0-9.]*\) *ms.*/\1/p' | head -n1)
+                local RTT
+                RTT=$(ping -c 1 -W 2 "$PGRE" 2>/dev/null | sed -n 's/.*time=\([0-9.]*\) *ms.*/\1/p' | head -n1)
+                if [[ -n "$RTT" ]]; then
                     PING_OUT="${GREEN}OK (${RTT}ms to ${PGRE})${NC}"
                 else
                     PING_OUT="${RED}FAIL (no reply from ${PGRE})${NC}"
                 fi
             fi
-
-            echo -e "\n${CYAN}==========================================================${NC}"
-            echo -e "${CYAN}         Tunnel Carrier & Multi-Protocol Failover         ${NC}"
-            echo -e "${CYAN}==========================================================${NC}"
-            echo -e "Failover Mode:    ${YELLOW}${MODE}${NC} (auto / direct / manual)"
-            echo -e "Active Carrier:   ${GREEN}${ACT}${NC}"
-            echo -e "FOU Listeners:    UDP ${P1} / UDP ${P2} (Kernel FOU / ipproto 47)"
-            echo -e "Tunnel Health:    ${PING_OUT}"
-            python3 -c '
-import json
-try:
-    with open("'"$CARRIER_FILE"'") as f:
-        d = json.load(f)
-    cands = ", ".join(d.get("candidates", []))
-    print(f"Candidates:       {cands}")
-    print(f"Total Switches:   {d.get(\"switch_count\", 0)}")
-    last = d.get("last_switch", "") or "never"
-    print(f"Last Switch:      {last}")
-except Exception:
-    pass
-' 2>/dev/null
-            echo -e "${CYAN}==========================================================${NC}\n"
-            ;;
-        mode|set-mode)
-            local TARGET="${2:-direct}"
-            [[ "$TARGET" == "auto" ]] && TARGET="direct"
-            carrier_set_mode "$TARGET"
-            echo -e "${GREEN}[OK] Carrier mode set to: ${TARGET}${NC}"
-            carrier_apply "$TARGET"
-            echo -e "${GREEN}[OK] Active carrier applied: ${TARGET}${NC}"
-            ;;
-        set|set-active|apply)
-            local TARGET="${2:-direct}"
-            carrier_apply "$TARGET"
-            echo -e "${GREEN}[OK] Switched active carrier to: ${TARGET}${NC}"
-            ;;
-        next|cycle)
-            local NEW_C
-            NEW_C=$(carrier_cycle_next)
-            echo -e "${GREEN}[OK] Cycled carrier to: ${NEW_C}${NC}"
-            ;;
-        set-ports)
-            local P1="${2:-443}" P2="${3:-55555}"
-            carrier_set_fou_ports "$P1" "$P2"
-            carrier_init_kernel
-            echo -e "${GREEN}[OK] FOU ports updated: ${P1} and ${P2}${NC}"
-            ;;
-        kernel-init)
-            carrier_init_kernel
+            echo -e "Active Carrier: ${GREEN}${ACT}${NC}"
+            echo -e "Mode:           $(carrier_get_mode)"
+            echo -e "GRE device:     ${KIND:-none} (${TUNNEL_NAME})"
+            if [[ "$ACT" == 4in6 ]]; then
+                echo -e "IPv6 ends:      $(gre6_get "$TUNNEL_NAME" LOCAL6) -> $(gre6_get "$TUNNEL_NAME" REMOTE6)"
+            fi
+            echo -e "Tunnel health:  ${PING_OUT}"
             ;;
         *)
-            echo "Usage: hashem carrier [status|mode <direct|fou:PORT>|set <direct|fou:PORT>|next|cycle|set-ports <P1> <P2>]"
+            echo "Usage: hashem carrier [status | set <direct|wss[:PORT]|6to4|4in6> [--if IF] [--local6 IP] [--remote6 IP] | mode <...> | cycle | set-ports P1 P2 | init]"
             return 1
             ;;
     esac
@@ -8520,16 +8894,26 @@ except Exception:
 menu_carrier() {
     local c
     while true; do
-        ui_menu c "Tunnel / Carrier" "$(cli_carrier status 2>&1)" \
+        # this menu changes this server only; the panel's Tunnel tab switches both
+        ui_menu c "Tunnel / Carrier" "$(cli_carrier status 2>&1; echo "Switch the other server too, or use the panel (Tunnel tab), which switches both.")" \
             "1|Direct GRE|Plain GRE (IP protocol 47). Fastest when it is not blocked." \
             "2|WSS (port 8443)|GRE inside WebSocket over TLS; looks like HTTPS." \
-            "3|Next candidate|Try the next carrier in the list now." \
-            "4|Automatic|Switch carriers by itself when one stops working."
+            "3|6to4|GRE over a private IPv6 inside IPv4 (protocol 41), when 47 is blocked." \
+            "4|4in6|GRE over both servers' public IPv6 addresses." \
+            "5|Next candidate|Try the next carrier in the list now."
         case "$c" in
-            1) ui_run "Carrier" cli_carrier set direct ;;
-            2) ui_run "Carrier" cli_carrier set wss:8443 ;;
-            3) ui_run "Carrier" cli_carrier next ;;
-            4) ui_run "Carrier" cli_carrier mode auto ;;
+            1) ui_run "Carrier" cli_carrier mode direct ;;
+            2) ui_run "Carrier" cli_carrier mode wss:8443 ;;
+            3) ui_run "Carrier" cli_carrier mode 6to4 ;;
+            4) local r6=""
+               read -r -p "IPv6 of the other server (Enter to keep the saved one): " r6
+               if [[ -n "$r6" ]] && ! is_valid_ip6 "$r6"; then
+                   echo -e "${RED}[!] Invalid IPv6: $r6${NC}"
+               else
+                   [[ -n "$r6" ]] && gre6_set "$TUNNEL_NAME" REMOTE6 "$r6"
+                   ui_run "Carrier" cli_carrier mode 4in6
+               fi ;;
+            5) ui_run "Carrier" cli_carrier cycle ;;
             0) return 0 ;;
         esac
     done
@@ -8792,7 +9176,7 @@ setup_backhaul_iran_interactive() {
         echo -e "\n${YELLOW}=== Setup Backhaul Iran Server (no GRE) ===${NC}"
     fi
     MYIP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    [[ -z "$MYIP" ]] && MYIP=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$MYIP" ]] && MYIP=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     prompt_ip LOCAL_PUB "Enter IRAN Server Public IP" "$MYIP"
     prompt_ip REMOTE_PUB "Enter FOREIGN Server Public IP" ""
     prompt_port PORT "Enter Backhaul Server Port" "$(gen_random_port)"
@@ -9860,7 +10244,7 @@ cli_setup_iran() {
         esac
     done
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     FRP_PORT=${FRP_PORT:-$(gen_random_port)}
     validate_setup_common "$LOCAL_PUB" "$REMOTE_PUB" "$FRP_PORT" "$LOCAL_GRE" || return 1
     is_valid_ip "$PEER_GRE" || { echo -e "${RED}[!] Invalid peer GRE IP: '$PEER_GRE'${NC}"; return 1; }
@@ -9940,7 +10324,7 @@ cli_setup_foreign() {
     # --bundle replaces --token as the required secret
     [[ -z "$TOKEN" && -n "$BUNDLE" ]] && TOKEN=$B_TOKEN
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     FRP_PORT=${FRP_PORT:-$(gen_random_port)}
     LOCAL_GRE=${LOCAL_GRE:-$FOREIGN_GRE_DEF}
     PEER_GRE=${PEER_GRE:-$IRAN_GRE_DEF}
@@ -9993,9 +10377,9 @@ cli_setup_backhaul_iran() {
         esac
     done
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     PORT=${PORT:-$(gen_random_port)}
-    is_valid_ip "$LOCAL_PUB" || { echo -e "${RED}[!] Invalid local IP: '$LOCAL_PUB'${NC}"; return 1; }
+    is_valid_ip_any "$LOCAL_PUB" || { echo -e "${RED}[!] Invalid local IP: '$LOCAL_PUB'${NC}"; return 1; }
     is_valid_port "$PORT" || { echo -e "${RED}[!] Invalid port: '$PORT'${NC}"; return 1; }
     if [[ -z "$TOKEN" ]]; then
         TOKEN=$(gen_token32)
@@ -10034,8 +10418,8 @@ cli_setup_backhaul_foreign() {
     fi
     [[ -z "$TOKEN" && -n "$BUNDLE" ]] && TOKEN=$B_TOKEN
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
-    is_valid_ip "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: '$REMOTE_PUB'${NC}"; return 1; }
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    is_valid_ip_any "$REMOTE_PUB" || { echo -e "${RED}[!] Invalid remote public IP: '$REMOTE_PUB'${NC}"; return 1; }
     is_valid_port "$PORT" || { echo -e "${RED}[!] Invalid port: '$PORT'${NC}"; return 1; }
     [[ -n "$TOKEN" ]] || { echo -e "${RED}[!] --token or --bundle is required.${NC}"; return 1; }
     if [[ "$FORCE" -ne 1 ]] && systemctl is-active --quiet backhaul-client 2>/dev/null; then
@@ -10065,7 +10449,7 @@ cli_setup_gre_backhaul_iran() {
         esac
     done
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     PORT=${PORT:-$(gen_random_port)}
     validate_setup_common "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$LOCAL_GRE" || return 1
     is_valid_ip "$PEER_GRE" || { echo -e "${RED}[!] Invalid peer GRE IP: '$PEER_GRE'${NC}"; return 1; }
@@ -10112,7 +10496,7 @@ cli_setup_gre_backhaul_foreign() {
     fi
     [[ -z "$TOKEN" && -n "$BUNDLE" ]] && TOKEN=$B_TOKEN
     LOCAL_PUB=${LOCAL_PUB:-$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')}
-    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$LOCAL_PUB" ]] && LOCAL_PUB=$(curl -4 -sSL --max-time 5 https://api.ipify.org 2>/dev/null)
     LOCAL_GRE=${LOCAL_GRE:-$FOREIGN_GRE_DEF}
     PEER_GRE=${PEER_GRE:-$IRAN_GRE_DEF}
     validate_setup_common "$LOCAL_PUB" "$REMOTE_PUB" "$PORT" "$LOCAL_GRE" || return 1
@@ -10267,33 +10651,15 @@ show_credentials_and_exit() {
     echo ""
 }
 
-cli_carrier() {
-    local SUB="${1:-status}"
-    case "$SUB" in
-        set|apply)
-            shift
-            if [[ -n "${1:-}" ]]; then
-                carrier_apply "$1"
-            else
-                echo -e "${RED}[!] Usage: hashem carrier set <mode>${NC}"
-                return 1
-            fi
-            ;;
-        cycle)
-            carrier_cycle_next
-            ;;
-        set-ports)
-            shift
-            carrier_set_fou_ports "${1:-443}" "${2:-55555}"
-            ;;
-        init)
-            carrier_init_kernel
-            ;;
-        status|*)
-            echo "Active Carrier: $(carrier_get_active)"
-            echo "Mode: $(carrier_get_mode)"
-            ;;
-    esac
+
+# bagher_link_units: the carrier units of the foreign servers after the first
+# (hashem-bagher-2.service, ...), one per line.
+bagher_link_units() {
+    local f
+    for f in /etc/systemd/system/hashem-bagher-[0-9]*.service; do
+        [[ -f $f ]] && basename "$f"
+    done
+    return 0
 }
 
 cli_bagher() {
@@ -10310,6 +10676,14 @@ cli_bagher() {
                 SVC_ACT="${YELLOW}inactive${NC}"
             fi
             echo -e "Bagher Service:     $SVC_ACT"
+            local LU
+            for LU in $(bagher_link_units); do
+                if systemctl is-active "$LU" >/dev/null 2>&1; then
+                    echo -e "  ${LU%.service}: ${GREEN}active (running)${NC} [$(sed -n 's/^Description=.* to //p' "/etc/systemd/system/$LU")]"
+                else
+                    echo -e "  ${LU%.service}: ${YELLOW}inactive${NC} [$(sed -n 's/^Description=.* to //p' "/etc/systemd/system/$LU")]"
+                fi
+            done
 
             local FRPC_ACT="inactive"
             if systemctl is-active hashem-bagher-frpc.service >/dev/null 2>&1; then
@@ -10484,7 +10858,7 @@ EOF
                 local FWD_ARGS=""
                 for p in "${PORT_ARR[@]}"; do
                     p=$(echo "$p" | tr -d ' ')
-                    [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L 0.0.0.0:$p:127.0.0.1:$p"
+                    [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L *:$p:127.0.0.1:$p"
                 done
                 systemctl disable --now hashem-bagher-frps.service >/dev/null 2>&1 || true
                 cat <<EOF > /etc/systemd/system/hashem-bagher.service
@@ -10521,26 +10895,30 @@ EOF
             systemctl disable --now hashem-bagher-frps.service >/dev/null 2>&1 || true
             systemctl disable --now hashem-ssh-fwd.service >/dev/null 2>&1 || true
             systemctl disable --now hashem-ssh-frps.service >/dev/null 2>&1 || true
+            bagher_link_units | xargs -r systemctl disable --now >/dev/null 2>&1 || true
             echo -e "${YELLOW}[*] Bagher Engine service disabled.${NC}"
             ;;
         start)
-            systemctl start hashem-bagher.service 2>/dev/null || systemctl start hashem-ssh-fwd.service 2>/dev/null || true
             systemctl start hashem-bagher-frps.service 2>/dev/null || true
+            systemctl start hashem-bagher.service 2>/dev/null || systemctl start hashem-ssh-fwd.service 2>/dev/null || true
+            bagher_link_units | xargs -r systemctl start 2>/dev/null || true
             echo -e "${GREEN}[OK] Bagher Engine service started.${NC}"
             ;;
         stop)
             systemctl stop hashem-bagher.service 2>/dev/null || true
             systemctl stop hashem-ssh-fwd.service 2>/dev/null || true
+            bagher_link_units | xargs -r systemctl stop 2>/dev/null || true
             systemctl stop hashem-bagher-frps.service 2>/dev/null || true
             echo -e "${YELLOW}[*] Bagher Engine service stopped.${NC}"
             ;;
         restart)
-            systemctl restart hashem-bagher.service 2>/dev/null || systemctl restart hashem-ssh-fwd.service 2>/dev/null || true
             systemctl restart hashem-bagher-frps.service 2>/dev/null || true
+            systemctl restart hashem-bagher.service 2>/dev/null || systemctl restart hashem-ssh-fwd.service 2>/dev/null || true
+            bagher_link_units | xargs -r systemctl restart 2>/dev/null || true
             echo -e "${GREEN}[OK] Bagher Engine service restarted.${NC}"
             ;;
         logs)
-            journalctl -u hashem-bagher.service -u hashem-ssh-fwd.service -n 50 --no-pager
+            journalctl -u 'hashem-bagher*' -u hashem-ssh-fwd.service -n 50 --no-pager
             ;;
         gen-key)
             mkdir -p /root/.ssh
@@ -10996,7 +11374,7 @@ cli_join_hub() {
         install_backhaul_binaries || return 1
         [[ "$GRE_IF" != "none" ]] && DIAL_ADDR=$(dial_pick "$DIAL" "$B_IRAN_GRE" "$B_IRAN_PUB" "$B_FRP_PORT")
         SVC="backhaul-client-h${ID}"; CONF="${BACKHAUL_CONFIG_DIR}/client-h${ID}.toml"
-        backhaul_write_client_conf "$CONF" "${DIAL_ADDR}:${B_FRP_PORT}" "${B_TRANSPORT:-tcpmux}" "$B_TOKEN"
+        backhaul_write_client_conf "$CONF" "$(hostport "$DIAL_ADDR" "$B_FRP_PORT")" "${B_TRANSPORT:-tcpmux}" "$B_TOKEN"
         setup_backhaul_client_systemd "$SVC" "$CONF" >/dev/null
         if [[ "$GRE_IF" != "none" ]]; then
             sed -i "s/After=network.target/After=network.target ${GRE_IF}.service/" "/etc/systemd/system/${SVC}.service" 2>/dev/null || true
@@ -11162,6 +11540,7 @@ if [[ $# -gt 0 ]]; then
             menu_backhaul ;;
         backhaul-migrate) cli_backhaul_migrate ;;
         spoof|spoof-tunnel) shift; cli_spoof "$@" ;;
+        xray|xray-tunnel) shift; cli_xray "$@" ;;
         remove-tunnel)
             if [[ "${2:-}" == "--force" ]]; then remove_tunnel_force; else remove_tunnel; fi ;;
         uninstall)

@@ -111,6 +111,7 @@ FAMILIES = {
     "ENGINE": "Engine switch",
     "SENTINEL": "Sentinel addon",
     "PATHTEST": "Path test (Benchmark tab)",
+    "LIMIT": "Speed and volume limits",
 }
 
 

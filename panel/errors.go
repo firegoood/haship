@@ -18,6 +18,7 @@ package main
 //   E-BH-xx      Backhaul diagnostics (log annotation)
 //   E-SYS-xx     host tooling (journalctl/systemctl missing)
 //   E-WD-xx      watchdog / telegram alerts / backup
+//   E-XRAY-xx    Xray tunnel (links, ports, the core)
 
 import (
 	"encoding/json"
@@ -104,6 +105,16 @@ var errCatalog = map[string]errInfo{
 	"E-SENTINEL-04": {409, "sentinel is not installed", "Install Sentinel first."},
 	"E-SENTINEL-05": {409, "a sentinel install is already running", "Wait for the current install to finish, then refresh."},
 	"E-SENTINEL-06": {400, "bad sentinel request", "Reload the page and try again."},
+	// Xray tunnel
+	"E-XRAY-01": {400, "bad Xray tunnel request", "The detail names the field; fix it and try again."},
+	"E-XRAY-02": {409, "Xray-core is not installed", "Install it from the Xray tab (or: hashem xray install)."},
+	"E-XRAY-03": {409, "a port the link needs is taken", "The detail names the program that holds it and a free port to use instead."},
+	"E-XRAY-04": {500, "Xray rejected the config", "The detail has Xray's own message. Undo the last expert change, or reset the link to its preset."},
+	"E-XRAY-05": {500, "the Xray link did not stay up", "Check: hashem xray logs"},
+	"E-XRAY-06": {404, "no such Xray link", "Reload the page: the link may have been removed."},
+	"E-XRAY-07": {409, "an Xray-core install is already running", "Wait for it to finish; the tab shows its progress."},
+	// speed and volume limits
+	"E-LIMIT-01": {400, "bad limits request", "The detail names the field; fix it and try again."},
 	// log diagnostics (annotation only, also reused by status hints)
 	"E-GRE-01":     {0, "GRE interface missing / down", "Tunnel setup did not create it, or it was deleted — reinstall that peer."},
 	"E-GRE-02":     {0, "GRE ping failed (100% loss / unreachable)", "Peers cannot reach each other: firewall, wrong public IP, or GRE blocked."},

@@ -292,12 +292,13 @@ func currentIranBundle() (string, string) {
 func handleSetupGet(w http.ResponseWriter, r *http.Request) {
 	st := currentLocal()
 	resp := map[string]any{
-		"local_public": detectPublicIP(),
-		"iran_gre":     defaultIranGRE,
-		"foreign_gre":  defaultForeignGRE,
-		"frp_port":     randomFrpPort(),
-		"role_guess":   st.Role,
-		"exists":       tunnelExists(),
+		"local_public":  detectPublicIP(),
+		"local_public6": detectPublicIP6(),
+		"iran_gre":      defaultIranGRE,
+		"foreign_gre":   defaultForeignGRE,
+		"frp_port":      randomFrpPort(),
+		"role_guess":    st.Role,
+		"exists":        tunnelExists(),
 	}
 	if bStr, tok := currentIranBundle(); bStr != "" {
 		resp["bundle"] = bStr
@@ -424,6 +425,79 @@ func lookupExternalPublicIP() string {
 	return ""
 }
 
+// detectPublicIP6 is this server's public IPv6, or "": the route source when it
+// is a global address, else an external lookup over IPv6 (cached like the
+// IPv4 one).
+func detectPublicIP6() string {
+	if src := routeSourceIP6(); validPublicIP(src, 6) {
+		return src
+	}
+	return externalPublicIP6Cached()
+}
+
+func routeSourceIP6() string { return routeSourceTo6("2001:4860:4860::8888") }
+
+// routeSourceTo6 is the source address this server uses towards IPv6 dst.
+func routeSourceTo6(dst string) string {
+	out, err := runCmdTimeout(5*time.Second, "ip", "-6", "route", "get", dst)
+	if err != nil {
+		return ""
+	}
+	f := strings.Fields(string(out))
+	for i, p := range f {
+		if p == "src" && i+1 < len(f) && isV6(f[i+1]) {
+			return f[i+1]
+		}
+	}
+	return ""
+}
+
+var (
+	extIP6Mu   sync.Mutex
+	extIP6Val  string
+	extIP6Time time.Time
+	// externalIP6Lookup is externalIPLookup over IPv6; swappable for tests.
+	externalIP6Lookup = lookupExternalPublicIP6
+)
+
+func externalPublicIP6Cached() string {
+	extIP6Mu.Lock()
+	defer extIP6Mu.Unlock()
+	if extIP6Val != "" && time.Since(extIP6Time) < 30*time.Minute {
+		return extIP6Val
+	}
+	if extIP6Val == "" && !extIP6Time.IsZero() && time.Since(extIP6Time) < 2*time.Minute {
+		return ""
+	}
+	extIP6Time = time.Now()
+	if v := externalIP6Lookup(); v != "" {
+		extIP6Val = v
+	}
+	return extIP6Val
+}
+
+func lookupExternalPublicIP6() string {
+	dialer := &net.Dialer{Timeout: 1200 * time.Millisecond}
+	client := &http.Client{Timeout: 1200 * time.Millisecond, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "tcp6", addr)
+		},
+	}}
+	for _, u := range []string{"https://api6.ipify.org", "https://ipv6.icanhazip.com"} {
+		resp, err := client.Get(u)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64))
+		_ = resp.Body.Close()
+		candidate := strings.TrimSpace(string(body))
+		if resp.StatusCode == 200 && validPublicIP(candidate, 6) {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // ---- POST /api/setup ----
 
 type setupRequest struct {
@@ -466,6 +540,10 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	body.PeerGre = strings.TrimSpace(body.PeerGre)
 	body.Token = strings.TrimSpace(body.Token)
 	body.Name = strings.TrimSpace(body.Name)
+	if err := validLinkName(body.Name); err != nil {
+		writeAPIError(w, r, "E-SETUP-01", err.Error())
+		return
+	}
 
 	// add-peer mode: each new foreign server gets its own token + tunnel.
 	// Port conflicts (same remotePort on two peers) are rejected with 409
@@ -512,6 +590,11 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Engine != "backhaul" {
+		// GRE runs between the two IPv4 addresses
+		if !isV4(body.LocalPub) || !isV4(body.RemotePub) {
+			writeAPIError(w, r, "E-SETUP-04", "a tunnel over GRE needs the IPv4 addresses of both servers; for IPv6 use Backhaul without GRE")
+			return
+		}
 		if net.ParseIP(body.LocalGre) == nil || !isV4(body.LocalGre) {
 			writeAPIError(w, r, "E-SETUP-05", "")
 			return
@@ -643,7 +726,7 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 			// The master's panel port is unknown here (each panel picks its
 			// own); without a port sendToPeer tries the usual ones, and the
 			// handshake reply then records the real port.
-			pcfg.PeerURL = "http://" + body.RemotePub
+			pcfg.PeerURL = "http://" + urlHost(body.RemotePub)
 		}
 		_ = savePeerConfig(pcfg)
 
@@ -658,6 +741,10 @@ func handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	// the first tunnel's other server: named in the setup form
+	if (body.Role == "iran" || body.Role == "foreign") && body.Name != "" {
+		_ = setLinkName("main", body.Name)
+	}
 	writeJSON(w, out)
 }
 

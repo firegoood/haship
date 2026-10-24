@@ -39,7 +39,46 @@ const (
 type carrierEnd struct {
 	Port   int
 	Remote string // the IPv4 this server dials; "" when it listens on Port
+	From   string // listening: count only this peer's IPv4 (sshd also serves logins)
 	UDP    bool   // also count UDP on the port (Backhaul udp transport, UDP companion)
+	// Tag is the tunnel the end belongs to: its Backhaul unit
+	// ("backhaul-server-3", the UDP companion files under it too) or
+	// "bagher-N" for Bagher link N. Per-link speeds and usage read it.
+	Tag string
+}
+
+// acctKey identifies an end in iptables-save output, which has no tags.
+type acctKey struct {
+	Listen bool
+	Port   int
+	Peer   string // the -s/-d address, "" for any
+}
+
+func (e carrierEnd) key() acctKey {
+	if e.Remote != "" {
+		return acctKey{Port: e.Port, Peer: e.Remote}
+	}
+	return acctKey{Listen: true, Port: e.Port, Peer: e.From}
+}
+
+// backhaulTag is the unit a Backhaul config belongs to: config.toml and
+// server.toml are backhaul-server, client.toml backhaul-client, server-3.toml
+// backhaul-server-3; a UDP companion's config is udp/<unit>.toml.
+func backhaulTag(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), ".toml")
+	if filepath.Base(filepath.Dir(path)) == "udp" {
+		if rest, ok := strings.CutPrefix(base, "backhaul-udp-"); ok { // named after the companion unit
+			return "backhaul-" + rest
+		}
+		return base
+	}
+	switch base {
+	case "config", "server":
+		return "backhaul-server"
+	case "client":
+		return "backhaul-client"
+	}
+	return "backhaul-" + base
 }
 
 // carrierConfigs lists the Backhaul configs on this server: the main ones, the
@@ -89,6 +128,15 @@ type carrierDNSEntry struct {
 	at time.Time
 }
 
+// carrierIP is host as an IP address: an IPv6 literal stays IPv6, a name is
+// resolved like carrierIPv4.
+func carrierIP(host string) string {
+	if h := normHost(host); isV6(h) {
+		return net.ParseIP(h).String()
+	}
+	return carrierIPv4(host)
+}
+
 // carrierIPv4 is host as an IPv4 address ("" for IPv6 or a name that does not
 // resolve). Names are looked up at most every 10 minutes.
 func carrierIPv4(host string) string {
@@ -115,7 +163,7 @@ func carrierIPv4(host string) string {
 	return ip
 }
 
-// carrierEnds reads every Backhaul config and the Bagher config.
+// carrierEnds reads every Backhaul config, the Bagher config and the Xray links.
 func carrierEnds() []carrierEnd {
 	var ends []carrierEnd
 	for _, p := range carrierConfigs() {
@@ -123,17 +171,54 @@ func carrierEnds() []carrierEnd {
 		if err != nil {
 			continue
 		}
-		ends = append(ends, backhaulCarrierEnd(parseBackhaulConf(string(data)))...)
+		tag := backhaulTag(p)
+		for _, e := range backhaulCarrierEnd(parseBackhaulConf(string(data))) {
+			e.Tag = tag
+			ends = append(ends, e)
+		}
 	}
 	sshFwdMu.Lock()
 	cfg := loadSSHFwdConfigLocked()
 	sshFwdMu.Unlock()
-	if cfg.Enabled && cfg.Role == "client" && cfg.RemoteSSHPort > 0 {
-		if ip := carrierIPv4(cfg.RemoteHost); ip != "" {
-			ends = append(ends, carrierEnd{Port: cfg.RemoteSSHPort, Remote: ip})
+	ends = append(ends, bagherCarrierEnds(cfg)...)
+	ends = append(ends, xrayCarrierEnds()...)
+	return dedupeEnds(ends)
+}
+
+// bagherCarrierEnds are Bagher's SSH connections: on Iran one per foreign
+// server it dials, on the foreign server its sshd port for the Iran server
+// only (the same sshd also serves admin logins). The check used to want
+// role "client", which Bagher never has, so its traffic was never counted.
+func bagherCarrierEnds(cfg SSHFwdConfig) []carrierEnd {
+	if !cfg.Enabled || strings.TrimSpace(cfg.RemoteHost) == "" {
+		return nil
+	}
+	port := func(p int) int {
+		if p > 0 {
+			return p
+		}
+		return 22
+	}
+	if cfg.Role == "foreign" || cfg.Role == "server" {
+		if ip := carrierIP(cfg.RemoteHost); ip != "" {
+			return []carrierEnd{{Port: port(cfg.RemoteSSHPort), From: ip, Tag: "bagher-1"}}
+		}
+		return nil
+	}
+	var ends []carrierEnd
+	if ip := carrierIP(cfg.RemoteHost); ip != "" {
+		ends = append(ends, carrierEnd{Port: port(cfg.RemoteSSHPort), Remote: ip, Tag: "bagher-1"})
+	}
+	for _, l := range cfg.Links {
+		p := l.RemoteSSHPort
+		if p <= 0 {
+			p = cfg.RemoteSSHPort
+		}
+		if ip := carrierIP(l.RemoteHost); ip != "" {
+			ends = append(ends, carrierEnd{Port: port(p), Remote: ip, Tag: fmt.Sprintf("bagher-%d", l.ID)})
 		}
 	}
-	return dedupeEnds(ends)
+	return ends
 }
 
 // backhaulCarrierEnd is the end a Backhaul config makes: it listens on the
@@ -149,7 +234,7 @@ func backhaulCarrierEnd(c backhaulConf) []carrierEnd {
 	if c.RemoteAddr != "" {
 		if h, p, err := net.SplitHostPort(c.RemoteAddr); err == nil {
 			n, err := strconv.Atoi(p)
-			if ip := carrierIPv4(h); err == nil && n > 0 && n <= 65535 && ip != "" {
+			if ip := carrierIP(h); err == nil && n > 0 && n <= 65535 && ip != "" {
 				return []carrierEnd{{Port: n, Remote: ip, UDP: true}}
 			}
 		}
@@ -157,55 +242,150 @@ func backhaulCarrierEnd(c backhaulConf) []carrierEnd {
 	return nil
 }
 
+// dedupeEnds keeps one end per counted connection (the first tag wins: two
+// rules for the same packets would count them twice).
 func dedupeEnds(ends []carrierEnd) []carrierEnd {
-	seen := map[carrierEnd]bool{}
+	seen := map[acctKey]int{}
 	var out []carrierEnd
 	for _, e := range ends {
-		if !seen[e] {
-			seen[e] = true
-			out = append(out, e)
+		if i, ok := seen[e.key()]; ok {
+			out[i].UDP = out[i].UDP || e.UDP
+			continue
 		}
+		seen[e.key()] = len(out)
+		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Port != out[j].Port {
 			return out[i].Port < out[j].Port
 		}
-		return out[i].Remote < out[j].Remote
+		if out[i].Remote != out[j].Remote {
+			return out[i].Remote < out[j].Remote
+		}
+		return out[i].From < out[j].From
 	})
 	return out
 }
 
 // carrierRules renders the two chains as iptables-restore input. ifname is the
 // default-route interface ("" matches any).
-func carrierRules(ends []carrierEnd, ifname string) string {
+func carrierRules(ends []carrierEnd, ifname string) string { return carrierRulesFam(ends, ifname, 4) }
+
+// carrierRules6 is the IPv6 table for ip6tables-restore: the ends with an
+// IPv6 peer, and the ports this server listens on for anyone (they are
+// reached over IPv6 too) when it has an IPv6 address. "" when there is
+// nothing to count over IPv6.
+func carrierRules6(ends []carrierEnd, ifname string) string {
+	return carrierRulesFam(ends, ifname, 6)
+}
+
+// acctIPv6 reports whether this server has a global IPv6 address; swappable
+// for tests.
+var acctIPv6 = func() bool {
+	data, err := os.ReadFile("/proc/net/if_inet6")
+	if err != nil {
+		return false
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if f := strings.Fields(l); len(f) >= 4 && f[3] == "00" { // scope global
+			return true
+		}
+	}
+	return false
+}
+
+func carrierRulesFam(ends []carrierEnd, ifname string, fam int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "*filter\n:%s - [0:0]\n:%s - [0:0]\n-F %s\n-F %s\n", acctIn, acctOut, acctIn, acctOut)
 	in, out := "", ""
 	if ifname != "" {
 		in, out = " -i "+ifname, " -o "+ifname
 	}
+	mask, v6host, n := "/32", fam == 6 && acctIPv6(), 0
+	if fam == 6 {
+		mask = "/128"
+	}
 	for _, e := range ends {
+		peer := e.Remote
+		if peer == "" {
+			peer = e.From
+		}
+		if peer != "" && ipFamily(peer) != fam || peer == "" && fam == 6 && !v6host {
+			continue
+		}
+		n++
 		protos := []string{"tcp"}
 		if e.UDP {
 			protos = append(protos, "udp")
 		}
 		for _, pr := range protos {
-			if e.Remote == "" { // this server listens on the port
+			switch {
+			case e.Remote == "" && e.From != "": // listens, for one peer only
+				fmt.Fprintf(&b, "-A %s%s -s %s%s -p %s --dport %d\n", acctIn, in, e.From, mask, pr, e.Port)
+				fmt.Fprintf(&b, "-A %s%s -d %s%s -p %s --sport %d\n", acctOut, out, e.From, mask, pr, e.Port)
+			case e.Remote == "": // this server listens on the port
 				fmt.Fprintf(&b, "-A %s%s -p %s --dport %d\n", acctIn, in, pr, e.Port)
 				fmt.Fprintf(&b, "-A %s%s -p %s --sport %d\n", acctOut, out, pr, e.Port)
-			} else { // this server dials Remote:Port
-				fmt.Fprintf(&b, "-A %s%s -s %s/32 -p %s --sport %d\n", acctIn, in, e.Remote, pr, e.Port)
-				fmt.Fprintf(&b, "-A %s%s -d %s/32 -p %s --dport %d\n", acctOut, out, e.Remote, pr, e.Port)
+			default: // this server dials Remote:Port
+				fmt.Fprintf(&b, "-A %s%s -s %s%s -p %s --sport %d\n", acctIn, in, e.Remote, mask, pr, e.Port)
+				fmt.Fprintf(&b, "-A %s%s -d %s%s -p %s --dport %d\n", acctOut, out, e.Remote, mask, pr, e.Port)
 			}
 		}
 	}
 	b.WriteString("COMMIT\n")
+	if fam == 6 && n == 0 {
+		return ""
+	}
 	return b.String()
 }
 
 // parseAcctSave sums the byte counters of our chains in `iptables-save -c`
 // output and reports whether both chains and both jumps to them exist.
 func parseAcctSave(out string) (rx, tx uint64, ready bool) {
+	rx, tx, _, ready = parseAcctSaveEnds(out)
+	return rx, tx, ready
+}
+
+// acctRuleKey reads which end a counting rule belongs to from its text, as
+// iptables-save prints it ("-A HASHEM_ACCT_IN -i eth0 -s 1.2.3.4/32 -p tcp
+// -m tcp --sport 22"). In the IN chain --dport is a port this server listens
+// on and -s the peer; in the OUT chain --sport and -d.
+func acctRuleKey(rule string, in bool) (acctKey, bool) {
+	f := strings.Fields(rule)
+	var k acctKey
+	var lport, dport int
+	var peer string
+	for i := 0; i+1 < len(f); i++ {
+		switch f[i] {
+		case "--dport":
+			dport, _ = strconv.Atoi(f[i+1])
+		case "--sport":
+			lport, _ = strconv.Atoi(f[i+1])
+		case "-s", "-d":
+			if (f[i] == "-s") == in {
+				peer = strings.TrimSuffix(strings.TrimSuffix(f[i+1], "/32"), "/128")
+			}
+		}
+	}
+	if !in { // OUT: the local port is the source port
+		lport, dport = dport, lport
+	}
+	// now dport is the local listening port (if any), lport the remote's port
+	switch {
+	case dport > 0:
+		k = acctKey{Listen: true, Port: dport, Peer: peer}
+	case lport > 0:
+		k = acctKey{Port: lport, Peer: peer}
+	default:
+		return k, false
+	}
+	return k, true
+}
+
+// parseAcctSaveEnds is parseAcctSave with the bytes of each end as well
+// ([0] received, [1] sent).
+func parseAcctSaveEnds(out string) (rx, tx uint64, ends map[acctKey][2]uint64, ready bool) {
+	ends = map[acctKey][2]uint64{}
 	var chains, hooks int
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -234,23 +414,53 @@ func parseAcctSave(out string) (rx, tx uint64, ready bool) {
 		if err != nil {
 			continue
 		}
-		if strings.HasPrefix(rule, "-A "+acctIn+" ") {
+		in := strings.HasPrefix(rule, "-A "+acctIn+" ")
+		if !in && !strings.HasPrefix(rule, "-A "+acctOut+" ") {
+			continue
+		}
+		if in {
 			rx += n
-		} else if strings.HasPrefix(rule, "-A "+acctOut+" ") {
+		} else {
 			tx += n
 		}
+		if k, ok := acctRuleKey(rule, in); ok {
+			c := ends[k]
+			if in {
+				c[0] += n
+			} else {
+				c[1] += n
+			}
+			ends[k] = c
+		}
 	}
-	return rx, tx, chains == 2 && hooks == 2
+	return rx, tx, ends, chains == 2 && hooks == 2
 }
 
 var carrierState = struct {
 	sync.Mutex
 	sig        string // the rules last loaded by this process
+	sig6       string // the IPv6 ones
 	at         time.Time
 	rx, tx     uint64
+	tags       map[string][2]uint64 // per tunnel: [0] received, [1] sent
 	ok         bool
 	lastFailed time.Time
 }{}
+
+// carrierTagCounters is the last reading per tunnel (see carrierEnd.Tag);
+// call carrierCounters first for a fresh one.
+func carrierTagCounters() map[string][2]uint64 {
+	carrierState.Lock()
+	defer carrierState.Unlock()
+	if !carrierState.ok {
+		return nil
+	}
+	out := make(map[string][2]uint64, len(carrierState.tags))
+	for k, v := range carrierState.tags {
+		out[k] = v
+	}
+	return out
+}
 
 // carrierCounters returns the bytes received (rx) and sent (tx) by this
 // server's Backhaul and Bagher carriers since the chains were last built. ok
@@ -270,9 +480,9 @@ func readCarrierCounters() (rx, tx uint64, ok bool) {
 
 	ends := carrierEnds()
 	if len(ends) == 0 {
-		if carrierState.sig != "" { // the tunnels are gone: remove the chains once
+		if carrierState.sig != "" || carrierState.sig6 != "" { // the tunnels are gone: remove the chains once
 			carrierDrop()
-			carrierState.sig = ""
+			carrierState.sig, carrierState.sig6 = "", ""
 		}
 		return 0, 0, false
 	}
@@ -286,7 +496,7 @@ func readCarrierCounters() (rx, tx uint64, ok bool) {
 		carrierState.lastFailed = time.Now()
 		return 0, 0, false
 	}
-	rx, tx, ready := parseAcctSave(string(out))
+	rx, tx, byEnd, ready := parseAcctSaveEnds(string(out))
 	if !ready || rules != carrierState.sig {
 		// New or changed tunnels, a reboot or a firewall reload: build the
 		// chains again (their counters start over, which the ledger treats as
@@ -296,39 +506,83 @@ func readCarrierCounters() (rx, tx uint64, ok bool) {
 			return 0, 0, false
 		}
 		carrierState.sig = rules
-		rx, tx = 0, 0
+		rx, tx, byEnd = 0, 0, nil
+	}
+	// IPv6: a failing ip6tables leaves the IPv4 counts alone
+	if rules6 := carrierRules6(ends, primaryInterface()); rules6 == "" && carrierState.sig6 != "" {
+		carrierDropFam("ip6tables")
+		carrierState.sig6 = ""
+	} else if rules6 != "" {
+		if out6, err := runCmdTimeoutOut(5*time.Second, "ip6tables-save", "-c", "-t", "filter"); err == nil {
+			rx6, tx6, byEnd6, ready6 := parseAcctSaveEnds(string(out6))
+			if !ready6 || rules6 != carrierState.sig6 {
+				if carrierLoadFam("ip6tables", rules6) == nil {
+					carrierState.sig6 = rules6
+				}
+				rx6, tx6, byEnd6 = 0, 0, nil
+			}
+			rx, tx = rx+rx6, tx+tx6
+			if byEnd == nil {
+				byEnd = map[acctKey][2]uint64{}
+			}
+			for k, v := range byEnd6 {
+				c := byEnd[k]
+				byEnd[k] = [2]uint64{c[0] + v[0], c[1] + v[1]}
+			}
+		}
+	}
+	tags := map[string][2]uint64{}
+	for _, e := range ends {
+		c, t := byEnd[e.key()], tags[e.Tag]
+		tags[e.Tag] = [2]uint64{t[0] + c[0], t[1] + c[1]}
 	}
 	carrierState.lastFailed = time.Time{}
-	carrierState.rx, carrierState.tx, carrierState.ok = rx, tx, true
+	carrierState.rx, carrierState.tx, carrierState.tags, carrierState.ok = rx, tx, tags, true
 	return rx, tx, true
 }
 
 // carrierLoad replaces both chains and makes sure INPUT and OUTPUT jump to them.
-func carrierLoad(rules string) error {
+func carrierLoad(rules string) error { return carrierLoadFam("iptables", rules) }
+
+// carrierLoadFam is carrierLoad with bin ("iptables" or "ip6tables").
+func carrierLoadFam(bin, rules string) error {
 	_ = os.MkdirAll(configDir, 0o700)
 	f := filepath.Join(configDir, "carrier-acct.v4")
+	if bin == "ip6tables" {
+		f = filepath.Join(configDir, "carrier-acct.v6")
+	}
 	if err := os.WriteFile(f, []byte(rules), 0o600); err != nil {
 		return err
 	}
-	if out, err := runCmdTimeout(10*time.Second, "iptables-restore", "-w", "5", "-n", f); err != nil {
-		return fmt.Errorf("iptables-restore: %s", strings.TrimSpace(string(out)))
+	if out, err := runCmdTimeout(10*time.Second, bin+"-restore", "-w", "5", "-n", f); err != nil {
+		return fmt.Errorf("%s-restore: %s", bin, strings.TrimSpace(string(out)))
 	}
 	for _, h := range [][2]string{{"INPUT", acctIn}, {"OUTPUT", acctOut}} {
-		if _, err := runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-C", h[0], "-j", h[1]); err != nil {
-			if out, err := runCmdTimeout(5*time.Second, "iptables", "-w", "5", "-I", h[0], "1", "-j", h[1]); err != nil {
-				return fmt.Errorf("iptables -I %s: %s", h[0], strings.TrimSpace(string(out)))
+		if _, err := runCmdQuiet(5*time.Second, bin, "-w", "5", "-C", h[0], "-j", h[1]); err != nil {
+			if out, err := runCmdTimeout(5*time.Second, bin, "-w", "5", "-I", h[0], "1", "-j", h[1]); err != nil {
+				return fmt.Errorf("%s -I %s: %s", bin, h[0], strings.TrimSpace(string(out)))
 			}
 		}
 	}
 	return nil
 }
 
-// carrierDrop removes both chains and the jumps to them (hashem.sh
-// acct_chains_drop does the same on uninstall).
+// carrierDrop removes both chains and the jumps to them, IPv4 and IPv6
+// (hashem.sh acct_chains_drop does the same on uninstall).
 func carrierDrop() {
+	carrierDropFam("iptables")
+	carrierDropFam("ip6tables")
+}
+
+func carrierDropFam(bin string) {
+	// a host that never counted IPv6 has no chains to drop: skip the failing calls
+	if out, err := runCmdTimeoutOut(5*time.Second, bin+"-save", "-t", "filter"); err == nil &&
+		strings.Contains(string(out), "*filter") && !strings.Contains(string(out), ":"+acctIn+" ") {
+		return
+	}
 	for _, h := range [][2]string{{"INPUT", acctIn}, {"OUTPUT", acctOut}} {
-		_, _ = runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-D", h[0], "-j", h[1])
-		_, _ = runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-F", h[1])
-		_, _ = runCmdQuiet(5*time.Second, "iptables", "-w", "5", "-X", h[1])
+		_, _ = runCmdQuiet(5*time.Second, bin, "-w", "5", "-D", h[0], "-j", h[1])
+		_, _ = runCmdQuiet(5*time.Second, bin, "-w", "5", "-F", h[1])
+		_, _ = runCmdQuiet(5*time.Second, bin, "-w", "5", "-X", h[1])
 	}
 }

@@ -3,6 +3,15 @@ const at = p => BASE + p;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const escapeHtml = esc;
+// IP literals, the same rules as the panel's ipFamily: no brackets, zone or prefix.
+const isIPv4 = ip => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(o => +o <= 255);
+const isIPv6 = ip => {
+  if (!/^[0-9a-f:]+$/i.test(ip) || !ip.includes(':') || /:::/.test(ip) || (ip.match(/::/g) || []).length > 1) return false;
+  if (/^:[^:]/.test(ip) || /[^:]:$/.test(ip)) return false;
+  const groups = ip.split(':').filter(g => g !== '');
+  return groups.every(g => g.length <= 4) && (ip.includes('::') ? groups.length <= 7 : groups.length === 8);
+};
+const isIP = ip => isIPv4(ip) || isIPv6(ip);
 // jsArg renders a value as a JS string literal for inline handlers
 // (onclick="fn(${jsArg(x)})"). esc() alone is not enough there: the browser
 // decodes &#39; back to ' before running the handler, so a quote in the value
@@ -217,6 +226,35 @@ function entConfirm(title, body, confirmYes) {
     _entModalCleanup = () => { $('entModalYes').onclick = $('entModalNo').onclick = $('entModalX').onclick = null; ov.onclick = null; };
   });
 }
+// renameLink names a link that has no record of its own (the main tunnel:
+// "main", Bagher's foreign servers: "bagher-N"); then redraws what shows it.
+function renameLink(key, current) {
+  const ov = $('nameModal'), inp = $('nameModalInput'), err = $('nameModalErr');
+  if (!ov) return;
+  inp.value = current || '';
+  err.classList.add('hidden');
+  const close = () => modalHide(ov);
+  modalShow(ov, close);
+  inp.focus();
+  const save = async () => {
+    try {
+      await api('/api/link-name', { key, name: inp.value.trim() });
+      close();
+      toastOk(tr('', 'Name saved'), inp.value.trim());
+      if (typeof refresh === 'function') refresh();
+      if (/^bagher/.test(key) && typeof loadSSHFwd === 'function') loadSSHFwd();
+      if (typeof refreshDash === 'function') refreshDash();
+    } catch (e) {
+      err.textContent = e.message;
+      err.classList.remove('hidden');
+    }
+  };
+  $('nameModalYes').onclick = save;
+  $('nameModalNo').onclick = close;
+  $('nameModalX').onclick = close;
+  inp.onkeydown = e => { if (e.key === 'Enter') save(); };
+}
+
 // Skeleton blocks for loading states (Dashboard/Logs/Update reuse).
 function skel(n) {
   let s = '';
@@ -258,6 +296,8 @@ const PRO_TXT = {
   benchmark: ['pro_t_bench', 'Benchmark — Hashem Pro', 'pro_b_bench', 'The benchmark and the path test are Hashem Pro features.'],
   cluster: ['pro_t_cluster', 'Cluster — Hashem Pro', 'pro_b_cluster', 'The cluster is a Hashem Pro feature: pools of foreign servers behind one port, linked Iran hubs and DNS failover. Pools that already run keep running without it.'],
   spoof: ['pro_t_spoof', 'Spoof Tunnel — Hashem Pro', 'pro_b_spoof', 'The Spoof Tunnel is a Hashem Pro feature, on both servers: an IP-spoofing pipe wrapped with WireGuard to cross whitelist-based Layer-3 firewalls.'],
+  xray: ['pro_t_xray', 'Xray Tunnel — Hashem Pro', 'pro_b_xray', 'The Xray Tunnel is a Hashem Pro feature, on both servers: Reality, XHTTP, gRPC or mKCP, direct or reverse, next to any Xray panel.'],
+  limits: ['pro_t_limits', 'Speed and volume limits — Hashem Pro', 'pro_b_limits', 'Limiting the speed and volume of each foreign server is a Hashem Pro feature. Limits already set keep working without it, and can always be removed.'],
 };
 function isSentinelLicensed() {
   const f = (_licenseData && _licenseData.is_valid && _licenseData.features) || [];
@@ -274,9 +314,12 @@ function proSync() {
   tag('navBenchmarkPro', 'benchmark');
   tag('navSpoofPro', 'spoof');
   tag('spoofPro', 'spoof');
+  tag('navXrayPro', 'xray');
+  tag('xrayPro', 'xray');
+  tag('limitsPro', 'limits');
   if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', clLicensed());
   if ($('navSentinelPro')) $('navSentinelPro').classList.toggle('hidden', isSentinelLicensed());
-  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navSpoofPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
+  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navSpoofPro', 'navXrayPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
     const el = $(id); if (!el) return;
     const t = id === 'navSentinelPro' ? tr('pro_addon', 'Add-on license') : 'Hashem Pro';
     el.title = t; el.setAttribute('aria-label', t);
@@ -293,7 +336,7 @@ function goTab(name) {
   // Bagher lives in Setup (create) and Tunnel (run) like every other tunnel.
   if (name === 'sshfwd' || name === 'bagher') { openBagherSetup(); return; }
   // Hashem Pro tabs: the license window instead of the tab
-  const proTab = { doctor: 'diagnostics', perf: 'performance', watchdog: 'watchdog', benchmark: 'benchmark', spoof: 'spoof' }[name];
+  const proTab = { doctor: 'diagnostics', perf: 'performance', watchdog: 'watchdog', benchmark: 'benchmark', spoof: 'spoof', xray: 'xray' }[name];
   if (proTab && !isProLicensed(proTab)) {
     if (_licenseData === null) {
       loadLicense().then(() => { if (isProLicensed(proTab)) goTab(name); else openBagherLicModal(proTab); });
@@ -313,7 +356,7 @@ function goTab(name) {
     openBagherLicModal('cluster');
     return;
   }
-  ['dashboard','tunnel','cluster','setup','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  ['dashboard','tunnel','cluster','setup','xray','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -328,11 +371,12 @@ function goTab(name) {
     loadClusterStatus();
   }
   if (name === 'perf') loadPerf();
-  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); }
+  if (name === 'tunnel') { loadCarrier(); loadFleet(); loadTunnelHealth(); loadUsage(); loadLimits(); loadXray(true); }
   if (name === 'watchdog') loadWatchdog();
   if (name === 'doctor') loadDoctor();
   if (name === 'benchmark') { loadBenchmark(); loadPathTest(); }
   if (name === 'spoof') loadSpoof();
+  if (name === 'xray') loadXray();
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
   if (name === 'terminal') termOnShow();
@@ -456,6 +500,10 @@ const I18N = {
     spoof_title: "Spoof Tunnel",
     spoof_sub: "A tunnel that forges its source IP on both servers to cross whitelist-based Layer-3 firewalls, wrapped with WireGuard for a real encrypted link. Test which spoof IPs get through first, then bring the tunnel up.",
     spoof_idle: "Not configured",
+    nav_xray: "Xray",
+    xray_title: "Xray Tunnel",
+    xray_sub: "Forward ports from the Iran server to a foreign server over Xray: Reality, XHTTP, gRPC or mKCP, direct or reverse. It runs its own Xray-core next to any Xray panel (3x-ui, Marzban) and never touches its files, services or ports.",
+    xray_idle: "No tunnel yet",
     nav_update: "Update",
     upd_channel: "Update channel",
     upd_channel_stable: "Stable",
@@ -1213,15 +1261,22 @@ async function showPeerToken(peerId, name) {
   } catch(e) { toastErr('token lookup failed', e.message); }
 }
 // ---- Tunnel link diagram: this server ⇄ pipe with moving packets ⇄ other server ----
-// Live speed of one link from its byte counters between two status polls.
+// Live speed of one link from its byte counters between two server readings.
+// at is when the server read them (counters_at, unix ms). The browser's own
+// clock is not it: a poll returns the snapshot of up to 5 s before, so two
+// polls 0.2 s apart could hold readings 5 s apart and showed 5x the speed.
 const _linkSeen = {};
-function linkRate(key, rx, tx) {
+let _statusCountersAt = null; // counters_at of the last /api/status
+function linkRate(key, rx, tx, at) {
   if (rx == null || tx == null) return null;
-  const now = Date.now() / 1000, p = _linkSeen[key];
-  if (p && rx === p.rx && tx === p.tx) return (now - p.t > 30) ? { dn: 0, up: 0 } : p.r; // same sample drawn again
-  _linkSeen[key] = { rx, tx, t: now, r: null };
-  if (!p || now - p.t > 120 || rx < p.rx || tx < p.tx) return null;
-  const dt = Math.max(1, now - p.t);
+  const wall = Date.now() / 1000, t = at ? at / 1000 : wall, p = _linkSeen[key];
+  if (p && (t <= p.t || (rx === p.rx && tx === p.tx))) {
+    // the same reading again (or an older one): keep its speed; idle after 30 s
+    return (wall - p.seen > 30) ? { dn: 0, up: 0 } : p.r;
+  }
+  _linkSeen[key] = { rx, tx, t, seen: wall, r: null };
+  if (!p || t - p.t > 120 || rx < p.rx || tx < p.tx) return null;
+  const dt = Math.max(1, t - p.t);
   return (_linkSeen[key].r = { dn: (rx - p.rx) / dt, up: (tx - p.tx) / dt });
 }
 // Packet speed on the pipe, in steps so a new poll rarely changes it (0 = idle).
@@ -1285,20 +1340,43 @@ function renderPeers(peers) {
   if (bagherHasCfg) {
     const fwdPorts = Array.isArray(b.ports) ? b.ports.join(', ') : (b.ports || '—');
     const roleLabel = b.role === 'foreign' ? 'Foreign Client' : 'Iran Hub';
+    // foreign servers after the first, each with its own SSH carrier
+    const links = b.role === 'foreign' ? [] : (Array.isArray(b.links) ? b.links : []);
+    const linkRow = l => {
+      const st = l.connected ? ['ok', 'Connected'] : (l.is_active ? ['warn', 'Waiting for the other server'] : ['err', 'Stopped']);
+      return `<div class="det-row bagher-link">
+        <span class="det-k">${l.name ? `<bdi data-no-i18n>${esc(l.name)}</bdi> · ` : ''}<bdi class="mono" data-no-i18n>${esc(l.remote_host || '—')}</bdi></span>
+        <span class="det-v bagher-link-v">
+          <span class="badge ${st[0]}"><span class="dot"></span>${esc(tr('', st[1]))}</span>
+          <span class="mono" data-no-i18n>${esc((l.ports || []).join(', '))}${l.udp ? ' +UDP' : ''}</span>
+          ${l.latency_ms > 0 ? `<span class="mono" data-no-i18n>${l.latency_ms.toFixed(1)} ms</span>` : ''}
+          <button class="hashem-btn hashem-btn-ghost u-btn-30" onclick="renameLink('bagher-${+l.id}', ${jsArg(l.name || '')})">${esc(tr('', 'Rename'))}</button>
+          <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="bagherLinkCopyBundle(${+l.id})">${esc(tr('', 'Copy Bundle'))}</button>
+          <button class="hashem-btn hashem-btn-ghost u-btn-30" onclick="bagherLinkRemove(${+l.id})">${esc(tr('', 'Remove'))}</button>
+        </span>
+        ${l.last_error && !l.connected ? `<span class="det-v det-ports bagher-link-err" data-no-i18n>${esc(String(l.last_error).slice(0, 160))}</span>` : ''}
+      </div>`;
+    };
+    const linksHtml = b.role === 'foreign' ? '' : `<div class="det-card bagher-links">
+        <div class="det-card-head">${ICO_SRV} <span>${esc(tr('', 'More foreign servers'))}</span></div>
+        ${links.length ? links.map(linkRow).join('') : `<p class="u-hint-11">${esc(tr('', 'One Iran server can carry several foreign servers over Bagher, each on its own ports.'))}</p>`}
+        <div class="u-mt-8"><button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openBagherAddLink()">${esc(tr('', 'Add Foreign Server'))}</button></div>
+      </div>`;
     bagherCardHtml = `<div class="tunnel-card peer-card u-peer-card-wide u-bd-ok u-bg-s1" id="peer-card-bagher">
       <div class="tc-header u-flex-wrap-gap8">
         <div class="u-flex-center-gap10">
           <span class="status-indicator ${bagherUp ? 'active' : 'offline'}"><span class="dot"></span></span>
-          <b class="u-fs-16-tx">Bagher</b>
+          <b class="u-fs-16-tx">Bagher${b.name ? ' · <bdi data-no-i18n>' + esc(b.name) + '</bdi>' : ''}</b>
           <span class="badge info" data-no-i18n>SSH + FRP</span>
           <span class="badge dim">${esc(roleLabel)}</span>
           <span class="badge ${bagherState[0]}"><span class="dot"></span>${esc(tr('', bagherState[1]))}</span>
+          <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="renameLink('bagher-1', ${jsArg(b.name || '')})">${esc(tr('', 'Rename'))}</button>
         </div>
       </div>
       ${tunViz({
         state: bagherLinked ? 'ok' : (bagherRun ? 'warn' : 'down'),
         here: tr('', 'This server'), hereSub: tr('', b.role === 'foreign' ? 'Foreign' : 'Iran'),
-        there: tr('', b.role === 'foreign' ? 'Iran server' : 'Foreign server'), thereSub: b.remote_host || '',
+        there: b.name || tr('', b.role === 'foreign' ? 'Iran server' : 'Foreign server'), thereSub: b.remote_host || '',
         tags: [['Bagher', 'eng'], ['SSH', ''], [b.udp ? 'UDP' : '', 'udp']],
         lat: (typeof b.latency_ms === 'number' && b.latency_ms > 0) ? b.latency_ms.toFixed(0) + ' ms' : null,
         rate: null, ports: Array.isArray(b.ports) ? b.ports : [],
@@ -1317,6 +1395,7 @@ function renderPeers(peers) {
           <div class="det-row"><span class="det-k">Latency</span><span class="det-v mono">${(typeof b.latency_ms === 'number' && b.latency_ms > 0) ? (b.latency_ms.toFixed(1) + ' ms') : '—'}</span></div>
           ${b.last_error && !bagherLinked ? `<div class="det-row"><span class="det-k">Last error</span><span class="det-v det-ports" data-no-i18n>${esc(String(b.last_error).slice(0, 160))}</span></div>` : ''}
         </div>
+        ${linksHtml}
       </div>
       <div class="tc-acts u-flex u-wrap u-gap-8 u-mt-4">
         ${b.role === 'foreign' ? '' : `<button class="hashem-btn hashem-btn-secondary" onclick="openBagherQuickEdit()">${esc(tr('', 'Quick Edit'))}</button>
@@ -1386,7 +1465,7 @@ function renderPeers(peers) {
         here: tr('', 'Iran server'), hereSub: p.local_pub || '',
         there: nm, thereSub: p.remote_pub || '',
         tags: [[isBh || isGreBh ? 'Backhaul' : 'FRP', 'eng'], [p.transport || '', ''], [isBh ? '' : 'GRE', 'gre']],
-        gre: !isBh, lat: linkPing(p).ok ? linkPing(p).txt : null, rate: linkRate('p' + p.id, p.rx, p.tx),
+        gre: !isBh, lat: linkPing(p).ok ? linkPing(p).txt : null, rate: linkRate('p' + p.id, p.rx, p.tx, _statusCountersAt),
         ports: p.raw_ports ? String(p.raw_ports).split(/[ ,]+/) : (p.ports || []),
       })}
       <div class="det-grid">
@@ -1489,15 +1568,16 @@ function renderTunnel(st) {
     ? `<span class="badge ok"><span class="dot"></span><bdi data-no-i18n>${esc(st.frp_svc || 'frp')}</bdi></span>`
     : `<span class="badge err"><span class="dot"></span><bdi data-no-i18n>${esc(st.frp_svc || 'service')}</bdi> · ${esc(tr('', 'stopped'))}</span>`;
   const ports = ((st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || [])).join(', ') || '—';
-  const title = tr('', 'Tunnel') + (st.remote_pub ? ' · ' + st.remote_pub : '');
-  let mainRate = linkRate('main', st.rx, st.tx);
+  // the user's name for the other server when there is one
+  const title = st.name ? st.name + (st.remote_pub ? ' · ' + st.remote_pub : '') : tr('', 'Tunnel') + (st.remote_pub ? ' · ' + st.remote_pub : '');
+  let mainRate = linkRate('main', st.rx, st.tx, _statusCountersAt);
   const dashT = window._lastDash && window._lastDash.traffic;
   if (!mainRate && st.rx == null && !(tunPeerCache || []).length && dashT && dashT.speed_down != null) mainRate = { dn: dashT.speed_down, up: dashT.speed_up };
   const mainPing = linkPing(st);
   const mainViz = !hasMain ? '' : tunViz({
     state: vizState(st) || (up ? 'ok' : 'down'),
     here: tr('', 'This server'), hereSub: tr('', isIran ? 'Iran' : 'Foreign') + (st.local_pub ? ' · ' + st.local_pub : ''),
-    there: tr('', isIran ? 'Foreign server' : 'Iran server'), thereSub: st.remote_pub || gre.peer_ip || st.gre_peer || '',
+    there: st.name || tr('', isIran ? 'Foreign server' : 'Iran server'), thereSub: st.remote_pub || gre.peer_ip || st.gre_peer || '',
     tags: [[bhSvc ? 'Backhaul' : 'FRP', 'eng'], [eng !== 'frp' ? st.transport : '', ''], [usesGre ? 'GRE' : '', 'gre']],
     gre: usesGre, lat: mainPing.ok ? mainPing.txt : null, rate: mainRate,
     ports: (st.proxy_ports && st.proxy_ports.length) ? st.proxy_ports : (st.proxies || []),
@@ -1513,6 +1593,7 @@ function renderTunnel(st) {
           ${eng ? '<span class="badge info" data-no-i18n>' + esc(LS_ENGINE[eng] || eng) + '</span>' : ''}
           <span class="badge ${up ? 'ok' : 'err'}"><span class="dot"></span>${esc(tr('', up ? 'Active' : 'Down'))}</span>
           ${(usesGre && !st.ping_ok && st.frp_up) ? '<span class="badge info"><span class="dot"></span>' + esc(tr('fleet_frp_only', 'FRP only')) + '</span>' : ''}
+          <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="renameLink('main', ${jsArg(st.name || '')})">${esc(tr('', 'Rename'))}</button>
         </div>
       </div>
       ${mainViz}
@@ -1538,7 +1619,7 @@ function renderTunnel(st) {
       </div>
       <div class="peer-acts u-peer-acts-bar">
         ${usesGre ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="ping-0" onclick="peerAct('ping', 0)">${esc(tr('', 'Ping'))}</button>` : ''}
-        ${isIran && st.carrier_id ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openSwap(0)">${esc(tr('', 'Swap carrier'))}</button>` : ''}
+        ${st.carrier_id ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openSwap(0)">${esc(tr('', 'Swap carrier'))}</button>` : ''}
         <button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="editMainPortsClick()">${esc(tr('', 'Edit Tunnel'))}</button>
         ${isIran ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyMainIranBundle()">${esc(tr('', 'Copy Bundle'))}</button>` : ''}
         ${usesGre ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="restart-gre-0" onclick="peerAct('restart-gre', 0)">${esc(tr('', 'Restart GRE'))}</button>` : ''}
@@ -1622,6 +1703,7 @@ async function refresh() {
   let ok = true;
   try {
     const s = await api('/api/status');
+    _statusCountersAt = s.counters_at || null;
     // peers first: renderTunChips (called inside renderTunnel) reads the cache
     tunPeerCache = s.peers || null;
     renderTunnel(s.local);
@@ -2299,8 +2381,11 @@ async function refreshDash() {
     window._lastBagher = bObj;
     const bagherUp = !!(bObj.is_active || bObj.enabled || bObj.connected);
     // Fresh install: nothing to be "down" yet, so no red state (onboarding card explains next steps).
-    const unset = window._hashemEmpty === true && !on && !bagherUp;
-    const state = dashState(d, unset, bagherUp);
+    const xrLinks = d.xray || [];
+    const unset = window._hashemEmpty === true && !on && !bagherUp && !xrLinks.length;
+    // a server whose only tunnel is Xray is as healthy as its links
+    const xrOnly = xrLinks.length && !on && !(d.gre || {}).exists && !(d.frp || {}).svc;
+    const state = dashState(d, unset, bagherUp || (xrOnly && xrLinks.some(x => x.link === 'up' || x.link === 'listening')));
     const g = d.gre || {}, f = d.frp || {};
     const role = String(d.role || '').toLowerCase();
     const iran = /iran|master/.test(role), foreign = /foreign/.test(role);
@@ -2323,7 +2408,7 @@ async function refreshDash() {
     else if (multi && nPeers > 1) { remName = nPeers + ' ' + tr('', 'foreign servers'); remIp = upPeers + ' / ' + nPeers + ' ' + tr('', 'up'); }
     else if (multi) { remName = peers[0].name || 'Foreign server'; remIp = peers[0].remote_pub || '—'; }
     else {
-      remName = iran ? 'Foreign server' : foreign ? 'Iran server' : 'Other server';
+      remName = d.main_name || (bagherUp && !(d.gre || {}).exists && bObj.name) || (iran ? 'Foreign server' : foreign ? 'Iran server' : 'Other server');
       remIp = d.remote_pub || g.peer || (bagherUp ? bObj.remote_host : '') || '—';
     }
     set('heroRemoteName', tr('', remName));
@@ -2339,6 +2424,10 @@ async function refreshDash() {
       if (f.up || f.svc || !bagherUp) chips.push(chip(engName, f.up ? 'ok' : 'err'));
     }
     if (bagherUp) chips.push(chip('Bagher', bObj.connected ? 'ok' : 'warn'));
+    if (xrLinks.length) {
+      const xrUp = xrLinks.filter(x => x.link === 'up' || x.link === 'listening').length;
+      chips.push(chip('Xray ' + xrUp + '/' + xrLinks.length, xrUp === xrLinks.length ? 'ok' : xrUp ? 'warn' : 'err'));
+    }
     setHTML('kpiLinks', chips.join(''));
     const nPorts = (f.proxy_ports || []).length || (bObj.ports || []).length;
     const carrier = d.active_carrier && d.active_carrier !== 'direct' ? String(d.active_carrier).toUpperCase() : '';
@@ -2353,7 +2442,10 @@ async function refreshDash() {
       if (!host) { host = document.createElement('div'); host.className = 'hero-topo-host'; heroLinkEl.appendChild(host); }
       host.innerHTML = links.length ? heroTopo(links, tr('', iran ? 'Iran server' : foreign ? 'Foreign server' : 'This server'), d.local_pub || '—') : '';
       host.querySelectorAll('[data-goto-link]').forEach(b => {
-        b.onclick = () => { const k = b.dataset.gotoLink; if (k) gotoPeerCard(k); else goTab('tunnel'); };
+        b.onclick = () => {
+          const k = b.dataset.gotoLink;
+          if (/^xray\d+$/.test(k)) gotoXrayLink(k.slice(4)); else if (k) gotoPeerCard(k); else goTab('tunnel');
+        };
       });
     }
     let ms = null;
@@ -2787,10 +2879,10 @@ function dashLinks(d, bObj, iran, foreign) {
   const msOf = o => { const p = linkPing(o); return p.ok ? p.txt : ''; };
   if (g.exists || f.up || f.svc) {
     const up = !!(g.exists || f.up);
-    let rate = linkRate('main', st.rx, st.tx);
+    let rate = linkRate('main', st.rx, st.tx, _statusCountersAt);
     const t = d.traffic || {};
     if (!rate && st.rx == null && !peers.length && t.speed_down != null) rate = { dn: t.speed_down, up: t.speed_up };
-    L.push({ key: 'main', name: tr('', peers.length ? 'Main tunnel' : (foreign ? 'Iran server' : 'Foreign server')),
+    L.push({ key: 'main', name: d.main_name || tr('', peers.length ? 'Main tunnel' : (foreign ? 'Iran server' : 'Foreign server')),
       ip: d.remote_pub || g.peer || '', state: vizState(st) || (up ? 'ok' : 'down'),
       eng: /backhaul/.test(eng) || /^backhaul/.test(f.svc || '') ? 'Backhaul' : 'FRP', gre: !!g.exists,
       lat: msOf(st.health_state ? st : d), rate });
@@ -2799,14 +2891,34 @@ function dashLinks(d, bObj, iran, foreign) {
     const bh = p.engine === 'backhaul' || p.engine === 'gre-backhaul' || /backhaul/.test(p.frps_svc || '');
     L.push({ key: String(p.id), name: p.name || ('peer-' + p.id), ip: p.remote_pub || '',
       state: vizState(p) || ((p.gre_up || p.frp_up) ? 'ok' : 'down'), eng: bh ? 'Backhaul' : 'FRP',
-      gre: !(p.engine === 'backhaul' || p.no_gre), lat: msOf(p), rate: linkRate('p' + p.id, p.rx, p.tx) });
+      gre: !(p.engine === 'backhaul' || p.no_gre), lat: msOf(p), rate: linkRate('p' + p.id, p.rx, p.tx, d.counters_at) });
   });
   if (bObj && (bObj.is_active || bObj.has_config || bObj.remote_host)) {
-    L.push({ key: 'bagher', name: 'Bagher', ip: bObj.remote_host || '',
+    L.push({ key: 'bagher', name: bObj.name || 'Bagher', ip: bObj.remote_host || '',
       state: bObj.connected ? 'ok' : (bObj.is_active ? 'warn' : 'down'), eng: 'SSH', gre: false,
       lat: bObj.latency_ms > 0 ? Math.round(bObj.latency_ms) + 'ms' : '', rate: null });
+    // more foreign servers on the same Bagher hub
+    (Array.isArray(bObj.links) ? bObj.links : []).forEach(l => L.push({ key: 'bagher' + l.id, name: l.name || 'Bagher ' + l.id,
+      ip: l.remote_host || '', state: l.connected ? 'ok' : (l.is_active ? 'warn' : 'down'), eng: 'SSH', gre: false,
+      lat: l.latency_ms > 0 ? Math.round(l.latency_ms) + 'ms' : '', rate: null }));
   }
+  // Xray tunnel links (their foreign end: "listening" waits for Iran)
+  (d.xray || []).forEach(x => L.push({ key: 'xray' + x.id, name: x.name || ('Xray ' + x.id), ip: x.remote || '',
+    state: x.link === 'up' ? 'ok' : (x.link === 'listening' || x.link === 'checking') ? 'warn' : 'down',
+    eng: 'Xray · ' + xrWireName(x), gre: false, lat: x.ping_ms > 0 ? Math.round(x.ping_ms) + 'ms' : '',
+    rate: linkRate('xray-' + x.id, x.rx, x.tx, d.counters_at) }));
   return L;
+}
+// xrWireName: a link's transport in a word (Reality, XHTTP, CDN, mKCP...).
+function xrWireName(x) {
+  if (x.cdn) return 'CDN';
+  if (x.transport === 'raw' && x.security === 'reality') return 'Reality';
+  return { xhttp: 'XHTTP', grpc: 'gRPC', ws: 'WS', httpupgrade: 'HTTPUpgrade', kcp: 'mKCP', raw: 'RAW' }[x.transport] || x.transport || '';
+}
+// gotoXrayLink opens the Xray tab at one link's card.
+function gotoXrayLink(id) {
+  goTab('xray');
+  setTimeout(() => { const el = $('xrLink' + id); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 400);
 }
 function heroTopo(links, hubName, hubIp) {
   const shown = links.slice(0, links.length > HT_MAX ? HT_MAX - 1 : HT_MAX);
@@ -3010,6 +3122,7 @@ async function doSetup() {
       frp_transport: ($('sEngine') && $('sEngine').value === 'frp') ? selTrans : '',
       local_public: $('sLocalPub').value.trim(),
       remote_public: $('sRemotePub').value.trim(),
+      name: $('sMainName') ? $('sMainName').value.trim() : '',
       local_gre: $('sLocalGre') ? $('sLocalGre').value.trim() : '',
       peer_gre: $('sPeerGre') ? $('sPeerGre').value.trim() : '',
       frp_port: parseInt($('sFrpPort').value, 10),
@@ -3114,6 +3227,8 @@ function setIranEngine(eng) {
     ? tr('', 'The foreign server uses GRE when it works and the public IP while GRE is blocked, then goes back to GRE by itself.')
     : tr('', 'No GRE interface at all: for servers where GRE (protocol 47) is blocked for good.');
   const noGre = api_eng === 'backhaul';
+  if ($('bhFamWrap')) $('bhFamWrap').classList.toggle('hidden', !noGre);
+  if (!noGre && _bhFam === 6) { _bhFam = 4; syncBhFam(); }
   if ($('iranFields')) $('iranFields').hidden = isBagher;
   if ($('bagherFields')) $('bagherFields').hidden = !isBagher;
   if ($('wrapLocalGre')) $('wrapLocalGre').classList.toggle('hidden', noGre);
@@ -3163,6 +3278,22 @@ if ($('sshfwdUdp')) $('sshfwdUdp').addEventListener('change', e => { e.target.da
 if ($('engGreFrp')) $('engGreFrp').onclick = () => setIranEngine('frp');
 if ($('engBh')) $('engBh').onclick = () => setIranEngine('backhaul');
 if ($('engBagher')) $('engBagher').onclick = () => setIranEngine('bagher');
+// Backhaul without GRE connects the servers over IPv4 or IPv6 (GRE needs IPv4).
+let _bhFam = 4;
+function syncBhFam() {
+  const six = _bhFam === 6, d = setupDefaults || {};
+  if ($('bhFam4')) $('bhFam4').setAttribute('aria-pressed', !six);
+  if ($('bhFam6')) $('bhFam6').setAttribute('aria-pressed', six);
+  for (const id of ['sLocalPub', 'sRemotePub']) if ($(id)) $(id).setAttribute('inputmode', six ? 'text' : 'decimal');
+  if ($('sRemotePub')) $('sRemotePub').placeholder = six ? 'e.g. 2001:db8::10' : 'e.g. 203.0.113.10';
+  const cur = $('sLocalPub') ? $('sLocalPub').value.trim() : '';
+  if ($('sLocalPub') && (!cur || (six ? isIPv4(cur) : isIPv6(cur)))) $('sLocalPub').value = (six ? d.local_public6 : d.local_public) || '';
+  if ($('bhFamHint')) $('bhFamHint').textContent = !six ? ''
+    : d.local_public6 ? tr('', 'The foreign server dials the IPv6 address of this server. Both servers need a public IPv6 address.')
+    : tr('', 'No public IPv6 address was found on this server: enter it by hand, or connect over IPv4.');
+}
+if ($('bhFam4')) $('bhFam4').onclick = () => { _bhFam = 4; syncBhFam(); };
+if ($('bhFam6')) $('bhFam6').onclick = () => { _bhFam = 6; syncBhFam(); };
 if ($('bhGreOn')) $('bhGreOn').onclick = () => { _bhGre = true; setIranEngine('backhaul'); };
 if ($('bhGreOff')) $('bhGreOff').onclick = () => { _bhGre = false; setIranEngine('backhaul'); };
 if ($('bagherLicOpenBtn')) $('bagherLicOpenBtn').onclick = () => openBagherLicModal();
@@ -3224,12 +3355,12 @@ if ($('pTransport')) $('pTransport').addEventListener('change', syncPeerUdp);
 // Foreign join: bundle-first UX supporting hsh1_, bh1_, and gh1_ bundles.
 function parseBundleClient(s) {
   s = (s || '').trim();
-  const v4 = ip => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(o => +o <= 255);
+  const v4 = isIPv4;
   if (s.startsWith('bh1_')) {
     const parts = s.slice(4).split('_');
     if (parts.length < 4 || parts.length > 5) return {error: 'bh1 bundle must have 4 or 5 parts'};
     const [iranPub, portS, transport, token] = parts;
-    if (!v4(iranPub)) return {error: 'bad Iran public IP in bundle'};
+    if (!isIP(iranPub)) return {error: 'bad Iran public IP in bundle'};
     const port = parseInt(portS, 10);
     if (!/^\d+$/.test(portS) || port < 1 || port > 65535) return {error: 'bad port in bundle'};
     if (!token || token.length > 128) return {error: 'bad token in bundle'};
@@ -3401,6 +3532,7 @@ $('joinBtn').onclick = async () => {
       token: rawToken,
       dial: bundle.engine === 'backhaul' ? '' : ($('jDial') ? $('jDial').value : 'auto'),
       accept_udp: !!bundle.udp,
+      name: $('jName') ? $('jName').value.trim() : '',
       ports, force: true,
     } : {
       role: 'foreign',
@@ -3413,6 +3545,7 @@ $('joinBtn').onclick = async () => {
       local_gre: (m.inner || '').split('/')[0] || adv('fLocalGre') || $('sLocalGre').value.trim(),
       peer_gre: peerInnerHint(st) || adv('fPeerGre') || $('sPeerGre').value.trim(),
       frp_port: st.frp_port || parseInt(adv('fFrpPort') || $('sFrpPort').value, 10) || 7000,
+      name: $('jName') ? $('jName').value.trim() : '',
       token, ports, force: true,
     };
     if (!body.ports) {
@@ -4745,8 +4878,12 @@ $('perfRestoreBtn').onclick = () => runNetRestore($('perfRestoreBtn'));
 let carrierState = { mode: 'direct', active: 'direct', wss_port: 8443 };
 
 function carrierName(c) {
-  return (c || '').startsWith('wss') ? 'WSS :' + (c.split(':')[1] || '8443') : tr('', 'Direct GRE');
+  c = c || '';
+  if (c === '6to4' || c === '4in6') return c;
+  return c.startsWith('wss') ? 'WSS :' + (c.split(':')[1] || '8443') : tr('', 'Direct GRE');
 }
+// gwKey: the wrap tile a carrier belongs to
+const gwKey = c => (c || '').startsWith('wss') ? 'wss' : (c === '6to4' || c === '4in6') ? c : 'direct';
 
 async function loadCarrier() {
   let s;
@@ -4760,14 +4897,19 @@ async function loadCarrier() {
   }
   carrierState = s;
   const cur = s.active || s.active_carrier || 'direct';
-  const isWss = cur.startsWith('wss');
+  const key = gwKey(cur);
 
   const badge = $('carrierActiveBadge');
   badge.textContent = carrierName(cur);
-  badge.className = 'badge ' + (isWss ? 'ok' : 'info');
-  badge.dir = isWss ? 'ltr' : '';
-  (isWss ? perfSetLtr : perfSetText)('carrierActiveVal', carrierName(cur));
-  perfSetText('carrierActiveSub', tr('', isWss ? 'GRE inside TLS WebSocket' : 'Raw GRE, protocol 47'));
+  badge.className = 'badge ' + (key === 'direct' ? 'info' : 'ok');
+  badge.dir = key === 'direct' ? '' : 'ltr';
+  (key === 'direct' ? perfSetText : perfSetLtr)('carrierActiveVal', carrierName(cur));
+  perfSetText('carrierActiveSub', tr('', {
+    wss: 'GRE inside TLS WebSocket',
+    '6to4': 'GRE over a private IPv6 inside IPv4 (protocol 41)',
+    '4in6': 'GRE over the public IPv6 addresses',
+    direct: 'Raw GRE, protocol 47',
+  }[key]));
 
   const lv = $('carrierLinkVal');
   if (!s.gre_exists) {
@@ -4788,23 +4930,26 @@ async function loadCarrier() {
     ? docTpl('Port {0} · {1} packets out, {2} in', [s.wss_port, (w.packets_sent || 0).toLocaleString(), (w.packets_recv || 0).toLocaleString()])
     : docTpl('Port {0}', [s.wss_port || 8443]));
 
-  gwPick = cur.startsWith('wss') ? 'wss' : 'direct';
+  gwPick = key;
   gwRender();
   $('carrierApplyBtn').disabled = !s.gre_exists;
   const wpIn = $('carrierWSSPortInput');
   if (s.wss_port && document.activeElement !== wpIn) wpIn.value = s.wss_port;
   const sniIn = $('carrierWSSSNIInput');
   if (document.activeElement !== sniIn) sniIn.value = s.wss_sni || '';
+  const remIn = $('carrierWSSRemoteInput');
+  if (document.activeElement !== remIn) remIn.value = s.wss_remote || '';
 
   const tunCarrier = $('tunnelCarrierTxt');
   if (tunCarrier) tunCarrier.textContent = cur.toUpperCase();
 }
 // The two wrap tiles: the active one is marked, the picked one is selected.
 let gwPick = 'direct';
-function gwTarget() { return gwPick === 'wss' ? 'wss:' + (carrierState.wss_port || 8443) : 'direct'; }
+function gwTarget() { return gwPick === 'wss' ? 'wss:' + (carrierState.wss_port || 8443) : gwPick; }
 function gwRender() {
   const cur = carrierState.active || carrierState.active_carrier || 'direct';
-  const curKey = cur.startsWith('wss') ? 'wss' : 'direct';
+  const curKey = gwKey(cur);
+  if ($('gwV6')) $('gwV6').classList.toggle('hidden', gwPick !== '4in6');
   document.querySelectorAll('#gwOpts .gw-opt').forEach(b => {
     const k = b.dataset.gw;
     b.classList.toggle('cur', k === curKey);
@@ -4860,14 +5005,22 @@ if (carrierApplyBtn) {
 const carrierSaveModeBtn = $('carrierSaveModeBtn');
 carrierSaveModeBtn.onclick = async () => {
   const m = gwTarget();
+  const r6 = m === '4in6' && $('carrierRemote6') ? $('carrierRemote6').value.trim() : '';
+  if (r6 && !isIPv6(r6)) {
+    toastErr(tr('', 'Invalid IPv6 address'), r6);
+    $('carrierRemote6').focus();
+    return;
+  }
   if (!await entConfirm(tr('', 'Switch GRE wrap?'), docTpl('GRE packets will be carried over {0}. The tunnel reconnects, which takes a few seconds. The other server switches too when it is linked.', [carrierName(m)]), tr('', 'Switch Wrap'))) return;
   carrierSaveModeBtn.disabled = true;
+  carrierSaveModeBtn.innerHTML = '<span class="ent-spinner"></span> ' + esc(tr('', 'Switching…'));
   try {
-    const res = await api('/api/carrier', { action: 'set-active', target: m });
-    toastOk(tr('', 'GRE wrap switched'), carrierName(res.active || res.active_carrier || m));
+    const res = await api('/api/carrier', { action: 'switch', target: m, remote6: r6 || undefined });
+    toastOk(tr('', 'GRE wrap switched'), res.detail || carrierName(res.active || res.active_carrier || m));
   } catch (e) {
     toastErr(tr('', 'Could not switch the GRE wrap'), e.message);
   }
+  carrierSaveModeBtn.textContent = tr('', 'Switch Wrap');
   await loadCarrier();
 };
 
@@ -4876,15 +5029,23 @@ const carrierSaveWSSBtn = $('carrierSaveWSSBtn');
 carrierSaveWSSBtn.onclick = async () => {
   const p = Number($('carrierWSSPortInput').value);
   const sni = $('carrierWSSSNIInput').value.trim();
+  const remote = $('carrierWSSRemoteInput').value.trim().replace(/^\[|\]$/g, '');
   if (!Number.isInteger(p) || p < 1 || p > 65535) {
     toastErr(tr('', 'Invalid port'), tr('', 'Enter a port from 1 to 65535.'));
     $('carrierWSSPortInput').focus();
     return;
   }
+  if (remote && !isIP(remote) && !/^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(remote)) {
+    toastErr(tr('', 'Invalid address'), tr('', 'Enter an IPv4, an IPv6 or a host name.'));
+    $('carrierWSSRemoteInput').focus();
+    return;
+  }
   carrierSaveWSSBtn.disabled = true;
   try {
-    await api('/api/carrier', { action: 'set_wss', wss_port: p, wss_sni: sni });
-    toastOk(tr('', 'WSS settings saved'), docTpl('Port {0}', [p]) + (sni ? ' · SNI ' + sni : ''));
+    const body = { action: 'set_wss', wss_port: p, wss_sni: sni };
+    if (remote) body.wss_remote = remote;
+    await api('/api/carrier', body);
+    toastOk(tr('', 'WSS settings saved'), docTpl('Port {0}', [p]) + (sni ? ' · SNI ' + sni : '') + (remote ? ' · ' + remote : ''));
   } catch (e) {
     toastErr(tr('', 'Could not save WSS settings'), e.message);
   } finally {
@@ -4950,7 +5111,7 @@ function renderCarriers() {
   const hint = $('carriersHint');
   if (hint) hint.textContent = iran
     ? tr('', 'How each tunnel travels. When a network starts blocking or slowing one, swap it: both servers switch, and if the new carrier does not connect they go back on their own.')
-    : tr('', 'How this tunnel travels. Carriers are swapped from the Iran server; this server follows on its own.');
+    : tr('', 'How this tunnel travels. Swap it here or on the Iran server: the Iran server switches both, and if the new carrier does not connect they go back on their own.');
   box.innerHTML = rows.map(r => {
     const [eng, t] = r.carrier.split(':');
     const fam = SW_FAMS.find(f => f.eng === eng) || {};
@@ -4962,7 +5123,7 @@ function renderCarriers() {
       <span class="cr-dot" aria-hidden="true"></span>
       <div class="cr-id"><b>${esc(r.name)}</b><small>${esc(r.ip)}</small></div>
       <div class="cr-car"><span class="cr-eng" data-no-i18n>${esc(fam.name || eng)}</span><b data-no-i18n>${esc(o[1] || (t || '').toUpperCase())}</b><span class="cr-tags" data-no-i18n>${tags}</span></div>
-      ${iran ? `<button class="hashem-btn ${busy ? 'hashem-btn-ghost' : 'hashem-btn-secondary'} u-btn-30" onclick="openSwap(${r.id})">${busy ? '<span class="ent-spinner"></span> ' + esc(tr('', 'Swapping…')) : esc(tr('', 'Swap'))}</button>` : ''}
+      <button class="hashem-btn ${busy ? 'hashem-btn-ghost' : 'hashem-btn-secondary'} u-btn-30" onclick="openSwap(${r.id})">${busy ? '<span class="ent-spinner"></span> ' + esc(tr('', 'Swapping…')) : esc(tr('', 'Swap'))}</button>
     </div>`;
   }).join('');
 }
@@ -4987,7 +5148,7 @@ async function openSwap(id) {
   }
   if (!_sw || _sw.id !== id) return;
   if (r.error) {
-    $('swapBody').innerHTML = `<div class="sw-result warn">${esc(tr('', r.foreign_side ? 'Swap the carrier from the Iran server: it switches this server too.' : r.error))}</div>`;
+    $('swapBody').innerHTML = `<div class="sw-result warn">${esc(r.error)}</div>`;
     return;
   }
   _sw.info = r;
@@ -5018,9 +5179,11 @@ function closeSwap() {
 
 // The two servers with the carrier between them: now -> next.
 function swRoute(t, from, to, state) {
+  // On the foreign server the Iran server's view comes back: t.remote_pub is this server.
+  const viaIran = !!(_sw && _sw.info && _sw.info.via_iran), L = window._lastLocal || {};
   const next = to ? `<span class="sw-pill next" data-no-i18n>${esc(carrierText(to))}</span>` : `<span class="sw-pill next empty">${esc(tr('', 'Pick a carrier below'))}</span>`;
   return `<div class="sw-route ${state || ''}">
-    <div class="sw-end"><span class="tv-ico">${ICO_SRV}</span><b>${esc(tr('', 'Iran server'))}</b><small>${esc((window._lastLocal || {}).local_pub || '')}</small></div>
+    <div class="sw-end"><span class="tv-ico">${ICO_SRV}</span><b>${esc(tr('', 'Iran server'))}</b><small>${esc(viaIran ? L.remote_pub || '' : L.local_pub || '')}</small></div>
     <div class="sw-mid">
       <div class="sw-pills">
         <span class="sw-pill cur" data-no-i18n>${esc(carrierText(from))}</span>
@@ -5029,7 +5192,7 @@ function swRoute(t, from, to, state) {
       </div>
       <div class="sw-wire" aria-hidden="true"><i></i></div>
     </div>
-    <div class="sw-end"><span class="tv-ico far">${ICO_GLOBE}</span><b>${esc(t.main ? tr('', 'Foreign server') : t.name)}</b><small>${esc(t.remote_pub || '')}</small></div>
+    <div class="sw-end"><span class="tv-ico far">${ICO_GLOBE}</span><b>${esc(viaIran ? tr('', 'This server') : t.main ? tr('', 'Foreign server') : t.name)}</b><small>${esc(t.remote_pub || '')}</small></div>
   </div>`;
 }
 
@@ -5038,7 +5201,7 @@ function renderSwapPick() {
   const fams = SW_FAMS.map(f => {
     let why = '';
     if (f.gre && !t.gre_ok) why = tr('', 'Needs GRE; this tunnel has none');
-    else if (!(f.eng === 'frp' ? info.bins.frps : info.bins.backhaul)) why = tr('', 'Not installed on this server');
+    else if (!(f.eng === 'frp' ? info.bins.frps : info.bins.backhaul)) why = tr('', info.via_iran ? 'Not installed on this server or on the Iran server' : 'Not installed on this server');
     const locked = f.pro && !info.backhaul_pro;
     const opts = f.opts.map(o => {
       const id = f.eng + ':' + o[0];
@@ -5056,7 +5219,11 @@ function renderSwapPick() {
     </section>`;
   }).join('');
   let follow;
-  if (_sw.follow === null) follow = `<div class="sw-follow wait"><span class="ent-spinner"></span> ${esc(tr('', 'Checking that the foreign server can follow…'))}</div>`;
+  if (info.via_iran) {
+    follow = _sw.follow === null ? `<div class="sw-follow wait"><span class="ent-spinner"></span> ${esc(tr('', 'Checking that the Iran server can switch this server…'))}</div>`
+      : _sw.follow ? `<div class="sw-follow ok"><span class="sw-fdot"></span> ${esc(tr('', 'The Iran server runs the swap and switches both servers. If the new carrier does not connect within 45 s, both go back.'))}</div>`
+      : `<div class="sw-follow warn"><span class="sw-fdot"></span><div>${esc(tr('', "The Iran server cannot reach this server's panel, so it cannot switch it. Swap the carrier on the Iran server."))}<small data-no-i18n>${esc(_sw.followErr)}</small></div></div>`;
+  } else if (_sw.follow === null) follow = `<div class="sw-follow wait"><span class="ent-spinner"></span> ${esc(tr('', 'Checking that the foreign server can follow…'))}</div>`;
   else if (_sw.follow) follow = `<div class="sw-follow ok"><span class="sw-fdot"></span> ${esc(tr('', 'The foreign server follows on its own. If the new carrier does not connect within 45 s, both servers go back.'))}</div>`;
   else follow = `<div class="sw-follow warn"><span class="sw-fdot"></span><div>${esc(tr('', 'The foreign server\'s panel cannot be reached from here, so it cannot follow on its own.'))}
       <small data-no-i18n>${esc(_sw.followErr)}</small>
@@ -5106,15 +5273,20 @@ const SW_STEPS = {
   verify: 'Wait for the tunnel to connect',
   revert: 'Put both servers back',
 };
+// Steps as the foreign server sees a swap the Iran server runs.
+const SW_STEPS_FAR = {
+  foreign: 'Switch this server',
+  local: 'Switch the Iran server',
+};
 function renderSwapProgress() {
-  const j = _sw.job, t = _sw.info.tunnel;
+  const j = _sw.job, t = _sw.info.tunnel, steps0 = _sw.info.via_iran ? Object.assign({}, SW_STEPS, SW_STEPS_FAR) : SW_STEPS;
   const secs = j.took_ms ? (j.took_ms / 1000).toFixed(1) : '';
   const wire = j.state === 'running' ? 'run' : j.state === 'ok' ? 'ok' : j.state === 'manual' ? 'warn' : 'bad';
   const icon = s => s === 'ok' ? '<svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>'
     : s === 'fail' ? '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>'
     : s === 'run' ? '<span class="ent-spinner"></span>' : s === 'skip' ? '<svg viewBox="0 0 16 16"><path d="M4 8h8"/></svg>' : '';
   const steps = (j.steps || []).map(s => `<li class="sw-step ${esc(s.state)}"><span class="sw-step-ic">${icon(s.state)}</span>
-      <div><b>${esc(tr('', SW_STEPS[s.key] || s.key))}</b>${s.detail ? `<small data-no-i18n>${esc(s.detail)}</small>` : ''}</div></li>`).join('');
+      <div><b>${esc(tr('', steps0[s.key] || s.key))}</b>${s.detail ? `<small data-no-i18n>${esc(s.detail)}</small>` : ''}</div></li>`).join('');
   let res = '';
   if (j.state === 'ok') res = `<div class="sw-result ok">${esc(docTpl('The tunnel is connected on {0}. Took {1} s.', [carrierText(j.to), secs]))}</div>`;
   else if (j.state === 'reverted') res = `<div class="sw-result warn">${esc(docTpl('{0} did not connect, so both servers went back to {1}. The tunnel works as before.', [carrierText(j.to), carrierText(j.from)]))}<small data-no-i18n>${esc(j.error || '')}</small></div>`;
@@ -5417,6 +5589,767 @@ function renderSpoofTester(t) {
     const el = $('spIPs');
     if (el) { el.value = passed.map(p => p.ip).join('\n'); toastOk(tr('', 'Spoof IPs filled'), tr('', 'Save or bring the tunnel up to apply.')); }
   };
+}
+
+// ---------- Xray Tunnel (tab-xray) ----------
+// A port forward over Xray-core: direct (Iran dials the foreign server) or
+// reverse (the foreign server dials Iran). The Iran server makes a link with
+// the wizard and hands the foreign server a bundle (xr1_...). The links list
+// refreshes every few seconds; the wizard is drawn only on its own actions,
+// so a refresh never loses what was typed.
+let _xray = null;
+let _xrTimer = null;
+let _xrWiz = null;     // the open wizard: {step, id, mode, preset, profile, ...}
+let _xrCheckT = null;  // debounce of the wizard's port check
+let _xrCheck = null;   // its last answer
+// the HTTPS ports Cloudflare proxies (the server checks the same list)
+const XR_CDN_PORTS = [443, 2053, 2083, 2087, 2096, 8443];
+const ICO_CLOUD = '<svg viewBox="0 0 24 24"><path d="M7 18h10.5a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.2 9.4 4.3 4.3 0 0 0 7 18z"/></svg>';
+const XR_STEPS = [['core', 'Xray-core'], ['ports', 'Ports are free'], ['config', 'Xray accepts the config'], ['service', 'Service running'], ['link', 'Link works']];
+// meter: speed, stealth, stability (out of 5)
+const XR_PRESETS = {
+  reality: { name: 'Reality', wire: 'VLESS · RAW · Reality · Vision', meter: [5, 4, 4], hint: 'The fastest. On the wire it looks like a visit to a normal HTTPS site.' },
+  xhttp: { name: 'XHTTP', wire: 'VLESS · XHTTP · Reality', meter: [4, 5, 4], hint: 'Ordinary HTTP requests instead of one long stream: for when plain Reality gets cut.' },
+  grpc: { name: 'gRPC', wire: 'VLESS · gRPC · Reality', meter: [4, 4, 3], hint: 'Many streams over one connection, like an app talking to its API.' },
+  kcp: { name: 'mKCP', wire: 'VLESS · mKCP · UDP', meter: [3, 2, 3], hint: 'Over UDP, encrypted by mKCP: for when TCP is throttled.' },
+  cdn: { name: 'CDN', wire: 'VLESS · XHTTP · TLS · Cloudflare', meter: [3, 5, 5], hint: 'Through Cloudflare: a censor sees only a Cloudflare site, and a blocked server IP stays reachable. Needs a domain on Cloudflare.' },
+};
+const ICO_USERS = '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/></svg>';
+const ICO_APP = '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>';
+const ICO_INFO = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>';
+const xrArrow = cls => `<svg class="${cls}" viewBox="0 0 56 10" aria-hidden="true"><path class="xr-dash" d="M2 5h46"/><path d="M44 1l6 4-6 4"/></svg>`;
+
+async function loadXray(quiet) {
+  if (!$('xrayLinks')) return;
+  try {
+    _xray = await api('/api/xray');
+  } catch (e) {
+    if (!quiet) $('xrayLinks').innerHTML = stateError(e.message, null, true);
+    return;
+  }
+  renderXray();
+  xrArm();
+}
+
+// xrShown: the Xray tab is open, or the Tunnel tab with Xray links on it.
+function xrShown() {
+  const x = $('tab-xray'), t = $('tab-tunnel');
+  return (x && !x.hidden) || (t && !t.hidden && !!(_xray && (_xray.links || []).length));
+}
+
+// xrArm refreshes every 4 s (2 s while the core installs) while the links are on screen.
+function xrArm() {
+  clearTimeout(_xrTimer);
+  if (!xrShown()) return;
+  _xrTimer = setTimeout(() => {
+    if (xrShown() && !document.hidden) loadXray(true); else xrArm();
+  },_xray && _xray.install && _xray.install.running ? 2000 : 4000);
+}
+
+function renderXray() {
+  const d = _xray;
+  const links = d.links || [];
+  // the foreign end of a direct link only listens: "ready" is its good state
+  const up = links.filter(l => !l.disabled && l.health && (l.health.link === 'up' || l.health.link === 'listening')).length;
+  const b = $('xrayBadge');
+  if (b) {
+    let cls = 'dim', txt = tr('xray_idle', 'No tunnel yet');
+    if (links.length && up === links.length) { cls = 'ok'; txt = links.length === 1 ? tr('', 'Tunnel up') : up + ' ' + tr('', 'links up'); }
+    else if (links.length) { cls = 'warn'; txt = up + '/' + links.length + ' ' + tr('', 'links up'); }
+    b.className = 'badge ' + cls;
+    b.textContent = txt;
+  }
+  $('xrayTop').innerHTML = xrTopHTML(d);
+  // A link's open bundle or bring-up steps survive the refresh.
+  const keep = {};
+  document.querySelectorAll('#xrayLinks [id^="xrOut"]').forEach(o => { if (o.innerHTML) keep[o.id] = [o.innerHTML, o.dataset.bundle]; });
+  $('xrayLinks').innerHTML = links.length ? `<div class="xr-stack">${links.map(l => xrLinkCard(l)).join('')}</div>` : '';
+  Object.keys(keep).forEach(id => {
+    const o = $(id);
+    if (!o) return;
+    o.innerHTML = keep[id][0];
+    if (keep[id][1]) o.dataset.bundle = keep[id][1];
+  });
+  if ($('tunXrayCards')) $('tunXrayCards').innerHTML = links.map(l => xrLinkCard(l, true)).join('');
+  if (!_xrWiz) $('xrayWizard').innerHTML = xrStartHTML(links.length > 0);
+}
+
+// xrTopHTML: the core (install or its progress) and the Xray panels next door.
+function xrTopHTML(d) {
+  const parts = [];
+  const ins = d.install || {};
+  if (!d.installed) {
+    const log = ins.log ? `<pre class="xr-log" data-no-i18n>${esc(ins.log.split('\n').slice(-12).join('\n'))}</pre>` : '';
+    parts.push(`<div class="xr-note ${ins.done && !ins.ok ? 'warn' : 'info'}">${ICO_INFO}<div class="xr-note-body">
+      <b>${esc(tr('', ins.running ? 'Installing Xray-core…' : 'Xray-core is not installed on this server yet'))}</b>
+      <span>${esc(tr('', 'The tunnel uses its own copy of Xray-core (the official release, checked by its checksum) in its own folder. An Xray panel on this server keeps its own.'))}</span>
+      ${ins.done && !ins.ok ? `<span class="xr-bad">${esc(tr('', 'The install failed. The log is below; the server may not reach GitHub or its mirrors.'))}</span>` : ''}
+      ${log}
+      <div class="xr-bar"><button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="xrInstall()" ${ins.running ? 'disabled' : ''}>${esc(tr('', ins.running ? 'Installing…' : 'Install Xray-core'))}</button></div>
+    </div></div>`);
+  }
+  const panels = d.panels || [];
+  if (panels.length) {
+    parts.push(`<div class="xr-note info">${ICO_INFO}<div class="xr-note-body">
+      <b>${esc(tr('', 'Found on this server:'))} <span data-no-i18n>${esc(panels.map(p => p.name).join(', '))}</span></b>
+      <span>${esc(tr('', 'No conflict: the tunnel runs its own Xray-core under its own services (hashem-xray-N) and never touches their files, services or ports. A port they use is refused with its owner named, and a free one is suggested.'))}</span>
+    </div></div>`);
+  }
+  return parts.length ? `<div class="xr-stack">${parts.join('')}</div>` : '';
+}
+
+function xrStartHTML(hasLinks) {
+  return `<div class="xr-bar">
+    <button type="button" class="hashem-btn hashem-btn-primary" onclick="xrWizOpen()">${esc(tr('', hasLinks ? 'Add a tunnel' : 'Create a tunnel (on the Iran server)'))}</button>
+    <button type="button" class="hashem-btn hashem-btn-secondary" onclick="xrImportOpen()">${esc(tr('', 'Paste a bundle (on the foreign server)'))}</button>
+  </div>`;
+}
+
+// ---- a link: its live scene and actions ----
+
+function xrLane(cls, bps, live) {
+  if (!live) return '';
+  const d = flowDur(bps);
+  if (!d) return `<i class="tv-lane ${cls} idle"></i>`;
+  const ph = -((Date.now() / 1000) % d);
+  return `<i class="tv-lane ${cls}" style="--d:${d}s;--p:${ph.toFixed(2)}s"><b></b><b></b><b></b><b></b></i>`;
+}
+
+// xrWire is the short line between the users (or the service) and a server.
+const xrWire = live => `<i class="xr-wire${live ? ' live' : ''}"></i>`;
+
+// xrScene draws users -> Iran == tunnel == foreign -> service. o: {state:
+// ok|warn|down|off, mode, here: iran|foreign, iranSub, forSub, up, dn (bytes/s
+// Iran->foreign and back, null when unknown), tags, meta, ports}
+function xrScene(o) {
+  const live = o.state !== 'down' && o.state !== 'off';
+  const busy = live && ((o.up || 0) >= 1024 || (o.dn || 0) >= 1024);
+  const rev = o.mode === 'reverse';
+  const here = esc(tr('', 'this server'));
+  const node = (side, ico, far, sub) => `<div class="tv-node"><span class="tv-ico${far ? ' far' : ''}">${ico}</span>
+      <b>${esc(tr('', side === 'iran' ? 'Iran' : 'Foreign'))}</b><small data-no-i18n>${esc(sub || '')}</small>${o.here === side ? `<em>${here}</em>` : ''}</div>`;
+  return `<div class="tv xr-scene ${live ? 'tv-on' : 'tv-off'}${o.state === 'warn' ? ' tv-warn' : ''}${o.state === 'off' ? ' xr-paused' : ''}">
+    <div class="xr-end"><span class="tv-ico">${ICO_USERS}</span>${esc(tr('', 'Users'))}</div>
+    ${xrWire(busy)}
+    ${node('iran', ICO_SRV, false, o.iranSub)}
+    <div class="tv-link">
+      <div class="xr-dial${rev ? ' rev' : ''}">${xrArrow('')}<span>${esc(tr('', rev ? 'the foreign server dials Iran' : 'Iran dials the foreign server'))}</span></div>
+      <div class="tv-tag">${(o.tags || []).filter(t => t && t[0]).map(t => `<span class="${t[1] || ''}" ${t[2] ? '' : 'data-no-i18n'}>${esc(t[0])}</span>`).join('')}</div>
+      <div class="xr-pipe"><div class="tv-pipe" role="img" aria-label="${esc(tr('', live ? 'Tunnel connected' : 'Tunnel down'))}">
+        ${xrLane('tv-u', o.up, live)}${xrLane('tv-d', o.dn, live)}
+        ${live ? '' : '<span class="tv-break" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg></span>'}
+      </div>${o.cdn ? `<span class="xr-cdn" role="img" aria-label="Cloudflare" title="Cloudflare">${ICO_CLOUD}</span>` : ''}</div>
+      <div class="tv-meta">${(o.meta || []).join('')}</div>
+    </div>
+    ${node('foreign', ICO_GLOBE, true, o.forSub)}
+    ${xrWire(busy)}
+    <div class="xr-end"><span class="tv-ico">${ICO_APP}</span>${esc(tr('', 'Service'))}<small class="u-mono" data-no-i18n>127.0.0.1</small></div>
+  </div>`;
+}
+
+// xrTags: what the link is, and what a censor sees on the wire.
+function xrTags(p) {
+  const tags = [];
+  const wire = ['VLESS', { raw: 'RAW', xhttp: 'XHTTP', grpc: 'gRPC', ws: 'WS', httpupgrade: 'HTTPUpgrade', kcp: 'mKCP' }[p.transport] || p.transport];
+  if (p.security === 'reality') wire.push('Reality'); else if (p.security === 'tls') wire.push('TLS');
+  if (p.vision) wire.push('Vision');
+  tags.push([wire.join(' · '), 'eng']);
+  if (p.cdn && p.sni) tags.push([tr('', 'through Cloudflare as') + ' ' + p.sni, 'mask', true]);
+  else if (p.security !== 'none' && p.sni) tags.push([tr('', 'looks like') + ' ' + p.sni, 'mask', true]);
+  else if (p.transport === 'kcp') tags.push([tr('', 'encrypted UDP'), 'mask', true]);
+  return tags;
+}
+
+function xrLinkCard(l, compact) {
+  const h = l.health || {};
+  const iran = l.side === 'iran';
+  const link = l.disabled ? 'off' : (h.link || 'checking');
+  const state = link === 'up' ? 'ok' : (link === 'listening' || link === 'checking') ? 'warn' : link === 'off' ? 'off' : 'down';
+  const r = linkRate('xray-' + l.id, l.rx, l.tx, _xray.counters_at);
+  // rx/tx are this server's: on Iran rx comes from the foreign server.
+  const up = r ? (iran ? r.up : r.dn) : null, dn = r ? (iran ? r.dn : r.up) : null;
+  const meta = [];
+  if (h.ping_ms > 0) meta.push(`<span class="tv-lat" data-no-i18n>${esc(tr('', 'ping'))} ${h.ping_ms.toFixed(h.ping_ms < 10 ? 1 : 0)} ms</span>`);
+  if (state !== 'down' && state !== 'off' && r) meta.push(`<span class="tv-dn">↓ ${esc(fmtRate(dn))}</span><span class="tv-up">↑ ${esc(fmtRate(up))}</span>`);
+  if (state === 'down') meta.push(`<span class="tv-err">${esc(tr('', 'No connection'))}</span>`);
+  if (link === 'listening') meta.push(`<span>${esc(tr('', 'the Iran server checks this link'))}${h.conns ? ' · ' + h.conns + ' ' + esc(tr('', 'connections')) : ''}</span>`);
+  // the tunnel port sits on the server that listens: foreign (direct) or Iran (reverse)
+  const rev = l.mode === 'reverse', tp = ' :' + l.tunnel_port;
+  const iranAddr = iran ? (_xray.public_ip || '') : (l.remote || ''), forAddr = iran ? (l.remote || '') : '';
+  const scene = xrScene({
+    state, mode: l.mode, here: l.side, up, dn, meta, tags: xrTags(l.profile || {}), cdn: !!(l.profile || {}).cdn,
+    iranSub: iranAddr + (rev ? tp : ''), forSub: forAddr + (rev ? '' : tp),
+  });
+  const badge = { ok: ['ok', 'Connected'], warn: ['warn', link === 'listening' ? 'Ready' : 'Checking…'], down: ['err', 'No connection'], off: ['dim', 'Stopped'] }[state];
+  const ports = (l.ports || []).map(p => `<span class="tv-port" data-no-i18n>${p}</span>`).join('');
+  const err = (state === 'down' && h.error) ? `<div class="xr-err" data-no-i18n>${esc(tr('', h.error))}</div>` : '';
+  const head = `<b data-no-i18n>${esc(l.name || (tr('', 'Link') + ' ' + l.id))}</b>
+      <span class="badge ${badge[0]}"><span class="dot"></span>${esc(tr('', badge[1]))}</span>
+      <small>Xray · ${esc(tr('', l.mode === 'reverse' ? 'Reverse' : 'Direct'))} · ${esc(tr('', iran ? 'Iran end' : 'foreign end'))}</small>
+      <span class="xr-grow"></span>`;
+  // the Tunnel tab's copy: the picture, and the way to the full card
+  if (compact) {
+    return `<div class="xr-link">
+    <div class="xr-link-h">${head}
+      <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="gotoXrayLink(${l.id})">${esc(tr('', 'Open in the Xray tab'))}</button></div>
+    ${scene}${err}</div>`;
+  }
+  return `<div class="xr-link" id="xrLink${l.id}">
+    <div class="xr-link-h">
+      ${head}
+      ${iran ? `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="xrShowBundle(${l.id})">${esc(tr('', 'Bundle'))}</button>
+        <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="xrWizEdit(${l.id})">${esc(tr('', 'Edit'))}</button>` : ''}
+      ${l.disabled
+        ? `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="xrAct('start', ${l.id})">${esc(tr('', 'Start'))}</button>`
+        : `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="xrAct('apply', ${l.id})">${esc(tr('', 'Restart'))}</button>
+           <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="xrAct('stop', ${l.id})">${esc(tr('', 'Stop'))}</button>`}
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="xrRemove(${l.id})">${esc(tr('', 'Remove'))}</button>
+    </div>
+    ${scene}
+    <div class="tv-ports"><span class="tv-ports-k">${esc(tr('', 'Forwarded'))}</span>${ports}${l.udp ? '<span class="tv-port more">+UDP</span>' : ''}</div>
+    ${err}
+    ${iran ? '' : `<div class="qs-hint">${esc(tr('', 'Its settings come from the Iran server: change them there and paste the new bundle here.'))}</div>`}
+    <div id="xrOut${l.id}"></div>
+  </div>`;
+}
+
+async function xrInstall() {
+  try {
+    await api('/api/xray', { action: 'install' });
+    toastOk(tr('', 'Installing Xray-core'), tr('', 'This takes a minute; the tab shows its progress.'));
+  } catch (e) { toastErr(tr('', 'Install failed'), e.message); }
+  loadXray(true);
+}
+
+async function xrAct(action, id) {
+  // looked up each time: the 4 s refresh may have redrawn the card meanwhile
+  const out = () => $('xrOut' + id);
+  const put = html => { const o = out(); if (o) { o.innerHTML = html; delete o.dataset.bundle; } };
+  put(action === 'stop' ? '' : xrRunHTML({}));
+  try {
+    const r = await api('/api/xray', { action, id });
+    if (r.steps) await xrRunPlay('xrOut' + id, r);
+    else put('');
+    if (r.status === 'error') toastErr(tr('', 'The link did not come up'), r.error || '');
+  } catch (e) {
+    put(`<div class="xr-err">${esc(e.message)}</div>`);
+  }
+  xrayHealthSoon();
+}
+
+// xrayHealthSoon: refresh shortly (the server checks health in the background).
+function xrayHealthSoon() { setTimeout(() => loadXray(true), 1200); }
+
+async function xrRemove(id) {
+  const l = ((_xray && _xray.links) || []).find(x => x.id === id) || {};
+  if (!await entConfirm(tr('', 'Remove this Xray link?'), tr('', 'Its service and config are deleted on this server. Remove it on the other server too.'), tr('', 'Remove'))) return;
+  try {
+    await api('/api/xray', { action: 'remove', id });
+    toastOk(tr('', 'Link removed'), l.name || '');
+  } catch (e) { toastErr(tr('', 'Remove failed'), e.message); }
+  loadXray(true);
+}
+
+async function xrShowBundle(id) {
+  const out = $('xrOut' + id);
+  if (!out) return;
+  if (out.dataset.bundle) { out.innerHTML = ''; delete out.dataset.bundle; return; }
+  try {
+    const r = await api('/api/xray', { action: 'bundle', id });
+    out.dataset.bundle = '1';
+    out.innerHTML = xrBundleHTML(r.bundle, 'xrB' + id);
+  } catch (e) { out.innerHTML = `<div class="xr-err">${esc(e.message)}</div>`; }
+}
+
+function xrBundleHTML(bundle, id) {
+  return `<div class="xr-sub">
+    <label class="qs-label" for="${id}">${esc(tr('', 'Bundle for the foreign server'))}</label>
+    <textarea class="hashem-input xr-bundle" id="${id}" readonly data-no-i18n>${esc(bundle)}</textarea>
+    <div class="xr-bar"><button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="xrCopy('${id}')">${esc(tr('', 'Copy bundle'))}</button>
+      <span class="qs-hint">${esc(tr('', 'On the foreign server: Xray tab, Paste a bundle. It carries the link\'s keys, so keep it private.'))}</span></div>
+  </div>`;
+}
+
+function xrCopy(id) { const t = $(id); if (t) copyTextSafe(t.value, tr('', 'Copied'), tr('', 'Paste it in the Xray tab on the foreign server.')); }
+
+// ---- bringing a link up, step by step ----
+
+// xrRunHTML: the steps. res {} = the server is working (first step
+// spinning); shown = how many of res.steps to show (the next one spins).
+function xrRunHTML(res, shown) {
+  const steps = (res && res.steps) || [];
+  const n = shown == null ? steps.length : shown;
+  const spin = res && (shown != null ? shown < steps.length : !steps.length) ? n : -1;
+  return `<ol class="xr-run">${XR_STEPS.map(([k, label], i) => {
+    const s = i < n ? steps.find(x => x.key === k) : null;
+    const cls = s ? (s.ok ? 'ok' : s.wait ? 'wait' : 'bad') : i === spin ? 'go' : '';
+    const detail = s && s.detail ? `<small data-no-i18n>${esc(tr('', s.detail))}</small>` : '';
+    return `<li class="${cls}"><i></i><span>${esc(tr('', label))}${detail}</span></li>`;
+  }).join('')}</ol>`;
+}
+
+// xrRunPlay shows a result's steps one after another, as the server went,
+// in the element with id boxId (found again each step: it may be redrawn).
+async function xrRunPlay(boxId, res) {
+  const n = (res.steps || []).length;
+  for (let i = 0; i <= n; i++) {
+    const box = $(boxId);
+    if (!box) return;
+    box.innerHTML = xrRunHTML(res, i);
+    if (i < n) await new Promise(r => setTimeout(r, 260));
+  }
+}
+
+// ---- the wizard (Iran server) ----
+
+function xrPresetOf(name) {
+  const defs = (_xray && _xray.preset_defs) || {};
+  return JSON.parse(JSON.stringify(defs[name] || defs.reality || { transport: 'raw', security: 'reality', vision: true }));
+}
+
+function xrWizOpen() {
+  _xrCheck = null;
+  _xrWiz = { step: 1, mode: 'direct', preset: 'reality', profile: xrPresetOf('reality'), remote: '', ports: '', udp: false,
+    tunnel_port: 443, name: '', public_ip: (_xray && _xray.public_ip) || '', expert: '' };
+  xrWizRender();
+}
+
+function xrWizEdit(id) {
+  const l = ((_xray && _xray.links) || []).find(x => x.id === id);
+  if (!l) return;
+  _xrCheck = null;
+  _xrWiz = { step: 2, id, mode: l.mode, preset: (l.profile && l.profile.preset) || '', profile: JSON.parse(JSON.stringify(l.profile || {})),
+    remote: l.remote || '', ports: (l.ports || []).join(', '), udp: !!l.udp, tunnel_port: l.tunnel_port, name: l.name || '',
+    public_ip: (_xray && _xray.public_ip) || '', listen: l.listen || '', expert: l.expert ? JSON.stringify(l.expert, null, 2) : '' };
+  xrWizRender();
+  const w = $('xrayWizard');
+  if (w && w.scrollIntoView) w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function xrWizClose() { _xrWiz = null; $('xrayWizard').innerHTML = ''; loadXray(true); }
+
+function xrWizRender() {
+  const w = _xrWiz;
+  const titles = ['Direction', 'Settings', 'Review', 'Connect'];
+  const nav = `<ol class="xr-wiz-nav">${titles.map((t, i) => `<li class="${i + 1 === w.step ? 'on' : i + 1 < w.step ? 'done' : ''}">${esc(tr('', t))}</li>`).join('')}</ol>`;
+  const body = [null, xrWizStep1, xrWizStep2, xrWizStep3, xrWizStep4][w.step]();
+  $('xrayWizard').innerHTML = `<div class="xr-wiz">
+    <div class="xr-wiz-h"><b>${esc(tr('', w.id ? 'Edit link' : 'New Xray tunnel'))}</b>
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="xrWizClose()">${esc(tr('', w.step === 4 ? 'Done' : 'Cancel'))}</button></div>
+    ${nav}${body}</div>`;
+  if (w.step === 2) xrWizCheckSoon();
+}
+
+function xrWizGo(step) {
+  if (_xrWiz.step === 2) {
+    xrWizRead();
+    if (step > 2) {
+      const msg = xrWizProblem();
+      if (msg) { toastErr(tr('', 'Check the settings'), msg); return; }
+    }
+  }
+  _xrWiz.step = step;
+  xrWizRender();
+}
+
+// Step 1: who dials whom.
+function xrWizStep1() {
+  const w = _xrWiz;
+  const card = (mode, title, why, tag) => `<button type="button" class="xr-choice${w.mode === mode ? ' on' : ''}" onclick="xrWizMode('${mode}')" aria-pressed="${w.mode === mode}">
+      ${tag ? `<span class="xr-tagline">${esc(tr('', tag))}</span>` : ''}
+      <b>${esc(tr('', title))}</b>
+      <span class="xr-mini${mode === 'reverse' ? ' rev' : ''}"><span class="tv-ico">${ICO_SRV}</span>${esc(tr('', 'Iran'))}${xrArrow('xr-arrow')}${esc(tr('', 'Foreign'))}<span class="tv-ico far">${ICO_GLOBE}</span></span>
+      <small>${esc(tr('', why))}</small>
+    </button>`;
+  return `<div class="xr-choices">
+      ${card('direct', 'Direct', 'The Iran server connects to the foreign server. The usual choice.', 'Recommended')}
+      ${card('reverse', 'Reverse', 'The foreign server connects to the Iran server. Use it when the Iran server cannot reach the foreign one, or its connections out get cut.', '')}
+    </div>
+    <div class="xr-wiz-foot"><span></span><button type="button" class="hashem-btn hashem-btn-primary" onclick="xrWizGo(2)">${esc(tr('', 'Next'))}</button></div>`;
+}
+
+function xrWizMode(mode) {
+  _xrWiz.mode = mode;
+  // XHTTP suits a link the foreign server keeps open to Iran
+  if (!_xrWiz.id && mode === 'reverse' && _xrWiz.preset === 'reality') xrWizPresetSet('xhttp');
+  if (!_xrWiz.id && mode === 'direct' && _xrWiz.preset === 'xhttp') xrWizPresetSet('reality');
+  xrWizRender();
+}
+
+function xrWizPresetSet(name) {
+  // a disguise site carries over between Reality presets only (not a CDN domain)
+  const old = _xrWiz.profile || {};
+  _xrWiz.preset = name;
+  _xrWiz.profile = xrPresetOf(name);
+  if (_xrWiz.profile.security === 'reality' && old.security === 'reality') _xrWiz.profile.sni = old.sni || '';
+  if (_xrWiz.profile.cdn && !XR_CDN_PORTS.includes(_xrWiz.tunnel_port)) _xrWiz.tunnel_port = 443;
+}
+
+// xrWizRefresh redraws the settings after a choice that changes which fields apply.
+function xrWizRefresh() {
+  xrWizRead();
+  _xrWiz.advOpen = true;
+  if (_xrWiz.profile.cdn && !XR_CDN_PORTS.includes(_xrWiz.tunnel_port)) _xrWiz.tunnel_port = 443;
+  xrWizRender();
+}
+
+function xrWizPreset(name) { xrWizRead(); xrWizPresetSet(name); xrWizRender(); }
+
+// Step 2: the profile, the servers and the ports.
+function xrWizStep2() {
+  const w = _xrWiz, p = w.profile || {};
+  const rev = w.mode === 'reverse';
+  const meter = (label, n) => `<span>${esc(tr('', label))}</span><span>${[1, 2, 3, 4, 5].map(i => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</span>`;
+  const presets = Object.keys(XR_PRESETS).map(k => {
+    const x = XR_PRESETS[k];
+    const rec = (k === 'reality' && !rev) || (k === 'xhttp' && rev);
+    return `<button type="button" class="xr-choice${w.preset === k ? ' on' : ''}" onclick="xrWizPreset('${k}')" aria-pressed="${w.preset === k}">
+      ${rec ? `<span class="xr-tagline">${esc(tr('', 'Recommended'))}</span>` : ''}
+      <b data-no-i18n>${esc(x.name)}</b><code data-no-i18n>${esc(x.wire)}</code>
+      <span class="xr-meter">${meter('Speed', x.meter[0])}${meter('Stealth', x.meter[1])}${meter('Stability', x.meter[2])}</span>
+      <small>${esc(tr('', x.hint))}</small></button>`;
+  }).join('');
+  const f = (id, label, val, ph, hint, extra) => `<div class="xr-field"><label class="qs-label" for="${id}">${esc(tr('', label))}</label>
+      <input class="hashem-input u-ltr u-mono" id="${id}" value="${esc(val == null ? '' : String(val))}" placeholder="${esc(ph || '')}" autocomplete="off" ${extra || ''}>
+      ${hint ? `<div class="qs-hint" id="${id}Hint">${hint}</div>` : `<div class="qs-hint" id="${id}Hint"></div>`}</div>`;
+  const reality = p.security === 'reality', cdn = !!p.cdn;
+  const sniList = ((_xray && _xray.sni) || {})[rev ? 'reverse' : 'direct'] || [];
+  // where the domain's DNS record points: the server the CDN connects to
+  const origin = rev ? (w.public_ip || tr('', "this server's IP")) : (w.remote || tr('', "the foreign server's IP"));
+  const cdnHTML = !cdn ? '' : `<div class="xr-fields">
+      ${f('xrSni', 'Domain on Cloudflare', p.sni, 'tun.example.com', esc(tr('', 'A domain or subdomain whose DNS is on Cloudflare.')))}
+      ${f('xrAddr', 'Clean Cloudflare IP (optional)', p.address, '104.16.0.1', esc(tr('', 'The address the dialing server connects to. Empty: the domain itself.')))}
+    </div>
+    <div class="xr-note info">${ICO_INFO}<div class="xr-note-body"><b>${esc(tr('', 'On Cloudflare'))}</b>
+      <ol class="xr-list">
+        <li>${esc(tr('', 'DNS: an A record for the domain to'))} <bdi class="u-mono" data-no-i18n>${esc(origin)}</bdi>, ${esc(tr('', 'with the proxy on (orange cloud).'))}</li>
+        <li>${esc(tr('', 'SSL/TLS mode: Full (not Full strict). The link uses a certificate the panel makes for the domain.'))}</li>
+        <li>${esc(tr('', 'Network: turn on WebSockets or gRPC if you pick those transports in the advanced settings.'))}</li>
+      </ol></div></div>`;
+  return `<div class="xr-presets">${presets}</div>
+    <div class="xr-fields">
+      ${f('xrRemote', rev ? 'Foreign server IP (optional)' : 'Foreign server IP or domain', w.remote, '198.51.100.10', esc(tr('', rev
+        ? 'Only to show and count its traffic: in reverse mode the foreign server connects here.'
+        : cdn ? "It goes in the domain's DNS record; the Iran server connects through Cloudflare." : 'The Iran server connects to it.')))}
+      ${rev ? f('xrPubIP', "This server's public IP", w.public_ip, '203.0.113.5', esc(tr('', 'The foreign server connects to this address.'))) : ''}
+      ${f('xrPorts', 'Ports to forward', w.ports, '2053, 8080', esc(tr('', 'Users connect to these ports here; each reaches the same port on the foreign server (your 3x-ui inbounds).')), 'inputmode="numeric"')}
+      ${cdn ? `<div class="xr-field"><label class="qs-label" for="xrTunnel">${esc(tr('', rev ? 'Tunnel port on this server' : 'Tunnel port on the foreign server'))}</label>
+        <select class="hashem-input u-ltr" id="xrTunnel">${XR_CDN_PORTS.map(x => `<option value="${x}"${x === w.tunnel_port ? ' selected' : ''}>${x}</option>`).join('')}</select>
+        <div class="qs-hint" id="xrTunnelHint">${esc(tr('', 'Cloudflare passes HTTPS only on these ports.'))}</div></div>`
+        : f('xrTunnel', rev ? 'Tunnel port on this server' : 'Tunnel port on the foreign server', w.tunnel_port, '443', esc(tr('', '443 looks most like normal HTTPS.')), 'inputmode="numeric"')}
+      ${f('xrName', 'Name (optional)', w.name, 'Frankfurt', '')}
+      <div class="xr-field"><span class="qs-label">${esc(tr('', 'UDP'))}</span>
+        <label class="xr-check"><input type="checkbox" id="xrUdp" ${w.udp ? 'checked' : ''}> ${esc(tr('', 'Forward UDP too (games, calls, QUIC)'))}</label></div>
+    </div>
+    ${reality ? `<div class="xr-field">
+      <label class="qs-label" for="xrSni">${esc(tr('', 'Disguise site (SNI)'))}</label>
+      <div class="xr-bar"><input class="hashem-input u-ltr u-mono xr-grow" id="xrSni" value="${esc(p.sni || '')}" placeholder="${esc(sniList[0] || '')}" autocomplete="off">
+        <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="xrSniTest()">${esc(tr('', 'Find a working site'))}</button></div>
+      <div class="qs-hint">${esc(tr('', rev ? 'Reality borrows this site\'s TLS handshake on the Iran server, so it must open from Iran (TLS 1.3 with h2). The test runs from this server.' : 'Reality borrows this site\'s TLS handshake: a censor sees a visit to it. It must work from Iran (TLS 1.3 with h2); the test runs from this server.'))}</div>
+      <div class="xr-sni" id="xrSniOut"></div></div>` : ''}
+    ${cdnHTML}
+    ${xrAdvHTML(w)}
+    <div class="xr-wiz-foot">
+      ${w.id ? '<span></span>' : `<button type="button" class="hashem-btn hashem-btn-ghost" onclick="xrWizGo(1)">${esc(tr('', 'Back'))}</button>`}
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="xrWizGo(3)">${esc(tr('', 'Next'))}</button></div>`;
+}
+
+// xrAdvHTML: every setting of the profile, closed by default.
+function xrAdvHTML(w) {
+  const p = w.profile || {}, o = (_xray && _xray.options) || {};
+  const sel = (id, label, list, val, none, extra) => `<div class="xr-field"><label class="qs-label" for="${id}">${esc(tr('', label))}</label>
+      <select class="hashem-input" id="${id}" ${extra || ""}>${none ? `<option value="">${esc(tr('', none))}</option>` : ''}${(list || []).map(v => `<option value="${esc(v)}"${String(v) === String(val) ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></div>`;
+  const inp = (id, label, val, ph, hint) => `<div class="xr-field"><label class="qs-label" for="${id}">${esc(tr('', label))}</label>
+      <input class="hashem-input u-ltr u-mono" id="${id}" value="${esc(val == null || val === 0 ? '' : String(val))}" placeholder="${esc(ph || '')}" autocomplete="off">${hint ? `<div class="qs-hint">${esc(tr('', hint))}</div>` : ''}</div>`;
+  const chk = (id, label, on) => `<label class="xr-check"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> ${esc(tr('', label))}</label>`;
+  const fr = p.fragment || {}, k = p.kcp || {}, nz = p.noise || {};
+  const t = p.transport;
+  return `<details class="xr-adv"${w.advOpen ? ' open' : ''} ontoggle="if(_xrWiz)_xrWiz.advOpen=this.open">
+    <summary>${esc(tr('', 'Advanced settings'))}</summary>
+    <div class="xr-adv-body">
+      <h5>${esc(tr('', 'Transport'))}</h5>
+      <div class="xr-fields">
+        ${sel('xaTransport', 'Transport', o.transports, t, '', 'onchange="xrWizRefresh()"')}
+        ${sel('xaSecurity', 'Security', o.securities, p.security, '', 'onchange="xrWizRefresh()"')}
+        ${t === 'xhttp' || t === 'ws' || t === 'httpupgrade' || t === 'grpc' ? inp('xaPath', t === 'grpc' ? 'gRPC service name' : 'Path', p.path, t === 'grpc' ? 'random if empty' : '/random if empty') : ''}
+        ${t === 'xhttp' ? sel('xaMode', 'XHTTP mode', o.xhttp_modes, p.xhttp_mode || 'auto') : ''}
+        ${t !== 'kcp' && t !== 'raw' ? inp('xaHost', 'HTTP Host', p.host, '') : ''}
+        <div class="xr-field"><span class="qs-label">Vision</span>${chk('xaVision', 'Vision flow (raw + Reality/TLS)', p.vision)}</div>
+      </div>
+      ${p.security === 'reality' ? `<h5>Reality</h5><div class="xr-fields">
+        ${sel('xaFp', 'Fingerprint', o.fingerprints, p.fingerprint || 'chrome')}
+        ${inp('xaTarget', 'Target (host:port)', p.target, (p.sni || 'site') + ':443', 'Where Reality takes the handshake from; the SNI on port 443 when empty.')}
+        ${inp('xaSpider', 'SpiderX', p.spider_x, '/')}
+        ${sel('xaXver', 'PROXY protocol to the target', ['0', '1', '2'], String(p.xver || 0))}
+      </div>` : ''}
+      ${p.security === 'tls' ? `<h5>TLS</h5><div class="xr-fields">
+        ${p.cdn ? '' : inp('xaSniTLS', 'TLS server name', p.sni, 'tun.example.com', 'The panel makes a certificate for this name and the dialing end trusts only that one.')}
+        <div class="xr-field"><span class="qs-label">CDN</span><label class="xr-check"><input type="checkbox" id="xaCDN" ${p.cdn ? 'checked' : ''} onchange="xrWizRefresh()"> ${esc(tr('', 'Through a CDN (Cloudflare)'))}</label></div>
+        ${inp('xaCert', 'Your own certificate file (optional)', p.cert_file, '/etc/ssl/tun.crt', 'On the server end. Empty: the panel\'s own certificate.')}
+        ${inp('xaKey', 'Your own key file (optional)', p.key_file, '/etc/ssl/tun.key')}
+      </div>` : ''}
+      ${t === 'kcp' ? `<h5>mKCP</h5><div class="xr-fields">
+        ${inp('xaKMTU', 'MTU', k.mtu, '1350')}${inp('xaKTTI', 'TTI (ms)', k.tti, '20')}${inp('xaKUp', 'Upload capacity (MB/s)', k.up, '20')}${inp('xaKDown', 'Download capacity (MB/s)', k.down, '100')}
+        <div class="xr-field"><span class="qs-label">${esc(tr('', 'Congestion control'))}</span>${chk('xaKCong', 'On', k.congestion)}</div></div>
+      <h5>${esc(tr('', 'Noise (anti-DPI, on the dialing end)'))}</h5>
+      <div class="xr-fields">
+        ${sel('xaNzType', 'Noise packets', ['rand', 'str', 'hex', 'base64'], nz.type || '', 'Off', 'onchange="xrWizRefresh()"')}
+        ${nz.type === 'rand' ? inp('xaNzLen', 'Length (bytes)', nz.length, '10-60') : nz.type ? inp('xaNzPkt', 'Packet', nz.packet, nz.type === 'hex' ? 'deadbeef' : nz.type === 'base64' ? 'aGVsbG8=' : 'hello') : ''}
+        ${nz.type ? inp('xaNzDelay', 'Delay (ms)', nz.delay, '10-20') + inp('xaNzCount', 'How many', nz.count, '1', 'Sent before the first real packet to each address; the other end drops them.') : ''}
+      </div>` : ''}
+      <h5>${esc(tr('', 'Connection'))}</h5>
+      <div class="xr-fields">
+        ${inp('xaMux', 'Mux concurrency (0 = off)', p.mux, '0', 'Not with Vision or in reverse mode.')}
+        ${sel('xaCong', 'TCP congestion', o.congestions, p.congestion, 'System default')}
+        ${inp('xaMark', 'Socket mark', p.mark, '0')}
+        <div class="xr-field"><span class="qs-label">${esc(tr('', 'Sockets'))}</span>${chk('xaTFO', 'TCP Fast Open', p.tfo)}${chk('xaMPTCP', 'Multipath TCP', p.mptcp)}</div>
+        ${inp('xaListen', 'Listen address for the users\' ports', w.listen, '0.0.0.0')}
+      </div>
+      ${t !== 'kcp' ? `<h5>${esc(tr('', 'Fragment (anti-DPI, on the dialing end)'))}</h5>
+      <div class="xr-fields">
+        ${inp('xaFrPk', 'Packets', fr.packets, 'tlshello', 'tlshello or a range like 1-3; empty = off')}
+        ${inp('xaFrLen', 'Length', fr.length, '100-200')}
+        ${inp('xaFrDelay', 'Delay (ms)', fr.delay, '10-20')}
+      </div>` : ''}
+      <div class="xr-field"><label class="qs-label" for="xaExpert">${esc(tr('', 'Expert JSON (merged over the generated config)'))}</label>
+        <textarea class="hashem-input xr-json" id="xaExpert" spellcheck="false" placeholder='{"outbounds": [{"tag": "tunnel", "streamSettings": {"sockopt": {"tcpKeepAliveIdle": 30}}}]}' data-no-i18n>${esc(w.expert || '')}</textarea>
+        <div class="qs-hint">${esc(tr('', 'Objects merge key by key; inbounds and outbounds merge by tag. Xray checks the result before it is used. This server only.'))}</div></div>
+    </div></details>`;
+}
+
+// xrWizRead copies the step 2 inputs into the wizard.
+function xrWizRead() {
+  const w = _xrWiz;
+  if (!w || w.step !== 2 || !$('xrPorts')) return;
+  const v = id => { const el = $(id); return el ? el.value.trim() : undefined; };
+  const n = id => { const s = v(id); if (s === undefined) return undefined; const x = parseInt(s, 10); return isNaN(x) ? 0 : x; };
+  const c = id => { const el = $(id); return el ? el.checked : undefined; };
+  w.remote = v('xrRemote') || '';
+  if ($('xrPubIP')) w.public_ip = v('xrPubIP');
+  w.ports = v('xrPorts') || '';
+  w.tunnel_port = n('xrTunnel') || 0;
+  w.name = v('xrName') || '';
+  w.udp = !!c('xrUdp');
+  const p = w.profile = w.profile || {};
+  if ($('xrSni')) p.sni = v('xrSni');
+  if (!$('xaTransport')) return;
+  const before = p.transport + '/' + p.security;
+  p.transport = v('xaTransport'); p.security = v('xaSecurity');
+  if ($('xaPath')) p.path = v('xaPath');
+  if ($('xaMode')) p.xhttp_mode = v('xaMode');
+  if ($('xaHost')) p.host = v('xaHost');
+  p.vision = !!c('xaVision');
+  if ($('xaFp')) { p.fingerprint = v('xaFp'); p.target = v('xaTarget'); p.spider_x = v('xaSpider'); p.xver = n('xaXver'); }
+  if ($('xaSniTLS')) p.sni = v('xaSniTLS');
+  if ($('xaCert')) { p.cert_file = v('xaCert'); p.key_file = v('xaKey'); p.cdn = !!c('xaCDN'); }
+  if ($('xrAddr')) p.address = v('xrAddr');
+  if (p.security !== 'tls') p.cdn = false;
+  if (p.transport !== 'kcp') p.noise = null; // noise rides on UDP only
+  if ($('xaKMTU')) p.kcp = Object.assign(p.kcp || {}, { mtu: n('xaKMTU'), tti: n('xaKTTI'), up: n('xaKUp'), down: n('xaKDown'), congestion: !!c('xaKCong') });
+  if ($('xaNzType')) {
+    const t = v('xaNzType');
+    p.noise = !t ? null : { type: t, length: v('xaNzLen') || (t === 'rand' ? '10-60' : ''), packet: v('xaNzPkt') || '',
+      delay: v('xaNzDelay') || '', count: n('xaNzCount') || 1 };
+  }
+  p.mux = n('xaMux'); p.congestion = v('xaCong'); p.mark = n('xaMark'); p.tfo = !!c('xaTFO'); p.mptcp = !!c('xaMPTCP');
+  if ($('xaListen')) w.listen = v('xaListen');
+  if ($('xaFrPk')) {
+    const pk = v('xaFrPk');
+    p.fragment = pk ? { packets: pk, length: v('xaFrLen') || '100-200', delay: v('xaFrDelay') } : null;
+  }
+  w.expert = $('xaExpert') ? $('xaExpert').value : w.expert;
+  // a new transport or security: the old path and Vision may not fit it
+  if (before !== p.transport + '/' + p.security) {
+    if (p.transport !== 'raw' || p.security === 'none') p.vision = false;
+    if (p.transport === 'kcp') { p.security = 'none'; p.kcp = p.kcp || { mtu: 1350, tti: 20, up: 20, down: 100, congestion: true }; }
+    w.preset = '';
+  }
+}
+
+function xrWizPorts() {
+  return String(_xrWiz.ports || '').split(/[\s,]+/).filter(Boolean).map(x => parseInt(x, 10));
+}
+
+// xrWizProblem: what must be fixed before the review (the server checks again).
+function xrWizProblem() {
+  const w = _xrWiz;
+  const ports = xrWizPorts();
+  if (!ports.length || ports.some(p => !(p > 0 && p < 65536))) return tr('', 'Enter the ports to forward, like 2053, 8080.');
+  if (!(w.tunnel_port > 0 && w.tunnel_port < 65536)) return tr('', 'Enter a tunnel port.');
+  if (w.mode === 'direct' && !w.remote) return tr('', "Enter the foreign server's IP.");
+  const pr = w.profile || {};
+  if (pr.cdn && !pr.sni) return tr('', 'Enter the domain on Cloudflare.');
+  if (pr.cdn && !XR_CDN_PORTS.includes(w.tunnel_port)) return tr('', 'Cloudflare passes HTTPS only on these ports.') + ' ' + XR_CDN_PORTS.join(', ');
+  if (pr.security === 'tls' && !pr.sni) return tr('', 'Enter the TLS server name.');
+  if (w.mode === 'reverse' && !w.public_ip) return tr('', "Enter this server's public IP: the foreign server connects to it.");
+  if (w.expert && w.expert.trim()) { try { const j = JSON.parse(w.expert); if (!j || typeof j !== 'object' || Array.isArray(j)) throw 0; } catch (_) { return tr('', 'The expert JSON is not a JSON object.'); } }
+  if (_xrCheck && _xrCheck.conflicts && _xrCheck.conflicts.length) return _xrCheck.conflicts.map(c => `${c.proto.toUpperCase()} ${c.port}: ${c.owner}`).join(' · ');
+  return '';
+}
+
+function xrWizReq(action) {
+  const w = _xrWiz;
+  let expert;
+  if (w.expert && w.expert.trim()) { try { expert = JSON.parse(w.expert); } catch (_) { expert = undefined; } } else if (w.id) expert = {};
+  const p = Object.assign({}, w.profile);
+  if (w.preset) p.preset = w.preset;
+  return { action, id: w.id || 0, mode: w.mode, remote: w.remote, ports: xrWizPorts(), udp: w.udp, tunnel_port: w.tunnel_port,
+    name: w.name, listen: w.listen || '', public_ip: w.mode === 'reverse' ? w.public_ip : (w.public_ip || ''), profile: p, expert };
+}
+
+// The live check: which ports are taken and by whom, and a free tunnel port.
+function xrWizCheckSoon() {
+  clearTimeout(_xrCheckT);
+  const fire = () => { clearTimeout(_xrCheckT); _xrCheckT = setTimeout(xrWizCheck, 500); };
+  ['xrPorts', 'xrTunnel', 'xrUdp'].forEach(id => { const el = $(id); if (el) { el.oninput = fire; el.onchange = fire; } });
+  fire();
+}
+
+async function xrWizCheck() {
+  if (!_xrWiz || _xrWiz.step !== 2) return;
+  xrWizRead();
+  if (!xrWizPorts().length) return;
+  try { _xrCheck = await api('/api/xray', xrWizReq('check')); } catch (_) { return; }
+  if (!_xrWiz || _xrWiz.step !== 2) return;
+  const cs = _xrCheck.conflicts || [];
+  const tp = _xrWiz.tunnel_port;
+  const onTunnel = cs.filter(c => c.port === tp), onPorts = cs.filter(c => c.port !== tp);
+  const hp = $('xrPortsHint'), ht = $('xrTunnelHint');
+  if (hp) hp.innerHTML = onPorts.length
+    ? `<span class="xr-bad" data-no-i18n>${esc(onPorts.map(c => `${c.proto.toUpperCase()} ${c.port}: ${tr('', 'used by')} ${c.owner}`).join(' · '))}</span>`
+    : `<span class="xr-ok">${esc(tr('', 'Free on this server'))}</span>`;
+  const sug = _xrCheck.suggest_tunnel_port;
+  if (ht && _xrWiz.mode === 'reverse') ht.innerHTML = onTunnel.length
+    ? `<span class="xr-bad" data-no-i18n>${esc(tr('', 'used by') + ' ' + onTunnel[0].owner)}</span>${sug ? ` <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="xrUsePort(${sug})">${esc(tr('', 'Use'))} ${sug}</button>` : ''}`
+    : `<span class="xr-ok">${esc(tr('', 'Free on this server'))}</span>`;
+}
+
+function xrUsePort(p) { const el = $('xrTunnel'); if (el) { el.value = p; xrWizCheckSoon(); } }
+
+async function xrSniTest() {
+  xrWizRead();
+  const out = $('xrSniOut');
+  const rev = _xrWiz.mode === 'reverse';
+  const list = ((_xray && _xray.sni) || {})[rev ? 'reverse' : 'direct'] || [];
+  const mine = (_xrWiz.profile || {}).sni;
+  const sni = [...new Set([mine, ...list].filter(Boolean))];
+  if (out) out.innerHTML = `<span class="qs-hint">${esc(tr('', 'Testing from this server…'))}</span>`;
+  try {
+    const r = await api('/api/xray', { action: 'snitest', sni });
+    if (!out) return;
+    out.innerHTML = (r.results || []).map(x => `<button type="button" class="${x.ok ? 'ok' : 'bad'}${x.sni === mine ? ' on' : ''}" ${x.ok ? `onclick="xrSniPick('${esc(x.sni)}')"` : 'disabled'} title="${esc(x.ok ? Math.round(x.ms) + ' ms' : (x.error || ''))}">${esc(x.sni)}${x.ok ? ' · ' + Math.round(x.ms) + ' ms' : ''}</button>`).join('');
+    const best = (r.results || []).find(x => x.ok);
+    if (best && !mine) xrSniPick(best.sni);
+  } catch (e) { if (out) out.innerHTML = `<span class="xr-bad">${esc(e.message)}</span>`; }
+}
+
+function xrSniPick(s) {
+  const el = $('xrSni');
+  if (el) el.value = s;
+  _xrWiz.profile.sni = s;
+  document.querySelectorAll('#xrSniOut button').forEach(b => b.classList.toggle('on', b.textContent.split(' · ')[0] === s));
+}
+
+// Step 3: what will be made, drawn as it will run.
+function xrWizStep3() {
+  const w = _xrWiz, p = Object.assign({}, w.profile);
+  const rev = w.mode === 'reverse';
+  // an empty SNI gets the first default on the server
+  if (p.security === 'reality' && !p.sni) p.sni = (((_xray && _xray.sni) || {})[rev ? 'reverse' : 'direct'] || [''])[0];
+  const row = (k, v) => `<dt>${esc(tr('', k))}</dt><dd data-no-i18n>${esc(v)}</dd>`;
+  const scene = xrScene({ state: 'ok', mode: w.mode, here: 'iran', up: null, dn: null, tags: xrTags(p), cdn: !!p.cdn,
+    iranSub: rev ? (w.public_ip + ' :' + w.tunnel_port) : '', forSub: rev ? (w.remote || '') : (w.remote + ' :' + w.tunnel_port),
+    meta: [`<span>${esc(tr('', 'preview'))}</span>`] });
+  return `${scene}
+    <dl class="xr-review">
+      ${row('Direction', tr('', rev ? 'Reverse: the foreign server dials Iran' : 'Direct: Iran dials the foreign server'))}
+      ${row('Wire', xrTags(p)[0][0])}
+      ${p.cdn ? row('Domain', p.sni) + row('Connects to', p.address || p.sni) : ''}
+      ${p.security === 'reality' ? row('Disguise', p.sni) : ''}
+      ${row('Ports', xrWizPorts().join(', ') + (w.udp ? ' + UDP' : ''))}
+      ${row('Tunnel port', String(w.tunnel_port) + (rev ? ' ' + tr('', '(on this server)') : ' ' + tr('', '(on the foreign server)')))}
+    </dl>
+    <div class="xr-note info">${ICO_INFO}<div class="xr-note-body"><span>${esc(tr('', w.id
+      ? 'Saving restarts the link here. If the foreign server needs the change too, a new bundle is shown to paste there.'
+      : 'The link starts here first; then copy its bundle to the foreign server, which completes it.'))}</span></div></div>
+    <div class="xr-wiz-foot">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="xrWizGo(2)">${esc(tr('', 'Back'))}</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" id="xrCreateBtn" onclick="xrWizSubmit()">${esc(tr('', w.id ? 'Save and restart' : 'Create the tunnel'))}</button></div>`;
+}
+
+// Step 4: the bring-up, then the bundle for the foreign server.
+function xrWizStep4() {
+  const r = _xrWiz.result || {};
+  return `<div id="xrWizRun">${xrRunHTML(r.steps ? r : {})}</div><div id="xrWizTail">${r.done ? xrWizTail() : ''}</div>`;
+}
+
+function xrWizTail() {
+  const w = _xrWiz, r = w.result || {};
+  if (r.bundle && (w.isNew || r.bundle_changed)) {
+    return `${w.isNew ? '' : `<div class="xr-note warn">${ICO_INFO}<div class="xr-note-body"><b>${esc(tr('', 'The foreign server needs this change:'))}</b><span>${esc(tr('', 'paste the new bundle in its Xray tab.'))}</span></div></div>`}${xrBundleHTML(r.bundle, 'xrWizBundle')}`;
+  }
+  if (r.status === 'ok') return `<div class="qs-hint">${esc(tr('', 'Nothing changed for the foreign server: no new bundle is needed.'))}</div>`;
+  return '';
+}
+
+async function xrWizSubmit() {
+  const w = _xrWiz;
+  const req = xrWizReq(w.id ? 'update' : 'create');
+  w.isNew = !w.id;
+  w.step = 4;
+  w.result = {};
+  xrWizRender();
+  let r;
+  try {
+    r = await api('/api/xray', req);
+  } catch (e) {
+    // refused before anything ran (a taken port, a bad field): back to the settings
+    w.step = 2;
+    xrWizRender();
+    toastErr(tr('', 'Not created'), e.message);
+    return;
+  }
+  w.result = Object.assign({}, r, { done: false });
+  if (!w.id && r.link) w.id = r.link.id;
+  await xrRunPlay('xrWizRun', r);
+  w.result.done = true;
+  if ($('xrWizTail')) $('xrWizTail').innerHTML = xrWizTail();
+  if (r.status === 'error') toastErr(tr('', 'The link did not come up'), r.error || '');
+  else toastOk(tr('', req.action === 'create' ? 'Tunnel created' : 'Link saved'), '');
+  loadXray(true);
+}
+
+// ---- the foreign server: paste the bundle ----
+
+function xrImportOpen() {
+  _xrWiz = { step: 0, importing: true };
+  $('xrayWizard').innerHTML = `<div class="xr-wiz">
+    <div class="xr-wiz-h"><b>${esc(tr('', 'Paste the bundle from the Iran server'))}</b>
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="xrWizClose()">${esc(tr('', 'Close'))}</button></div>
+    <div class="xr-field"><label class="qs-label" for="xrBundleIn">${esc(tr('', 'Bundle (xr1_…)'))}</label>
+      <textarea class="hashem-input xr-bundle" id="xrBundleIn" placeholder="xr1_…" spellcheck="false" data-no-i18n></textarea>
+      <div class="qs-hint">${esc(tr('', 'From the Iran server: Xray tab, the link\'s Bundle button. The same bundle again updates the link.'))}</div></div>
+    <div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="xrImpName">${esc(tr('', 'Name (optional)'))}</label><input class="hashem-input" id="xrImpName" autocomplete="off"></div>
+    </div>
+    <div class="xr-bar"><button type="button" class="hashem-btn hashem-btn-primary" onclick="xrImport()">${esc(tr('', 'Import and start'))}</button></div>
+    <div id="xrImpRun"></div></div>`;
+}
+
+async function xrImport() {
+  const bundle = ($('xrBundleIn') || {}).value || '';
+  const box = $('xrImpRun');
+  if (!bundle.trim()) { toastErr(tr('', 'Paste the bundle first'), ''); return; }
+  box.innerHTML = xrRunHTML({});
+  try {
+    const r = await api('/api/xray', { action: 'import', bundle, name: ($('xrImpName') || {}).value || '' });
+    await xrRunPlay('xrImpRun', r);
+    if (r.status === 'error') toastErr(tr('', 'The link did not come up'), r.error || '');
+    else toastOk(tr('', r.updated ? 'Link updated' : 'Link added'), '');
+  } catch (e) {
+    box.innerHTML = `<div class="xr-err">${esc(e.message)}</div>`;
+  }
+  loadXray(true);
 }
 
 // ---------- Watchdog & Backup (tab-watchdog) ----------
@@ -6430,6 +7363,158 @@ async function loadUsage() {
   }, 60000);
 })();
 
+// ---- Speed and volume limits per foreign server (limits.go) ----
+// One rule per server IP: a rate for both directions and/or a volume that
+// cuts the server's links when used up, reset monthly or by hand.
+let _limitsData = null, limitsTimer = null;
+const fmtGB = n => {
+  n = +n || 0;
+  if (n >= 1e12) return (n / 1e12).toFixed(2) + ' TB';
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + ' GB';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + ' MB';
+  return Math.round(n / 1e3) + ' KB';
+};
+const fmtMbit = bps => {
+  const m = (+bps || 0) * 8 / 1e6;
+  return (m >= 100 ? Math.round(m) : m.toFixed(m >= 10 ? 1 : 2)) + ' Mbit/s';
+};
+function limLinkName(k) {
+  if (k === 'main') return tr('', 'Main tunnel');
+  const m = /^(peer|bagher|xray)-(\d+)$/.exec(k);
+  if (!m) return k;
+  return { peer: tr('', 'Peer'), bagher: 'Bagher', xray: 'Xray' }[m[1]] + ' ' + m[2];
+}
+const limDate = sec => new Date(sec * 1000).toLocaleDateString(currentLang === 'fa' ? 'fa-IR' : undefined, { month: 'short', day: 'numeric' });
+function limRow(s) {
+  const r = s.rule, ip = s.ip;
+  const used = r ? r.used_rx + r.used_tx : 0;
+  const q = r && r.quota_gb > 0 ? r.quota_gb * 1e9 : 0;
+  const pct = q ? Math.min(100, used / q * 100) : 0;
+  const [cls, label] = !r ? ['dim', tr('', 'Unlimited')]
+    : r.blocked ? ['err', tr('', 'Cut: volume used up')]
+    : q && pct >= 90 ? ['warn', tr('', '90% of the volume used')]
+    : s.orphan ? ['dim', tr('', 'No tunnel to it now')]
+    : ['info', tr('', 'Limited')];
+  const rate = r && r.rate_mbit > 0 ? r.rate_mbit : 0;
+  const live = r ? Math.max(s.speed_rx, s.speed_tx) * 8 / 1e6 : 0;
+  const lp = rate ? Math.min(100, live / rate * 100) : 0;
+  const meter = (p, c) => `<div class="lm-meter ${c}" aria-hidden="true"><i style="--p:${p.toFixed(1)}%"></i></div>`;
+  const speed = `<div class="lm-box"><div class="lm-k"><span>${esc(tr('', 'Speed'))}</span><b class="lm-num">${rate ? esc(rate + ' Mbit/s') : esc(tr('', 'Unlimited'))}</b></div>` +
+    meter(lp, rate ? (lp >= 95 ? 'warn' : '') : 'inf') +
+    `<div class="lm-sub">${r ? '<span class="lm-num">↓ ' + esc(fmtMbit(s.speed_rx)) + ' · ↑ ' + esc(fmtMbit(s.speed_tx)) + '</span>' : esc(tr('', 'Not measured: no limit set'))}</div></div>`;
+  const vol = `<div class="lm-box"><div class="lm-k"><span>${esc(tr('', 'Volume'))}</span><b class="lm-num">${q ? esc(fmtGB(used) + ' / ' + fmtGB(q)) : r ? esc(fmtGB(used)) : esc(tr('', 'Unlimited'))}</b></div>` +
+    meter(pct, q ? (r.blocked || pct >= 100 ? 'err' : pct >= 90 ? 'warn' : '') : 'inf') +
+    `<div class="lm-sub">${r ? esc((q && r.reset === 'monthly' && s.next_reset ? tr('', 'Resets on') + ' ' + limDate(s.next_reset) : q ? tr('', 'Reset by hand') : tr('', 'No volume limit')) + ' · ' + tr('', 'counted since') + ' ' + limDate(r.period_start)) : ''}</div></div>`;
+  const acts = [`<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openLimitEdit(${jsArg(ip)})">${esc(r ? tr('', 'Edit limits') : tr('', 'Set limits'))}</button>`];
+  if (r && (used > 0 || r.blocked)) acts.push(`<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="limitAction('reset', ${jsArg(ip)})">${esc(tr('', 'Reset usage'))}</button>`);
+  if (r) acts.push(`<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="limitAction('remove', ${jsArg(ip)})">${esc(tr('', 'Remove limits'))}</button>`);
+  return `<div class="lm-row${r && r.blocked ? ' cut' : cls === 'warn' ? ' warn' : ''}">
+    <div class="lm-head"><div class="lm-name"><b class="lm-num">${esc(s.name || ip)}</b>${s.name || s.alias ? '<small class="lm-num">' + esc([s.name ? ip : '', s.alias || ''].filter(Boolean).join(' · ')) + '</small>' : ''}</div>
+      <div class="lm-links">${(s.links || []).map(k => '<span>' + esc(limLinkName(k)) + '</span>').join('')}</div>
+      <span class="badge ${cls}">${esc(label)}</span></div>
+    <div class="lm-grid">${speed}${vol}</div>
+    <div class="lm-acts">${acts.join('')}</div></div>`;
+}
+function renderLimits(d) {
+  _limitsData = d;
+  const box = $('limitsBody');
+  if (!box) return;
+  if ($('limitsPro')) $('limitsPro').classList.toggle('hidden', isProLicensed('limits'));
+  const err = $('limitsErr');
+  if (err) { err.textContent = d.error ? tr('', 'Limits could not be applied:') + ' ' + d.error : ''; err.classList.toggle('hidden', !d.error); }
+  const list = d.servers || [], ruled = list.filter(s => s.rule), cut = ruled.filter(s => s.rule.blocked).length;
+  const b = $('limitsBadge');
+  if (b) {
+    b.className = 'badge ' + (cut ? 'err' : ruled.length ? 'info' : 'dim');
+    b.textContent = cut ? cut + ' ' + tr('', 'cut') : ruled.length ? ruled.length + ' ' + tr('', 'limited') : tr('', 'Unlimited');
+  }
+  box.innerHTML = list.length ? '<div class="lm-list">' + list.map(limRow).join('') + '</div>'
+    : '<p class="qs-hint">' + esc(tr('', 'No foreign server yet. Servers show here once a tunnel to them is set up.')) + '</p>';
+}
+async function loadLimits() {
+  try { renderLimits(await api('/api/limits')); } catch (e) { reportErr('limits', e); }
+}
+(function initLimits() {
+  if (!limitsTimer) limitsTimer = setInterval(() => {
+    const t = $('tab-tunnel');
+    if (t && !t.hidden && !document.hidden) loadLimits();
+  }, 10000);
+})();
+function openLimitEdit(ip) {
+  if (!isProLicensed('limits')) { openBagherLicModal('limits'); return; }
+  const s = ((_limitsData || {}).servers || []).find(x => x.ip === ip);
+  const ov = $('limitModal');
+  if (!s || !ov) return;
+  const r = s.rule || {};
+  $('limitModalTitle').textContent = tr('', 'Limits') + ' — ' + (s.name || ip);
+  $('limitModalSrv').innerHTML = '<b class="lm-num">' + esc(ip) + '</b>' + ((s.links || []).length ? ' · ' + s.links.map(k => esc(limLinkName(k))).join(', ') : '');
+  const day = $('lmDay');
+  if (!day.options.length) for (let i = 1; i <= 28; i++) day.add(new Option(String(i), String(i)));
+  const today = new Date().getDate();
+  day.value = String(r.reset_day || (today > 28 ? 1 : today));
+  $('lmSpeed').value = r.rate_mbit > 0 ? r.rate_mbit : '';
+  $('lmQuota').value = r.quota_gb > 0 ? r.quota_gb : '';
+  const st = { speed: r.rate_mbit > 0, quota: r.quota_gb > 0, monthly: r.reset !== 'never' || !(r.quota_gb > 0) };
+  const err = $('limitModalErr');
+  err.classList.add('hidden');
+  const press = (off, on, v) => { $(off).setAttribute('aria-pressed', String(!v)); $(on).setAttribute('aria-pressed', String(v)); };
+  const sync = () => {
+    press('lmSpeedOff', 'lmSpeedOn', st.speed); $('lmSpeedWrap').hidden = !st.speed;
+    press('lmQuotaOff', 'lmQuotaOn', st.quota); $('lmQuotaWrap').hidden = !st.quota; $('lmResetSec').hidden = !st.quota;
+    press('lmResetNever', 'lmResetMonthly', st.monthly); $('lmDayWrap').hidden = !st.monthly;
+  };
+  const set = (k, v, focus) => () => { st[k] = v; sync(); if (focus) $(focus).focus(); };
+  $('lmSpeedOff').onclick = set('speed', false); $('lmSpeedOn').onclick = set('speed', true, 'lmSpeed');
+  $('lmQuotaOff').onclick = set('quota', false); $('lmQuotaOn').onclick = set('quota', true, 'lmQuota');
+  $('lmResetNever').onclick = set('monthly', false); $('lmResetMonthly').onclick = set('monthly', true);
+  ov.querySelectorAll('.lm-chips button').forEach(b => { b.onclick = () => { $(b.parentNode.dataset.for).value = b.dataset.v; }; });
+  sync();
+  const close = () => modalHide(ov);
+  const save = async () => {
+    const body = {
+      action: 'set', ip,
+      rate_mbit: st.speed ? parseFloat($('lmSpeed').value) : 0,
+      quota_gb: st.quota ? parseFloat($('lmQuota').value) : 0,
+      reset: st.quota && st.monthly ? 'monthly' : 'never',
+      reset_day: parseInt(day.value, 10) || 1,
+    };
+    const bad = st.speed && !(body.rate_mbit >= 0.1) ? tr('', 'Enter the speed in Mbit/s (at least 0.1).')
+      : st.quota && !(body.quota_gb >= 0.01) ? tr('', 'Enter the volume in GB (at least 0.01).') : '';
+    if (bad) { err.textContent = bad; err.classList.remove('hidden'); return; }
+    const btn = $('limitModalYes');
+    btn.disabled = true;
+    try {
+      renderLimits(await api('/api/limits', body));
+      close();
+      toastOk(tr('', 'Limits saved'), s.name || ip);
+    } catch (e) {
+      err.textContent = e.message;
+      err.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  $('limitModalYes').onclick = save;
+  $('limitModalNo').onclick = close;
+  $('limitModalX').onclick = close;
+  modalShow(ov, close);
+  $(st.speed ? 'lmSpeed' : 'lmSpeedOn').focus();
+}
+async function limitAction(action, ip) {
+  if (action === 'reset' && !isProLicensed('limits')) { openBagherLicModal('limits'); return; }
+  const s = ((_limitsData || {}).servers || []).find(x => x.ip === ip) || {};
+  const ask = action === 'reset'
+    ? [tr('', 'Reset the used volume?'), tr('', "This server's used volume goes back to 0. If its links were cut, they come back now."), tr('', 'Reset usage')]
+    : [tr('', 'Remove the limits?'), tr('', 'This server gets unlimited speed and volume. If its links were cut, they come back now.'), tr('', 'Remove limits')];
+  if (!await entConfirm(...ask)) return;
+  try {
+    renderLimits(await api('/api/limits', { action, ip }));
+    toastOk(action === 'reset' ? tr('', 'Usage reset') : tr('', 'Limits removed'), s.name || ip);
+  } catch (e) {
+    toastErr(tr('', 'Failed'), e.message);
+  }
+}
+
 async function runDoctor() {
   if (doctorRunning) return;
   if (!isProLicensed('diagnostics')) { openBagherLicModal('diagnostics'); return; }
@@ -6808,7 +7893,7 @@ function fleetLinks(nodes) {
       key: p ? String(n.id) : 'main', name: n.name, ip: n.remote_pub || '',
       state: n.health === 'healthy' ? 'ok' : n.health === 'degraded' ? 'warn' : 'down',
       eng: /backhaul/.test(n.engine || '') ? 'Backhaul' : 'FRP', gre: n.engine !== 'backhaul',
-      lat: ms, rate: p ? linkRate('p' + p.id, p.rx, p.tx) : linkRate('main', L.rx, L.tx),
+      lat: ms, rate: p ? linkRate('p' + p.id, p.rx, p.tx, _statusCountersAt) : linkRate('main', L.rx, L.tx, _statusCountersAt),
     };
   });
 }
@@ -7197,7 +8282,7 @@ function openEditPeer(peerId) {
   const p = (peerId === 0) ? (window._lastLocal || {}) : ((tunPeerCache || []).find(x => x.id === peerId) || {});
   if (peerId === 0) {
     const st = p;
-    name = 'Main tunnel';
+    name = st.name || ''; // the main tunnel's own name, empty until one is given
     remoteIp = (st.gre && (st.gre.peer_ip || st.gre_peer)) || '';
     carrier = (st.carrier && (st.carrier.active || st.carrier.mode)) || 'direct';
     engine = st.engine || (st.frp_svc && st.frp_svc.includes('backhaul') ? (st.no_gre ? 'backhaul' : 'gre-backhaul') : 'frp');
@@ -7224,7 +8309,7 @@ function openEditPeer(peerId) {
 
   _editPortsList = [...ports];
 
-  $('editPortsTitle').textContent = 'Edit Tunnel \u2014 ' + name;
+  $('editPortsTitle').textContent = 'Edit Tunnel \u2014 ' + (name || tr('', 'Main tunnel'));
   $('editPortsSub').textContent   = tr('', 'Rename the tunnel or change its foreign IP and forwarded ports. To change how it travels, use Swap carrier.');
   
   if ($('editPeerName'))   $('editPeerName').value = name;
@@ -7342,13 +8427,8 @@ async function saveEditPorts() {
   const compVal      = $('editPeerCompression') && $('editPeerCompression').checked;
 
   if (remoteVal) {
-    const parts = remoteVal.split('.');
-    const valid = parts.length === 4 && parts.every(p => {
-      const n = parseInt(p, 10);
-      return !isNaN(n) && n >= 0 && n <= 255 && String(n) === p;
-    });
-    if (!valid) {
-      warnEl.textContent = 'Enter a valid IPv4 address for Remote Public IP.';
+    if (!isIPv6(remoteVal) && (!isIPv4(remoteVal) || remoteVal.split('.').some(o => String(+o) !== o))) {
+      warnEl.textContent = tr('', 'Enter a valid IP address for Remote Public IP.');
       warnEl.classList.remove('hidden');
       return;
     }
@@ -8244,6 +9324,7 @@ async function bagherIranApplyClick() {
       role: 'iran',
       remote_host,
       remote_user: val('sshfwdRemoteUser') || 'root',
+      name: val('sshfwdName') || undefined, // empty keeps the saved name
       ssh_port: parseInt(val('sshfwdRemotePort'), 10) || 22,
       ports,
       pool_count: parseInt(val('sshfwdPoolCount'), 10) || 25,
@@ -8283,7 +9364,7 @@ async function bagherForeignConnectClick(bundle) {
   const w = $('joinWarn'), out = $('joinOut');
   w.classList.add('hidden');
   try {
-    const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle });
+    const res = await api('/api/sshfwd', { action: 'apply_bundle', bundle, name: $('jName') ? $('jName').value.trim() : '' });
     out.classList.remove('hidden');
     out.textContent = (res && res.message) || tr('', 'Connected to the Iran server');
     toastOk(tr('', 'Connected to the Iran server'));
@@ -8505,6 +9586,72 @@ function closeBagherQuickEdit() {
   modalHide($('bagherQuickEditModal'));
 }
 
+// More foreign servers on this Bagher hub: each gets its own SSH carrier and
+// its own bundle; the ports of two foreign servers may not overlap.
+function bagherAddLinkStep(done) {
+  $('bagherAddLinkForm').hidden = done;
+  $('bagherAddLinkDone').hidden = !done;
+  $('bagherAddLinkSave').hidden = done;
+  $('bagherAddLinkCopy').hidden = !done;
+  $('bagherAddLinkCancel').textContent = tr('', done ? 'Done' : 'Cancel');
+}
+function openBagherAddLink() {
+  ['bagherLinkName', 'bagherLinkHost', 'bagherLinkPorts', 'bagherLinkSSHPort', 'bagherLinkUser'].forEach(id => { $(id).value = ''; });
+  $('bagherLinkUdp').checked = !!(_sshfwdData || {}).udp;
+  $('bagherAddLinkWarn').classList.add('hidden');
+  bagherAddLinkStep(false);
+  modalShow($('bagherAddLinkModal'), closeBagherAddLink);
+}
+function closeBagherAddLink() {
+  modalHide($('bagherAddLinkModal'));
+}
+async function saveBagherAddLink() {
+  const warn = $('bagherAddLinkWarn');
+  const say = m => { warn.textContent = m; warn.classList.remove('hidden'); };
+  const remote_host = $('bagherLinkHost').value.trim(), ports = $('bagherLinkPorts').value.trim();
+  if (!remote_host) return say(tr('', 'Enter the foreign server address.'));
+  if (!ports) return say(tr('', 'Enter at least one port.'));
+  warn.classList.add('hidden');
+  const btn = $('bagherAddLinkSave');
+  btn.disabled = true;
+  try {
+    const res = await api('/api/sshfwd', {
+      action: 'add_link', remote_host, ports, udp: $('bagherLinkUdp').checked, name: $('bagherLinkName').value.trim(),
+      ssh_port: parseInt($('bagherLinkSSHPort').value, 10) || 0, remote_user: $('bagherLinkUser').value.trim(),
+    });
+    if (res.status_data) { _sshfwdData = res.status_data; renderSSHFwd(); }
+    $('bagherLinkBundle').value = res.bundle || '';
+    bagherAddLinkStep(true);
+    toastOk(tr('', 'Foreign server added'), tr('', 'Paste the bundle on that server.'));
+  } catch (err) {
+    say(err.message || String(err));
+  } finally {
+    btn.disabled = false;
+  }
+}
+function copyBagherAddLinkBundle() {
+  copyTextSafe($('bagherLinkBundle').value, tr('', 'Bundle copied'), tr('', 'Paste it on the foreign server.'));
+}
+function bagherLinkCopyBundle(id) {
+  const l = (((_sshfwdData || {}).links) || []).find(x => x.id === id);
+  if (!l || !l.bundle) { toastErr(tr('', 'No bundle yet'), tr('', 'Open the Tunnel tab again in a moment.')); loadSSHFwd(); return; }
+  copyTextSafe(l.bundle, tr('', 'Bundle copied'), tr('', 'Paste it on the foreign server.'));
+}
+async function bagherLinkRemove(id) {
+  const l = (((_sshfwdData || {}).links) || []).find(x => x.id === id) || {};
+  const ok = await entConfirm(tr('', 'Remove foreign server'),
+    tr('', 'Stop the Bagher link to {host} and remove it from this server? Its ports stop working here. On the foreign server, remove Bagher from its Tunnel tab.').replace('{host}', l.remote_host || ('#' + id)),
+    tr('', 'Remove'));
+  if (!ok) return;
+  try {
+    const res = await api('/api/sshfwd', { action: 'remove_link', id });
+    if (res.status_data) { _sshfwdData = res.status_data; renderSSHFwd(); }
+    toastOk(tr('', 'Foreign server removed'), l.remote_host || '');
+  } catch (err) {
+    toastErr(tr('', 'Remove failed'), err.message || String(err));
+  }
+}
+
 async function saveBagherQuickEdit() {
   const remote_host = $('bagherQuickRemoteHost') ? $('bagherQuickRemoteHost').value.trim() : '';
   const ports = $('bagherQuickPorts') ? $('bagherQuickPorts').value.trim() : '';
@@ -8529,9 +9676,7 @@ async function saveBagherQuickEdit() {
       action: 'enable',
       mode: 'bagher',
       role: 'iran',
-      remote_host,
-      remote_user: 'root',
-      ssh_port: 22,
+      remote_host, // SSH port and user stay as set up (this used to reset them to 22 / root)
       ports,
       pool_count,
       frp_bind_port,
@@ -8562,6 +9707,12 @@ window.cleanBagherTunnelClick = cleanBagherTunnelClick;
 window.openBagherQuickEdit = openBagherQuickEdit;
 window.closeBagherQuickEdit = closeBagherQuickEdit;
 window.saveBagherQuickEdit = saveBagherQuickEdit;
+window.openBagherAddLink = openBagherAddLink;
+window.closeBagherAddLink = closeBagherAddLink;
+window.saveBagherAddLink = saveBagherAddLink;
+window.copyBagherAddLinkBundle = copyBagherAddLinkBundle;
+window.bagherLinkCopyBundle = bagherLinkCopyBundle;
+window.bagherLinkRemove = bagherLinkRemove;
 window.sshfwdClearDnatClick = sshfwdClearDnatClick;
 window.sshfwdCopyForeignClick = sshfwdCopyForeignClick;
 window.sshfwdCopyAuthClick = sshfwdCopyAuthClick;

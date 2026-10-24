@@ -161,7 +161,7 @@ func spokePing(layer string, size int, df bool, src, dst string) ProbeResult {
 
 func spokeTCP(layer, host string, port int) ProbeResult {
 	r := ProbeResult{Layer: layer, Direction: DirSpokeToHub}
-	c, err := dialFn("tcp", fmt.Sprintf("%s:%d", host, port), connectProbeTimeout)
+	c, err := dialFn("tcp", hostPort(host, port), connectProbeTimeout)
 	if err == nil {
 		_ = c.Close()
 		r.OK = true
@@ -205,7 +205,7 @@ func requestSpokeProbe(p peerRecord) *SpokeProbeReport {
 	// like sendToPeer does (fixed peer prefix first, known port first).
 	target := PeerConfig{InternalIP: p.PeerGre, InternalPort: c.InternalPort, PeerBasePath: c.PeerBasePath}
 	if p.RemotePub != "" {
-		target.PeerURL = "http://" + p.RemotePub
+		target.PeerURL = "http://" + urlHost(p.RemotePub)
 	}
 	urls := peerTargetURLs(target, "/api/peer/revpath-probe")
 	if len(urls) == 0 {

@@ -127,7 +127,7 @@ func ParseBackhaulBundle(s string) (setupBundle, error) {
 	}
 	iranPub, portS, transport, token := parts[0], parts[1], parts[2], parts[3]
 	transport, udp, udpPort := splitBundleTransport(transport)
-	if net.ParseIP(iranPub) == nil || !isV4(iranPub) {
+	if ipFamily(iranPub) == 0 { // no GRE: IPv4 or IPv6
 		return b, fmt.Errorf("bad Iran public IP in bundle: %q", iranPub)
 	}
 	port, err := strconv.Atoi(portS)

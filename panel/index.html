@@ -493,6 +493,14 @@
   .det-row > :last-child { margin-inline-start:auto; max-width:100%; }
   .det-k { font-size:12px; color:var(--dim); font-weight:500; flex:0 1 auto; }
   .det-v.det-ports { flex:1 1 100%; } /* a port list gets its own line */
+  /* Bagher card: one row per extra foreign server */
+  #peer-card-bagher .det-grid { grid-template-columns:repeat(2,1fr); }
+  @media (max-width:900px) { #peer-card-bagher .det-grid { grid-template-columns:1fr; } }
+  .det-card.bagher-links { grid-column:1 / -1; }
+  .bagher-link + .bagher-link { border-top:1px solid var(--ln); padding-top:8px; }
+  .det-v.bagher-link-v { gap:8px 12px; }
+  .det-row > .det-v.bagher-link-err { flex:1 1 100%; margin-inline-start:0; justify-content:flex-start; text-align:start;
+    font-size:12px; color:var(--er); font-weight:500; }
   .det-v { font-size:13px; color:var(--tx); font-weight:600; font-variant-numeric:tabular-nums;
     display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:6px; min-width:0;
     text-align:end; overflow-wrap:anywhere; }
@@ -1358,6 +1366,7 @@
       <button role="tab" aria-selected="false" class="nav-item" id="sentinelNav" onclick="openSentinelModal()" title="Sentinel VLESS &amp; Node Health Monitor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Sentinel</span><span class="nav-lock hidden" id="navSentinelPro" role="img" title="Add-on license" aria-label="Add-on license"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span><span class="nav-badge hidden u-ml-auto u-fs-12 u-p-2x4 u-r-4 u-tint-info u-c-info u-bd-info" id="sentinelNavBadge">LIVE ↗</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-cluster" tabindex="-1" class="nav-item" data-tab="cluster" id="clusterNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg><span data-i18n="nav_cluster">Cluster</span><span class="nav-lock hidden" id="navClusterPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-setup" tabindex="-1" class="nav-item" data-tab="setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span data-i18n="nav_setup">Setup</span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-xray" tabindex="-1" class="nav-item" data-tab="xray" id="xrayNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 5l7 7-7 7"/><path d="M20 5l-7 7 7 7"/></svg><span data-i18n="nav_xray">Xray</span><span class="nav-lock hidden" id="navXrayPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" class="nav-item" data-tab="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span data-i18n="nav_logs">Logs</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_system">System</div>
       <button role="tab" aria-selected="false" aria-controls="tab-perf" tabindex="-1" class="nav-item" data-tab="perf" id="perfNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span data-i18n="nav_perf">Performance</span><span class="nav-lock hidden" id="navPerfPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
@@ -1614,6 +1623,7 @@
           <div id="tunChips" aria-label="Per-tunnel health"></div>
           <div class="ent-sec-label u-mt-6 hidden" id="peerCardsLabel">Peer tunnels</div>
           <div id="peerCards" class="det-grid"></div>
+          <div id="tunXrayCards" class="xr-stack"></div>
           <div class="tun-acts hidden" id="tunnelActs">
             <div class="tun-acts-main">
               <button class="hashem-btn hashem-btn-secondary hidden" id="tunnelCarrierCycleBtn" title="Switch how GRE packets are carried (Direct GRE or WSS)">GRE wrap: <span id="tunnelCarrierTxt" data-no-i18n>GRE</span></button>
@@ -1636,6 +1646,13 @@
             </select></div>
           <p class="qs-hint" data-i18n="usage_hint">Saved on disk every minute, so it survives restarts, updates and reboots. Per foreign server, plus the hub total.</p>
           <div id="usageBody"><p class="qs-hint">…</p></div>
+        </div>
+        <!-- Speed and volume limits per foreign server (limits.go; loadLimits in app.js) -->
+        <div class="tunnel-card" id="limitsCard">
+          <div class="tc-header"><p class="tc-title">Speed and volume limits <span class="eng-pro hidden" id="limitsPro" data-no-i18n>PRO</span></p><span class="badge dim" id="limitsBadge">—</span></div>
+          <p class="qs-hint">One speed for both directions and a volume for each foreign server, or unlimited. When a server's volume is used up, its links are cut until the next reset; the other servers keep working.</p>
+          <div class="xr-err hidden" id="limitsErr" role="alert"></div>
+          <div id="limitsBody"><div class="ent-skel u-h-14"></div></div>
         </div>
         <!-- Tunnel Health: per-tunnel PASS / FAIL / UNREACHABLE (service + session + data) -->
         <div class="tunnel-card" id="tunnelHealthCard">
@@ -1664,7 +1681,7 @@
           <div class="tc-header">
             <div>
               <p class="tc-title">GRE wrap</p>
-              <div class="qs-hint">How the main tunnel's GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47).</div>
+              <div class="qs-hint">How the main tunnel's GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47). 6to4 and 4in6 carry them over IPv6.</div>
             </div>
             <span class="badge info" id="carrierActiveBadge">Direct GRE</span>
           </div>
@@ -1697,15 +1714,34 @@
               <span class="gw-txt"><b>WSS</b><small>GRE inside TLS on a web port. For networks that block or slow down protocol 47.</small></span>
               <span class="gw-badge">Active</span>
             </button>
+            <button type="button" class="gw-opt" role="radio" aria-checked="false" data-gw="6to4">
+              <span class="gw-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="8" rx="4"/><path d="M8 12h8"/></svg></span>
+              <span class="gw-txt"><b>6to4</b><small>A private IPv6 between the two IPv4 addresses (protocol 41), GRE on top. When 47 is blocked but 41 gets through.</small></span>
+              <span class="gw-badge">Active</span>
+            </button>
+            <button type="button" class="gw-opt" role="radio" aria-checked="false" data-gw="4in6">
+              <span class="gw-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-6 4 12 3-6h4"/></svg></span>
+              <span class="gw-txt"><b>4in6</b><small>GRE over the real IPv6 addresses of both servers. When both have IPv6 and the IPv4 path is blocked or slow.</small></span>
+              <span class="gw-badge">Active</span>
+            </button>
+          </div>
+          <div class="gw-wss hidden" id="gwV6">
+            <div class="gw-wss-h"><b>4in6 addresses</b><span class="ent-help">Both servers need a public IPv6 address. With a Peer Link the other server's address is asked for you.</span></div>
+            <div class="gw-wss-f">
+              <div class="fg">
+                <label for="carrierRemote6">IPv6 of the other server (optional)</label>
+                <input type="text" class="hashem-input u-mono" id="carrierRemote6" placeholder="2001:db8::2" autocomplete="off" spellcheck="false" autocapitalize="off" inputmode="text" dir="ltr">
+              </div>
+            </div>
           </div>
           <div class="gw-acts">
             <button class="hashem-btn hashem-btn-primary" id="carrierSaveModeBtn" disabled>Switch Wrap</button>
             <button class="hashem-btn hashem-btn-ghost" id="carrierApplyBtn">Re-apply</button>
-            <span class="ent-help">Switching reconnects the tunnel for a few seconds. Re-apply sets up the current carrier again, which can fix a stuck link.</span>
+            <span class="ent-help">Switching changes both servers over the Peer Link and reconnects the tunnel for a few seconds; if the tunnel does not answer within 45 seconds, both go back. Re-apply sets up the current carrier again, which can fix a stuck link.</span>
           </div>
 
           <div class="gw-wss">
-            <div class="gw-wss-h"><b>WSS settings</b><span class="ent-help">Use the same port on both servers. The SNI is the host name shown in the TLS handshake; leave it empty to send none.</span></div>
+            <div class="gw-wss-h"><b>WSS settings</b><span class="ent-help">Use the same port on both servers. The SNI is the host name shown in the TLS handshake; leave it empty to send none. The address can be IPv4, IPv6 or a host name: give the other server's IPv6 to carry WSS over IPv6.</span></div>
             <div class="gw-wss-f">
               <div class="fg">
                 <label for="carrierWSSPortInput">WSS port</label>
@@ -1714,6 +1750,10 @@
               <div class="fg">
                 <label for="carrierWSSSNIInput">SNI (optional)</label>
                 <input type="text" class="hashem-input" id="carrierWSSSNIInput" placeholder="www.example.com" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="fg">
+                <label for="carrierWSSRemoteInput">Address of the other server</label>
+                <input type="text" class="hashem-input u-mono" id="carrierWSSRemoteInput" placeholder="203.0.113.10 or 2001:db8::2" autocomplete="off" spellcheck="false" autocapitalize="off" inputmode="text" dir="ltr">
               </div>
               <button class="hashem-btn hashem-btn-secondary" id="carrierSaveWSSBtn">Save WSS Settings</button>
             </div>
@@ -1823,7 +1863,7 @@
                 <option value="webhook">Webhook (any DNS provider or script)</option>
               </select></div>
             <div class="fg hidden" id="clDnsURLRow"><label for="clDnsURL">Webhook URL</label><input class="hashem-input u-mono" id="clDnsURL" autocomplete="off" placeholder="https://example.com/hashem-dns"></div>
-            <div class="ent-help hidden" id="clDnsHookHelp">The hub that leads POSTs JSON {"name", "ips", "ttl", "hub", "at"} whenever the working hubs change, and every 30 seconds. Your script sets the record to exactly "ips". Any 2xx answer counts as done.</div>
+            <div class="ent-help hidden" id="clDnsHookHelp">The hub that leads POSTs JSON {"name", "ips", "ips6", "ttl", "hub", "at"} whenever the working hubs change, and every 30 seconds. Your script sets the record to exactly "ips" (A) and "ips6" (AAAA). Any 2xx answer counts as done.</div>
             <div class="fg"><label for="clDnsToken" id="clDnsTokenLabel">Cloudflare API token (Zone, DNS, Edit)</label><input class="hashem-input u-mono" id="clDnsToken" type="password" autocomplete="off" placeholder="Saved; paste a new one to replace it"></div>
             <label class="u-check-row u-mb-8"><input type="checkbox" id="clDnsEnabled"> Keep the record pointed at the working hubs</label>
             <div class="ent-help cl-pre" id="clDnsState"></div>
@@ -1917,6 +1957,14 @@
                   <button type="button" id="bhGreOff" aria-pressed="false" data-i18n="setup_bh_gre_off">Without GRE</button>
                 </div>
                 <div class="qs-hint" id="bhGreHint"></div>
+                <div class="u-mt-8 hidden" id="bhFamWrap">
+                  <div class="qs-label" id="bhFamLbl">Connect the two servers over</div>
+                  <div class="qs-seg" role="group" aria-labelledby="bhFamLbl">
+                    <button type="button" id="bhFam4" aria-pressed="true">IPv4</button>
+                    <button type="button" id="bhFam6" aria-pressed="false">IPv6</button>
+                  </div>
+                  <div class="qs-hint" id="bhFamHint"></div>
+                </div>
               </div>
               <div id="bhLicWarn" class="warnbox hidden u-mt-8">
                 <span data-i18n="setup_bh_lic">Backhaul needs a Hashem Pro license on both servers. Backhaul tunnels that already run keep running.</span>
@@ -1929,6 +1977,7 @@
                 <div class="qs-row">
                   <div class="fg" id="wrapLocalPub"><label for="sLocalPub" data-i18n="setup_local_pub">Iran public IP (auto, editable)</label><input class="hashem-input" id="sLocalPub" inputmode="decimal"></div>
                   <div class="fg"><label for="sRemotePub" data-i18n="setup_remote_pub">Remote public IP (the other server)</label><input class="hashem-input" id="sRemotePub" inputmode="decimal" placeholder="e.g. 203.0.113.10"></div>
+                  <div class="fg"><label for="sMainName">Name of the foreign server (optional)</label><input class="hashem-input" id="sMainName" maxlength="40" autocomplete="off" placeholder="e.g. Frankfurt"></div>
                   <div class="fg" id="wrapLocalGre"><label for="sLocalGre" data-i18n="setup_local_gre">Local GRE IP</label><input class="hashem-input" id="sLocalGre" inputmode="decimal"></div>
                   <div class="fg" id="wrapPeerGre"><label for="sPeerGre" data-i18n="setup_peer_gre">Peer GRE IP</label><input class="hashem-input" id="sPeerGre" inputmode="decimal"></div>
                   <div class="fg" id="wrapCtrlPort"><label for="sFrpPort" id="lblControlPort" data-i18n="setup_ctrl_port">Control / Bind port</label><input class="hashem-input" id="sFrpPort" inputmode="numeric"></div>
@@ -1961,7 +2010,8 @@
                   <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="bagherLicOpenBtn" data-i18n="setup_bagher_lic_btn">Activate License</button>
                 </div>
                 <div class="qs-row">
-                  <div class="fg"><label for="sshfwdRemoteHost" data-i18n="setup_bagher_host">Foreign server public IP</label><input class="hashem-input" id="sshfwdRemoteHost" inputmode="decimal" placeholder="e.g. 198.51.100.73"></div>
+                  <div class="fg"><label for="sshfwdRemoteHost" data-i18n="setup_bagher_host">Foreign server public IP</label><input class="hashem-input" id="sshfwdRemoteHost" inputmode="text" spellcheck="false" autocapitalize="off" placeholder="e.g. 198.51.100.73"></div>
+                  <div class="fg"><label for="sshfwdName">Name of the foreign server (optional)</label><input class="hashem-input" id="sshfwdName" maxlength="40" autocomplete="off" placeholder="e.g. Frankfurt"></div>
                   <div class="fg"><label for="sshfwdPorts" data-i18n="setup_forward_ports">Forwarded Ports (single, ranges, mappings)</label><input class="hashem-input" id="sshfwdPorts" placeholder="e.g. 443, 8443, 2083"></div>
                 </div>
                 <div class="fg"><label class="u-check-row"><input type="checkbox" id="sshfwdUdp"><span data-i18n="setup_bh_udp">Also forward UDP on these ports</span></label></div>
@@ -2006,6 +2056,7 @@
               <label class="qs-label" data-i18n="setup_foreign_step2">Connect this server to Iran</label>
               <div class="u-grid-gap-10">
                 <div class="fg"><label for="jToken" data-i18n="setup_bundle_paste_lbl">Setup bundle or token (from Iran side)</label><input class="hashem-input" id="jToken" autocomplete="off" data-i18n-ph="setup_bundle_paste_ph" placeholder="paste hsh1_..., bh1_..., gh1_... or BAGHER:... bundle"></div>
+                <div class="fg"><label for="jName">Name of the Iran server (optional)</label><input class="hashem-input" id="jName" maxlength="40" autocomplete="off" placeholder="e.g. Tehran"></div>
                 <div class="fg" id="jPortsWrap"><label for="jPorts">Reverse ports (ranges &amp; mappings allowed)</label><input class="hashem-input" id="jPorts" placeholder="auto-filled from bundle, or 443, 10000-10050"></div>
                 <div id="joinFrpOpts" class="u-grid-gap-10">
                 <div class="fg u-mt-2">
@@ -2056,8 +2107,8 @@
                 <summary>Manual addresses &amp; control port</summary>
                 <div class="qs-hint u-my-8" >Leave everything here empty to auto-join — the panel discovers Iran's settings from the live tunnel. Only fill these in if auto-join fails.</div>
                 <div class="qs-row">
-                  <div class="fg"><label for="fLocalPub">Foreign public IP (auto, editable)</label><input class="hashem-input" id="fLocalPub" inputmode="decimal"></div>
-                  <div class="fg"><label for="fRemotePub">Iran public IP</label><input class="hashem-input" id="fRemotePub" inputmode="decimal" placeholder="e.g. 203.0.113.10"></div>
+                  <div class="fg"><label for="fLocalPub">Foreign public IP (auto, editable)</label><input class="hashem-input" id="fLocalPub" inputmode="text" spellcheck="false" autocapitalize="off"></div>
+                  <div class="fg"><label for="fRemotePub">Iran public IP</label><input class="hashem-input" id="fRemotePub" inputmode="text" spellcheck="false" autocapitalize="off" placeholder="e.g. 203.0.113.10"></div>
                   <div class="fg"><label for="fLocalGre">Local GRE IP</label><input class="hashem-input" id="fLocalGre" inputmode="decimal" placeholder="e.g. 10.10.10.1"></div>
                   <div class="fg"><label for="fPeerGre">Iran GRE IP</label><input class="hashem-input" id="fPeerGre" inputmode="decimal" placeholder="e.g. 10.10.10.2"></div>
                   <div class="fg"><label for="fFrpPort">Control port</label><input class="hashem-input" id="fFrpPort" inputmode="numeric" placeholder="7000"></div>
@@ -2091,8 +2142,8 @@
                       <option value="wss">WSS TLS (Obfuscated)</option>
                     </select>
                   </div>
-                  <div class="fg"><label for="pRemotePub">Foreign public IP</label><input class="hashem-input" id="pRemotePub" inputmode="decimal" placeholder="e.g. 203.0.113.10"></div>
-                  <div class="fg"><label for="pLocalPub">Iran public IP (auto, editable)</label><input class="hashem-input" id="pLocalPub" inputmode="decimal"></div>
+                  <div class="fg"><label for="pRemotePub">Foreign public IP</label><input class="hashem-input" id="pRemotePub" inputmode="text" spellcheck="false" autocapitalize="off" placeholder="e.g. 203.0.113.10"></div>
+                  <div class="fg"><label for="pLocalPub">Iran public IP (auto, editable)</label><input class="hashem-input" id="pLocalPub" inputmode="text" spellcheck="false" autocapitalize="off"></div>
                   <div class="fg" id="wrapPeerLocalGre"><label for="pLocalGre">Iran GRE IP (unique)</label><input class="hashem-input" id="pLocalGre" inputmode="decimal" placeholder="e.g. 10.11.0.2"></div>
                   <div class="fg" id="wrapPeerPeerGre"><label for="pPeerGre">Foreign GRE IP</label><input class="hashem-input" id="pPeerGre" inputmode="decimal" placeholder="e.g. 10.11.0.1"></div>
                   <div class="fg"><label for="pFrpPort">Control port (unique per peer)</label><input class="hashem-input" id="pFrpPort" inputmode="numeric" placeholder="e.g. 7001"></div>
@@ -3036,6 +3087,20 @@
           <div id="spoofBody"><div class="ent-skel u-h-14"></div></div>
         </div>
       </section>
+      <section id="tab-xray" role="tabpanel" hidden>
+        <div class="tunnel-card u-mb-20">
+          <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
+            <div>
+              <span class="tc-title u-fs-18 u-fw-700" data-i18n="xray_title">Xray Tunnel</span> <span class="eng-pro hidden" id="xrayPro" data-no-i18n>PRO</span>
+              <div class="qs-hint u-mt-4" data-i18n="xray_sub">Forward ports from the Iran server to a foreign server over Xray: Reality, XHTTP, gRPC or mKCP, direct or reverse. It runs its own Xray-core next to any Xray panel (3x-ui, Marzban) and never touches its files, services or ports.</div>
+            </div>
+            <span class="badge dim" id="xrayBadge" data-i18n="xray_idle">No tunnel yet</span>
+          </div>
+          <div id="xrayTop"></div>
+          <div id="xrayLinks"><div class="ent-skel u-h-14"></div></div>
+          <div id="xrayWizard"></div>
+        </div>
+      </section>
       <section id="tab-update" role="tabpanel" hidden>
         <div class="tunnel-card">
           <div class="tc-header"><p class="tc-title">Panel Update <span class="badge info hidden" id="updDevBadge" data-i18n="upd_dev_badge">DEV</span></p><span class="status-indicator" id="updDot"><span class="dot"></span><span id="updDotTxt">—</span></span></div>
@@ -3388,6 +3453,56 @@
 
 
 
+<div class="ent-modal-ov" id="limitModal" hidden>
+  <div class="ent-modal lm-modal" role="dialog" aria-modal="true" aria-labelledby="limitModalTitle">
+    <div class="ent-modal-h"><b id="limitModalTitle">Limits</b><button class="ent-x" id="limitModalX" aria-label="Close" data-i18n-aria="aria_close">×</button></div>
+    <div class="ent-modal-b">
+      <div class="lm-srv" id="limitModalSrv"></div>
+      <div class="lm-sec">
+        <span class="qs-label" id="lmSpeedLbl">Speed (one number for both directions)</span>
+        <div class="qs-seg" role="group" aria-labelledby="lmSpeedLbl"><button type="button" id="lmSpeedOff" aria-pressed="true">Unlimited</button><button type="button" id="lmSpeedOn" aria-pressed="false">Limit</button></div>
+        <div class="lm-in" id="lmSpeedWrap" hidden>
+          <label class="qs-label" for="lmSpeed">Mbit/s</label>
+          <input class="hashem-input" id="lmSpeed" type="number" min="0.1" max="100000" step="0.1" inputmode="decimal" placeholder="e.g. 100">
+          <div class="lm-chips" data-for="lmSpeed"><button type="button" data-v="10">10</button><button type="button" data-v="50">50</button><button type="button" data-v="100">100</button><button type="button" data-v="500">500</button></div>
+        </div>
+      </div>
+      <div class="lm-sec">
+        <span class="qs-label" id="lmQuotaLbl">Volume (download and upload together)</span>
+        <div class="qs-seg" role="group" aria-labelledby="lmQuotaLbl"><button type="button" id="lmQuotaOff" aria-pressed="true">Unlimited</button><button type="button" id="lmQuotaOn" aria-pressed="false">Limit</button></div>
+        <div class="lm-in" id="lmQuotaWrap" hidden>
+          <label class="qs-label" for="lmQuota">GB</label>
+          <input class="hashem-input" id="lmQuota" type="number" min="0.01" max="1000000" step="any" inputmode="decimal" placeholder="e.g. 500">
+          <div class="lm-chips" data-for="lmQuota"><button type="button" data-v="100">100</button><button type="button" data-v="500">500</button><button type="button" data-v="1000">1000</button><button type="button" data-v="5000">5000</button></div>
+        </div>
+      </div>
+      <div class="lm-sec" id="lmResetSec" hidden>
+        <span class="qs-label" id="lmResetLbl">Reset the used volume</span>
+        <div class="qs-seg" role="group" aria-labelledby="lmResetLbl"><button type="button" id="lmResetMonthly" aria-pressed="true">Every month</button><button type="button" id="lmResetNever" aria-pressed="false">Only by hand</button></div>
+        <div class="lm-in" id="lmDayWrap">
+          <label class="qs-label" for="lmDay">On day</label>
+          <select class="hashem-input" id="lmDay"></select>
+        </div>
+      </div>
+      <div class="qs-hint">The volume already used is kept when you change the limits. A limit covers every tunnel to this server.</div>
+      <div class="xr-err hidden" id="limitModalErr"></div>
+    </div>
+    <div class="ent-modal-f"><button class="hashem-btn hashem-btn-ghost" id="limitModalNo">Cancel</button><button class="hashem-btn hashem-btn-primary" id="limitModalYes">Save</button></div>
+  </div>
+</div>
+<div class="ent-modal-ov" id="nameModal" hidden>
+  <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="nameModalTitle">
+    <div class="ent-modal-h"><b id="nameModalTitle">Name this server</b><button class="ent-x" id="nameModalX" aria-label="Close" data-i18n-aria="aria_close">×</button></div>
+    <div class="ent-modal-b">
+      <label class="qs-label" for="nameModalInput">Name</label>
+      <input class="hashem-input" id="nameModalInput" maxlength="40" autocomplete="off" placeholder="e.g. Frankfurt">
+      <div class="qs-hint u-mt-6">Shown on the dashboard map, the tunnel cards and the limits. Empty: no name.</div>
+      <div class="xr-err hidden" id="nameModalErr"></div>
+    </div>
+    <div class="ent-modal-f"><button class="hashem-btn hashem-btn-ghost" id="nameModalNo">Cancel</button><button class="hashem-btn hashem-btn-primary" id="nameModalYes">Save</button></div>
+  </div>
+</div>
+
 <div class="ent-modal-ov" id="termAuthModal" hidden>
   <div class="ent-modal" role="dialog" aria-modal="true" aria-labelledby="termAuthTitle">
     <div class="ent-modal-h"><b id="termAuthTitle">Confirm it's you</b><button class="ent-x" id="termAuthX" aria-label="Close">×</button></div>
@@ -3685,6 +3800,52 @@
       <button type="button" class="hashem-btn hashem-btn-primary" onclick="saveBagherQuickEdit()">
         Save &amp; Apply Changes
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- Bagher: one more foreign server on this Iran server -->
+<div class="ent-modal-ov" id="bagherAddLinkModal" hidden>
+  <div class="ent-modal u-maxw-540 u-w-full u-bd-info u-lift" role="dialog" aria-modal="true" aria-labelledby="bagherAddLinkTitle">
+    <div class="ent-modal-h u-bb-info u-tint-info">
+      <b id="bagherAddLinkTitle" class="u-flex u-ai-c u-gap-8 u-c-info u-fs-16 u-fw-700">Add a Foreign Server to Bagher</b>
+      <button class="ent-x" onclick="closeBagherAddLink()" aria-label="Close">&#xD7;</button>
+    </div>
+    <div class="ent-modal-b u-gap-16 u-p-20" id="bagherAddLinkForm">
+      <div class="u-hint-11">This Iran server keeps its own SSH session to every foreign server. Each one forwards its own ports: a port can belong to one foreign server only.</div>
+      <div class="fg">
+        <label for="bagherLinkHost" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">Foreign Server Public IP / Host:</label>
+        <input class="hashem-input u-w-full u-mono" id="bagherLinkHost" placeholder="e.g. 198.51.100.74" autocomplete="off">
+      </div>
+      <div class="fg">
+        <label for="bagherLinkName" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">Name (optional):</label>
+        <input class="hashem-input u-w-full" id="bagherLinkName" maxlength="40" autocomplete="off" placeholder="e.g. Helsinki">
+      </div>
+      <div class="fg">
+        <label for="bagherLinkPorts" class="u-fs-12 u-fw-700 u-c-tx2 u-mb-8 u-block">Forwarded Ports:</label>
+        <input class="hashem-input u-w-full u-mono" id="bagherLinkPorts" placeholder="e.g. 2053, 2083">
+        <label class="u-check-row u-mt-8"><input type="checkbox" id="bagherLinkUdp"><span data-i18n="setup_bh_udp">Also forward UDP on these ports</span></label>
+      </div>
+      <div class="u-grid u-gtc-1fr-1fr u-gap-12">
+        <div class="fg">
+          <label for="bagherLinkSSHPort" class="u-fs-12 u-fw-700 u-c-mu u-mb-8 u-block" data-i18n="setup_bagher_sshport">Foreign SSH port</label>
+          <input type="number" class="hashem-input u-w-full u-mono" id="bagherLinkSSHPort" placeholder="22" min="1" max="65535">
+        </div>
+        <div class="fg">
+          <label for="bagherLinkUser" class="u-fs-12 u-fw-700 u-c-mu u-mb-8 u-block" data-i18n="setup_bagher_sshuser">Foreign SSH user</label>
+          <input class="hashem-input u-w-full u-mono" id="bagherLinkUser" placeholder="root" autocomplete="off">
+        </div>
+      </div>
+      <div class="warnbox hidden u-mt-8" id="bagherAddLinkWarn"></div>
+    </div>
+    <div class="ent-modal-b u-gap-16 u-p-20" id="bagherAddLinkDone" hidden>
+      <label for="bagherLinkBundle" class="u-hint-11 u-block">Paste this bundle on the new foreign server: Setup → Foreign → Setup bundle. It carries the key and the ports; nothing else to fill in.</label>
+      <textarea id="bagherLinkBundle" class="hashem-input u-w-full u-mono u-fs-12" rows="4" readonly></textarea>
+    </div>
+    <div class="ent-modal-f u-flex u-jc-sb u-ai-c u-bt-ln u-p-16x20">
+      <button type="button" class="hashem-btn hashem-btn-ghost" onclick="closeBagherAddLink()" id="bagherAddLinkCancel">Cancel</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="saveBagherAddLink()" id="bagherAddLinkSave">Add and Make the Bundle</button>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="copyBagherAddLinkBundle()" id="bagherAddLinkCopy" hidden>Copy Bundle</button>
     </div>
   </div>
 </div>

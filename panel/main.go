@@ -91,8 +91,8 @@ func effectiveTLSPort() int {
 var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
-	// go build -ldflags "-X main.panelVersion=v2.6.1"
-	panelVersion = "v2.6.1"
+	// go build -ldflags "-X main.panelVersion=v2.7.0"
+	panelVersion = "v2.7.0"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -534,6 +534,8 @@ func main() {
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
+		case "bagher-carrier":
+			os.Exit(bagherCarrierCmd(os.Args[2:]))
 		case "pathtest":
 			os.Exit(cliPathTest(os.Args[2:]))
 		case "cluster", "mesh":
@@ -571,6 +573,11 @@ func main() {
 		log.Printf("bagher: upgrading key restrictions in %s: %v", authorizedKeysPath, err)
 	} else if n > 0 {
 		log.Printf("bagher: locked down %d Bagher key(s) in %s (no commands, no -L forwards)", n, authorizedKeysPath)
+	}
+	if ok, err := migrateBagherCarrierUnit(bagherLinkUnitPath(1)); err != nil {
+		log.Printf("bagher: moving the carrier off ssh -N: %v", err)
+	} else if ok {
+		log.Printf("bagher: the carrier now runs in the panel (ssh -N held small packets back: high ping)")
 	}
 	if _, err := rand.Read(nonce[:]); err != nil {
 		log.Fatal(err)
@@ -677,6 +684,11 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/spoof", requireAuth(requireCSRF(handleSpoofPost)))
 	mux.HandleFunc("GET "+base+"/api/spoof/tester", requireAuth(handleSpoofTester))
 	mux.HandleFunc("POST "+base+"/api/spoof/tester", requireAuth(requireCSRF(handleSpoofTester)))
+	mux.HandleFunc("GET "+base+"/api/xray", requireAuth(handleXrayGet))
+	mux.HandleFunc("POST "+base+"/api/xray", requireAuth(requireCSRF(handleXrayPost)))
+	mux.HandleFunc("GET "+base+"/api/limits", requireAuth(handleLimitsGet))
+	mux.HandleFunc("POST "+base+"/api/limits", requireAuth(requireCSRF(handleLimitsPost)))
+	mux.HandleFunc("POST "+base+"/api/link-name", requireAuth(requireCSRF(handleLinkName)))
 	mux.HandleFunc("GET "+base+"/api/fleet", requireAuth(handleFleet))
 	mux.HandleFunc("GET "+base+"/api/selfstats", requireAuth(handleSelfStats))
 	mux.HandleFunc("GET "+base+"/api/tunnel-health", requireAuth(handleTunnelHealthGet))
@@ -766,6 +778,7 @@ func main() {
 	go startRescueMonitor()
 	go startClusterMonitor()
 	go startMeshLoop()
+	go startLimitsLoop()
 	go func() {
 		cc := loadCarrierConfig()
 		if strings.HasPrefix(cc.ActiveCarrier, "wss") {
@@ -802,6 +815,7 @@ func main() {
 	go func() {
 		<-sigc
 		close(histStop)
+		limitsFlush()
 		time.Sleep(300 * time.Millisecond) // let the final history write finish
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()

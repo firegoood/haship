@@ -32,11 +32,12 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		lv.Rx, lv.Tx = m.Rx, m.Tx
 	}
 	lv.CarrierID = mainCarrierID(snap.Local)
-	if lv.Rx == nil && len(peers) == 0 && snap.CarrierOK {
-		rx, tx := snap.CarrierRx, snap.CarrierTx
-		lv.Rx, lv.Tx = &rx, &tx
+	lv.Name = linkLabel("main")
+	if lv.Rx == nil {
+		lv.Rx, lv.Tx = snap.LocalRx, snap.LocalTx
 	}
-	resp := map[string]any{"local": lv, "peers": peers, "peer_count": len(peers), "peer_max": maxPeers(), "snapshot_age_ms": snap.AgeMs()}
+	resp := map[string]any{"local": lv, "peers": peers, "peer_count": len(peers), "peer_max": maxPeers(), "snapshot_age_ms": snap.AgeMs(),
+		"counters_at": countersAtMs(snap)}
 	if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
 		resp["csrf_token"] = GenerateCSRFToken(c.Value)
 	}
@@ -60,6 +61,8 @@ type localView struct {
 	// CarrierID: the carrier the base tunnel runs on ("frp:kcp", "backhaul:tcpmux"),
 	// for the Carriers card and Swap carrier.
 	CarrierID string `json:"carrier_id,omitempty"`
+	// Name: what the user calls the base tunnel's other server ("" = none).
+	Name string `json:"name,omitempty"`
 }
 
 func splitLogLines(text string) []string {
@@ -510,6 +513,9 @@ func livePeersFrom(v *hostView, recs []peerRecord) []peerLive {
 		if !p.NoGre {
 			l.Rx, l.Tx = v.traffic(p.GreIf)
 			sig.TrafficFlowing = v.flowing[p.GreIf]
+		} else {
+			// Backhaul without GRE has no interface: its unit's port counters
+			l.Rx, l.Tx = v.carrierTraffic(p.FrpsSvc)
 		}
 		sig.Rx, sig.Tx = l.Rx, l.Tx
 		l.applyHealth(sig, ic)
@@ -740,6 +746,12 @@ func localStatusFrom(v *hostView) tunnelStatus {
 		st.Gre.Exists = true
 		if st.Gre.Name == "" {
 			st.Gre.Name = "gre-tunnel"
+		}
+		// 6to4 / 4in6: an ip6gre device is not in `ip tunnel show`
+		if st.Gre.PeerIP == "" {
+			if r, l := gre6Ends("gre-tunnel"); r != "" {
+				st.Gre.PeerIP, st.GrePeer, st.Gre.Local = r, r, l
+			}
 		}
 	}
 	// FRP / Backhaul role: which unit file exists / is active
@@ -1359,7 +1371,7 @@ remotePort = %d
 			}
 			conf := filepath.Join(backhaulDir, "client.toml")
 			tx.backup(conf)
-			if err := writeBackhaulClientConfig(conf, fmt.Sprintf("%s:%d", dial, port), targetTransport, token); err != nil {
+			if err := writeBackhaulClientConfig(conf, hostPort(dial, port), targetTransport, token); err != nil {
 				return outMsg.String(), tx.rollback(fmt.Errorf("write backhaul config: %w", err))
 			}
 			if err := tx.start("backhaul-client"); err != nil {
