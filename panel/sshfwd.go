@@ -297,9 +297,15 @@ func buildBagherCarrierUnit(cfg SSHFwdConfig, id int) string {
 		if cfg.RemoteSSHPort > 0 && cfg.RemoteSSHPort != 22 {
 			portArg = fmt.Sprintf("-p %d ", cfg.RemoteSSHPort)
 		}
+		// "*" is every address of both families: users reach the port over
+		// IPv4 and IPv6, and a host without IPv6 still binds IPv4 alone.
+		bind := cfg.BindAddr
+		if bind == "0.0.0.0" || bind == "::" {
+			bind = "*"
+		}
 		forwards := make([]string, 0, len(cfg.Ports))
 		for _, p := range cfg.Ports {
-			forwards = append(forwards, fmt.Sprintf("-L %s:127.0.0.1:%d", hostPort(cfg.BindAddr, p), p))
+			forwards = append(forwards, fmt.Sprintf("-L %s:127.0.0.1:%d", hostPort(bind, p), p))
 		}
 		execCmd = fmt.Sprintf("/usr/bin/ssh -N -i %s -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=8 -o ServerAliveInterval=%d -o ServerAliveCountMax=%d -o StrictHostKeyChecking=accept-new %s%s %s@%s",
 			cfg.KeyPath, cfg.ServerAliveInterval, cfg.ServerAliveCountMax, portArg, strings.Join(forwards, " "), cfg.RemoteUser, cfg.RemoteHost)

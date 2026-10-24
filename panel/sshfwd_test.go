@@ -80,8 +80,12 @@ func TestSSHFwdBuildService(t *testing.T) {
 	// Direct mode test
 	cfg.Mode = "direct"
 	svcDirect := buildSSHFwdService(cfg)
-	if !strings.Contains(svcDirect, "-L 0.0.0.0:443:127.0.0.1:443") {
-		t.Fatalf("direct service missing -L forward: %s", svcDirect)
+	if !strings.Contains(svcDirect, "-L *:443:127.0.0.1:443") {
+		t.Fatalf("direct service missing -L forward on every address: %s", svcDirect)
+	}
+	cfg.BindAddr = "2001:db8::7"
+	if svc := buildSSHFwdService(cfg); !strings.Contains(svc, "-L [2001:db8::7]:443:127.0.0.1:443") {
+		t.Fatalf("direct service on one IPv6 address: %s", svc)
 	}
 }
 

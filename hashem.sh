@@ -10702,7 +10702,7 @@ EOF
                 local FWD_ARGS=""
                 for p in "${PORT_ARR[@]}"; do
                     p=$(echo "$p" | tr -d ' ')
-                    [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L 0.0.0.0:$p:127.0.0.1:$p"
+                    [[ -n "$p" ]] && FWD_ARGS="$FWD_ARGS -L *:$p:127.0.0.1:$p"
                 done
                 systemctl disable --now hashem-bagher-frps.service >/dev/null 2>&1 || true
                 cat <<EOF > /etc/systemd/system/hashem-bagher.service

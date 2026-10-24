@@ -65,7 +65,7 @@ jobs:
           # the netns lab tests run in the separate `lab` job below.
           fail=0
           for t in tests/test_*.sh; do
-            case "$t" in *test_backhaul_e2e.sh|*test_backhaul_udp_lab.sh|*test_gre_backhaul_lab.sh|*test_revpath_lab.sh|*test_bagher_lab.sh|*test_traffic_lab.sh|*test_tunnel_combos_lab.sh|*test_pathtest_lab.sh|*test_cluster_lab.sh|*test_xray_lab.sh|*test_limits_lab.sh) continue;; esac
+            case "$t" in *test_backhaul_e2e.sh|*test_backhaul_udp_lab.sh|*test_gre_backhaul_lab.sh|*test_revpath_lab.sh|*test_bagher_lab.sh|*test_traffic_lab.sh|*test_tunnel_combos_lab.sh|*test_pathtest_lab.sh|*test_cluster_lab.sh|*test_xray_lab.sh|*test_limits_lab.sh|*test_ipv6_lab.sh) continue;; esac
             echo "== $t"
             bash "$t" || fail=1
           done
@@ -104,6 +104,8 @@ jobs:
           command -v sshd || sudo apt-get install -y -qq openssh-server
       - name: Tunnel combinations lab (Backhaul x 7 transports with/without GRE, GRE <-> public route for Backhaul and FRP)
         run: sudo env "PATH=$PATH" bash tests/test_tunnel_combos_lab.sh
+      - name: IPv6 lab (users over IPv6 and the link over IPv6, Backhaul x 8 and FRP, byte-exact TCP and UDP)
+        run: sudo env "PATH=$PATH" GITHUB_ACTIONS="$GITHUB_ACTIONS" bash tests/test_ipv6_lab.sh
       - name: Path test lab (Benchmark tab, all transports between two servers, blocked ones detected, safe next to a live tunnel)
         run: |
           # Pro feature: a throwaway lab key, trusted only by this lab build
