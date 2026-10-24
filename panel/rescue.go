@@ -1198,26 +1198,70 @@ func requireRescuePeerHidden(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// rescuePeerAllowed accepts the designated rescue remote IP or the peer secret.
+// rescuePeerAllowed accepts a request from a known peer: the designated
+// rescue remote IP, a peer address this panel already dials, the Peer Link
+// secret, or a peers.json tunnel token. A hub with several tunnels has no
+// single Peer Link secret for them, so their expected 20 s rescue polls used
+// to be rejected (and audited) as auth failures.
 func rescuePeerAllowed(r *http.Request) bool {
 	rescueMu.Lock()
 	st := loadRescueLocked()
 	rescueMu.Unlock()
-	if st.RemoteIP != "" && ClientIP(r) == st.RemoteIP {
+	ip := ClientIP(r)
+	if st.RemoteIP != "" && ip == st.RemoteIP {
 		return true
 	}
-	c := loadPeerConfig()
-	if c.PeerSecret == "" {
+	if rescueKnownPeerIP(ip) {
+		return true
+	}
+	clientSecret := peerSecretFromRequest(r)
+	if clientSecret == "" {
 		return false
 	}
-	clientSecret := strings.TrimSpace(r.Header.Get("X-Peer-Secret"))
-	if clientSecret == "" {
-		authHdr := r.Header.Get("Authorization")
-		if strings.HasPrefix(strings.ToLower(authHdr), "bearer ") {
-			clientSecret = strings.TrimSpace(authHdr[7:])
+	c := loadPeerConfig()
+	if c.PeerSecret != "" && ConstantTimeCompare(c.PeerSecret, clientSecret) {
+		return true
+	}
+	return rescueKnownTunnelToken(clientSecret)
+}
+
+// rescueKnownPeerIP reports whether ip is one of the peer addresses this
+// panel already probes for rescue.
+func rescueKnownPeerIP(ip string) bool {
+	if ip == "" {
+		return false
+	}
+	for _, t := range rescueTargets() {
+		if t.Host == ip {
+			return true
 		}
 	}
-	return clientSecret != "" && ConstantTimeCompare(c.PeerSecret, clientSecret)
+	return false
+}
+
+// rescueKnownTunnelToken accepts any peers.json tunnel token. The legacy
+// record's token is the main tunnel's token, which CLI installs never copy
+// into peer_link.json.
+func rescueKnownTunnelToken(secret string) bool {
+	if secret == "" {
+		return false
+	}
+	for _, p := range loadPeers() {
+		if p.Token != "" && ConstantTimeCompare(p.Token, secret) {
+			return true
+		}
+	}
+	return false
+}
+
+func peerSecretFromRequest(r *http.Request) string {
+	if s := strings.TrimSpace(r.Header.Get("X-Peer-Secret")); s != "" {
+		return s
+	}
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(h), "bearer ") {
+		return strings.TrimSpace(h[7:])
+	}
+	return ""
 }
 
 // Peer endpoints (X-Peer-Secret). The offer is only released to the exact
@@ -1231,8 +1275,10 @@ func handlePeerRescueOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !authed(r) && ClientIP(r) != st.RemoteIP {
-		LogSecurityAudit("rescue_offer_denied", "peer", ClientIP(r), "")
-		writeAPIError(w, r, "E-RESCUE-07", "")
+		// A known peer that is not the entry named when rescue was enabled
+		// gets no offer. Every tunnel on a hub runs this poll, so this is
+		// expected background traffic, not an authorization failure.
+		writeJSON(w, map[string]any{"offer": false})
 		return
 	}
 	pub := rescuePublicIP()
