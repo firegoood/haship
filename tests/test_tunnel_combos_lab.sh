@@ -109,7 +109,7 @@ ext() { awk -v n="$1" '$0 ~ "^"n"\\(\\) \\{" {p=1} p {print} p && /^}/ {exit}' "
     echo "RED='' GREEN='' YELLOW='' CYAN='' NC='' TMP='$TMP' BIN='$BIN' FRPC='$FRP_DIR/frpc'"
     grep -E '^(BACKHAUL_TRANSPORTS|DIAL_BACK_TICKS|DIAL_BACK_WAIT|DIAL_HOLD_SECS)=' "$ROOT/hashem.sh"
     grep -E '^(backhaul_transport_ok|backhaul_udp_wanted)\(\)' "$ROOT/hashem.sh"
-    for f in hostonly backhaul_is_v2 backhaul_ensure_tls backhaul_write_server_conf_v1 backhaul_write_client_conf_v1 \
+    for f in hostport hostonly backhaul_is_v2 backhaul_ensure_tls backhaul_write_server_conf_v1 backhaul_write_client_conf_v1 \
              backhaul_write_server_conf backhaul_write_client_conf backhaul_wait_link \
              dial_env_file dial_env_write dial_env_get dial_conf_file dial_service dial_current_addr \
              dial_current_port dial_gre_usable dial_pick dial_apply_addr dial_env_ensure dial_reselect \

@@ -4878,8 +4878,12 @@ $('perfRestoreBtn').onclick = () => runNetRestore($('perfRestoreBtn'));
 let carrierState = { mode: 'direct', active: 'direct', wss_port: 8443 };
 
 function carrierName(c) {
-  return (c || '').startsWith('wss') ? 'WSS :' + (c.split(':')[1] || '8443') : tr('', 'Direct GRE');
+  c = c || '';
+  if (c === '6to4' || c === '4in6') return c;
+  return c.startsWith('wss') ? 'WSS :' + (c.split(':')[1] || '8443') : tr('', 'Direct GRE');
 }
+// gwKey: the wrap tile a carrier belongs to
+const gwKey = c => (c || '').startsWith('wss') ? 'wss' : (c === '6to4' || c === '4in6') ? c : 'direct';
 
 async function loadCarrier() {
   let s;
@@ -4893,14 +4897,19 @@ async function loadCarrier() {
   }
   carrierState = s;
   const cur = s.active || s.active_carrier || 'direct';
-  const isWss = cur.startsWith('wss');
+  const key = gwKey(cur);
 
   const badge = $('carrierActiveBadge');
   badge.textContent = carrierName(cur);
-  badge.className = 'badge ' + (isWss ? 'ok' : 'info');
-  badge.dir = isWss ? 'ltr' : '';
-  (isWss ? perfSetLtr : perfSetText)('carrierActiveVal', carrierName(cur));
-  perfSetText('carrierActiveSub', tr('', isWss ? 'GRE inside TLS WebSocket' : 'Raw GRE, protocol 47'));
+  badge.className = 'badge ' + (key === 'direct' ? 'info' : 'ok');
+  badge.dir = key === 'direct' ? '' : 'ltr';
+  (key === 'direct' ? perfSetText : perfSetLtr)('carrierActiveVal', carrierName(cur));
+  perfSetText('carrierActiveSub', tr('', {
+    wss: 'GRE inside TLS WebSocket',
+    '6to4': 'GRE over a private IPv6 inside IPv4 (protocol 41)',
+    '4in6': 'GRE over the public IPv6 addresses',
+    direct: 'Raw GRE, protocol 47',
+  }[key]));
 
   const lv = $('carrierLinkVal');
   if (!s.gre_exists) {
@@ -4921,7 +4930,7 @@ async function loadCarrier() {
     ? docTpl('Port {0} · {1} packets out, {2} in', [s.wss_port, (w.packets_sent || 0).toLocaleString(), (w.packets_recv || 0).toLocaleString()])
     : docTpl('Port {0}', [s.wss_port || 8443]));
 
-  gwPick = cur.startsWith('wss') ? 'wss' : 'direct';
+  gwPick = key;
   gwRender();
   $('carrierApplyBtn').disabled = !s.gre_exists;
   const wpIn = $('carrierWSSPortInput');
@@ -4934,10 +4943,11 @@ async function loadCarrier() {
 }
 // The two wrap tiles: the active one is marked, the picked one is selected.
 let gwPick = 'direct';
-function gwTarget() { return gwPick === 'wss' ? 'wss:' + (carrierState.wss_port || 8443) : 'direct'; }
+function gwTarget() { return gwPick === 'wss' ? 'wss:' + (carrierState.wss_port || 8443) : gwPick; }
 function gwRender() {
   const cur = carrierState.active || carrierState.active_carrier || 'direct';
-  const curKey = cur.startsWith('wss') ? 'wss' : 'direct';
+  const curKey = gwKey(cur);
+  if ($('gwV6')) $('gwV6').classList.toggle('hidden', gwPick !== '4in6');
   document.querySelectorAll('#gwOpts .gw-opt').forEach(b => {
     const k = b.dataset.gw;
     b.classList.toggle('cur', k === curKey);
@@ -4993,14 +5003,22 @@ if (carrierApplyBtn) {
 const carrierSaveModeBtn = $('carrierSaveModeBtn');
 carrierSaveModeBtn.onclick = async () => {
   const m = gwTarget();
+  const r6 = m === '4in6' && $('carrierRemote6') ? $('carrierRemote6').value.trim() : '';
+  if (r6 && !isIPv6(r6)) {
+    toastErr(tr('', 'Invalid IPv6 address'), r6);
+    $('carrierRemote6').focus();
+    return;
+  }
   if (!await entConfirm(tr('', 'Switch GRE wrap?'), docTpl('GRE packets will be carried over {0}. The tunnel reconnects, which takes a few seconds. The other server switches too when it is linked.', [carrierName(m)]), tr('', 'Switch Wrap'))) return;
   carrierSaveModeBtn.disabled = true;
+  carrierSaveModeBtn.innerHTML = '<span class="ent-spinner"></span> ' + esc(tr('', 'Switching…'));
   try {
-    const res = await api('/api/carrier', { action: 'set-active', target: m });
-    toastOk(tr('', 'GRE wrap switched'), carrierName(res.active || res.active_carrier || m));
+    const res = await api('/api/carrier', { action: 'switch', target: m, remote6: r6 || undefined });
+    toastOk(tr('', 'GRE wrap switched'), res.detail || carrierName(res.active || res.active_carrier || m));
   } catch (e) {
     toastErr(tr('', 'Could not switch the GRE wrap'), e.message);
   }
+  carrierSaveModeBtn.textContent = tr('', 'Switch Wrap');
   await loadCarrier();
 };
 

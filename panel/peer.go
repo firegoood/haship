@@ -54,7 +54,10 @@ type PeerHandshakeRequest struct {
 const peerRoutePrefix = "/_hp"
 
 type PeerApplyCarrierRequest struct {
-	Carrier string `json:"carrier"` // "direct", "fou:443", "wss:8443", etc.
+	Carrier string `json:"carrier"` // "direct", "wss:8443", "6to4", "4in6", etc.
+	// 4in6: the receiver's own IPv6 (Local6) and the sender's (Remote6)
+	Local6  string `json:"local6,omitempty"`
+	Remote6 string `json:"remote6,omitempty"`
 }
 
 type PeerApplyEngineRequest struct {
@@ -259,6 +262,7 @@ func mountPeerRoutes(mux *http.ServeMux, base string) {
 	}{
 		{"POST", "/api/peer/handshake", handlePeerHandshake},
 		{"POST", "/api/peer/apply-carrier", handlePeerApplyCarrier},
+		{"POST", "/api/peer/carrier-info", handlePeerCarrierInfo},
 		{"POST", "/api/peer/apply-engine", handlePeerApplyEngine},
 		{"POST", "/api/peer/ping", handlePeerPing},
 		{"POST", "/api/peer/revpath-probe", handlePeerRevPathProbe},
@@ -377,7 +381,15 @@ func handlePeerApplyCarrier(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[PeerSync] Received remote carrier apply command: %s", target)
-	out, err := applyCarrierMode(target)
+	o := carrier6Opts{Local6: strings.TrimSpace(req.Local6), Remote6: strings.TrimSpace(req.Remote6)}
+	if target == carrier4in6 && o.Local6 == "" {
+		o.Local6 = detectPublicIP6()
+	}
+	if err := o.validate(); err != nil {
+		writeAPIError(w, r, "E-ACTION-01", err.Error())
+		return
+	}
+	out, err := applyCarrierModeOpts(target, o)
 	if err != nil {
 		log.Printf("[PeerSync] Error applying carrier %s: %v (%s)", target, err, out)
 		writeAPIError(w, r, "E-CARRIER-01", fmt.Sprintf("failed applying carrier: %v", err))

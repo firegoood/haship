@@ -1137,7 +1137,7 @@ except Exception:
 carrier_set_mode() {
     local M="$1"
     [[ "$M" == "auto" ]] && M="direct"
-    [[ "$M" == "direct" || "$M" == fou:* || "$M" == wss* ]] || return 1
+    [[ "$M" == "direct" || "$M" == fou:* || "$M" == wss* || "$M" == 6to4 || "$M" == 4in6 ]] || return 1
     init_carrier_json
     python3 -c '
 import json, sys
@@ -1258,6 +1258,131 @@ mss_clamp_drop() {
     done
 }
 
+# ---- 6to4 / 4in6: the GRE device rides on IPv6 ----
+# 6to4: a sit tunnel (IP protocol 41) between the servers' IPv4 addresses
+# carries a private IPv6 /64, and an ip6gre device on it keeps the tunnel's
+# name and inner IPv4. 4in6: the ip6gre device runs between the servers'
+# public IPv6 addresses. FRP, Backhaul, the inner /30, the MTU keeper and the
+# counters see the same interface either way. Each tunnel's ends are kept in
+# $PANEL_CONFIG_DIR/gre6/IF.env (REMOTE4, LOCAL4, REMOTE6, LOCAL6), since an
+# ip6gre device no longer shows its IPv4 ends.
+gre6_env_file() { echo "$PANEL_CONFIG_DIR/gre6/$1.env"; }
+
+gre6_get() { # IF KEY
+    local f; f=$(gre6_env_file "$1")
+    [[ -r "$f" ]] || return 0
+    sed -n "s/^$2=//p" "$f" | head -n1
+}
+
+gre6_set() { # IF KEY VALUE
+    local f; f=$(gre6_env_file "$1")
+    mkdir -p "$(dirname "$f")"
+    { grep -v "^$2=" "$f" 2>/dev/null; echo "$2=$3"; } > "$f.tmp" && mv "$f.tmp" "$f"
+    chmod 600 "$f" 2>/dev/null || true
+}
+
+gre6_sit_name() { local n="hs6-$1"; echo "${n:0:15}"; }
+
+# gre_dev_kind IF: gre, ip6gre, sit or empty
+gre_dev_kind() {
+    ip -d -o link show dev "$1" 2>/dev/null | grep -oE ' (ip6gre|gre|sit) remote ' | head -n1 | awk '{print $1}'
+}
+
+# gre_dev_ends IF: "REMOTE LOCAL" of a tunnel device
+gre_dev_ends() {
+    ip -d -o link show dev "$1" 2>/dev/null | awk '{for (i = 1; i < NF; i++) {if ($i == "remote") r = $(i + 1); if ($i == "local") l = $(i + 1)}} END {print r, l}'
+}
+
+# gre6_ula INNER: "LOCAL REMOTE", the sit's private IPv6 ends. They come from
+# the tunnel's inner /30 (10.10.10.2 and .1 -> fd68:6173:a0a:a00::2 and ::1),
+# so both servers pick the same /64 without exchanging anything.
+gre6_ula() {
+    local a b c d base peer
+    IFS=. read -r a b c d <<<"${1%/*}"
+    [[ -n "$d" ]] || return 1
+    base=$((d & ~3))
+    if ((d == base + 1)); then peer=$((base + 2)); else peer=$((base + 1)); fi
+    printf 'fd68:6173:%x:%x::%x fd68:6173:%x:%x::%x\n' $((a * 256 + b)) $((c * 256 + base)) "$d" $((a * 256 + b)) $((c * 256 + base)) "$peer"
+}
+
+# gre6_firewall TARGET IF: let the carrier's packets in from the other server
+gre6_firewall() {
+    local r
+    if [[ "$1" == 6to4 ]]; then
+        r=$(gre6_get "$2" REMOTE4)
+        [[ -n "$r" ]] && { iptables -C INPUT -p 41 -s "$r" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p 41 -s "$r" -j ACCEPT 2>/dev/null; }
+    elif [[ "$1" == 4in6 ]]; then
+        r=$(gre6_get "$2" REMOTE6)
+        [[ -n "$r" ]] && command -v ip6tables >/dev/null 2>&1 && \
+            { ip6tables -C INPUT -p 47 -s "$r" -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p 47 -s "$r" -j ACCEPT 2>/dev/null; }
+    fi
+    true
+}
+
+# gre6_rebuild IF TARGET INNER: delete IF and create it again as the device
+# TARGET needs: ip6gre over a sit (6to4), ip6gre over IPv6 (4in6), or a plain
+# gre (any other carrier, which then sets its own encap). The routes on IF
+# come back afterwards; the caller restores the inner address and MTU.
+gre6_rebuild() {
+    local dev=$1 target=$2 inner=$3 kind r4 l4 r6 l6 sit ul ur routes
+    kind=$(gre_dev_kind "$dev")
+    if [[ "$kind" == gre ]]; then # remember the IPv4 ends before the device goes
+        read -r r4 l4 <<<"$(gre_dev_ends "$dev")"
+        [[ -n "$r4" && "$r4" != any ]] && gre6_set "$dev" REMOTE4 "$r4"
+        [[ -n "$l4" && "$l4" != any ]] && gre6_set "$dev" LOCAL4 "$l4"
+    fi
+    r4=$(gre6_get "$dev" REMOTE4); l4=$(gre6_get "$dev" LOCAL4)
+    r6=$(gre6_get "$dev" REMOTE6); l6=$(gre6_get "$dev" LOCAL6)
+    sit=$(gre6_sit_name "$dev")
+    case "$target" in
+        6to4) [[ -n "$r4" ]] || { echo "6to4: the IPv4 address of the other server is unknown" >&2; return 1; }
+              read -r ul ur <<<"$(gre6_ula "$inner")"
+              [[ -n "$ur" ]] || { echo "6to4: no inner IPv4 on $dev" >&2; return 1; } ;;
+        4in6) [[ -n "$r6" ]] || { echo "4in6: the IPv6 address of the other server is unknown" >&2; return 1; } ;;
+        *)    [[ -n "$r4" ]] || { echo "$target: the IPv4 address of the other server is unknown" >&2; return 1; } ;;
+    esac
+    [[ "$target" == 6to4 || "$target" == 4in6 ]] && { [[ -d /proc/sys/net/ipv6 ]] || { echo "$target: IPv6 is disabled in this kernel" >&2; return 1; }; }
+    routes=$(ip -4 route show dev "$dev" 2>/dev/null | grep -v ' proto kernel ')
+    ip link del "$dev" >/dev/null 2>&1 || ip tunnel del "$dev" >/dev/null 2>&1 || true
+    ip link del "$sit" >/dev/null 2>&1 || true
+    local rc=0
+    case "$target" in
+        6to4)
+            modprobe sit >/dev/null 2>&1; modprobe ip6_gre >/dev/null 2>&1
+            if ip link add "$sit" type sit ${l4:+local "$l4"} remote "$r4" ttl 255; then
+                sysctl -qw "net.ipv6.conf.$sit.disable_ipv6=0" >/dev/null 2>&1 || true
+                ip link set "$sit" up mtu 1480
+                ip -6 addr add "$ul/64" dev "$sit" nodad 2>/dev/null || true
+                ip link add "$dev" type ip6gre local "$ul" remote "$ur" hoplimit 255 encaplimit none || rc=1
+            else
+                rc=1
+            fi
+            ;;
+        4in6)
+            modprobe ip6_gre >/dev/null 2>&1
+            ip link add "$dev" type ip6gre ${l6:+local "$l6"} remote "$r6" hoplimit 255 encaplimit none || rc=1
+            ;;
+        *)
+            ip link add "$dev" type gre ${l4:+local "$l4"} remote "$r4" ttl 255 2>/dev/null || \
+                ip link add "$dev" type gre remote "$r4" ttl 255 || rc=1
+            ;;
+    esac
+    if ((rc)); then # never leave the tunnel without its device: plain GRE again
+        ip link del "$sit" >/dev/null 2>&1 || true
+        ip link del "$dev" >/dev/null 2>&1 || true
+        [[ -n "$r4" ]] && ip link add "$dev" type gre ${l4:+local "$l4"} remote "$r4" ttl 255 2>/dev/null
+    fi
+    ip link set "$dev" up
+    [[ -n "$inner" ]] && ip addr replace "$inner" dev "$dev" 2>/dev/null
+    local r
+    while read -r r; do
+        [[ -n "$r" ]] && ip route replace $r dev "$dev" 2>/dev/null
+    done <<<"$routes"
+    ((rc)) && return 1
+    gre6_firewall "$target" "$dev"
+    return 0
+}
+
 carrier_apply() {
     local TARGET="$1"
     local SPECIFIC_IF="${2:-}"
@@ -1269,9 +1394,9 @@ carrier_apply() {
         IFS_TO_APPLY+=("$SPECIFIC_IF")
     else
         local dev
-        for dev in $(ip -o link show type gre 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1); do
+        for dev in $( (ip -o link show type gre; ip -o link show type ip6gre) 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1); do
             # hpt0: the panel's path test, never a tunnel (keyed GRE, removed after the test)
-            [[ "$dev" == "gre0" || "$dev" == "gretap0" || "$dev" == hpt* ]] && continue
+            [[ "$dev" == "gre0" || "$dev" == "gretap0" || "$dev" == "ip6gre0" || "$dev" == hpt* ]] && continue
             IFS_TO_APPLY+=("$dev")
         done
         if [[ ${#IFS_TO_APPLY[@]} -eq 0 ]]; then
@@ -1300,7 +1425,18 @@ carrier_apply() {
             TARGET_MTU=$(gre_mtu_for "$TARGET_MTU")
 
             local CHANGED=0
-            if [[ "$TARGET" == "direct" ]]; then
+            # 6to4 / 4in6, or back from them: another kind of device
+            if [[ "$TARGET" == 6to4 || "$TARGET" == 4in6 || "$(gre_dev_kind "$dev")" == ip6gre ]]; then
+                if gre6_rebuild "$dev" "$TARGET" "$DEV_IP"; then
+                    [[ "$TARGET" == 6to4 || "$TARGET" == 4in6 ]] && CHANGED=1
+                    ANY_APPLIED=1
+                elif [[ "$TARGET" == 6to4 || "$TARGET" == 4in6 ]]; then
+                    return 1
+                fi
+            fi
+            if [[ "$TARGET" == 6to4 || "$TARGET" == 4in6 ]]; then
+                :
+            elif [[ "$TARGET" == "direct" ]]; then
                 iptables -t nat -D OUTPUT -p udp --dport 19999 -j DNAT --to-destination 127.0.0.1:19999 >/dev/null 2>&1 || true
                 if ip link set dev "$dev" type gre encap none >/dev/null 2>&1; then
                     CHANGED=1
@@ -4552,6 +4688,7 @@ remove_hashem_tunnel_ifaces() {
     for gif in $names; do
         [[ -n "$gif" && "$gif" != gre0 && "$gif" != gretap0 ]] || continue
         ip link del "$gif" >/dev/null 2>&1 || ip tunnel del "$gif" >/dev/null 2>&1 || true
+        ip link del "$(gre6_sit_name "$gif")" >/dev/null 2>&1 || true
     done
     ip fou show 2>/dev/null | awk '$0 ~ /ipproto 47/ {for (i = 1; i < NF; i++) if ($i == "port") print $(i + 1)}' | while read -r fp; do
         [[ -n "$fp" ]] && ip fou del port "$fp" 2>/dev/null || true
@@ -4934,7 +5071,7 @@ PYEOF
 
 # edit full configuration of one peer ($1=id, [--name], [--remote-pub], [--carrier], [--ports])
 cli_edit_peer() {
-    local ID="" NAME="" REMOTE_PUB="" CARRIER="" PORTS="" PROXY_PROTOCOL=""
+    local ID="" NAME="" REMOTE_PUB="" CARRIER="" PORTS="" PROXY_PROTOCOL="" REMOTE6=""
     local FRP_TRANSPORT="" FRP_ENCRYPTION="" FRP_COMPRESSION=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -4942,6 +5079,7 @@ cli_edit_peer() {
             --name) NAME="$2"; shift 2 ;;
             --remote-pub) REMOTE_PUB="$2"; shift 2 ;;
             --carrier) CARRIER="$2"; shift 2 ;;
+            --remote6) REMOTE6="$2"; shift 2 ;;
             --ports) PORTS="$2"; shift 2 ;;
             --proxy-protocol) PROXY_PROTOCOL="$2"; shift 2 ;;
             --frp-transport) FRP_TRANSPORT="$2"; shift 2 ;;
@@ -4949,7 +5087,7 @@ cli_edit_peer() {
             --compress) FRP_COMPRESSION="on"; shift ;;
             --frp-encryption) FRP_ENCRYPTION="$2"; shift 2 ;;
             --frp-compression) FRP_COMPRESSION="$2"; shift 2 ;;
-            -h|--help) echo 'Usage: hashem.sh edit-peer --id N [--name LABEL] [--remote-pub IP] [--carrier direct|wss:P] [--ports "443, 2083"] [--proxy-protocol off|v1|v2] [--frp-transport tcp|kcp|quic|websocket|wss] [--encrypt] [--compress]'; return 0 ;;
+            -h|--help) echo 'Usage: hashem.sh edit-peer --id N [--name LABEL] [--remote-pub IP] [--carrier direct|wss:P|6to4|4in6 [--remote6 IP]] [--ports "443, 2083"] [--proxy-protocol off|v1|v2] [--frp-transport tcp|kcp|quic|websocket|wss] [--encrypt] [--compress]'; return 0 ;;
             *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
         esac
     done
@@ -4996,10 +5134,14 @@ PYEOF
 
     # Validate carrier if provided
     if [[ -n "$CARRIER" ]]; then
-        if [[ "$CARRIER" != "direct" && "$CARRIER" != fou:* && "$CARRIER" != wss:* && "$CARRIER" != "fou" && "$CARRIER" != "wss" ]]; then
-            echo -e "${RED}[!] Invalid carrier mode: ${CARRIER} (must be direct, fou:PORT, or wss:PORT)${NC}"
+        if [[ "$CARRIER" != "direct" && "$CARRIER" != fou:* && "$CARRIER" != wss:* && "$CARRIER" != "fou" && "$CARRIER" != "wss" && "$CARRIER" != 6to4 && "$CARRIER" != 4in6 ]]; then
+            echo -e "${RED}[!] Invalid carrier mode: ${CARRIER} (must be direct, wss:PORT, 6to4 or 4in6)${NC}"
             return 1
         fi
+    fi
+    if [[ -n "$REMOTE6" ]]; then
+        is_valid_ip6 "$REMOTE6" || { echo -e "${RED}[!] Invalid --remote6: ${REMOTE6}${NC}"; return 1; }
+        gre6_set "$CUR_GIF" REMOTE6 "$REMOTE6"
     fi
 
     # Validate ports if provided
@@ -10481,12 +10623,25 @@ cli_carrier() {
     case "$SUB" in
         set|apply)
             shift
-            if [[ -n "${1:-}" ]]; then
-                carrier_apply "$1"
-            else
-                echo -e "${RED}[!] Usage: hashem carrier set <mode>${NC}"
+            local T="${1:-}" GIF="" L6="" R6=""
+            if [[ -z "$T" ]]; then
+                echo -e "${RED}[!] Usage: hashem carrier set <direct|wss[:PORT]|6to4|4in6> [--if IF] [--local6 IP --remote6 IP]${NC}"
                 return 1
             fi
+            shift
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --if) GIF="$2"; shift 2 ;;
+                    --local6) L6="$2"; shift 2 ;;
+                    --remote6) R6="$2"; shift 2 ;;
+                    *) echo -e "${RED}[!] Unknown flag: $1${NC}"; return 1 ;;
+                esac
+            done
+            [[ -z "$L6" ]] || is_valid_ip6 "$L6" || { echo -e "${RED}[!] Invalid --local6: $L6${NC}"; return 1; }
+            [[ -z "$R6" ]] || is_valid_ip6 "$R6" || { echo -e "${RED}[!] Invalid --remote6: $R6${NC}"; return 1; }
+            [[ -n "$L6" ]] && gre6_set "${GIF:-$TUNNEL_NAME}" LOCAL6 "$L6"
+            [[ -n "$R6" ]] && gre6_set "${GIF:-$TUNNEL_NAME}" REMOTE6 "$R6"
+            carrier_apply "$T" "$GIF"
             ;;
         cycle)
             carrier_cycle_next

@@ -1681,7 +1681,7 @@
           <div class="tc-header">
             <div>
               <p class="tc-title">GRE wrap</p>
-              <div class="qs-hint">How the main tunnel's GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47).</div>
+              <div class="qs-hint">How the main tunnel's GRE packets travel between the two servers. Direct GRE is the fastest. WSS wraps them in TLS on a web port, for networks that block or slow down GRE (protocol 47). 6to4 and 4in6 carry them over IPv6.</div>
             </div>
             <span class="badge info" id="carrierActiveBadge">Direct GRE</span>
           </div>
@@ -1714,11 +1714,30 @@
               <span class="gw-txt"><b>WSS</b><small>GRE inside TLS on a web port. For networks that block or slow down protocol 47.</small></span>
               <span class="gw-badge">Active</span>
             </button>
+            <button type="button" class="gw-opt" role="radio" aria-checked="false" data-gw="6to4">
+              <span class="gw-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="8" rx="4"/><path d="M8 12h8"/></svg></span>
+              <span class="gw-txt"><b>6to4</b><small>A private IPv6 between the two IPv4 addresses (protocol 41), GRE on top. When 47 is blocked but 41 gets through.</small></span>
+              <span class="gw-badge">Active</span>
+            </button>
+            <button type="button" class="gw-opt" role="radio" aria-checked="false" data-gw="4in6">
+              <span class="gw-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-6 4 12 3-6h4"/></svg></span>
+              <span class="gw-txt"><b>4in6</b><small>GRE over the real IPv6 addresses of both servers. When both have IPv6 and the IPv4 path is blocked or slow.</small></span>
+              <span class="gw-badge">Active</span>
+            </button>
+          </div>
+          <div class="gw-wss hidden" id="gwV6">
+            <div class="gw-wss-h"><b>4in6 addresses</b><span class="ent-help">Both servers need a public IPv6 address. With a Peer Link the other server's address is asked for you.</span></div>
+            <div class="gw-wss-f">
+              <div class="fg">
+                <label for="carrierRemote6">IPv6 of the other server (optional)</label>
+                <input type="text" class="hashem-input u-mono" id="carrierRemote6" placeholder="2001:db8::2" autocomplete="off" spellcheck="false" autocapitalize="off" inputmode="text" dir="ltr">
+              </div>
+            </div>
           </div>
           <div class="gw-acts">
             <button class="hashem-btn hashem-btn-primary" id="carrierSaveModeBtn" disabled>Switch Wrap</button>
             <button class="hashem-btn hashem-btn-ghost" id="carrierApplyBtn">Re-apply</button>
-            <span class="ent-help">Switching reconnects the tunnel for a few seconds. Re-apply sets up the current carrier again, which can fix a stuck link.</span>
+            <span class="ent-help">Switching changes both servers over the Peer Link and reconnects the tunnel for a few seconds; if the tunnel does not answer within 45 seconds, both go back. Re-apply sets up the current carrier again, which can fix a stuck link.</span>
           </div>
 
           <div class="gw-wss">

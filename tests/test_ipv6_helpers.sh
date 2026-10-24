@@ -5,7 +5,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 for fn in is_valid_ip is_valid_ip6 is_valid_ip_any is_valid_port hostport hostonly \
-          dial_current_addr dial_current_port dial_apply_addr bundle_parse; do
+          dial_current_addr dial_current_port dial_apply_addr bundle_parse gre6_ula gre6_sit_name; do
     awk -v f="$fn" '
         $0 ~ "^"f"\\(\\) \\{" { p = 1; print; if ($0 ~ /; \}[[:space:]]*$/) p = 0; next }
         p { print }
@@ -54,5 +54,12 @@ bundle_parse "bh1_2001:db8::1_3080_tcpmux_tok_443"
 chk "bh1 v6 address" "$B_IRAN_PUB/$B_FRP_PORT/$B_TOKEN/$B_PORTS" "2001:db8::1/3080/tok/443"
 chk "bh1 v4 still parses" "$(ok bundle_parse "bh1_203.0.113.1_3080_tcpmux_tok")" y
 chk "gh1 v6 rejected" "$(ok bundle_parse "gh1_2001:db8::1_3080_10.10.10.2_10.10.10.1_tcpmux_tok")" n
+
+# 6to4: both ends derive the same private /64 from the inner /30
+chk "ula Iran" "$(gre6_ula 10.10.10.2/30)" "fd68:6173:a0a:a00::2 fd68:6173:a0a:a00::1"
+chk "ula foreign" "$(gre6_ula 10.10.10.1)" "fd68:6173:a0a:a00::1 fd68:6173:a0a:a00::2"
+chk "ula another /30" "$(gre6_ula 10.10.20.6/30)" "fd68:6173:a0a:1404::6 fd68:6173:a0a:1404::5"
+for a in $(gre6_ula 10.10.10.2/30) $(gre6_ula 192.168.255.254/30); do chk "ula $a is IPv6" "$(ok is_valid_ip6 "$a")" y; done
+chk "sit name fits IFNAMSIZ" "$(gre6_sit_name gre-tunnel)/$(gre6_sit_name gre-t123456789)" "hs6-gre-tunnel/hs6-gre-t123456"
 
 if [[ $fail -eq 0 ]]; then echo "PASS: test_ipv6_helpers"; else echo "FAIL: test_ipv6_helpers"; exit 1; fi

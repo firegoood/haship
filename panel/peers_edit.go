@@ -871,24 +871,13 @@ func generateMainBundle(req peerPatchRequest, legacyPeer *peerRecord) string {
 	return MakeBundle(iranPub, frpPort, iranGre, foreignGre, token, ports, frpTrans)
 }
 
+// applyPeerCarrierDirect switches one tunnel interface: hashem.sh's
+// carrier_apply does the device, encap, firewall and MTU (it used to switch
+// every GRE interface, then this patched the encap by hand with the wrong
+// WSS port).
 func applyPeerCarrierDirect(greIf string, carrier string) error {
-	script, err := greScriptPath()
-	if err == nil {
-		cmd := exec.Command("bash", script, "carrier", "set", carrier)
-		cmd.Env = append(os.Environ(), "GRE_SKIP_PANEL=1")
-		_ = cmd.Run()
-	}
-	if carrier == "direct" {
-		exec.Command("ip", "link", "set", "dev", greIf, "type", "gre", "encap", "none").CombinedOutput()
-	} else if strings.HasPrefix(carrier, "fou:") {
-		port := strings.TrimPrefix(carrier, "fou:")
-		exec.Command("ip", "fou", "add", "port", port, "ipproto", "47").CombinedOutput()
-		exec.Command("ip", "link", "set", "dev", greIf, "type", "gre", "encap", "fou", "encap-sport", "auto", "encap-dport", port).CombinedOutput()
-	} else if strings.HasPrefix(carrier, "wss") {
-		exec.Command("ip", "fou", "add", "port", "19998", "ipproto", "47").CombinedOutput()
-		exec.Command("ip", "link", "set", "dev", greIf, "type", "gre", "encap", "fou", "encap-sport", "auto", "encap-dport", "19998").CombinedOutput()
-	}
-	return nil
+	_, err := runHashemCarrierCmd("set", carrier, "--if", greIf)
+	return err
 }
 
 func updateServiceRemoteIP(serviceFile string, oldIP string, newIP string) {

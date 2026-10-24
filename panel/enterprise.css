@@ -968,6 +968,7 @@ html[dir="rtl"] .ht-wires { transform: scaleX(-1); }
 .gw-wss-h .ent-help { margin: 0; }
 .gw-wss-f { display: grid; grid-template-columns: minmax(0, 140px) minmax(0, 260px) auto; justify-content: start; align-items: end; gap: 10px; }
 .gw-wss-f .fg { margin: 0; }
+#gwV6 .gw-wss-f { grid-template-columns: minmax(0, 340px); }
 @media (max-width: 700px) {
   .gw-stats, .gw-opts { grid-template-columns: 1fr; }
   .gw-wss-f { grid-template-columns: 1fr 1fr; }

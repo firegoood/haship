@@ -10,6 +10,9 @@
 #     Backhaul on every transport, and FRP.
 #  2. The link over IPv6: IPv4 between the servers is dropped, the foreign
 #     side dials the hub's IPv6 address. Backhaul on every transport, and FRP.
+#  3. The GRE carriers with hashem.sh's carrier_apply: direct, then 6to4 with
+#     IP protocol 47 dropped, then 4in6 with no IPv4 between the servers at
+#     all, then direct again; Backhaul over the tunnel each time.
 #
 # Needs: ip, iptables, ip6tables, ping, python3, openssl, ss, the Backhaul
 # v0.7.2 binary (BACKHAUL_BIN), frps/frpc (FRP_DIR, optional), CAP_NET_ADMIN.
@@ -230,10 +233,75 @@ for t in $TRANSPORTS; do backhaul_round v6link "$t"; done
 [[ -x $FRP_DIR/frps && -x $FRP_DIR/frpc ]] && frp_round v6link
 v4_unblock
 
+# ---- 3. the GRE carriers: direct -> 6to4 -> 4in6 -> direct ----
+# hashem.sh's own carrier_apply switches gre-tunnel on both servers. The Iran
+# end is 10.10.10.2, the foreign end 10.10.10.1, as the panel sets them up;
+# Backhaul tcpmux runs over the inner addresses the whole time.
+{
+    echo "PANEL_CONFIG_DIR=\${PANEL_CONFIG_DIR:?}; CARRIER_FILE=\$PANEL_CONFIG_DIR/carrier.json; TUNNEL_NAME=gre-tunnel"
+    echo "RED='' GREEN='' YELLOW='' CYAN='' NC=''"
+    for f in is_valid_port is_valid_ip6 init_carrier_json carrier_get_active carrier_get_fou_ports carrier_init_kernel \
+             gre_path_mtu gre_mtu_for gre_mss mss_clamp_set gre6_env_file gre6_get gre6_set gre6_sit_name \
+             gre_dev_kind gre_dev_ends gre6_ula gre6_firewall gre6_rebuild carrier_apply; do
+        b="$(ext $f)"; [[ -n "$b" ]] || { echo "echo 'FAIL: $f missing from hashem.sh'; exit 1"; continue; }
+        echo "$b"
+    done
+} > "$TMP/carrier.sh"
+mkdir -p "$TMP/cfg-hub" "$TMP/cfg-spoke"
+hubc()   { $H env PANEL_CONFIG_DIR="$TMP/cfg-hub" bash -c "source '$TMP/carrier.sh'; $*"; }
+spokec() { $S env PANEL_CONFIG_DIR="$TMP/cfg-spoke" bash -c "source '$TMP/carrier.sh'; $*"; }
+$H sh -c "ip link add gre-tunnel type gre local $HUB4 remote $SPOKE4 ttl 255; ip link set gre-tunnel up mtu 1380
+  ip addr add 10.10.10.2/30 dev gre-tunnel; ip route replace 10.10.10.1/32 dev gre-tunnel"
+$S sh -c "ip link add gre-tunnel type gre local $SPOKE4 remote $HUB4 ttl 255; ip link set gre-tunnel up mtu 1380
+  ip addr add 10.10.10.1/30 dev gre-tunnel; ip route replace 10.10.10.2/32 dev gre-tunnel"
+inner_ping() { local i; for i in $(seq 1 20); do $S ping -c1 -W1 10.10.10.2 >/dev/null 2>&1 && { echo OK; return; }; sleep 0.5; done; echo DOWN; }
+kind() { ip netns exec "$1" bash -c "source '$TMP/carrier.sh'; gre_dev_kind gre-tunnel"; }
+over_gre() { # name: Backhaul tcpmux over the inner addresses, 256 KiB byte-exact
+    server_start tcpmux "29001=19001"
+    spoke "backhaul_write_client_conf '$TMP/bh/client.toml' '10.10.10.2:3080' tcpmux tok; : > '$TMP/client.log'; client_start backhaul-client"
+    check "$1: Backhaul over the tunnel, link up" 0 "$(link)"
+    check "$1: Backhaul over the tunnel, TCP 256 KiB" OK "$(probe tcp 127.0.0.1 262144)"
+    check "$1: a user over IPv6 through it, TCP 256 KiB" OK "$(probe tcp "$HUB6" 262144)"
+    spoke client_stop; server_stop
+}
+block47() { for ns in "$H" "$S"; do $ns iptables -A INPUT -p 47 -j DROP; done; }
+block41() { for ns in "$H" "$S"; do $ns iptables -A INPUT -p 41 -j DROP; done; }
+unblock_all() { for ns in "$H" "$S"; do $ns iptables -F INPUT; $ns ip6tables -F INPUT; done; }
+
+check "carrier direct: the inner address answers" OK "$(inner_ping)"
+# 6to4, with IP protocol 47 dropped on the IPv4 path: only protocol 41 passes
+block47
+check "carrier direct: down once protocol 47 is dropped" DOWN "$(inner_ping)"
+hubc "carrier_apply 6to4 gre-tunnel" >/dev/null 2>&1; spokec "carrier_apply 6to4 gre-tunnel" >/dev/null 2>&1
+check "carrier 6to4: gre-tunnel is ip6gre" "ip6gre ip6gre" "$(kind "$HUB") $(kind "$SPOKE")"
+check "carrier 6to4: the sit underlay is up" sit "$($H bash -c "source '$TMP/carrier.sh'; gre_dev_kind hs6-gre-tunnel")"
+check "carrier 6to4: inner IPv4 and its route kept" "10.10.10.1 dev gre-tunnel" "$($H ip -4 route show 10.10.10.1 | awk '{print $1, $2, $3}')"
+check "carrier 6to4: the inner address answers with GRE (47) dropped" OK "$(inner_ping)"
+over_gre "carrier 6to4"
+# 4in6, with all IPv4 between the servers dropped
+block41; v4_block; $S iptables -A INPUT -s "$HUB4" -j DROP
+check "carrier 6to4: down once protocol 41 is dropped" DOWN "$(inner_ping)"
+hubc "gre6_set gre-tunnel REMOTE6 $SPOKE6; gre6_set gre-tunnel LOCAL6 $HUB6; carrier_apply 4in6 gre-tunnel" >/dev/null 2>&1
+spokec "gre6_set gre-tunnel REMOTE6 $HUB6; gre6_set gre-tunnel LOCAL6 $SPOKE6; carrier_apply 4in6 gre-tunnel" >/dev/null 2>&1
+check "carrier 4in6: gre-tunnel is ip6gre, no sit left" "ip6gre ip6gre -" "$(kind "$HUB") $(kind "$SPOKE") $($H ip link show hs6-gre-tunnel >/dev/null 2>&1 && echo sit || echo -)"
+check "carrier 4in6: the inner address answers with no IPv4 between the servers" OK "$(inner_ping)"
+over_gre "carrier 4in6"
+# back to plain GRE over IPv4
+unblock_all
+hubc "carrier_apply direct gre-tunnel" >/dev/null 2>&1; spokec "carrier_apply direct gre-tunnel" >/dev/null 2>&1
+check "carrier direct again: gre-tunnel is gre" "gre gre" "$(kind "$HUB") $(kind "$SPOKE")"
+check "carrier direct again: the IPv4 ends came back" "$SPOKE4 $HUB4" "$($H bash -c "source '$TMP/carrier.sh'; gre_dev_ends gre-tunnel")"
+check "carrier direct again: the inner address answers" OK "$(inner_ping)"
+over_gre "carrier direct again"
+# 4in6 without the other server's IPv6: refused, and the tunnel keeps working
+rm -f "$TMP/cfg-hub/gre6/gre-tunnel.env"
+check "carrier 4in6 without an IPv6 address is refused" 1 "$(hubc "carrier_apply 4in6 gre-tunnel" >/dev/null 2>&1; echo $?)"
+check "carrier 4in6 refused: gre-tunnel still gre and answering" "gre OK" "$(kind "$HUB") $(inner_ping)"
+
 if [[ -n ${GITHUB_ACTIONS:-} ]]; then
     ok=0 bad=0
     for r in "${results[@]}"; do [[ $r == ok* ]] && ok=$((ok + 1)) || bad=$((bad + 1)); done
-    echo "::notice title=IPv6 lab::$ok checks passed, $bad failed (Backhaul x 8 + FRP, users over IPv6 and the link over IPv6)"
+    echo "::notice title=IPv6 lab::$ok checks passed, $bad failed (Backhaul x 8 + FRP, users and the link over IPv6, GRE over 6to4 and 4in6)"
     for r in "${results[@]}"; do [[ $r == FAIL* ]] && echo "::error title=IPv6 lab::${r#FAIL }"; done
 fi
 (( fail )) && { echo "FAIL: test_ipv6_lab"; exit 1; }
