@@ -98,6 +98,13 @@ def service(host, port):
     def h(c):
         with c:
             n = struct.unpack("!Q", recvn(c, 8))[0]
+            if n >> 63:  # a download that runs until the client hangs up
+                chunk = os.urandom(1 << 16)
+                try:
+                    while True:
+                        c.sendall(chunk)
+                except OSError:
+                    return
             got = hashlib.sha256(recvn(c, n)).digest()
             data = os.urandom(n)
             c.sendall(got + hashlib.sha256(data).digest() + data)
@@ -144,6 +151,15 @@ def par(host, port, k, n):
     ts = [threading.Thread(target=lambda: res.append(one(host, port, n))) for _ in range(k)]
     [t.start() for t in ts]; [t.join() for t in ts]
     sys.exit(0 if len(res) == k and all(res) else 1)
+
+def load(host, port, secs):
+    c = socket.create_connection((host, port), timeout=10)
+    c.sendall(struct.pack("!Q", 1 << 63))
+    end = time.time() + secs
+    while time.time() < end:
+        if not c.recv(1 << 16):
+            break
+    c.close()
 
 def udp(host, port, count, size):
     s = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(0.2)
@@ -228,11 +244,14 @@ else
     bad "the panel did not see the fake 3x-ui on $TAKEN"; grep -v CMD-ERROR "$TMP/ports.log" | tail -20
 fi
 
+# The environment the panel's hashem-xray-N unit gives Xray
+GO_ENV=$(grep -o 'GODEBUG=[^ ]*' "$ROOT/panel/xray.go" | head -1)
 # start_link NAME [IRAN_CONFIG [CONFIG_DIR]]: both ends of one link; sets IRX and FOX
 start_link() {
-    local ic=${2:-$TMP/cfg/iran-$1.json} dir=${3:-$TMP/cfg}
-    ip netns exec $FO "$XRAY" run -c "$dir/fo-$1.json" >"$TMP/fo-$1.log" 2>&1 & FOX=$!; pids+=($FOX)
-    ip netns exec $IR "$XRAY" run -c "$ic" >"$TMP/iran-$1.log" 2>&1 & IRX=$!; pids+=($IRX)
+    local ic=${2:-$TMP/cfg/iran-$1.json} dir=${3:-$TMP/cfg} g=$GO_ENV
+    [[ $1 == *-base ]] && g=GODEBUG=   # as v2.8.4: no unit environment
+    ip netns exec $FO env "$g" "$XRAY" run -c "$dir/fo-$1.json" >"$TMP/fo-$1.log" 2>&1 & FOX=$!; pids+=($FOX)
+    ip netns exec $IR env "$g" "$XRAY" run -c "$ic" >"$TMP/iran-$1.log" 2>&1 & IRX=$!; pids+=($IRX)
 }
 stop_link() { kill -9 "$IRX" "$FOX" 2>/dev/null; wait "$IRX" "$FOX" 2>/dev/null; sleep 0.3; }
 # wait_probe SECONDS: until a request through the link comes back; prints its ms
@@ -259,7 +278,19 @@ while read -r name; do
         echo "--- Iran:"; tail -n 15 "$TMP/iran-$name.log"; echo "--- foreign:"; tail -n 15 "$TMP/fo-$name.log"
         stop_link; continue
     fi
-    probes+="$name ${ms} ms, "
+    # again once the link is open: what a user's new connection costs
+    sleep 1
+    warm=$(py $IR probe $PROBE 2>/dev/null || echo "?")
+    probes+="$name ${ms}/${warm} ms, "
+    # Direct Reality keeps connections ready (pre-connect): a new connection
+    # skips the TCP and Reality handshakes, about one round trip.
+    if [[ $name == reality-direct && -n $NETEM && $warm != "?" ]]; then
+        if awk -v w="$warm" 'BEGIN { exit !(w < 60) }'; then
+            ok "pre-connect: a new connection through direct Reality takes $warm ms over a $NETEM round trip"
+        else
+            bad "pre-connect: a new connection through direct Reality took $warm ms over a $NETEM round trip (want under 60)"
+        fi
+    fi
     sent=ok
     py $USR tcp $IR_U $PORT $((8 << 20)) || { bad "$name: 8 MiB each way through the tunnel (sha256)"; sent=; }
     py $USR par $IR_U $PORT 16 $((256 << 10)) || { bad "$name: 16 parallel connections"; sent=; }
@@ -273,7 +304,7 @@ while read -r name; do
     if [[ $name == xhttp-reverse ]]; then
         kill -9 "$FOX"; wait "$FOX" 2>/dev/null
         t0=$SECONDS
-        ip netns exec $FO "$XRAY" run -c "$TMP/cfg/fo-$name.json" >>"$TMP/fo-$name.log" 2>&1 & FOX=$!; pids+=($FOX)
+        ip netns exec $FO env "$GO_ENV" "$XRAY" run -c "$TMP/cfg/fo-$name.json" >>"$TMP/fo-$name.log" 2>&1 & FOX=$!; pids+=($FOX)
         if wait_probe 30 >/dev/null && py $USR tcp $IR_U $PORT $((1 << 20)); then
             ok "reverse: the link comes back after the foreign Xray is killed ($((SECONDS - t0))s)"
         else
@@ -283,7 +314,83 @@ while read -r name; do
     stop_link
 done <"$TMP/cfg/combos"
 unblock_iran_out
-note "a request through each link and back${NETEM:+ over a $NETEM round trip}: ${probes%, }"
+note "a request through each link and back, first/once open${NETEM:+, over a $NETEM round trip}: ${probes%, }"
+
+# ---- Ping under load and a dead connection. The reverse link carries every
+# user as a stream on its connections, so a download used to fill the one
+# connection's send queue in front of everyone else; and a connection the
+# network dropped without a word stayed in use for minutes. "base" is the
+# reverse link as v2.8.4 made it: one connection, no send queue cap, no fast
+# dead-connection check.
+median() { sort -n | awk '{a[NR] = $1} END {if (NR) print a[int((NR + 1) / 2)]; else print "?"}'; }
+# loaded: the probe while one download fills foreign -> Iran at 30 Mbit/s; median of 5, ms
+loaded() {
+    local lp i
+    ip netns exec $FO tc qdisc change dev xf1 root netem delay 15ms rate 30mbit limit 100 || return 1
+    py $USR load $IR_U $PORT 20 >/dev/null 2>&1 & lp=$!
+    sleep 4
+    for i in 1 2 3 4 5; do py $IR probe $PROBE 2>/dev/null || echo 6000; sleep 0.5; done | median
+    kill "$lp" 2>/dev/null; wait "$lp" 2>/dev/null
+    ip netns exec $FO tc qdisc change dev xf1 root netem delay 15ms limit 1000
+    sleep 1
+}
+# dead_flow NAME: drop the link's open connections both ways without a word
+# (new ones still pass); seconds until a request gets through again, at most
+# 120. The sockets of both ends go to the log at 20 and 45 s. Packets are
+# dropped where they arrive, as a network loses them: one dropped by the
+# sender's own OUTPUT chain counts as local congestion, and TCP then retries
+# without ever giving up.
+dead_flow() {
+    local p ports t0=$SECONDS shown=
+    ports=$(ip netns exec $FO ss -Htn state established "dport = :$TUNNEL" | awk '{n = split($(NF - 1), a, ":"); print a[n]}')
+    [[ -n $ports ]] || { echo 99; return; }
+    for p in $ports; do
+        ip netns exec $IR iptables -A INPUT -p tcp --sport "$p" --dport $TUNNEL -j DROP
+        ip netns exec $FO iptables -A INPUT -p tcp --sport $TUNNEL --dport "$p" -j DROP
+    done
+    while ((SECONDS - t0 < 120)); do
+        py $IR probe $PROBE >/dev/null 2>&1 && break
+        for p in 20 45; do
+            if ((SECONDS - t0 >= p)) && [[ $shown != *" $p"* ]]; then
+                shown+=" $p"
+                {
+                    echo "--- $1 at $((SECONDS - t0)) s, dropped ports: $(echo $ports)"
+                    echo "Iran:"; ip netns exec $IR ss -tnoi state all "( sport = :$TUNNEL )"
+                    echo "foreign:"; ip netns exec $FO ss -tnoi state all "( dport = :$TUNNEL )"
+                } >&2
+            fi
+        done
+        sleep 1
+    done
+    echo $((SECONDS - t0))
+    for p in $ports; do
+        ip netns exec $IR iptables -D INPUT -p tcp --sport "$p" --dport $TUNNEL -j DROP
+        ip netns exec $FO iptables -D INPUT -p tcp --sport $TUNNEL --dport "$p" -j DROP
+    done
+}
+if [[ -n $NETEM ]]; then
+    declare -A L D
+    for name in reality-direct reality-reverse-base reality-reverse; do
+        unblock_iran_out
+        [[ $name == *reverse* ]] && block_iran_out
+        start_link "$name"
+        if ! wait_probe 20 >/dev/null; then
+            bad "$name: the link never answered the probe"; stop_link; continue
+        fi
+        sleep 1
+        L[$name]=$(loaded)
+        [[ $name == *reverse* ]] && D[$name]=$(dead_flow "$name")
+        stop_link
+    done
+    unblock_iran_out
+    note "a request through the link while a download fills it (foreign -> Iran at 30 Mbit/s, ${NETEM}), median of 5: direct ${L[reality-direct]:-?} ms, reverse as v2.8.4 ${L[reality-reverse-base]:-?} ms, reverse ${L[reality-reverse]:-?} ms"
+    note "the reverse link's connections dropped without a word: requests get through again after ${D[reality-reverse-base]:-?} s as v2.8.4, ${D[reality-reverse]:-?} s now (120 = not yet)"
+    if awk -v r="${L[reality-reverse]:-6000}" -v d="${L[reality-direct]:-0}" 'BEGIN { exit !(r <= 1.5 * d + 20) }'; then
+        ok "reverse under load: ${L[reality-reverse]} ms, next to direct's ${L[reality-direct]} ms"
+    else
+        bad "reverse under load: ${L[reality-reverse]:-?} ms against direct's ${L[reality-direct]:-?} ms (want at most 1.5x + 20)"
+    fi
+fi
 
 # ---- IPv6: the servers connect over IPv6 only (IPv4 between them dropped)
 # and the user comes in over IPv6

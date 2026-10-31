@@ -237,6 +237,7 @@ var (
 	lifetimeDown     uint64
 	trafficStateInit bool
 	lastSampleAt     time.Time // when the counters of the last speed window were read
+	lastReadAt       time.Time // when the last reading taken into the totals was read
 	lastStateSave    time.Time
 	speedDeltaUp     uint64
 	speedDeltaDown   uint64
@@ -258,7 +259,22 @@ type persistentTrafficState struct {
 
 func trafficStateFile() string { return filepath.Join(configDir, "traffic_state.json") }
 
-func loadTrafficStateLocked() {
+// trafficHistoryLast is the last lifetime total in traffic.json.
+func trafficHistoryLast() (up, down uint64) {
+	histMu.Lock()
+	defer histMu.Unlock()
+	hist := loadHistory()
+	for i := len(hist) - 1; i >= 0; i-- {
+		if hist[i].Up != nil && hist[i].Down != nil {
+			return *hist[i].Up, *hist[i].Down
+		}
+	}
+	return 0, 0
+}
+
+// loadTrafficStateLocked reads traffic_state.json once; histUp and
+// histDown (trafficHistoryLast) are the totals when it has none.
+func loadTrafficStateLocked(histUp, histDown uint64) {
 	if trafficStateInit {
 		return
 	}
@@ -281,14 +297,7 @@ func loadTrafficStateLocked() {
 	}
 
 	// 2. Fallback to latest sample in traffic.json history
-	hist := loadHistory()
-	for i := len(hist) - 1; i >= 0; i-- {
-		if hist[i].Up != nil && hist[i].Down != nil {
-			lifetimeUp = *hist[i].Up
-			lifetimeDown = *hist[i].Down
-			break
-		}
-	}
+	lifetimeUp, lifetimeDown = histUp, histDown
 }
 
 func saveTrafficStateLocked() {
@@ -356,6 +365,12 @@ func isTunnelInterface(ifname string) bool {
 		strings.HasPrefix(ifname, "br-") || strings.HasPrefix(ifname, "dummy") ||
 		strings.HasPrefix(ifname, "eth") || strings.HasPrefix(ifname, "ens") ||
 		strings.HasPrefix(ifname, "enp") || strings.HasPrefix(ifname, "wl") {
+		return false
+	}
+	// a sold tunnel inside GRE (customers_gre.go): the customer's traffic,
+	// billed apart, not this server's tunnels. (hcc*, the buyer's end, is
+	// that server's own tunnel and counts there.)
+	if custGRENameRe.MatchString(ifname) {
 		return false
 	}
 	if strings.HasPrefix(ifname, "gre-") || strings.HasPrefix(ifname, "tun") || ifname == spoofIface {
@@ -453,22 +468,45 @@ func trafficSample(devData string, carrierRx, carrierTx uint64, carrierOK bool, 
 		cur[carrierKey] = [2]uint64{carrierRx, carrierTx}
 	}
 
+	// The fallback for a missing state file is in the history, which has
+	// its own lock: read it first (histMu is always taken before
+	// trafficStateMu, as in flushHistoryIfDirty).
+	trafficStateMu.Lock()
+	need := !trafficStateInit
+	trafficStateMu.Unlock()
+	var fbUp, fbDown uint64
+	if need {
+		fbUp, fbDown = trafficHistoryLast()
+	}
+
 	trafficStateMu.Lock()
 	defer trafficStateMu.Unlock()
 
 	first := !trafficStateInit
 	if first {
-		loadTrafficStateLocked()
+		loadTrafficStateLocked(fbUp, fbDown)
 	}
-	if !lastSampleAt.IsZero() && at.Before(lastSampleAt) {
+	// lastReadAt, not lastSampleAt: the speed window only closes after a
+	// second, and a stale reading inside it looked like every counter went
+	// down (each interface's whole count was taken again).
+	if !lastReadAt.IsZero() && !at.After(lastReadAt) {
 		return trafficResultLocked() // out of order: already counted past it
 	}
+	lastReadAt = at
 
 	// Deltas are taken per interface. Comparing one summed counter made the
 	// chart spike: when one of several tunnels dropped, the smaller sum was
 	// taken for a counter reset and counted again. An interface seen for the
 	// first time is only a baseline; one seen before this process started
 	// (traffic_state.json) counts what it moved while the panel was down.
+	// A failed carrier reading keeps its baseline: the carrier total only
+	// grows, so the next good reading counts what moved in between (as a
+	// new baseline it was lost).
+	if _, ok := cur[carrierKey]; !ok {
+		if prev, seen := lastRawIf[carrierKey]; seen {
+			cur[carrierKey] = prev
+		}
+	}
 	var dU, dD, rawUp, rawDown uint64
 	for name, c := range cur {
 		rawDown += c[0]
@@ -676,7 +714,28 @@ func readCPU() (cpuSample, bool) {
 
 // ---- connections: established TCP/UDP via ss ----
 
+// activeConnsCache: the four /proc/net tables are the kernel's slow path on a
+// host with many sockets, and the snapshot and the history recorder both ask
+// every 5s, so one reading serves for 30s.
+var activeConnsCache struct {
+	sync.Mutex
+	root string
+	at   time.Time
+	v    any
+}
+
 func activeConns() any {
+	c := &activeConnsCache
+	c.Lock()
+	defer c.Unlock()
+	if c.root == procRoot && time.Since(c.at) < 30*time.Second {
+		return c.v
+	}
+	c.root, c.at, c.v = procRoot, time.Now(), countActiveConns()
+	return c.v
+}
+
+func countActiveConns() any {
 	n := 0
 	have := false
 	for _, f := range []string{"net/tcp", "net/tcp6", "net/udp", "net/udp6"} {
@@ -840,7 +899,11 @@ func flushHistoryIfDirty() {
 		saveHistoryLocked()
 	}
 	trafficStateMu.Lock()
-	saveTrafficStateLocked()
+	// before the first reading the totals are not loaded yet: saving them
+	// would write zeros over the saved state
+	if trafficStateInit {
+		saveTrafficStateLocked()
+	}
 	trafficStateMu.Unlock()
 }
 

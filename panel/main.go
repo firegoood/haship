@@ -91,8 +91,8 @@ func effectiveTLSPort() int {
 var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
-	// go build -ldflags "-X main.panelVersion=v2.7.0"
-	panelVersion = "v2.7.0"
+	// go build -ldflags "-X main.panelVersion=v3.0.0"
+	panelVersion = "v3.0.0"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -530,12 +530,14 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | doctor [check|fix] | tls-proxy | pathtest | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate]]")
+			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | doctor [check|fix] | tls-proxy | pathtest | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate] | node [status|join CODE|-|leave|move]]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
 		case "bagher-carrier":
 			os.Exit(bagherCarrierCmd(os.Args[2:]))
+		case "sell-bagher":
+			os.Exit(custBagherRelayCmd(os.Args[2:]))
 		case "pathtest":
 			os.Exit(cliPathTest(os.Args[2:]))
 		case "cluster", "mesh":
@@ -552,6 +554,8 @@ func main() {
 			os.Exit(cliSettings(os.Args[2:]))
 		case "doctor":
 			os.Exit(cliDoctor(os.Args[2:]))
+		case "node":
+			os.Exit(cliNode(os.Args[2:]))
 		}
 	}
 	if v := os.Getenv("GRE_PANEL_DIR"); v != "" {
@@ -573,6 +577,14 @@ func main() {
 		log.Printf("bagher: upgrading key restrictions in %s: %v", authorizedKeysPath, err)
 	} else if n > 0 {
 		log.Printf("bagher: locked down %d Bagher key(s) in %s (no commands, no -L forwards)", n, authorizedKeysPath)
+	}
+	if ok, err := migrateBagherFRPCTLS("/etc/gre-panel/bagher/frpc.toml"); err != nil {
+		log.Printf("bagher: turning off frp TLS inside the SSH tunnel: %v", err)
+	} else if ok {
+		log.Printf("bagher: frp TLS turned off inside the SSH tunnel (it encrypted everything twice)")
+	}
+	if n := migrateXrayConfigs(); n > 0 {
+		log.Printf("xray: %d link(s) rebuilt for this version (pre-connect: lower ping in direct mode)", n)
 	}
 	if ok, err := migrateBagherCarrierUnit(bagherLinkUnitPath(1)); err != nil {
 		log.Printf("bagher: moving the carrier off ssh -N: %v", err)
@@ -606,7 +618,12 @@ func main() {
 	mux.HandleFunc("GET "+base+"/i18n-fa.js", serveAsset("i18n-fa.js", "text/javascript; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/tokens.css", serveAsset("tokens.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/fonts.css", serveAsset("fonts.css", "text/css; charset=utf-8"))
-	mux.HandleFunc("GET "+base+"/fonts/vazirmatn.woff2", serveAsset("fonts/vazirmatn.woff2", "font/woff2"))
+	fontH := serveAsset("fonts/vazirmatn.woff2", "font/woff2")
+	mux.HandleFunc("GET "+base+"/fonts/vazirmatn.woff2", func(w http.ResponseWriter, r *http.Request) {
+		// a public file: a node's view (a sandboxed frame, origin "null") loads it too
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		fontH(w, r)
+	})
 	mux.HandleFunc("GET "+base+"/base.css", serveAsset("base.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/enterprise.css", serveAsset("enterprise.css", "text/css; charset=utf-8"))
 	mux.HandleFunc("GET "+base+"/favicon.png", serveAsset("favicon.png", "image/png"))
@@ -651,6 +668,7 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/action", requireAuth(requireCSRF(handleAction)))
 	mux.HandleFunc("POST "+base+"/api/password", requireAuth(requireCSRF(handlePassword)))
 	mux.HandleFunc("GET "+base+"/api/setup", requireAuth(handleSetupGet))
+	mux.HandleFunc("GET "+base+"/api/setup/plan", requireAuth(handleSetupPlan))
 	mux.HandleFunc("GET "+base+"/api/version", requireAuth(handleVersion))
 	mux.HandleFunc("POST "+base+"/api/update", requireAuth(requireCSRF(handleUpdate)))
 	mux.HandleFunc("GET "+base+"/api/update/channel", requireAuth(handleUpdateChannelGet))
@@ -688,6 +706,15 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/xray", requireAuth(requireCSRF(handleXrayPost)))
 	mux.HandleFunc("GET "+base+"/api/limits", requireAuth(handleLimitsGet))
 	mux.HandleFunc("POST "+base+"/api/limits", requireAuth(requireCSRF(handleLimitsPost)))
+	mux.HandleFunc("GET "+base+"/api/customers", requireAuth(handleCustomersGet))
+	mux.HandleFunc("POST "+base+"/api/customers", requireAuth(requireCSRF(handleCustomersPost)))
+	mux.HandleFunc("GET "+base+"/api/customers/kit", requireAuth(handleCustomersKit))
+	mux.HandleFunc("GET "+base+"/api/customers/export.csv", requireAuth(handleCustomersExport))
+	mux.HandleFunc("GET "+base+"/api/customers/history", requireAuth(handleCustomersHistory))
+	// a sold tunnel's status page: no login, the token in the path is the secret
+	mux.HandleFunc("GET /_hs/{token}", handleCustomerStatus)
+	// frps of a sold tunnel asks which proxies to allow (loopback only)
+	mux.HandleFunc("POST /_hsplugin/{key}", handleCustomerPlugin)
 	mux.HandleFunc("POST "+base+"/api/link-name", requireAuth(requireCSRF(handleLinkName)))
 	mux.HandleFunc("GET "+base+"/api/fleet", requireAuth(handleFleet))
 	mux.HandleFunc("GET "+base+"/api/selfstats", requireAuth(handleSelfStats))
@@ -745,6 +772,15 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/cluster/join-hub", requireAuth(requireCSRF(handleClusterJoinHub)))
 	mux.HandleFunc("POST "+base+"/api/cluster/leave-hub", requireAuth(requireCSRF(handleClusterLeaveHub)))
 	mountMeshRoutes(mux)
+	// Nodes: the central's list and join codes; the channel nodes dial
+	mux.HandleFunc("GET "+base+"/api/nodes", requireAuth(handleNodesGet))
+	mux.HandleFunc("POST "+base+"/api/nodes", requireAuth(requireCSRF(handleNodesPost)))
+	mux.HandleFunc("GET "+base+"/api/nodes/backup", requireAuth(handleNodeBackupGet))
+	mux.HandleFunc("GET "+nodeLinkPath, handleNodeLink)
+	// a node shown in its sandboxed frame: the token is its only credential
+	for _, m := range []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"} {
+		mux.HandleFunc(m+" "+base+"/api/nv/{tok}/{path...}", handleNodeView)
+	}
 	mux.HandleFunc("GET "+base+"/api/bagher", requireAuth(handleSSHFwdGet))
 	mux.HandleFunc("POST "+base+"/api/bagher", requireAuth(requireCSRF(handleSSHFwdPost)))
 	mux.HandleFunc("GET "+base+"/api/license", requireAuth(handleLicenseGet))
@@ -778,6 +814,9 @@ func main() {
 	go startRescueMonitor()
 	go startClusterMonitor()
 	go startMeshLoop()
+	go startNodeLoop()
+	go startNodeMigrateWatch()
+	go startNodeBackups()
 	go startLimitsLoop()
 	go func() {
 		cc := loadCarrierConfig()
@@ -798,6 +837,8 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+	// after the busy-port switch: the sold relays' plugin calls go to cfg.Port
+	go startCustomersLoop()
 	srv := &http.Server{
 		Handler:           panelChain(mux),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -816,6 +857,7 @@ func main() {
 		<-sigc
 		close(histStop)
 		limitsFlush()
+		customersFlush()
 		time.Sleep(300 * time.Millisecond) // let the final history write finish
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -896,7 +938,14 @@ func assetTag() string {
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
-	if authed(r) {
+	// a node's view inside the central's page: sandboxed, see node_relay.go
+	nv := r.URL.Query().Has("nv")
+	if nv {
+		w.Header().Set("Content-Security-Policy", nodeViewCSP())
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+	}
+	if !nv && authed(r) {
 		if c, err := r.Cookie("gre_session"); err == nil && c.Value != "" {
 			csrfTok := GenerateCSRFToken(c.Value)
 			http.SetCookie(w, csrfCookie(r, csrfTok, 86400))

@@ -199,8 +199,9 @@ func writePeerConfig(c PeerConfig) error {
 // or via shared X-Peer-Secret / Bearer token header.
 func requirePeerAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Check if authenticated via active admin session cookie
-		if authed(r) {
+		// 1. Check if authenticated via active admin session cookie, or
+		// relayed from this node's central (only /api/peer/status is: node_relay.go)
+		if nodeRelayed(r) || authed(r) {
 			next(w, r)
 			return
 		}
@@ -268,6 +269,7 @@ func mountPeerRoutes(mux *http.ServeMux, base string) {
 		{"POST", "/api/peer/revpath-probe", handlePeerRevPathProbe},
 		{"POST", "/api/peer/sshfwd-install-key", handlePeerSSHFwdInstallKey},
 		{"GET", "/api/peer/status", handlePeerStatus},
+		{"GET", "/api/peer/node-offer", handlePeerNodeOffer}, // nodes N5 (node_migrate.go)
 		{"POST", "/api/peer/swap-carrier", handlePeerSwapCarrier},
 		{"GET", "/api/peer/swap-status", handlePeerSwapStatus},
 		{"GET", "/api/peer/swap-request", handlePeerSwapRequestGet},
@@ -276,10 +278,12 @@ func mountPeerRoutes(mux *http.ServeMux, base string) {
 		{"POST", "/api/peer/wrap-request", handlePeerWrapRequest},
 	}
 	for _, rt := range routes {
-		mux.HandleFunc(rt.method+" "+base+rt.path, requirePeerAuth(rt.h))
+		if rt.path != "/api/peer/node-offer" { // a foreign server's only: not under the base path
+			mux.HandleFunc(rt.method+" "+base+rt.path, requirePeerAuth(rt.h))
+		}
 		guard := requirePeerSecretHidden
 		switch rt.path {
-		case "/api/peer/handshake", "/api/peer/ping", "/api/peer/swap-request", "/api/peer/wrap-request":
+		case "/api/peer/handshake", "/api/peer/ping", "/api/peer/swap-request", "/api/peer/wrap-request", "/api/peer/node-offer":
 			// A peer's foreign server knows its own tunnel token, not the
 			// Peer Link secret: it may still say where its panel answers,
 			// and ask for a swap of its own tunnel.
@@ -829,7 +833,7 @@ func peerSyncTick() {
 
 	if c.Role == "worker" {
 		if !c.IsConnected {
-			st := localStatus()
+			st := currentLocal() // a full localStatus() scan every 10s only to read the GRE address
 			localInner := st.Gre.Inner
 			if localInner == "" {
 				localInner = defaultForeignGRE

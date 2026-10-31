@@ -99,15 +99,32 @@ func bagherPortOwner(cfg SSHFwdConfig, p, skip int) int {
 	return 0
 }
 
-// checkBagherLinkPorts refuses ports another link (or this server's
-// internal FRP ports) already uses.
+// checkBagherLinkPorts refuses ports another link, this server's internal
+// FRP ports or another of Hashem's configs (ports_registry.go) already use.
+// Callers hold sshFwdMu: the claims are built from cfg, not reloaded.
 func checkBagherLinkPorts(cfg SSHFwdConfig, ports []int, self int) error {
+	var claims claimIndex
 	for _, p := range ports {
 		if p >= cfg.FRPBindPort && p <= cfg.FRPBindPort+2 {
 			return fmt.Errorf("port %d is Bagher's internal FRP port (%d-%d)", p, cfg.FRPBindPort, cfg.FRPBindPort+2)
 		}
 		if owner := bagherPortOwner(cfg, p, self); owner != 0 {
 			return fmt.Errorf("port %d is already forwarded to foreign server %d (%s)", p, owner, bagherLinkHost(cfg, owner))
+		}
+		if claims == nil {
+			claims = indexClaims(portClaimsWith(cfg))
+		}
+		// Bagher's own claims were checked above. A pool's DNAT would take
+		// the port's traffic (Bagher is never a pool member): no skip for it.
+		skip := func(c portClaim) bool { return c.Kind == claimBagher || c.Kind == claimBagherFR }
+		protos := []string{"tcp"}
+		if cfg.UDP {
+			protos = append(protos, "udp")
+		}
+		for _, proto := range protos {
+			if owner := claims.owner(proto, p, skip); owner != "" {
+				return fmt.Errorf("port %d is already used by %s", p, owner)
+			}
 		}
 	}
 	return nil
@@ -347,6 +364,23 @@ func migrateBagherCarrierUnit(unitPath string) (bool, error) {
 	}
 	_, _ = runCmd("systemctl", "daemon-reload")
 	_, _ = runCmd("systemctl", "try-restart", filepath.Base(unitPath))
+	return true, nil
+}
+
+// migrateBagherFRPCTLS adds bagherFRPCNoTLS to a Bagher frpc.toml written by
+// an older panel or hashem.sh and restarts a running frpc, so an update alone
+// drops the second encryption layer. A file that sets TLS itself is left alone.
+func migrateBagherFRPCTLS(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	// a [transport] table would make the prepended dotted key a duplicate: leave such a file to its writer
+	if err != nil || strings.Contains(string(data), "transport.tls.enable") || strings.Contains(string(data), "[transport") {
+		return false, nil // no Bagher frpc here, or already decided
+	}
+	// first line: a top-level key must come before any [[proxies]] table
+	if err := writeTokenFile(path, append([]byte(bagherFRPCNoTLS+"\n"), data...)); err != nil {
+		return false, err
+	}
+	_, _ = runCmd("systemctl", "try-restart", "hashem-bagher-frpc.service")
 	return true, nil
 }
 

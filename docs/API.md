@@ -55,6 +55,11 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/cluster/rules` | session | `handleClusterRules` |
 | `POST` | `/api/cluster/settings` | session + CSRF | `handleClusterSettings` |
 | `GET` | `/api/cluster/status` | session | `handleClusterStatus` |
+| `GET` | `/api/customers` | session | `handleCustomersGet` |
+| `POST` | `/api/customers` | session + CSRF | `handleCustomersPost` |
+| `GET` | `/api/customers/export.csv` | session | `handleCustomersExport` |
+| `GET` | `/api/customers/history` | session | `handleCustomersHistory` |
+| `GET` | `/api/customers/kit` | session | `handleCustomersKit` |
 | `GET` | `/api/dashboard` | session | `handleDashboard` |
 | `GET` | `/api/dial` | session | `handleDialGet` |
 | `POST` | `/api/dial` | session + CSRF | `handleDialPost` |
@@ -74,6 +79,9 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `GET` | `/api/logs` | session | `handleLogs` |
 | `GET` | `/api/metrics-token` | session | `handleMetricsTokenGet` |
 | `POST` | `/api/metrics-token` | session + CSRF | `handleMetricsTokenPost` |
+| `GET` | `/api/nodes` | session | `handleNodesGet` |
+| `POST` | `/api/nodes` | session + CSRF | `handleNodesPost` |
+| `GET` | `/api/nodes/backup` | session | `handleNodeBackupGet` |
 | `POST` | `/api/password` | session + CSRF | `handlePassword` |
 | `GET` | `/api/pathtest` | session | `handlePathTestGet` |
 | `POST` | `/api/pathtest` | session + CSRF | `handlePathTestPost` |
@@ -114,6 +122,7 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/session-settings` | session + CSRF | `handleSessionSettingsPost` |
 | `GET` | `/api/setup` | session | `handleSetupGet` |
 | `POST` | `/api/setup` | session + CSRF | `handleSetupPost` |
+| `GET` | `/api/setup/plan` | session | `handleSetupPlan` |
 | `GET` | `/api/spoof` | session | `handleSpoofGet` |
 | `POST` | `/api/spoof` | session + CSRF | `handleSpoofPost` |
 | `GET` | `/api/spoof/tester` | session | `handleSpoofTester` |
@@ -158,4 +167,4 @@ Request and response bodies are defined by the handlers named below in `panel/`.
 | `POST` | `/api/xray` | session + CSRF | `handleXrayPost` |
 | `GET` | `/metrics` | none | `handleMetrics` |
 
-Total: 134 routes.
+Total: 143 routes.

@@ -206,6 +206,7 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | Code | HTTP | Meaning | What to do |
 | --- | --- | --- | --- |
 | `E-ENGINE-01` | 500 | engine switch failed | See the detail: nothing changed or the previous engine was restored. Check journalctl for the unit it names. |
+| `E-ENGINE-02` | 400 | engine settings are incomplete | Fill in what the detail names first: on the foreign server paste the bundle from the Iran server (Spoof tab → Bundle); nothing was changed. |
 
 ## E-SENTINEL-xx — Sentinel addon
 
@@ -230,6 +231,12 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | --- | --- | --- | --- |
 | `E-LIMIT-01` | 400 | bad limits request | The detail names the field; fix it and try again. |
 
+## E-SPOOF-xx — SPOOF
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-SPOOF-01` | 400 | the spoof bundle could not be made | Fill in what the message names in the Spoof form, then make the bundle again. |
+
 ## E-LIC-xx — LIC
 
 | Code | HTTP | Meaning | What to do |
@@ -252,6 +259,29 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-XRAY-05` | 500 | the Xray link did not stay up | Check: hashem xray logs |
 | `E-XRAY-06` | 404 | no such Xray link | Reload the page: the link may have been removed. |
 | `E-XRAY-07` | 409 | an Xray-core install is already running | Wait for it to finish; the tab shows its progress. |
+
+## E-CUST-xx — CUST
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-CUST-01` | 400 | bad customers request | Reload the page and try again. |
+| `E-CUST-02` | 400 | invalid customer or plan | The detail names the field; fix it and try again. |
+| `E-CUST-03` | 409 | a foreign server's ports are not usable | The detail names the port and what holds it: pick another port. |
+| `E-CUST-04` | 404 | unknown customer or foreign server | Refresh the page; it may have been removed. |
+| `E-CUST-05` | 409 | not possible in the customer's current state | The detail says what to do first (renew, reset the usage, or set an address). |
+| `E-CUST-06` | 500 | cannot save customers.json | Disk write failed: check free space and /etc/gre-panel permissions. |
+
+## E-NODE-xx — NODE
+
+| Code | HTTP | Meaning | What to do |
+| --- | --- | --- | --- |
+| `E-NODE-01` | 400 | bad nodes request | The detail names the field; fix it and try again. |
+| `E-NODE-02` | 409 | not possible in this panel's role | The detail says what to do first (leave the central, remove the nodes, or make this panel the central). |
+| `E-NODE-03` | 404 | unknown node | Refresh the page; it may have been removed. |
+| `E-NODE-04` | 502 | the node or server cannot be reached | Check the address and that the server is up; the detail has the network error. |
+| `E-NODE-05` | 500 | cannot save the node settings | The detail names the file: check free space and /etc/gre-panel permissions. |
+| `E-NODE-06` | 403 | not available through the central | Open the node's own panel for this (terminal, logins and the panel's access settings stay local). |
+| `E-NODE-07` | 409 | a tunnel job on these servers is running | Wait for it to finish (its log is on the Nodes page), then try again. |
 
 ## E-SSHFWD-xx — SSHFWD
 
@@ -290,4 +320,4 @@ lines in the Logs tab. `HTTP 0` means the code is a log annotation, not an HTTP 
 | `E-ACCESS-02` | 401 | current password is incorrect | Verify your current password before changing access settings. |
 | `E-ACCESS-03` | 409 | port conflict detected | The requested port is reserved or used by a tunnel/proxy. Pick a free port. |
 
-Total: 154 codes.
+Total: 169 codes.

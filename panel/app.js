@@ -1,5 +1,36 @@
 const BASE = document.documentElement.dataset.base || '';
-const at = p => BASE + p;
+// NODE: on a central, the node the page shows (null = this server). It is
+// shown in a sandboxed frame (#nodeView): the same page with ?nv=<id>, on an
+// origin of its own, so nothing a node answers can act as the central.
+let NODE = null;
+try { NODE = parseInt(sessionStorage.getItem('hashemNode') || '', 10) || null; } catch (_) { NODE = null; }
+// NV: this page is that frame. Its API calls go to the central's relay for
+// the node, /api/nv/<token>/..., with a token the central's page hands it.
+const NV = (() => { try { return parseInt(new URLSearchParams(location.search).get('nv') || '', 10) || null; } catch (_) { return null; } })();
+const NV_ORIGIN = (() => { try { return new URL(location.href).origin; } catch (_) { return ''; } })();
+let NV_TOKEN = '';
+const NV_READY = NV ? new Promise(done => {
+  window.addEventListener('message', e => {
+    if (e.source !== window.parent || e.origin !== NV_ORIGIN) return;
+    const d = e.data || {};
+    if (d.hnv === 'token' && typeof d.token === 'string' && /^[0-9a-f]{64}$/.test(d.token)) { NV_TOKEN = d.token; done(); }
+  });
+  try { window.parent.postMessage({ hnv: 'ready' }, NV_ORIGIN); } catch (_) { /* not framed */ }
+}) : null;
+const at = p => (NV && p.startsWith('/api/')) ? BASE + '/api/nv/' + NV_TOKEN + p.slice(4) : BASE + p;
+if (NV) document.documentElement.classList.add('nv');
+// the user working in a node's view keeps the central's login from going idle
+if (NV) {
+  let sent = 0;
+  // click, not pointerdown: a tap activates only when it ends
+  ['click', 'keydown'].forEach(ev => window.addEventListener(ev, () => {
+    if (Date.now() - sent < 20000) return;
+    const ua = navigator.userActivation;
+    if (ua && !ua.isActive) return; // the central's page would not count it: try the next one
+    sent = Date.now();
+    try { window.parent.postMessage({ hnv: 'active' }, NV_ORIGIN); } catch (_) { /* not framed */ }
+  }, { passive: true, capture: true }));
+}
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const escapeHtml = esc;
@@ -155,8 +186,10 @@ function modalHide(ov) {
 }
 let _csrfToken = '';
 function getCSRFToken() {
+  if (NV) return ''; // a node's view: its token is the credential, and it has no cookies
   if (_csrfToken) return _csrfToken;
-  const match = document.cookie.match(/(?:^|; )gre_csrf=([^;]*)/);
+  let match = null;
+  try { match = document.cookie.match(/(?:^|; )gre_csrf=([^;]*)/); } catch (_) { /* no cookie access */ }
   if (match) return decodeURIComponent(match[1]);
   return '';
 }
@@ -167,6 +200,7 @@ function setCSRFToken(tok) {
 let userActiveAt = Date.now();
 ['pointerdown','keydown','wheel','touchstart'].forEach(ev => window.addEventListener(ev, () => { userActiveAt = Date.now(); }, {passive: true, capture: true}));
 async function api(path, body, method) {
+  if (NV && !NV_TOKEN) await NV_READY;
   const m = method || (body ? 'POST' : 'GET');
   const headers = {};
   if (Date.now() - userActiveAt < 30000) headers['X-User-Active'] = '1';
@@ -180,6 +214,12 @@ async function api(path, body, method) {
     headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
+  // the central's own 401 (no X-Hashem-Node: not the node's answer): its
+  // login ended or the token is stale, and the central's page sorts it out
+  if (r.status === 401 && NV && !r.headers.get('X-Hashem-Node')) {
+    try { window.parent.postMessage({ hnv: 'ended' }, NV_ORIGIN); } catch (_) { /* not framed */ }
+    throw new Error(tr('', 'The session ended: reload the page'));
+  }
   if (r.status === 401 && !path.endsWith('/api/login')) {
     showLogin();
     throw new Error('session expired');
@@ -197,8 +237,28 @@ async function api(path, body, method) {
     throw new Error(txt || r.statusText);
   }
   const data = await r.json();
-  if (data && data.csrf_token) setCSRFToken(data.csrf_token);
+  if (data && data.csrf_token && !NV) setCSRFToken(data.csrf_token);
   return data;
+}
+// download saves what path answers. In a node's view it is fetched, so an
+// error is a message and the view stays (navigating the frame would replace it).
+async function download(path) {
+  try {
+    if (NV) await NV_READY;
+    const r = await fetch(at(path), { cache: 'no-store' });
+    if (!r.ok) {
+      let msg = r.statusText;
+      try { const j = await r.json(); msg = (j.error_code ? '[' + j.error_code + '] ' : '') + (j.error || msg); } catch (_) { /* not JSON */ }
+      throw new Error(msg);
+    }
+    const m = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(await r.blob());
+    a.download = m ? m[1] : 'download';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch (e) { toastErr(tr('', 'Download failed'), e.message); }
 }
 function showLogin() { $('login').classList.remove('hidden'); $('app').classList.add('hidden'); }
 function showApp() { $('login').classList.add('hidden'); $('app').classList.remove('hidden'); loadLicense(); }
@@ -298,6 +358,7 @@ const PRO_TXT = {
   spoof: ['pro_t_spoof', 'Spoof Tunnel — Hashem Pro', 'pro_b_spoof', 'The Spoof Tunnel is a Hashem Pro feature, on both servers: an IP-spoofing pipe wrapped with WireGuard to cross whitelist-based Layer-3 firewalls.'],
   xray: ['pro_t_xray', 'Xray Tunnel — Hashem Pro', 'pro_b_xray', 'The Xray Tunnel is a Hashem Pro feature, on both servers: Reality, XHTTP, gRPC or mKCP, direct or reverse, next to any Xray panel.'],
   limits: ['pro_t_limits', 'Speed and volume limits — Hashem Pro', 'pro_b_limits', 'Limiting the speed and volume of each foreign server is a Hashem Pro feature. Limits already set keep working without it, and can always be removed.'],
+  customers: ['pro_t_customers', 'Customers — Hashem Pro', 'pro_b_customers', 'Selling tunnels to customers is a Hashem Pro feature. Customers already set up keep running without it, and can always be paused or removed.'],
 };
 function isSentinelLicensed() {
   const f = (_licenseData && _licenseData.is_valid && _licenseData.features) || [];
@@ -317,9 +378,11 @@ function proSync() {
   tag('navXrayPro', 'xray');
   tag('xrayPro', 'xray');
   tag('limitsPro', 'limits');
+  tag('navCustomersPro', 'customers');
+  tag('custPro', 'customers');
   if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', clLicensed());
   if ($('navSentinelPro')) $('navSentinelPro').classList.toggle('hidden', isSentinelLicensed());
-  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navSpoofPro', 'navXrayPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
+  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navSpoofPro', 'navXrayPro', 'navCustomersPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
     const el = $(id); if (!el) return;
     const t = id === 'navSentinelPro' ? tr('pro_addon', 'Add-on license') : 'Hashem Pro';
     el.title = t; el.setAttribute('aria-label', t);
@@ -356,7 +419,7 @@ function goTab(name) {
     openBagherLicModal('cluster');
     return;
   }
-  ['dashboard','tunnel','cluster','setup','xray','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  ['dashboard','tunnel','cluster','nodes','setup','xray','customers','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -377,6 +440,8 @@ function goTab(name) {
   if (name === 'benchmark') { loadBenchmark(); loadPathTest(); }
   if (name === 'spoof') loadSpoof();
   if (name === 'xray') loadXray();
+  if (name === 'customers') loadCustomers();
+  if (name === 'nodes') { _ntLinks = null; loadNodes().then(() => { loadNodeTunnels(); nodeFleetLoad(); }); }
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
   if (name === 'terminal') termOnShow();
@@ -479,7 +544,9 @@ $('themeBtn').onclick = () => setTheme(document.body.dataset.t === 'dark' ? 'lig
 // No saved choice: follow the system appearance, live, until the user picks one.
 function savedTheme() { try { return localStorage.getItem('gre_theme'); } catch(e) { return null; } }
 const sysLight = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
-setTheme(savedTheme() || (sysLight && sysLight.matches ? 'light' : 'dark'), false);
+// a node's view has no storage: the central's page passes its theme
+if (NV) setTheme(new URLSearchParams(location.search).get('t') === 'light' ? 'light' : 'dark', false);
+else setTheme(savedTheme() || (sysLight && sysLight.matches ? 'light' : 'dark'), false);
 if (sysLight && sysLight.addEventListener) sysLight.addEventListener('change', e => { if (!savedTheme()) setTheme(e.matches ? 'light' : 'dark', false, true); });
 
 // i18n & Persian (Farsi) Language System
@@ -501,6 +568,14 @@ const I18N = {
     spoof_sub: "A tunnel that forges its source IP on both servers to cross whitelist-based Layer-3 firewalls, wrapped with WireGuard for a real encrypted link. Test which spoof IPs get through first, then bring the tunnel up.",
     spoof_idle: "Not configured",
     nav_xray: "Xray",
+    nav_customers: "Customers",
+    nav_nodes: "Nodes",
+    node_bar: "You are managing node",
+    node_bar_sub: "Changes apply to that server; a password asked here is that server's.",
+    node_view_off: "This node is offline. Its tunnels keep running; open its own panel on that server, or wait for it to connect.",
+    node_bar_back: "Back to this server",
+    node_pick: "Server shown",
+    settings_node_note: "This node's login, HTTPS, 2FA and terminal settings are on its own panel, not here. Its license and Telegram alerts are shown here.",
     xray_title: "Xray Tunnel",
     xray_sub: "Forward ports from the Iran server to a foreign server over Xray: Reality, XHTTP, gRPC or mKCP, direct or reverse. It runs its own Xray-core next to any Xray panel (3x-ui, Marzban) and never touches its files, services or ports.",
     xray_idle: "No tunnel yet",
@@ -1138,7 +1213,9 @@ function toggleLang() {
 
 if ($('langToggleBtn')) $('langToggleBtn').onclick = toggleLang;
 if ($('langToggleBtnM')) $('langToggleBtnM').onclick = toggleLang;
-try { setLanguage(localStorage.getItem('hashem_lang') || 'en', true); } catch(e) { /* storage blocked: stay on default language */ }
+// a node's view has no storage: the central's page passes its language
+if (NV) setLanguage(new URLSearchParams(location.search).get('lang') === 'fa' ? 'fa' : 'en', true);
+else try { setLanguage(localStorage.getItem('hashem_lang') || 'en', true); } catch(e) { /* storage blocked: stay on default language */ }
 
 // Each value in its own <bdi> so "0.0 B/s" keeps its order inside a Persian line.
 // Live traffic card: current rates are the numbers, the lifetime total is a footnote.
@@ -1227,7 +1304,9 @@ function armRemovePeer(peerId, name) {
   const btns = document.querySelectorAll(`[data-peer-remove="${peerId}"]`);
   btns.forEach(b => { b.classList.add('armed'); b.innerHTML = 'Confirm 5s <span class="peer-count" data-peer-n="' + peerId + '">5</span>'; });
   box.classList.remove('hidden');
-  box.innerHTML = `<div class="peer-confirm-in">Remove <b>${esc(name)} (#${peerId})</b>? GRE + frps go away; other tunnels keep running. <button class="hashem-btn hashem-btn-ghost u-btn-28" onclick="disarmRemovePeer(${peerId})">Undo</button></div>`;
+  // 'main' is the first tunnel; peers are numbered
+  const label = peerId === 'main' ? esc(name) : `${esc(name)} (#${peerId})`;
+  box.innerHTML = `<div class="peer-confirm-in">${esc(tr('', 'Remove'))} <b>${label}</b>? ${esc(tr('', 'Its GRE interface and tunnel service go away; other tunnels keep running.'))} <button class="hashem-btn hashem-btn-ghost u-btn-28" onclick="disarmRemovePeer(${jsArg(peerId)})">${esc(tr('', 'Undo'))}</button></div>`;
   clearTimeout(peerRemoveTimers[peerId]); clearInterval(peerRemoveTimers[peerId + '_n']);
   let n = 5;
   peerRemoveTimers[peerId + '_n'] = setInterval(() => {
@@ -1247,7 +1326,8 @@ async function removePeer(peerId, name) {
   const btns = document.querySelectorAll(`[data-peer-remove="${peerId}"]`);
   btns.forEach(b => { b.disabled = true; b.innerHTML = '<span class="ent-spinner"></span> Removing…'; });
   try {
-    await api('/api/action', {action: 'remove-tunnel', peer_id: peerId});
+    // without peer_id the panel removes the first tunnel alone when others exist
+    await api('/api/action', peerId === 'main' ? {action: 'remove-tunnel'} : {action: 'remove-tunnel', peer_id: peerId});
     toastOk(`tunnel '${name}' removed`);
     refresh();
   } catch(e) { toastErr('remove failed', e.message); refresh(); }
@@ -1410,7 +1490,7 @@ function renderPeers(peers) {
   }
 
   const L = window._lastLocal || {};
-  const hasMain = !!(L.frp_up || L.frp_svc || (L.gre && L.gre.exists) || (L.proxies || []).length);
+  const hasMain = hasBaseTunnel(L);
   const isForeign = /foreign/i.test(L.role || '') || L.frp_svc === 'frpc' || L.frp_svc === 'backhaul-client';
   const lbl = $('peerCardsLabel');
   if (lbl) lbl.classList.toggle('hidden', !(peers && peers.length) && !bagherCardHtml);
@@ -1443,7 +1523,7 @@ function renderPeers(peers) {
          ? `<span class="badge u-pill-violet">GRE+Backhaul</span>`
          : `<span class="badge warn">FRP</span>`);
     const transBadge = p.transport ? `<span class="badge dim">${esc(p.transport)}</span>` : '';
-    const fwdPorts = p.raw_ports || (p.ports || []).join(', ') || '—';
+    const fwdPorts = [].concat(p.raw_ports || p.ports || []).join(', ') || '—';
     const greIfLabel = isBh ? 'N/A (Standalone)' : (p.gre_if || 'gre-t' + p.id);
     const svcTitle = (isBh || isGreBh) ? 'Backhaul & Traffic' : 'FRP & Traffic';
     return `<div class="tunnel-card peer-card u-peer-card-wide" id="peer-card-${p.id}">
@@ -1466,7 +1546,7 @@ function renderPeers(peers) {
         there: nm, thereSub: p.remote_pub || '',
         tags: [[isBh || isGreBh ? 'Backhaul' : 'FRP', 'eng'], [p.transport || '', ''], [isBh ? '' : 'GRE', 'gre']],
         gre: !isBh, lat: linkPing(p).ok ? linkPing(p).txt : null, rate: linkRate('p' + p.id, p.rx, p.tx, _statusCountersAt),
-        ports: p.raw_ports ? String(p.raw_ports).split(/[ ,]+/) : (p.ports || []),
+        ports: p.raw_ports ? String(p.raw_ports).split(/[ ,]+/).filter(Boolean) : (p.ports || []),
       })}
       <div class="det-grid">
         <div class="det-card">
@@ -1543,6 +1623,14 @@ function linkStrip(s) {
     (eng ? sep + '<bdi>' + esc(eng) + '</bdi>' : '') + (ms ? sep + '<bdi>' + esc(ms) + '</bdi>' : '');
   el.title = up ? tr('ls_up', 'Tunnel up') : tr('ls_down', 'Tunnel down');
 }
+// The base tunnel exists. A peer's backhaul-server-N alone is not one: the
+// status names that unit when no base unit runs, for the role of a hub that
+// has only peers, and the first card then came back after its removal.
+function hasBaseTunnel(st) {
+  if (!st) return false;
+  const peerUnit = /^backhaul-server-\d+$/.test(st.frp_svc || '');
+  return !!((st.gre && st.gre.exists) || (st.proxies || []).length || (!peerUnit && (st.frp_up || st.frp_svc)));
+}
 // Engine of the base tunnel: recorded, else derived from the running unit.
 function tunEngine(st) {
   if (!st) return '';
@@ -1553,7 +1641,7 @@ function tunEngine(st) {
 }
 function renderTunnel(st) {
   const gre = st.gre || {};
-  const hasMain = !!(gre.exists || st.frp_up || st.frp_svc || (st.proxies || []).length);
+  const hasMain = hasBaseTunnel(st);
   const up = !!(gre.exists || st.frp_up);
   const eng = tunEngine(st);
   const usesGre = eng === 'frp' || eng === 'gre-backhaul' || !!gre.exists;
@@ -1624,7 +1712,9 @@ function renderTunnel(st) {
         ${isIran ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyMainIranBundle()">${esc(tr('', 'Copy Bundle'))}</button>` : ''}
         ${usesGre ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="restart-gre-0" onclick="peerAct('restart-gre', 0)">${esc(tr('', 'Restart GRE'))}</button>` : ''}
         ${st.frp_svc ? `<button class="hashem-btn hashem-btn-secondary u-btn-30" data-peer-act="restart-engine-0" onclick="peerAct('restart-engine', 0)">${esc(tr('', 'Restart Service'))}</button>` : ''}
+        <button class="hashem-btn hashem-btn-danger peer-remove-btn u-btn-30" data-peer-remove="main" onclick="peerRemoveClick('main', ${jsArg(title)})">${esc(tr('', 'Remove'))}</button>
       </div>
+      <div id="peer-confirm-main" class="peer-confirm warnbox hidden"></div>
     </div>`;
   $('tunnel').innerHTML = mainCard;
   window._lastLocal = st;
@@ -1665,7 +1755,7 @@ function renderTunChips(st) {
   const box = $('tunChips');
   if (!box) return;
   const chips = [];
-  if (st && (st.gre.exists || st.frp_up || (st.proxies || []).length)) {
+  if (hasBaseTunnel(st)) {
     chips.push({
       key: 'base',
       name: tr('', 'Tunnel'),
@@ -3588,6 +3678,8 @@ function doLogin() {
       await api('/api/login', {username: $('u').value, password: $('p').value, code: $('totpCode').value.trim()});
       $('p').value = ''; $('totpCode').value = ''; $('codeField').classList.add('hidden'); $('loginErr').textContent = '';
       showApp(); refresh(); loadSetupDefaults(); loadVersion(); accessRefresh(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh();
+      nodePickLoad(); // a node chosen before the login reopens
+      migrateBannerLoad();
     } catch(e) {
       if (e.code === 'E-AUTH-09') { $('codeField').classList.remove('hidden'); $('totpCode').focus(); }
       $('loginErr').textContent = e.message;
@@ -3800,7 +3892,11 @@ $('toggle').addEventListener('click', () => {
 $('logoutBtn').onclick = async () => { try { await api('/api/logout', {}); } catch(e){ /* logout best-effort: always fall through to login screen */ } showLogin(); };
 $('refreshBtn').onclick = refresh;
 $('removeTunnelBtn').onclick = async () => {
-  if (!await entConfirm(tr('', 'Remove Tunnel?'), tr('', 'The tunnel on this server is deleted: its GRE interface, tunnel service and their configs. The other server keeps its side until you remove it there. The panel stays.'), tr('', 'Remove Tunnel'))) return;
+  // peers other than the first tunnel itself (peer 1 on the legacy names)
+  const others = (tunPeerCache || []).filter(p => !p.legacy && p.gre_if !== 'gre-tunnel').length;
+  if (!await entConfirm(tr('', 'Remove Tunnel?'), others
+    ? tr('', 'The first tunnel on this server is deleted: its GRE interface, tunnel service and their configs. The other tunnels keep running; remove each from its own card. The panel stays.')
+    : tr('', 'The tunnel on this server is deleted: its GRE interface, tunnel service and their configs. The other server keeps its side until you remove it there. The panel stays.'), tr('', 'Remove Tunnel'))) return;
   const b = $('removeTunnelBtn');
   b.disabled = true;
   try {
@@ -5098,7 +5194,7 @@ function renderCarriers() {
   if (!card || !box) return;
   const L = window._lastLocal || {};
   const peers = tunPeerCache || [];
-  const hasMain = !!(L.frp_up || L.frp_svc || (L.gre && L.gre.exists));
+  const hasMain = hasBaseTunnel(L);
   const iran = swIsIran(L) || peers.length > 0;
   const rows = [];
   // The base tunnel has its own row unless a peer record already stands for it.
@@ -5351,13 +5447,14 @@ function spoofBadge(d, h) {
   if (!b) return;
   let cls = 'dim', txt = tr('spoof_idle', 'Not configured');
   if (d.enabled && h && h.core_active && h.wg_active) { cls = 'ok'; txt = tr('', 'Tunnel up'); }
+  else if (d.last_error) { cls = 'err'; txt = tr('', 'Failed'); }
   else if (d.enabled) { cls = 'warn'; txt = tr('', 'Starting…'); }
   else if (d.has_keys || (d.spoof_ips && d.spoof_ips.length)) { cls = 'info'; txt = tr('', 'Configured'); }
   b.className = 'badge ' + cls;
   b.textContent = txt;
 }
 
-function spoofOpt(sel, cur) {
+function spoofOpt(cur) {
   return SPOOF_TRANSPORTS.map(t => `<option value="${t}"${t === cur ? ' selected' : ''}>${t.toUpperCase()}</option>`).join('');
 }
 
@@ -5384,9 +5481,14 @@ function renderSpoof() {
       ${h.handshake ? `<span class="sp-hs" data-no-i18n>${esc(tr('', 'Last handshake'))}: ${esc(h.handshake)}</span>` : ''}
     </div>` : '';
 
+  const lastErr = d.last_error
+    ? `<div class="sw-result err" data-no-i18n>${esc(String(d.last_error).slice(0, 300))}</div>` : '';
+
   // Setup form. The foreign server fills most fields by importing the bundle.
   const ips = (d.spoof_ips || []).join('\n');
   const form = `<div class="sp-grid">
+      ${isLocal ? `<label class="qs-label" data-i18n-skip>${esc(tr('', "This server's public IPv4"))}</label>
+      <input class="hashem-input u-ltr u-mono" id="spLocalIP" value="${esc(d.local_public || '')}" placeholder="${esc(tr('', 'Found by itself'))}" autocomplete="off">` : ''}
       <label class="qs-label" data-i18n-skip>${esc(tr('', "The other server's public IP"))}</label>
       <input class="hashem-input u-ltr u-mono" id="spPeerIP" value="${esc(d.peer_public_ip || '')}" placeholder="198.51.100.10" autocomplete="off">
       <div class="sp-row3">
@@ -5398,6 +5500,7 @@ function renderSpoof() {
         <div><label class="qs-label">${esc(tr('', 'Send transport'))}</label><select class="hashem-input" id="spSend">${spoofOpt(d.send_transport)}</select></div>
         <div><label class="qs-label">${esc(tr('', 'Recv transport'))}</label><select class="hashem-input" id="spRecvT">${spoofOpt(d.recv_transport)}</select></div>
       </div>
+      <p class="qs-hint${/^icmp/.test(d.recv_transport || '') ? '' : ' hidden'}" id="spIcmpHint">${esc(tr('', 'Receiving over ICMP turns off ping replies on this whole server while the tunnel runs (the spoof core needs the echo packets). Checks that ping this server will see it as down.'))}</p>
       <label class="qs-label">${esc(tr('', 'Spoof source IPs (one per line, from the tester)'))}</label>
       <textarea class="hashem-input u-ltr u-mono sp-ips" id="spIPs" rows="3" placeholder="203.0.113.7">${esc(ips)}</textarea>
       <div class="sp-acts">
@@ -5423,7 +5526,7 @@ function renderSpoof() {
       <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="spImportBtn">${esc(tr('', 'Import bundle'))}</button></div>`;
   }
 
-  body.innerHTML = (d.installed ? '' : body.innerHTML) + roleSeg + health + form + keyBlock + spoofTesterHTML();
+  body.innerHTML = (d.installed ? '' : body.innerHTML) + roleSeg + health + lastErr + form + keyBlock + spoofTesterHTML();
   spoofWire();
   renderSpoofTester();
 }
@@ -5438,6 +5541,7 @@ function spoofWire() {
   if ($('spDownBtn')) $('spDownBtn').onclick = () => spoofPost({ action: 'down' });
   if ($('spBundleBtn')) $('spBundleBtn').onclick = spoofGenBundle;
   if ($('spImportBtn')) $('spImportBtn').onclick = spoofImport;
+  if ($('spRecvT')) $('spRecvT').onchange = e => { const hint = $('spIcmpHint'); if (hint) hint.classList.toggle('hidden', !/^icmp/.test(e.target.value)); };
   spoofTesterWire();
 }
 
@@ -5448,6 +5552,7 @@ function spoofFormReq(action) {
   return {
     action,
     peer_public_ip: ($('spPeerIP') || {}).value || '',
+    local_public_ip: (($('spLocalIP') || {}).value || '').trim(),
     listen_port: num('spListen'), recv_port: num('spRecv'), spoof_port: num('spSpoofPort'),
     send_transport: ($('spSend') || {}).value, recv_transport: ($('spRecvT') || {}).value,
     spoof_ips: ips,
@@ -5492,8 +5597,10 @@ async function spoofImport() {
   const btn = $('spImportBtn');
   btn.disabled = true;
   try {
-    await api('/api/spoof', { action: 'import', bundle });
-    toastOk(tr('', 'Bundle imported'), tr('', 'Now run the tester and bring the tunnel up.'));
+    const r = await api('/api/spoof', { action: 'import', bundle });
+    if (r.warning) toastWarn(tr('', 'Bundle imported'), r.warning);
+    else if (r.detail) toastOk(tr('', 'Bundle imported'), r.detail);
+    else toastOk(tr('', 'Bundle imported'), tr('', 'Now run the tester and bring the tunnel up.'));
     await loadSpoof();
   } catch (e) {
     toastErr(tr('', 'Could not import the bundle'), e.message);
@@ -5504,7 +5611,7 @@ async function spoofImport() {
 // ---- Spoof IP tester ----
 function spoofTesterHTML() {
   return `<div class="sp-sub sp-tester"><b>${esc(tr('', 'Spoof IP tester'))}</b>
-    <p class="qs-hint">${esc(tr('', 'Finds which source IPs the firewall lets through. Run the receiver on one server and the sender on the other, then swap. Passing IPs become that server\'s spoof list.'))}</p>
+    <p class="qs-hint">${esc(tr('', 'Finds which source IPs the firewall lets through. Run the receiver on one server and the sender on the other, then swap. The IPs that pass on the receiver are the ones the sender can forge: they go into the sender server\'s spoof list.'))}</p>
     <div class="sp-row2">
       <div><label class="qs-label">${esc(tr('', 'Mode'))}</label><select class="hashem-input" id="stMode"><option value="receiver">${esc(tr('', 'Receiver'))}</option><option value="sender">${esc(tr('', 'Sender'))}</option></select></div>
       <div><label class="qs-label">${esc(tr('', 'Protocol'))}</label><select class="hashem-input" id="stProto"><option value="icmp">ICMP</option><option value="tcp">TCP</option></select></div>
@@ -5514,7 +5621,10 @@ function spoofTesterHTML() {
       <div><label class="qs-label">${esc(tr('', 'Packets/IP'))}</label><input class="hashem-input u-ltr u-mono" id="stCount" value="10" inputmode="numeric"></div>
       <div><label class="qs-label">${esc(tr('', 'Max loss %'))}</label><input class="hashem-input u-ltr u-mono" id="stLoss" value="20" inputmode="numeric"></div>
     </div>
-    <div id="stSenderRow" class="hidden"><label class="qs-label">${esc(tr('', 'Destination IP (the receiver server)'))}</label><input class="hashem-input u-ltr u-mono" id="stDst" placeholder="198.51.100.10"></div>
+    <div id="stSenderRow" class="hidden sp-row2">
+      <div><label class="qs-label">${esc(tr('', 'Destination IP (the receiver server)'))}</label><input class="hashem-input u-ltr u-mono" id="stDst" placeholder="198.51.100.10"></div>
+      <div><label class="qs-label">${esc(tr('', 'Destination port (TCP)'))}</label><input class="hashem-input u-ltr u-mono" id="stDstPort" value="${esc(String(spoofTesterDstPort()))}" inputmode="numeric"></div>
+    </div>
     <label class="qs-label">${esc(tr('', 'Source IPs / ranges / CIDRs (one per line)'))}</label>
     <textarea class="hashem-input u-ltr u-mono sp-ips" id="stSources" rows="3" placeholder="203.0.113.0/24"></textarea>
     <div class="sp-acts">
@@ -5522,6 +5632,14 @@ function spoofTesterHTML() {
       <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 hidden" id="stStop">${esc(tr('', 'Stop'))}</button>
     </div>
     <div id="stResult"></div></div>`;
+}
+
+// spoofTesterDstPort is the port this server's tunnel packets go to on the
+// other server: the Iran side sends to the public port, the foreign side to
+// the recv port. TCP tests use it so they cross the same firewall rule.
+function spoofTesterDstPort() {
+  const d = _spoof || {};
+  return (d.role === 'local' ? d.listen_port : d.recv_port) || 80;
 }
 
 function spoofTesterWire() {
@@ -5536,7 +5654,7 @@ async function spoofTesterStart() {
   const sources = (($('stSources') || {}).value || '').split('\n').map(s => s.trim()).filter(Boolean);
   const req = {
     action: 'start', mode: ($('stMode') || {}).value, protocol: ($('stProto') || {}).value,
-    sources, dst_ip: ($('stDst') || {}).value || '',
+    sources, dst_ip: ($('stDst') || {}).value || '', dst_port: num('stDstPort', 0),
     timeout: num('stTimeout', 30), packet_count: num('stCount', 10), max_loss: num('stLoss', 20),
   };
   try {
@@ -5584,10 +5702,14 @@ function renderSpoofTester(t) {
   const rows = passed.map(p => `<tr><td class="u-mono" data-no-i18n>${esc(p.ip)}</td><td class="u-mono" data-no-i18n>${p.received}/${p.sent}</td><td class="u-mono" data-no-i18n>${p.loss_pct.toFixed(1)}%</td></tr>`).join('');
   box.innerHTML = `<div class="sw-result ok">${esc(docTpl('{0} usable spoof IPs found.', [String(passed.length)]))}</div>
     <table class="sp-ttable"><thead><tr><th>${esc(tr('', 'IP'))}</th><th>${esc(tr('', 'Received'))}</th><th>${esc(tr('', 'Loss'))}</th></tr></thead><tbody>${rows}</tbody></table>
-    <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="stUse">${esc(tr('', 'Use these as my spoof IPs'))}</button>`;
+    <p class="qs-hint">${esc(tr('', 'These are the IPs the sender server can forge. Paste them into the spoof source IPs on the sender server, not on this one.'))}</p>
+    <textarea class="hashem-input u-ltr u-mono sp-ips" rows="3" readonly data-no-i18n>${esc(passed.map(p => p.ip).join('\n'))}</textarea>
+    <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="stUse">${esc(tr('', 'Copy for the sender server'))}</button>`;
   if ($('stUse')) $('stUse').onclick = () => {
-    const el = $('spIPs');
-    if (el) { el.value = passed.map(p => p.ip).join('\n'); toastOk(tr('', 'Spoof IPs filled'), tr('', 'Save or bring the tunnel up to apply.')); }
+    const list = passed.map(p => p.ip).join('\n');
+    (navigator.clipboard ? navigator.clipboard.writeText(list) : Promise.reject())
+      .then(() => toastOk(tr('', 'Spoof IPs copied'), tr('', 'Paste them into the Spoof tab on the sender server.')))
+      .catch(() => toastWarn(tr('', 'Copy failed'), tr('', 'Select the list above and copy it by hand.')));
   };
 }
 
@@ -6100,6 +6222,8 @@ function xrAdvHTML(w) {
       <h5>${esc(tr('', 'Connection'))}</h5>
       <div class="xr-fields">
         ${inp('xaMux', 'Mux concurrency (0 = off)', p.mux, '0', 'Not with Vision or in reverse mode.')}
+        ${inp('xaPre', 'Pre-connect (connections kept ready)', p.preconnect, '4', 'Direct mode over raw, WS or HTTPUpgrade: the dialing end keeps connections open ahead of time, so a new user connection skips the handshake (lower ping). -1 = off. Needs this version on both servers.')}
+        ${inp('xaRev', 'Reverse connections', p.rev_conns, '4', 'Reverse mode: how many connections the foreign server keeps open to Iran (1-16). Users are spread over them, so one download does not slow the others.')}
         ${sel('xaCong', 'TCP congestion', o.congestions, p.congestion, 'System default')}
         ${inp('xaMark', 'Socket mark', p.mark, '0')}
         <div class="xr-field"><span class="qs-label">${esc(tr('', 'Sockets'))}</span>${chk('xaTFO', 'TCP Fast Open', p.tfo)}${chk('xaMPTCP', 'Multipath TCP', p.mptcp)}</div>
@@ -6151,7 +6275,7 @@ function xrWizRead() {
     p.noise = !t ? null : { type: t, length: v('xaNzLen') || (t === 'rand' ? '10-60' : ''), packet: v('xaNzPkt') || '',
       delay: v('xaNzDelay') || '', count: n('xaNzCount') || 1 };
   }
-  p.mux = n('xaMux'); p.congestion = v('xaCong'); p.mark = n('xaMark'); p.tfo = !!c('xaTFO'); p.mptcp = !!c('xaMPTCP');
+  p.mux = n('xaMux'); if ($('xaPre')) p.preconnect = n('xaPre'); if ($('xaRev')) p.rev_conns = n('xaRev'); p.congestion = v('xaCong'); p.mark = n('xaMark'); p.tfo = !!c('xaTFO'); p.mptcp = !!c('xaMPTCP');
   if ($('xaListen')) w.listen = v('xaListen');
   if ($('xaFrPk')) {
     const pk = v('xaFrPk');
@@ -6523,7 +6647,7 @@ async function loadWatchdog() {
         });
         bList.querySelectorAll('[data-dl]').forEach(btn => {
           btn.onclick = () => {
-            window.location.href = at('/api/watchdog/backup-download?f=' + encodeURIComponent(btn.dataset.dl));
+            download('/api/watchdog/backup-download?f=' + encodeURIComponent(btn.dataset.dl));
           };
         });
         bList.querySelectorAll('[data-rst]').forEach(btn => {
@@ -7608,7 +7732,16 @@ if ($('docCopyBtn')) $('docCopyBtn').onclick = () => { if (doctorData) copyTextS
 
 // boot: if already logged in, status works; else show login
 (async () => {
-  try { await api('/api/status'); showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh(); }
+  if (NV) { // a node's view: the central's own login, HTTPS, 2FA and terminal are not this page's
+    try {
+      await api('/api/status'); showApp(); refresh(); loadSetupDefaults(); loadVersion(); alertsRefresh(); histRefresh(); advisorRefresh();
+      const tb = new URLSearchParams(location.search).get('tab'); // opened from the central on a page (its customers list)
+      if (tb === 'customers') goTab(tb); // the one page the central opens a node on
+    }
+    catch(e) { showApp(); toastErr(tr('', 'Failed'), e.message); }
+    return;
+  }
+  try { await api('/api/status'); showApp(); refresh(); loadSetupDefaults(); loadVersion(); termFlagRefresh(); tlsRefresh(); twofaRefresh(); idleRefresh(); termAllowRefresh(); alertsRefresh(); metricsRefresh(); histRefresh(); advisorRefresh(); migrateBannerLoad(); }
   catch(e) { showLogin(); }
 })();
 // light pollers: skip when the tab is in the background (background tabs
@@ -8301,7 +8434,8 @@ function openEditPeer(peerId) {
     engine = p.engine || (p.frps_svc && p.frps_svc.includes('backhaul') ? (p.no_gre ? 'backhaul' : 'gre-backhaul') : 'frp');
     transport = p.transport || 'tcpmux';
     if (p.raw_ports) {
-      ports = p.raw_ports.split(',').map(s => s.trim()).filter(Boolean);
+      // a list from the panel, a string from older hashem.sh
+      ports = String(p.raw_ports).split(/[\s,]+/).filter(Boolean);
     } else {
       ports = p.ports ? [...p.ports] : [];
     }
@@ -9460,7 +9594,7 @@ _licenseData = null;
 async function loadLicense() {
   try {
     let d = await api('/api/license');
-    if (!d || !d.is_valid) {
+    if ((!d || !d.is_valid) && !NV) { // a node's view never sends this browser's saved key
       let saved = null;
       try { saved = localStorage.getItem('hashem_bagher_license'); } catch (e) {}
       if (saved && saved.trim()) {
@@ -11184,3 +11318,1107 @@ if (sModalEl) {
     if (e.target === sModalEl) closeSentinelModal();
   };
 }
+
+// ---- Customers: tunnels sold to customers (customers.go) ----
+// Each customer has a plan (end date, volume, speed) and one or more foreign
+// servers; each foreign server gets a kit the customer runs there. The cards
+// redraw every 10 s while the tab is open.
+let _cust = null, custTimer = null, _custWiz = null;
+const custState = c => !c.cut ? ['ok', tr('', 'Active')]
+  : c.cut === 'expired' ? ['err', tr('', 'Plan ended')]
+  : c.cut === 'quota' ? ['err', tr('', 'Volume used up')]
+  : ['warn', tr('', 'Paused')];
+const custStatusURL = c => location.origin + '/_hs/' + c.token;
+const custDate = sec => new Date(sec * 1000).toLocaleDateString(currentLang === 'fa' ? 'fa-IR' : undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+// the engines a sold link can run and their transports (as customers.go)
+const CUST_ENGINES = {
+  frp: { label: 'FRP', tr: ['tcp', 'websocket', 'kcp', 'quic'] },
+  backhaul: { label: 'Backhaul', tr: ['tcp', 'tcpmux', 'ws', 'wsmux', 'wss', 'wssmux'] },
+  xray: { label: 'Xray reverse', tr: ['reality', 'xhttp', 'grpc', 'kcp'] },
+  'xray-direct': { label: 'Xray direct', tr: ['reality', 'xhttp', 'grpc', 'kcp'], dials: true },
+  bagher: { label: 'Bagher (SSH)', tr: ['ssh'], dials: true },
+};
+const CUST_TR_LABEL = { tcp: 'TCP', websocket: 'WebSocket', kcp: 'KCP', quic: 'QUIC', tcpmux: 'TCP mux', ws: 'WS', wsmux: 'WS mux',
+  wss: 'WSS', wssmux: 'WSS mux', reality: 'Reality', xhttp: 'XHTTP + Reality', grpc: 'gRPC + Reality' };
+function custTrLabel(engine, t) { return (engine === 'xray' || engine === 'xray-direct') && t === 'kcp' ? 'mKCP (UDP)' : t === 'ssh' ? 'SSH' : (CUST_TR_LABEL[t] || t); }
+function custEngLabel(l) { const e = CUST_ENGINES[l.engine || 'frp']; return (e ? tr('', e.label) : l.engine) + ' · ' + custTrLabel(l.engine || 'frp', l.transport) + (l.gre ? ' · GRE' : ''); }
+// GRE wraps the links the foreign server dials in (as customers.go)
+const custGreOK = eng => eng === 'frp' || eng === 'backhaul';
+function custLinkDot(l, c) {
+  if (l.await_reply) return ['var(--wr)', tr('', 'Waiting for the customer\'s reply code')];
+  if (c.cut || !l.active) return ['var(--mu)', tr('', 'Stopped')];
+  // a UDP control channel (KCP, QUIC, mKCP) shows no session to watch
+  if (l.udp_ctrl && !l.linked) return ['var(--ok)', tr('', 'Running')];
+  return l.linked ? ['var(--ok)', tr('', 'Connected')] : ['var(--wr)', tr('', 'Waiting for the foreign server')];
+}
+// custMap: this server on the left, a wire per foreign server with its state.
+function custMap(c) {
+  const links = c.links || [];
+  const rows = links.map(l => {
+    const [col, why] = custLinkDot(l, c);
+    return `<div class="cs-link">
+      <span class="cs-wire" style="--c:${col}" title="${esc(why)}" aria-hidden="true"></span>
+      <div class="cs-node"><span class="tv-ico far">${ICO_GLOBE}</span><b>${esc(l.name || tr('', 'Foreign server') + ' ' + l.id)}</b>
+        <small class="lm-num">${esc((l.ports || []).join(', '))}${l.udp ? ' · TCP+UDP' : ''} · ${esc(custEngLabel(l))}</small>
+        <span class="cs-state" style="--c:${col}">${esc(why)}</span></div>
+      <div class="cs-link-acts">
+        <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openCustKit(${c.id}, ${l.id})">${esc(tr('', 'Kit'))}</button>
+        ${l.engine === 'bagher' ? `<button type="button" class="hashem-btn ${l.await_reply ? 'hashem-btn-primary' : 'hashem-btn-ghost'} u-btn-30" onclick="openCustReply(${c.id}, ${l.id})">${esc(tr('', 'Reply code'))}</button>` : ''}
+        <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="openCustLink(${c.id}, ${l.id})" aria-label="${esc(tr('', 'Edit'))}">${esc(tr('', 'Edit'))}</button>
+        ${links.length > 1 ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="custLinkRemove(${c.id}, ${l.id})">${esc(tr('', 'Remove'))}</button>` : ''}
+      </div></div>`;
+  }).join('');
+  return `<div class="cs-map"><div class="cs-hub"><span class="tv-ico">${ICO_SRV}</span><span>${esc(tr('', 'This server'))}<small class="lm-num">${esc(c.address || (_cust && _cust.address) || '')}</small></span></div>
+    <div class="cs-links">${rows}</div></div>`;
+}
+function custRow(c) {
+  const [cls, label] = custState(c);
+  const used = c.used_rx + c.used_tx, q = c.quota_gb > 0 ? c.quota_gb * 1e9 : 0;
+  const pct = q ? Math.min(100, used / q * 100) : 0;
+  const meter = (p, k) => `<div class="lm-meter ${k}" aria-hidden="true"><i style="--p:${p.toFixed(1)}%"></i></div>`;
+  const dl = c.days_left;
+  const dpct = dl == null ? 0 : c.days > 0 ? Math.max(0, Math.min(100, dl / c.days * 100)) : 100;
+  const days = `<div class="lm-box"><div class="lm-k"><span>${esc(tr('', 'Days left'))}</span><b class="lm-num">${dl == null ? '∞' : esc(String(dl))}</b></div>` +
+    meter(dpct, dl == null ? 'inf' : dl <= 3 ? 'err' : dl <= 7 ? 'warn' : '') +
+    `<div class="lm-sub">${dl == null ? esc(tr('', 'No end date')) : esc(tr('', 'Until') + ' ' + custDate(c.expires_at))}</div></div>`;
+  const rate = c.rate_mbit > 0 ? c.rate_mbit : 0;
+  const live = Math.max(c.speed_rx, c.speed_tx) * 8 / 1e6, lp = rate ? Math.min(100, live / rate * 100) : 0;
+  const speed = `<div class="lm-box"><div class="lm-k"><span>${esc(tr('', 'Speed'))}</span><b class="lm-num">${rate ? esc(rate + ' Mbit/s') : esc(tr('', 'Unlimited'))}</b></div>` +
+    meter(lp, rate ? (lp >= 95 ? 'warn' : '') : 'inf') +
+    `<div class="lm-sub"><span class="lm-num">↓ ${esc(fmtMbit(c.speed_tx))} · ↑ ${esc(fmtMbit(c.speed_rx))}</span></div></div>`;
+  const vol = `<div class="lm-box"><div class="lm-k"><span>${esc(tr('', 'Volume'))}</span><b class="lm-num">${q ? esc(fmtGB(used) + ' / ' + fmtGB(q)) : esc(fmtGB(used))}</b></div>` +
+    meter(pct, q ? (c.cut === 'quota' || pct >= 100 ? 'err' : pct >= 90 ? 'warn' : '') : 'inf') +
+    `<div class="lm-sub">${esc((q ? '' : tr('', 'No volume limit') + ' · ') + tr('', 'counted since') + ' ' + limDate(c.period_start))}</div></div>`;
+  const acts = [
+    `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openCustRenew(${c.id})">${esc(tr('', 'Renew'))}</button>`,
+    c.cut === 'manual' ? `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="custAction('resume', ${c.id})">${esc(tr('', 'Resume'))}</button>`
+      : !c.cut ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="custAction('cut', ${c.id})">${esc(tr('', 'Pause'))}</button>` : '',
+    used > 0 ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="custAction('reset', ${c.id})">${esc(tr('', 'Reset usage'))}</button>` : '',
+    `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="copyTextSafe(${jsArg(custStatusURL(c))}, ${jsArg(tr('', 'Status page link copied'))}, ${jsArg(c.name)})">${esc(tr('', 'Status page'))}</button>`,
+    `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="openCustLink(${c.id}, 0)">${esc(tr('', 'Add foreign server'))}</button>`,
+    `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="openCustEdit(${c.id})">${esc(tr('', 'Edit plan'))}</button>`,
+    `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="openCustHistory(${c.id})">${esc(tr('', 'History'))}</button>`,
+    `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 u-c-er" onclick="custAction('remove', ${c.id})">${esc(tr('', 'Remove'))}</button>`,
+  ].filter(Boolean);
+  return `<div class="lm-row cs-row${c.cut ? ' cut' : cls === 'warn' || (q && pct >= 90) || (dl != null && dl <= 3) ? ' warn' : ''}" id="cust-${c.id}">
+    <div class="lm-head"><div class="lm-name"><b>${esc(c.name)}</b>${c.note ? '<small>' + esc(c.note) + '</small>' : ''}</div>
+      <span class="badge ${cls}">${esc(label)}</span></div>
+    ${custMap(c)}
+    <div class="lm-grid">${days}${speed}${vol}</div>
+    <div class="lm-acts">${acts.join('')}</div></div>`;
+}
+function renderCustomers(d) {
+  _cust = d;
+  if ($('custPro')) $('custPro').classList.toggle('hidden', isProLicensed('customers'));
+  const err = $('custErr');
+  if (err) {
+    // an engine some link runs that this server does not have
+    const used = new Set((d.customers || []).flatMap(c => (c.links || []).map(l => l.engine || 'frp')));
+    const missing = [...used].filter(e => d.engines && d.engines[e] === false).map(e => CUST_ENGINES[e] ? CUST_ENGINES[e].label : e);
+    const msg = d.error ? tr('', 'Could not apply everything:') + ' ' + d.error
+      : missing.length ? tr('', '{e} is not installed on this server: set up a tunnel of that engine once (Setup tab), then the customers\' tunnels on it start.').replace('{e}', missing.join(', ')) : '';
+    err.textContent = msg; err.classList.toggle('hidden', !msg);
+  }
+  const list = d.customers || [];
+  const active = list.filter(c => !c.cut).length, cut = list.length - active;
+  const soon = list.filter(c => !c.cut && c.days_left != null && c.days_left <= 7).length;
+  const billed = list.reduce((s, c) => s + c.used_rx + c.used_tx, 0);
+  const sum = $('custSummary');
+  if (sum) sum.innerHTML = list.length ? [
+    [String(list.length), tr('', 'Customers')], [String(active), tr('', 'Active')], [String(cut), tr('', 'Cut or paused')],
+    [String(soon), tr('', 'Ending within 7 days')], [fmtGB(billed), tr('', 'Used this period')],
+  ].map(([v, k]) => `<div><b class="lm-num">${esc(v)}</b><span>${esc(k)}</span></div>`).join('') : '';
+  const box = $('custList');
+  if (!box) return;
+  box.innerHTML = list.length ? '<div class="lm-list">' + list.map(custRow).join('') + '</div>'
+    : `<div class="cs-empty"><b>${esc(tr('', 'No customers yet'))}</b><p class="qs-hint">${esc(tr('', 'Sell a tunnel: the customer brings one or more foreign servers, you set the plan, and they run one command on each server. Their users connect to this server.'))}</p>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="openCustWizard()">${esc(tr('', 'New customer'))}</button></div>`;
+}
+async function loadCustomers() {
+  try { renderCustomers(await api('/api/customers')); } catch (e) { reportErr('customers', e); }
+}
+(function initCustomers() {
+  if (!custTimer) custTimer = setInterval(() => {
+    const t = $('tab-customers');
+    if (t && !t.hidden && !document.hidden && !_custWiz) loadCustomers();
+  }, 10000);
+})();
+const custFind = id => ((_cust && _cust.customers) || []).find(c => c.id === id);
+
+// ---- one modal for the small forms (renew, plan, foreign server, kit) ----
+function custModal(title, html, yes, onYes) {
+  const ov = $('custModal');
+  $('custModalTitle').textContent = title;
+  $('custModalBody').innerHTML = html + '<div class="xr-err hidden" id="custModalErr" role="alert"></div>';
+  const y = $('custModalYes');
+  y.textContent = yes || tr('', 'Save');
+  y.classList.toggle('hidden', !onYes);
+  $('custModalNo').textContent = onYes ? tr('', 'Cancel') : tr('', 'Close');
+  const close = () => modalHide(ov);
+  y.onclick = async () => {
+    const e = $('custModalErr');
+    e.classList.add('hidden');
+    y.disabled = true;
+    try { if (await onYes() !== false) close(); } catch (er) { e.textContent = er.message; e.classList.remove('hidden'); } finally { y.disabled = false; }
+  };
+  $('custModalNo').onclick = close;
+  $('custModalX').onclick = close;
+  modalShow(ov, close);
+  const f = ov.querySelector('input, textarea, select');
+  if (f) f.focus();
+}
+const custNum = id => { const v = parseFloat(($(id) || {}).value); return isFinite(v) && v > 0 ? v : 0; };
+function custChips(forId, vals) {
+  return `<div class="lm-chips" data-for="${forId}">${vals.map(([v, l]) => `<button type="button" onclick="$('${forId}').value='${v}'">${esc(l)}</button>`).join('')}</div>`;
+}
+// custTplPicker: a select that fills the plan fields of prefix p from a
+// saved plan (none when there are no templates).
+function custTplPicker(p, daysOnly) {
+  const t = (_cust && _cust.templates) || [];
+  if (!t.length) return '';
+  return `<div class="xr-field"><label class="qs-label" for="${p}Tpl">${esc(tr('', 'Plan template'))}</label>
+    <select class="hashem-input" id="${p}Tpl" onchange="custTplApply('${p}', this.value, ${daysOnly ? 'true' : 'false'})"><option value="">—</option>
+    ${t.map(x => `<option value="${x.id}">${esc(x.name)} · ${esc(custPlanShort(x))}</option>`).join('')}</select></div>`;
+}
+function custPlanShort(x) {
+  return (x.days > 0 ? x.days + ' ' + tr('', 'days') : tr('', 'No end')) + ' · ' + (x.quota_gb > 0 ? x.quota_gb + ' GB' : tr('', 'Unlimited')) +
+    ' · ' + (x.rate_mbit > 0 ? x.rate_mbit + ' Mbit/s' : tr('', 'Unlimited'));
+}
+function custTplApply(p, id, daysOnly) {
+  const x = ((_cust && _cust.templates) || []).find(t => String(t.id) === String(id));
+  if (!x) return;
+  if ($(p + 'Days')) $(p + 'Days').value = x.days;
+  if (daysOnly) return;
+  if ($(p + 'Quota')) $(p + 'Quota').value = x.quota_gb > 0 ? x.quota_gb : '';
+  if ($(p + 'Rate')) $(p + 'Rate').value = x.rate_mbit > 0 ? x.rate_mbit : '';
+}
+const custPlanFields = (c, p) => `${custTplPicker(p, false)}<div class="xr-fields">
+    <div class="xr-field"><label class="qs-label" for="${p}Days">${esc(tr('', 'Days'))}</label>
+      <input class="hashem-input" id="${p}Days" type="number" min="0" max="3660" step="1" inputmode="numeric" value="${c.days ?? 30}">
+      ${custChips(p + 'Days', [['30', '30'], ['60', '60'], ['90', '90'], ['0', tr('', 'No end')]])}</div>
+    <div class="xr-field"><label class="qs-label" for="${p}Quota">${esc(tr('', 'Volume (GB)'))}</label>
+      <input class="hashem-input" id="${p}Quota" type="number" min="0" step="any" inputmode="decimal" placeholder="${esc(tr('', 'Unlimited'))}" value="${c.quota_gb > 0 ? c.quota_gb : ''}">
+      ${custChips(p + 'Quota', [['50', '50'], ['100', '100'], ['200', '200'], ['', tr('', 'Unlimited')]])}</div>
+    <div class="xr-field"><label class="qs-label" for="${p}Rate">${esc(tr('', 'Speed (Mbit/s)'))}</label>
+      <input class="hashem-input" id="${p}Rate" type="number" min="0" step="any" inputmode="decimal" placeholder="${esc(tr('', 'Unlimited'))}" value="${c.rate_mbit > 0 ? c.rate_mbit : ''}">
+      ${custChips(p + 'Rate', [['20', '20'], ['50', '50'], ['100', '100'], ['', tr('', 'Unlimited')]])}</div>
+  </div>
+  <div class="qs-hint">${esc(tr('', 'One plan for all of the customer\'s foreign servers: the volume is their sum, the speed is shared. Only users\' traffic is counted.'))}</div>`;
+
+function openCustEdit(id) {
+  if (!isProLicensed('customers')) { openBagherLicModal('customers'); return; }
+  const c = custFind(id);
+  if (!c) return;
+  const html = `<div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="cfName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="cfName" maxlength="60" value="${esc(c.name)}"></div>
+      <div class="xr-field"><label class="qs-label" for="cfAddr">${esc(tr('', 'Address in the kit'))}</label><input class="hashem-input lm-num" id="cfAddr" maxlength="253" placeholder="${esc((_cust && _cust.address) || '')}" value="${esc(c.address || '')}"></div>
+    </div>
+    <div class="xr-field"><label class="qs-label" for="cfNote">${esc(tr('', 'Note'))}</label><input class="hashem-input" id="cfNote" maxlength="500" value="${esc(c.note || '')}"></div>
+    <div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="cfQuota">${esc(tr('', 'Volume (GB)'))}</label><input class="hashem-input" id="cfQuota" type="number" min="0" step="any" placeholder="${esc(tr('', 'Unlimited'))}" value="${c.quota_gb > 0 ? c.quota_gb : ''}"></div>
+      <div class="xr-field"><label class="qs-label" for="cfRate">${esc(tr('', 'Speed (Mbit/s)'))}</label><input class="hashem-input" id="cfRate" type="number" min="0" step="any" placeholder="${esc(tr('', 'Unlimited'))}" value="${c.rate_mbit > 0 ? c.rate_mbit : ''}"></div>
+    </div>
+    <div class="qs-hint">${esc(tr('', 'The end date changes with Renew. A bigger volume reconnects a customer cut for volume. A new address needs new kits on the foreign servers.'))}</div>`;
+  custModal(tr('', 'Edit plan') + ' — ' + c.name, html, tr('', 'Save'), async () => {
+    renderCustomers(await api('/api/customers', { action: 'update', id, name: $('cfName').value, note: $('cfNote').value,
+      address: $('cfAddr').value.trim(), quota_gb: custNum('cfQuota'), rate_mbit: custNum('cfRate') }));
+    toastOk(tr('', 'Plan saved'), c.name);
+  });
+}
+function openCustRenew(id) {
+  if (!isProLicensed('customers')) { openBagherLicModal('customers'); return; }
+  const c = custFind(id);
+  if (!c) return;
+  const from = c.expires_at > Date.now() / 1000 ? tr('', 'The new days are added after the current end date.') : tr('', 'The plan starts again from today.');
+  const html = `${custTplPicker('cf', true)}<div class="xr-field"><label class="qs-label" for="cfDays">${esc(tr('', 'Days'))}</label>
+      <input class="hashem-input" id="cfDays" type="number" min="1" max="3660" step="1" inputmode="numeric" value="${c.days || 30}">
+      ${custChips('cfDays', [['30', '30'], ['60', '60'], ['90', '90'], ['365', '365']])}</div>
+    <label class="xr-check"><input type="checkbox" id="cfReset" checked> ${esc(tr('', 'Start a new period: used volume back to 0'))}</label>
+    <div class="qs-hint">${esc(from)}</div>`;
+  custModal(tr('', 'Renew') + ' — ' + c.name, html, tr('', 'Renew'), async () => {
+    const days = parseInt($('cfDays').value, 10);
+    if (!(days >= 1 && days <= 3660)) throw new Error(tr('', 'Days: 1 to 3660'));
+    renderCustomers(await api('/api/customers', { action: 'renew', id, days, reset_usage: $('cfReset').checked }));
+    toastOk(tr('', 'Renewed'), c.name);
+  });
+}
+// the customer's history (newest first) and the periods that ended
+const CUST_HIST_KIND = { created: 'Created', plan: 'Plan', renew: 'Renewed', cut: 'Cut', resume: 'Resumed', reset: 'Usage reset', reminder: 'Reminder', link: 'Foreign server' };
+async function openCustHistory(id) {
+  const c = custFind(id);
+  if (!c) return;
+  let d;
+  try { d = await api('/api/customers/history?id=' + id); } catch (e) { toastErr(e.message); return; }
+  const h = (d.history || []).slice().reverse();
+  const rows = h.length ? h.map(e => `<tr><td class="lm-num">${esc(custDate(e.at))}</td><td>${esc(tr('', CUST_HIST_KIND[e.kind] || e.kind))}</td><td>${esc(e.text)}</td></tr>`).join('')
+    : `<tr><td colspan="3">${esc(tr('', 'Nothing yet'))}</td></tr>`;
+  const per = (d.periods || []).slice().reverse();
+  const ptab = per.length ? `<h4 class="u-mt-16">${esc(tr('', 'Ended periods'))}</h4><div class="table-scroll"><table class="data-table"><thead><tr><th>${esc(tr('', 'From'))}</th><th>${esc(tr('', 'To'))}</th><th>${esc(tr('', 'Used'))}</th></tr></thead><tbody>` +
+    per.map(x => `<tr><td class="lm-num">${esc(custDate(x.start))}</td><td class="lm-num">${esc(custDate(x.end))}</td><td class="lm-num">${esc(fmtGB(x.used) + (x.quota_gb > 0 ? ' / ' + fmtGB(x.quota_gb * 1e9) : ''))}</td></tr>`).join('') + '</tbody></table></div>' : '';
+  custModal(tr('', 'History') + ' — ' + c.name, `<div class="table-scroll"><table class="data-table"><thead><tr><th>${esc(tr('', 'When'))}</th><th>${esc(tr('', 'What'))}</th><th>${esc(tr('', 'Details'))}</th></tr></thead><tbody>${rows}</tbody></table></div>${ptab}
+    <div class="qs-hint">${esc(tr('', 'The last 100 events and 24 periods are kept.'))}</div>`, '', null);
+}
+// saved plans: the list (remove) and a form for a new one
+function openCustTemplates(keepName) {
+  if (!isProLicensed('customers')) { openBagherLicModal('customers'); return; }
+  const t = (_cust && _cust.templates) || [];
+  const list = t.length ? '<div class="lm-list">' + t.map(x => `<div class="cs-tpl"><b>${esc(x.name)}</b> <span class="lm-num">${esc(custPlanShort(x))}</span>
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 u-c-er" onclick="custTplRemove(${x.id})">${esc(tr('', 'Remove'))}</button></div>`).join('') + '</div>'
+    : `<div class="qs-hint">${esc(tr('', 'No templates yet: save the plans you sell often.'))}</div>`;
+  const html = list + `<h4 class="u-mt-16">${esc(tr('', 'New template'))}</h4>
+    <div class="xr-field"><label class="qs-label" for="ctName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="ctName" maxlength="40" placeholder="${esc(tr('', 'e.g. Gold, 30 days'))}" value="${esc(keepName || '')}"></div>
+    <div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="ctDays">${esc(tr('', 'Days'))}</label>
+        <input class="hashem-input" id="ctDays" type="number" min="1" max="3660" step="1" inputmode="numeric" value="30">
+        ${custChips('ctDays', [['30', '30'], ['60', '60'], ['90', '90'], ['365', '365']])}</div>
+      <div class="xr-field"><label class="qs-label" for="ctQuota">${esc(tr('', 'Volume (GB)'))}</label>
+        <input class="hashem-input" id="ctQuota" type="number" min="0" step="any" inputmode="decimal" placeholder="${esc(tr('', 'Unlimited'))}">
+        ${custChips('ctQuota', [['50', '50'], ['100', '100'], ['200', '200'], ['', tr('', 'Unlimited')]])}</div>
+      <div class="xr-field"><label class="qs-label" for="ctRate">${esc(tr('', 'Speed (Mbit/s)'))}</label>
+        <input class="hashem-input" id="ctRate" type="number" min="0" step="any" inputmode="decimal" placeholder="${esc(tr('', 'Unlimited'))}">
+        ${custChips('ctRate', [['20', '20'], ['50', '50'], ['100', '100'], ['', tr('', 'Unlimited')]])}</div>
+    </div>`;
+  custModal(tr('', 'Plan templates'), html, tr('', 'Save template'), async () => {
+    const days = parseInt($('ctDays').value, 10);
+    if (!(days >= 1 && days <= 3660)) throw new Error(tr('', 'Days: 1 to 3660'));
+    renderCustomers(await api('/api/customers', { action: 'template-save', name: $('ctName').value.trim(), days, quota_gb: custNum('ctQuota'), rate_mbit: custNum('ctRate') }));
+    toastOk(tr('', 'Template saved'), $('ctName').value.trim());
+    setTimeout(openCustTemplates, 50);
+  });
+}
+async function custTplRemove(id) {
+  try {
+    const keep = $('ctName') ? $('ctName').value : '';
+    renderCustomers(await api('/api/customers', { action: 'template-remove', template_id: id }));
+    openCustTemplates(keep);
+  } catch (e) { toastErr(e.message); }
+}
+// renew several customers at once (all or none)
+function openCustBulkRenew() {
+  if (!isProLicensed('customers')) { openBagherLicModal('customers'); return; }
+  const list = (_cust && _cust.customers) || [];
+  if (!list.length) return;
+  const rows = list.map(c => `<label class="xr-check"><input type="checkbox" class="cb-bulk" value="${c.id}"${c.cut === 'expired' || (c.days_left != null && c.days_left <= 7) ? ' checked' : ''}>
+      ${esc(c.name)} <small class="lm-num">${esc(c.days_left == null ? tr('', 'No end date') : tr('', 'Days left') + ': ' + c.days_left)}${c.cut ? ' · ' + esc(tr('', 'cut')) : ''}</small></label>`).join('');
+  const html = `<div class="qs-hint">${esc(tr('', 'Customers ending within 7 days or ended are ticked. A customer with no end date gets one when renewed.'))}</div><div class="cs-bulk">${rows}</div>
+    ${custTplPicker('cb', true)}<div class="xr-field"><label class="qs-label" for="cbDays">${esc(tr('', 'Days'))}</label>
+      <input class="hashem-input" id="cbDays" type="number" min="1" max="3660" step="1" inputmode="numeric" value="30">
+      ${custChips('cbDays', [['30', '30'], ['60', '60'], ['90', '90'], ['365', '365']])}</div>
+    <label class="xr-check"><input type="checkbox" id="cbReset" checked> ${esc(tr('', 'Start a new period: used volume back to 0'))}</label>`;
+  custModal(tr('', 'Renew several'), html, tr('', 'Renew'), async () => {
+    const ids = [...document.querySelectorAll('.cb-bulk:checked')].map(x => parseInt(x.value, 10));
+    if (!ids.length) throw new Error(tr('', 'Choose at least one customer'));
+    const days = parseInt($('cbDays').value, 10);
+    if (!(days >= 1 && days <= 3660)) throw new Error(tr('', 'Days: 1 to 3660'));
+    renderCustomers(await api('/api/customers', { action: 'bulk-renew', ids, days, reset_usage: $('cbReset').checked }));
+    toastOk(tr('', 'Renewed'), tr('', '{n} customers').replace('{n}', ids.length));
+  });
+}
+function custExport() { download('/api/customers/export.csv'); }
+
+// a foreign server: lid 0 adds one
+function openCustLink(id, lid) {
+  if (!isProLicensed('customers')) { openBagherLicModal('customers'); return; }
+  const c = custFind(id);
+  if (!c) return;
+  const l = (c.links || []).find(x => x.id === lid) || { name: '', ports: [], udp: false, engine: 'frp', transport: 'tcp', ctrl_port: 0 };
+  const hint = l.engine === 'bagher'
+    ? tr('', 'New ports or a new control port need the kit again on the foreign server; a new address needs a new reply code.')
+    : l.engine === 'xray' || l.engine === 'xray-direct'
+    ? tr('', 'Any change to an Xray link (ports, SNI, transport, control port) needs the new kit on the foreign server.')
+    : tr('', 'A new control port, engine or transport needs the kit again on the foreign server; new ports only need it if the server serves them.');
+  const html = custLinkFields('cl', l) + (lid ? `<div class="qs-hint">${esc(hint)}</div>` : '');
+  custModal((lid ? tr('', 'Edit foreign server') : tr('', 'Add foreign server')) + ' — ' + c.name, html, lid ? tr('', 'Save') : tr('', 'Add'), async () => {
+    const body = { action: lid ? 'link-update' : 'link-add', id, link_id: lid, link: custLinkRead('cl') };
+    const d = await api('/api/customers', body);
+    renderCustomers(d);
+    toastOk(lid ? tr('', 'Foreign server saved') : tr('', 'Foreign server added'), c.name);
+    if (!lid) {
+      const nc = (d.customers || []).find(x => x.id === id);
+      const nl = nc && nc.links[nc.links.length - 1];
+      if (nl) setTimeout(() => openCustKit(id, nl.id), 50);
+    }
+  });
+}
+function custTrOptions(engine, cur) {
+  const list = (CUST_ENGINES[engine] || CUST_ENGINES.frp).tr;
+  return list.map(t => `<option value="${t}"${cur === t ? ' selected' : ''}>${esc(custTrLabel(engine, t))}</option>`).join('');
+}
+// custEngineSync: the transports of the chosen engine, the SNI for Xray's
+// Reality presets, and UDP where the transport cannot carry it.
+function custEngineSync(p, engineChanged) {
+  const eng = $(p + 'Eng').value, trSel = $(p + 'Tr');
+  if (engineChanged) trSel.innerHTML = custTrOptions(eng, '');
+  const t = trSel.value;
+  $(p + 'SniBox').classList.toggle('hidden', !((eng === 'xray' || eng === 'xray-direct') && t !== 'kcp'));
+  const greOK = custGreOK(eng), gre = $(p + 'Gre');
+  $(p + 'GreBox').classList.toggle('hidden', !greOK);
+  if (!greOK) gre.checked = false;
+  $(p + 'RemoteBox').classList.toggle('hidden', !((CUST_ENGINES[eng] || {}).dials || gre.checked));
+  $(p + 'RemoteHint').textContent = gre.checked ? tr('', 'The other end of the GRE tunnel: its public IPv4 address (or a domain that points to it).') : tr('', 'This server connects to it: its IPv4 address or a domain.');
+  $(p + 'CtrlLbl').textContent = eng === 'xray-direct' ? tr('', 'Port on the foreign server') : tr('', 'Control port');
+  const udp = $(p + 'Udp'), noUdp = eng === 'backhaul' && t !== 'tcp';
+  udp.disabled = noUdp;
+  if (noUdp) udp.checked = false;
+  $(p + 'UdpHint').classList.toggle('hidden', !noUdp);
+}
+function custLinkFields(p, l) {
+  const eng = l.engine || 'frp';
+  const esel = Object.keys(CUST_ENGINES).map(e => `<option value="${e}"${eng === e ? ' selected' : ''}>${esc(tr('', CUST_ENGINES[e].label))}</option>`).join('');
+  const noUdp = eng === 'backhaul' && l.transport !== 'tcp';
+  return `<div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="${p}Name">${esc(tr('', 'Foreign server name'))}</label><input class="hashem-input" id="${p}Name" maxlength="40" placeholder="${esc(tr('', 'e.g. Frankfurt'))}" value="${esc(l.name || '')}"></div>
+      <div class="xr-field"><label class="qs-label" for="${p}Ports">${esc(tr('', 'Users\' ports'))}</label><input class="hashem-input lm-num" id="${p}Ports" placeholder="443, 2083" value="${esc(Array.isArray(l.ports) ? l.ports.join(', ') : (l.ports || ''))}"></div>
+    </div>
+    <div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="${p}Eng">${esc(tr('', 'Engine'))}</label><select class="hashem-input" id="${p}Eng" onchange="custEngineSync('${p}', true)">${esel}</select></div>
+      <div class="xr-field"><label class="qs-label" for="${p}Tr">${esc(tr('', 'Transport'))}</label><select class="hashem-input" id="${p}Tr" onchange="custEngineSync('${p}', false)">${custTrOptions(eng, l.transport)}</select></div>
+    </div>
+    <div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="${p}Ctrl" id="${p}CtrlLbl">${esc(eng === 'xray-direct' ? tr('', 'Port on the foreign server') : tr('', 'Control port'))}</label><input class="hashem-input lm-num" id="${p}Ctrl" type="number" min="1" max="65535" placeholder="${esc(tr('', 'Automatic'))}" value="${l.ctrl_port || ''}"></div>
+      <div class="xr-field${(eng === 'xray' || eng === 'xray-direct') && l.transport !== 'kcp' ? '' : ' hidden'}" id="${p}SniBox"><label class="qs-label" for="${p}Sni">${esc(tr('', 'Reality SNI'))}</label><input class="hashem-input" id="${p}Sni" maxlength="253" placeholder="${esc(tr('', 'Automatic'))}" value="${esc(l.sni || '')}"></div>
+    </div>
+    <div class="${custGreOK(eng) ? '' : 'hidden'}" id="${p}GreBox">
+      <label class="xr-check"><input type="checkbox" id="${p}Gre"${l.gre ? ' checked' : ''} onchange="custEngineSync('${p}', false)"> ${esc(tr('', 'Inside a GRE tunnel'))}</label>
+      <div class="qs-hint">${esc(tr('', 'The foreign server reaches the control port through GRE; over GRE this server takes nothing else.'))}</div>
+    </div>
+    <div class="xr-fields${(CUST_ENGINES[eng] || {}).dials || l.gre ? '' : ' hidden'}" id="${p}RemoteBox">
+      <div class="xr-field"><label class="qs-label" for="${p}Remote">${esc(tr('', 'Foreign server address'))}</label><input class="hashem-input lm-num" id="${p}Remote" maxlength="253" placeholder="203.0.113.5" value="${esc(l.remote || '')}">
+      <div class="qs-hint" id="${p}RemoteHint">${esc(l.gre ? tr('', 'The other end of the GRE tunnel: its public IPv4 address (or a domain that points to it).') : tr('', 'This server connects to it: its IPv4 address or a domain.'))}</div></div>
+    </div>
+    <label class="xr-check"><input type="checkbox" id="${p}Udp"${l.udp && !noUdp ? ' checked' : ''}${noUdp ? ' disabled' : ''}> ${esc(tr('', 'UDP too (games, calls, QUIC)'))}</label>
+    <div class="qs-hint${noUdp ? '' : ' hidden'}" id="${p}UdpHint">${esc(tr('', 'Backhaul carries UDP on the TCP transport only.'))}</div>`;
+}
+const custLinkRead = p => ({ name: $(p + 'Name').value, ports: $(p + 'Ports').value, engine: $(p + 'Eng').value, transport: $(p + 'Tr').value,
+  sni: $(p + 'Sni').value.trim(), remote: $(p + 'Remote').value.trim(), ctrl_port: parseInt($(p + 'Ctrl').value, 10) || 0, udp: $(p + 'Udp').checked,
+  gre: custGreOK($(p + 'Eng').value) && $(p + 'Gre').checked });
+
+async function custLinkRemove(id, lid) {
+  const c = custFind(id);
+  if (!c) return;
+  const l = (c.links || []).find(x => x.id === lid) || {};
+  if (!await entConfirm(tr('', 'Remove this foreign server?'), tr('', 'Its tunnel stops now and its ports are freed. The customer\'s other foreign servers keep working.'), tr('', 'Remove'))) return;
+  try {
+    renderCustomers(await api('/api/customers', { action: 'link-remove', id, link_id: lid }));
+    toastOk(tr('', 'Foreign server removed'), l.name || c.name);
+  } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+async function custAction(action, id) {
+  const c = custFind(id);
+  if (!c) return;
+  if (action !== 'cut' && action !== 'remove' && !isProLicensed('customers')) { openBagherLicModal('customers'); return; }
+  const ask = {
+    cut: [tr('', 'Pause this customer?'), tr('', 'Their tunnels stop and their users are cut off until you resume.'), tr('', 'Pause')],
+    reset: [tr('', 'Reset the used volume?'), tr('', 'The customer\'s used volume goes back to 0. A customer cut for volume comes back now.'), tr('', 'Reset usage')],
+    remove: [tr('', 'Remove this customer?'), tr('', 'Their tunnels stop for good and their ports are freed. This cannot be undone.'), tr('', 'Remove')],
+  }[action];
+  if (ask && !await entConfirm(...ask)) return;
+  try {
+    renderCustomers(await api('/api/customers', { action, id }));
+    toastOk({ cut: tr('', 'Paused'), resume: tr('', 'Resumed'), reset: tr('', 'Usage reset'), remove: tr('', 'Customer removed') }[action], c.name);
+  } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+
+// a Bagher link: the customer's reply code (their sshd's port and host keys)
+function openCustReply(id, lid) {
+  if (!isProLicensed('customers')) { openBagherLicModal('customers'); return; }
+  const c = custFind(id);
+  const l = ((c && c.links) || []).find(x => x.id === lid) || {};
+  const html = `<p class="qs-hint">${esc(tr('', 'After the kit, the customer\'s installer prints a reply code (hsr1.…). Paste it here: this server then logs in to their server, trusting only the host keys in the code.'))}</p>
+    <textarea class="hashem-input lm-num" id="custReplyCode" rows="5" placeholder="hsr1.…" spellcheck="false"></textarea>`;
+  custModal(tr('', 'Reply code') + ' — ' + ((c && c.name) || '') + (l.name ? ' · ' + l.name : ''), html, tr('', 'Save'), async () => {
+    const d = await api('/api/customers', { action: 'link-reply', id, link_id: lid, reply: $('custReplyCode').value.trim() });
+    renderCustomers(d);
+    toastOk(tr('', 'Reply code saved'), (c && c.name) || '');
+  });
+}
+
+// ---- the kit: what the customer runs on a foreign server ----
+function custKitEngine(k) {
+  return { backhaul: 'Backhaul v0.7.2', xray: 'Xray-core v26.3.27', 'xray-direct': 'Xray-core v26.3.27' }[k.engine] || 'FRP v' + k.frp;
+}
+function custKitManualHint(k) {
+  if (k.engine === 'backhaul') return tr('', 'For a foreign server that already runs Backhaul v0.7.2: run backhaul -c with this file.');
+  if (k.engine === 'xray' || k.engine === 'xray-direct') return tr('', 'For a foreign server that already runs Xray-core v26.3.27: run xray run -c with this file.');
+  if (k.engine === 'bagher') return tr('', 'The steps in the file, then frpc v{v}. Without the installer, send the seller the reply code\'s parts by hand.').replace('{v}', k.frp);
+  return tr('', 'For a foreign server that already runs frpc v{v}: run frpc -c with this file.').replace('{v}', k.frp);
+}
+async function openCustKit(id, lid) {
+  const c = custFind(id);
+  let k;
+  try { k = await api('/api/customers/kit?id=' + id + '&link=' + lid); } catch (e) { toastErr(tr('', 'Failed'), e.message); return; }
+  const l = ((c && c.links) || []).find(x => x.id === lid) || {};
+  const block = (bid, title, text, hint) => `<div class="cs-srv"><div class="cs-srv-h"><b>${esc(title)}</b>
+      <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyTextSafe($('${bid}').textContent, ${jsArg(tr('', 'Copied'))}, ${jsArg(title)})">${esc(tr('', 'Copy'))}</button></div>
+      <pre class="cs-code" id="${bid}">${esc(text)}</pre>${hint ? `<div class="qs-hint">${esc(hint)}</div>` : ''}</div>`;
+  const html = `<p class="qs-hint">${esc(tr('', 'Send this to the customer. On the foreign server, as root, they run the command below; their service must listen on the same ports there. Users then connect to this server.'))}</p>
+    <div class="cs-facts"><span>${esc(tr('', 'Server'))} <b class="lm-num">${esc(k.address)}</b></span><span>${esc(tr('', 'Control port'))} <b class="lm-num">${esc(String(k.ctrl_port))} · ${esc(custEngLabel(k))}</b></span><span>${esc(tr('', 'Users\' ports'))} <b class="lm-num">${esc((k.ports || []).join(', '))}</b></span></div>
+    ${block('ckOne', tr('', 'One command (recommended)'), k.oneliner, tr('', 'It installs {e} from its official release (checksum verified) and keeps the tunnel running. Running it again updates the tunnel.').replace('{e}', custKitEngine(k)))}
+    ${block('ckToml', tr('', 'Manual setup: {f}').replace('{f}', k.manual_name || 'frpc.toml'), k.manual, custKitManualHint(k))}
+    ${c ? block('ckStatus', tr('', 'Status page for the customer'), custStatusURL(c), tr('', 'Days left, volume used and server state, in Persian and English. Anyone with the link can see it.')) : ''}`;
+  custModal(tr('', 'Kit') + ' — ' + ((c && c.name) || '') + (l.name ? ' · ' + l.name : ''), html, '', null);
+}
+
+// ---- new customer: plan, foreign servers, review ----
+function openCustWizard() {
+  if (!isProLicensed('customers')) { openBagherLicModal('customers'); return; }
+  _custWiz = { step: 1, name: '', note: '', address: '', days: 30, quota_gb: 0, rate_mbit: 0, links: [{ name: '', ports: [], udp: false, engine: 'frp', transport: 'tcp', ctrl_port: 0 }] };
+  custWizRender();
+  const w = $('custWizard');
+  if (w && w.scrollIntoView) w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function custWizClose() { _custWiz = null; $('custWizard').innerHTML = ''; loadCustomers(); }
+function custWizRender() {
+  const w = _custWiz;
+  const titles = ['Customer and plan', 'Foreign servers', 'Review'];
+  const nav = `<ol class="xr-wiz-nav">${titles.map((t, i) => `<li class="${i + 1 === w.step ? 'on' : i + 1 < w.step ? 'done' : ''}">${esc(tr('', t))}</li>`).join('')}</ol>`;
+  const body = [null, custWizStep1, custWizStep2, custWizStep3][w.step]();
+  $('custWizard').innerHTML = `<div class="xr-wiz">
+    <div class="xr-wiz-h"><b>${esc(tr('', 'New customer'))}</b>
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="custWizClose()">${esc(tr('', 'Cancel'))}</button></div>
+    ${nav}${body}<div class="xr-err hidden" id="custWizErr" role="alert"></div></div>`;
+  const f = $('custWizard').querySelector('input');
+  if (f && w.step < 3) f.focus();
+}
+function custWizStep1() {
+  const w = _custWiz;
+  return `<div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="cwName">${esc(tr('', 'Customer name'))}</label><input class="hashem-input" id="cwName" maxlength="60" placeholder="${esc(tr('', 'e.g. Ali (shop)'))}" value="${esc(w.name)}"></div>
+      <div class="xr-field"><label class="qs-label" for="cwNote">${esc(tr('', 'Note (only you see it)'))}</label><input class="hashem-input" id="cwNote" maxlength="500" placeholder="${esc(tr('', 'e.g. paid by card, Telegram @ali'))}" value="${esc(w.note)}"></div>
+    </div>
+    ${custPlanFields(w, 'cw')}
+    <details class="xr-adv"><summary>${esc(tr('', 'Address in the kit'))}</summary><div class="xr-field cs-adv">
+      <input class="hashem-input lm-num" id="cwAddr" maxlength="253" placeholder="${esc((_cust && _cust.address) || '')}" value="${esc(w.address)}">
+      <div class="qs-hint">${esc(tr('', 'What the foreign servers dial: this server\'s public IP by default, or a domain that points to it.'))}</div></div></details>
+    <div class="xr-wiz-foot"><span></span><button type="button" class="hashem-btn hashem-btn-primary" onclick="custWizGo(2)">${esc(tr('', 'Next'))}</button></div>`;
+}
+function custWizStep2() {
+  const w = _custWiz;
+  const rows = w.links.map((l, i) => `<div class="cs-srv"><div class="cs-srv-h"><b>${esc(tr('', 'Foreign server') + ' ' + (i + 1))}</b>
+      ${w.links.length > 1 ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="custWizDrop(${i})">${esc(tr('', 'Remove'))}</button>` : ''}</div>
+      ${custLinkFields('cw' + i, l)}</div>`).join('');
+  return `<p class="qs-hint">${esc(tr('', 'One entry per foreign server the customer owns. Users connect to these ports on this server; the customer\'s service listens on the same ports on the foreign server. Each port can be sold once on this server.'))}</p>
+    <div class="cs-srvs">${rows}</div>
+    <div><button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="custWizAdd()">${esc(tr('', 'Add another foreign server'))}</button></div>
+    <div class="xr-wiz-foot"><button type="button" class="hashem-btn hashem-btn-ghost" onclick="custWizGo(1)">${esc(tr('', 'Back'))}</button><button type="button" class="hashem-btn hashem-btn-primary" onclick="custWizGo(3)">${esc(tr('', 'Next'))}</button></div>`;
+}
+function custWizStep3() {
+  const w = _custWiz;
+  const plan = [
+    [tr('', 'Days'), w.days > 0 ? String(w.days) : tr('', 'No end')],
+    [tr('', 'Volume'), w.quota_gb > 0 ? w.quota_gb + ' GB' : tr('', 'Unlimited')],
+    [tr('', 'Speed'), w.rate_mbit > 0 ? w.rate_mbit + ' Mbit/s' : tr('', 'Unlimited')],
+  ];
+  const srv = w.links.map((l, i) => `<li><b>${esc(l.name || tr('', 'Foreign server') + ' ' + (i + 1))}</b> <span class="lm-num">${esc(String(l.ports))}</span> · ${esc(custEngLabel(l))}${l.udp ? ' · TCP+UDP' : ''}</li>`).join('');
+  return `<div class="cs-review"><div class="cs-facts">${plan.map(([k, v]) => `<span>${esc(k)} <b class="lm-num">${esc(v)}</b></span>`).join('')}</div>
+      <b>${esc(w.name)}</b>${w.note ? `<span class="qs-hint">${esc(w.note)}</span>` : ''}
+      <ul class="xr-list">${srv}</ul>
+      <p class="qs-hint">${esc(tr('', 'On Create the tunnels start on this server right away and wait for the foreign servers. Next you get the kit to send the customer.'))}</p></div>
+    <div class="xr-wiz-foot"><button type="button" class="hashem-btn hashem-btn-ghost" onclick="custWizGo(2)">${esc(tr('', 'Back'))}</button><button type="button" class="hashem-btn hashem-btn-primary" id="custWizCreate" onclick="custWizCreate()">${esc(tr('', 'Create'))}</button></div>`;
+}
+function custWizRead() {
+  const w = _custWiz;
+  if (w.step === 1) {
+    w.name = $('cwName').value.trim(); w.note = $('cwNote').value.trim(); w.address = $('cwAddr').value.trim();
+    const d = parseInt($('cwDays').value, 10);
+    w.days = isFinite(d) ? d : 0;
+    w.quota_gb = custNum('cwQuota'); w.rate_mbit = custNum('cwRate');
+  }
+  if (w.step === 2) w.links = w.links.map((_, i) => custLinkRead('cw' + i));
+}
+function custWizProblem() {
+  const w = _custWiz;
+  if (w.step === 1) {
+    if (!w.name) return tr('', 'Enter the customer\'s name.');
+    if (w.days < 0 || w.days > 3660) return tr('', 'Days: 1 to 3660');
+  }
+  if (w.step === 2) {
+    const seen = {};
+    for (const [i, l] of w.links.entries()) {
+      const ps = String(l.ports).split(/[\s,]+/).filter(Boolean);
+      if (!ps.length) return tr('', 'Enter the users\' ports of foreign server {n}.').replace('{n}', i + 1);
+      for (const p of ps) {
+        const n = +p;
+        if (!(n >= 1 && n <= 65535 && String(n) === p)) return tr('', 'Not a port: {p}').replace('{p}', p);
+        if (seen[n]) return tr('', 'Port {n} is listed twice: each port can be sold once on this server.').replace('{n}', n);
+        seen[n] = 1;
+      }
+    }
+  }
+  return '';
+}
+function custWizGo(step) {
+  custWizRead();
+  if (step > _custWiz.step) {
+    const msg = custWizProblem();
+    if (msg) { const e = $('custWizErr'); e.textContent = msg; e.classList.remove('hidden'); return; }
+  }
+  _custWiz.step = step;
+  custWizRender();
+}
+function custWizAdd() { custWizRead(); _custWiz.links.push({ name: '', ports: [], udp: false, engine: 'frp', transport: 'tcp', ctrl_port: 0 }); custWizRender(); }
+function custWizDrop(i) { custWizRead(); _custWiz.links.splice(i, 1); custWizRender(); }
+async function custWizCreate() {
+  const w = _custWiz, btn = $('custWizCreate');
+  btn.disabled = true;
+  try {
+    const d = await api('/api/customers', { action: 'create', name: w.name, note: w.note, address: w.address, days: w.days,
+      quota_gb: w.quota_gb, rate_mbit: w.rate_mbit, links: w.links.map(l => ({ ...l, ports: String(l.ports) })) });
+    _custWiz = null;
+    $('custWizard').innerHTML = '';
+    renderCustomers(d);
+    toastOk(tr('', 'Customer created'), w.name);
+    const c = (d.customers || []).find(x => x.id === d.created);
+    if (c && c.links.length) openCustKit(c.id, c.links[0].id);
+  } catch (e) {
+    const er = $('custWizErr'); er.textContent = e.message; er.classList.remove('hidden');
+    btn.disabled = false;
+  }
+}
+
+// ---- Nodes: this panel as the central of other servers (node*.go) ----
+let _nodes = null, nodesTimer = null;
+const _nodeJobOpen = {}; // SSH job logs the user opened or closed: kept across the 5 s refresh
+const nodeAgo = sec => {
+  if (!sec) return '—';
+  const d = Math.max(0, Math.round(Date.now() / 1000 - sec));
+  if (d < 60) return tr('', 'just now');
+  if (d < 3600) return Math.round(d / 60) + ' ' + tr('', 'min ago');
+  if (d < 86400) return Math.round(d / 3600) + ' ' + tr('', 'h ago');
+  return Math.round(d / 86400) + ' ' + tr('', 'days ago');
+};
+const nodePct = v => (typeof v === 'number' && v >= 0) ? v.toFixed(0) + '%' : '—';
+function nodeRow(n) {
+  const i = n.info || {}, lic = i.license || {};
+  const side = i.side === 'iran' ? tr('', 'Iran') : i.side === 'foreign' ? tr('', 'Foreign') : tr('', 'Not set up');
+  const state = n.online ? ['ok', tr('', 'Online')] : ['err', tr('', 'Offline')];
+  const licTxt = lic.active ? ('Pro' + (lic.expires ? ' · ' + tr('', 'until') + ' ' + custDate(lic.expires) : '')) : tr('', 'No license');
+  const kv = (k, v) => `<div class="lm-box"><div class="lm-k"><span>${esc(k)}</span><b class="lm-num">${esc(v)}</b></div></div>`;
+  return `<div class="lm-row${n.online ? '' : ' cut'}" id="node-${n.id}">
+    <div class="lm-head"><div class="lm-name"><b>${esc(n.name)}</b><small class="lm-num">${esc([i.public_ip || n.addr || '', i.hostname || ''].filter(Boolean).join(' · '))}</small></div>
+      <span class="badge ${state[0]}">${esc(state[1])}</span></div>
+    <div class="lm-grid">
+      ${kv(tr('', 'Side'), side)}${kv(tr('', 'Tunnels'), String(i.tunnels ?? '—'))}${kv(tr('', 'Version'), i.version || n.link_version || '—')}
+      ${kv('CPU · RAM · ' + tr('', 'Disk'), [nodePct(i.cpu_pct), nodePct(i.mem_pct), nodePct(i.disk_pct)].join(' · '))}
+      ${kv(tr('', 'License'), licTxt)}${kv(n.online ? tr('', 'Connected') : tr('', 'Last seen'), nodeAgo(n.online ? n.since : n.last_seen))}
+    </div>
+    <div class="qs-hint lm-num">${esc(tr('', 'Key'))} ${esc(n.key_fp)}${i.machine_hash ? ' · ' + esc(tr('', 'Machine ID')) + ' ' + esc(i.machine_hash) : ''}</div>
+    ${n.held ? `<div class="warnbox u-mt-8">${esc(tr('', 'Joined by the move to nodes. Check it is your server (its address and machine ID); this panel\'s license is copied to it only after you approve it.'))}</div>` : ''}
+    <div class="lm-acts">
+      ${n.held ? `<button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="nodeApprove(${Number(n.id)})">${esc(tr('', 'Approve'))}</button>` : ''}
+      ${n.online && !n.held ? `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openNodeHere(${Number(n.id)})">${esc(tr('', 'Open'))}</button>` : ''}
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="openNodeRename(${n.id})">${esc(tr('', 'Rename'))}</button>
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 u-c-er" onclick="nodeRemove(${n.id})">${esc(tr('', 'Remove'))}</button>
+    </div></div>`;
+}
+function nodeJobRow(j) {
+  const st = j.state === 'done' ? ['ok', tr('', 'Joined')] : j.state === 'failed' ? ['err', tr('', 'Failed')] : ['info', tr('', 'Working…')];
+  const open = j.id in _nodeJobOpen ? _nodeJobOpen[j.id] : j.state === 'failed';
+  return `<details class="lm-row" data-job="${j.id}"${open ? ' open' : ''} ontoggle="_nodeJobOpen[${j.id}] = this.open"><summary class="lm-head"><div class="lm-name"><b>${esc(j.name || j.host)}</b><small class="lm-num">SSH ${esc(j.host)}</small></div>
+    <span class="badge ${st[0]}">${esc(st[1])}</span></summary><pre class="cs-code">${esc(j.log || '')}</pre></details>`;
+}
+function renderNodes(d) {
+  _nodes = d;
+  renderNodeTunnels(d);
+  const acts = $('nodeActs'), body = $('nodeBody'), err = $('nodeErr');
+  if (err) { err.textContent = d.error || ''; err.classList.toggle('hidden', !d.error); }
+  if (!body) return;
+  if (d.role === 'node') {
+    const c = d.central || {};
+    if (acts) acts.innerHTML = `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 u-c-er" onclick="nodeLeave()">${esc(tr('', 'Leave the central'))}</button>`;
+    const st = c.connected ? ['ok', tr('', 'Connected')] : ['err', tr('', 'Not connected')];
+    body.innerHTML = `<div class="lm-row"><div class="lm-head"><div class="lm-name"><b>${esc(tr('', 'This server is a node'))}</b><small class="lm-num">${esc(c.url || '')}</small></div>
+      <span class="badge ${st[0]}">${esc(st[1])}</span></div>
+      <div class="qs-hint">${esc(tr('', 'Its central manages it; this panel still works for anything you want to do by hand here.'))}</div>
+      <div class="qs-hint lm-num">${esc(tr('', 'Node'))} ${esc(String(c.id))} (${esc(c.name || '')}) · ${esc(tr('', 'Central key'))} ${esc(c.key_fp || '')}${c.connected ? ' · ' + esc(tr('', 'Connected')) + ' ' + esc(nodeAgo(c.since)) : ''}</div>
+      ${c.refused ? `<div class="warnbox u-mt-8">${esc(tr('', 'The central does not know this node any more (it was removed, or its list was lost). Join again with a new code, or leave.'))}</div>` : ''}
+      ${!c.connected && c.last_error ? `<div class="xr-err u-mt-8">${esc(c.last_error)}</div>` : ''}</div>`;
+    return;
+  }
+  if (acts) acts.innerHTML = (d.role === 'central' && (d.invites || []).length ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="nodeCancelInvites()">${esc(tr('', 'Cancel open codes'))} (${(d.invites || []).length})</button>` : '') +
+    (d.role !== 'central' ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="openNodeJoin()">${esc(tr('', 'Join a central'))}</button>` : '') +
+    (d.role === 'central' && !(d.nodes || []).length ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="nodeLeave()">${esc(tr('', 'Stop being a central'))}</button>` : '') +
+    `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openNodeSSH()">${esc(tr('', 'Add with SSH'))}</button>
+     <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="openNodeInvite()">${esc(tr('', 'Add a server'))}</button>`;
+  const nodes = d.nodes || [], jobs = (d.jobs || []).filter(j => j.state !== 'done' || Date.now() / 1000 - (j.ended || 0) < 600);
+  const mig = migrateCard(d.migrate, false);
+  if (!nodes.length && !jobs.length) {
+    body.innerHTML = mig + `<div class="cs-empty"><b>${esc(tr('', 'No nodes yet'))}</b><p class="qs-hint">${esc(tr('', 'Add a server: run the line this panel gives on it, or let this panel log in with SSH and do it. Tunnels already running are not touched.'))}</p>
+      <button type="button" class="hashem-btn hashem-btn-primary" onclick="openNodeInvite()">${esc(tr('', 'Add a server'))}</button></div>`;
+    return;
+  }
+  const on = nodes.filter(n => n.online).length;
+  body.innerHTML = mig + `<div class="cs-sum">${[[String(nodes.length), tr('', 'Nodes')], [String(on), tr('', 'Online')], [String(nodes.length - on), tr('', 'Offline')]]
+    .map(([v, k]) => `<div><b class="lm-num">${esc(v)}</b><span>${esc(k)}</span></div>`).join('')}</div>
+    <div class="lm-list">${jobs.map(nodeJobRow).join('')}${nodes.map(nodeRow).join('')}</div>`;
+}
+async function loadNodes() {
+  try {
+    const d = await api('/api/nodes');
+    renderNodes(d);
+    _nodePickList = (d.role === 'central' && d.nodes) || [];
+    nodePickRender();
+  } catch (e) { reportErr('nodes', e); }
+}
+(function initNodes() {
+  if (!nodesTimer) nodesTimer = setInterval(() => {
+    const t = $('tab-nodes');
+    if (t && !t.hidden && !document.hidden && !($('custModal') && !$('custModal').hidden)) loadNodes();
+  }, 5000);
+})();
+const nodeFind = id => ((_nodes && _nodes.nodes) || []).find(n => n.id === id);
+function nodeAddrField() {
+  return `<div class="xr-field"><label class="qs-label" for="ndUrl">${esc(tr('', 'Address nodes dial'))}</label>
+    <input class="hashem-input lm-num" id="ndUrl" dir="ltr" maxlength="200" placeholder="http://IP:PORT" value="${esc((_nodes && _nodes.default_url) || '')}">
+    <div class="qs-hint">${esc(tr('', 'This panel\'s public IP and port. Use another address (a domain, or the GRE address) if nodes reach this server another way.'))}</div></div>`;
+}
+function openNodeInvite() {
+  const html = `<div class="xr-field"><label class="qs-label" for="ndName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="ndName" maxlength="40" placeholder="${esc(tr('', 'e.g. Germany 1'))}"></div>${nodeAddrField()}`;
+  custModal(tr('', 'Add a server'), html, tr('', 'Make the line'), async () => {
+    const r = await api('/api/nodes', { action: 'invite', name: $('ndName').value, url: $('ndUrl').value });
+    const box = (id, label, v) => `<div class="cs-srv"><div class="cs-srv-h"><b>${esc(label)}</b>
+      <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyTextSafe($('${id}').textContent, ${jsArg(tr('', 'Copied'))}, ${jsArg(label)})">${esc(tr('', 'Copy'))}</button></div>
+      <pre class="cs-code" id="${id}">${esc(v)}</pre></div>`;
+    custModal(tr('', 'Run this on the new server'), `<div class="qs-hint">${esc(tr('', 'Run one of these as root on the server. The code works once, for 30 minutes. The server shows up here when it joins.'))}</div>
+      <div class="cs-srvs">${box('ndCmdI', tr('', 'Any server (installs or updates Hashem, then joins)'), r.install_command)}${box('ndCmd', tr('', 'A server that already has this Hashem version or newer'), r.command)}</div>`);
+    loadNodes();
+    return false;
+  });
+}
+function openNodeSSH() {
+  const html = `<div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="nsHost">${esc(tr('', 'Server IP'))}</label><input class="hashem-input lm-num" id="nsHost" dir="ltr" maxlength="253"></div>
+      <div class="xr-field"><label class="qs-label" for="nsPort">${esc(tr('', 'SSH port'))}</label><input class="hashem-input lm-num" id="nsPort" type="number" min="1" max="65535" value="22"></div>
+      <div class="xr-field"><label class="qs-label" for="nsUser">${esc(tr('', 'User'))}</label><input class="hashem-input lm-num" id="nsUser" dir="ltr" value="root" maxlength="32"></div>
+    </div>
+    <div class="xr-field"><label class="qs-label" for="nsPass">${esc(tr('', 'Password'))}</label><input class="hashem-input" id="nsPass" type="password" autocomplete="off" dir="ltr"></div>
+    <div class="xr-field"><label class="qs-label" for="nsKey">${esc(tr('', 'Or a private key'))}</label><textarea class="hashem-input lm-num" id="nsKey" rows="3" dir="ltr" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></div>
+    <div class="xr-field"><label class="qs-label" for="ndName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="ndName" maxlength="40"></div>
+    ${nodeAddrField()}
+    <div class="qs-hint">${esc(tr('', 'This panel logs in once, installs or updates Hashem there and joins it. The password or key is not saved.'))}</div>`;
+  const req = () => ({ action: 'ssh', host: $('nsHost').value, port: parseInt($('nsPort').value, 10) || 22, user: $('nsUser').value,
+    password: $('nsPass').value, ssh_key: $('nsKey').value, name: $('ndName').value, url: $('ndUrl').value });
+  custModal(tr('', 'Add with SSH'), html, tr('', 'Connect'), async () => {
+    const body = req();
+    if (!body.password && !body.ssh_key) throw new Error(tr('', 'Give the SSH password or a private key.'));
+    // the first call only reads the host key: no password or key in it
+    const r = await api('/api/nodes', Object.assign({}, body, { password: '', ssh_key: '' }));
+    if (!r.host_key) return;
+    // the server's host key, before any secret is sent: the user confirms it
+    custModal(tr('', 'Is this the right server?'), `<div class="qs-hint">${esc(tr('', 'The server at {h} has this SSH host key. If you are not sure, compare it with: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the server.').replace('{h}', body.host))}</div>
+      <pre class="cs-code">${esc(r.host_key)}</pre>`, tr('', 'Yes, add it'), async () => {
+      await api('/api/nodes', Object.assign(body, { host_key: r.host_key }));
+      toastOk(tr('', 'Adding the server'), body.host);
+      loadNodes();
+    });
+    return false;
+  });
+}
+function openNodeJoin() {
+  const html = `<div class="xr-field"><label class="qs-label" for="njCode">${esc(tr('', 'Join code'))}</label><input class="hashem-input lm-num" id="njCode" dir="ltr" placeholder="hn1.…"></div>
+    <div class="xr-field"><label class="qs-label" for="ndName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="ndName" maxlength="40"></div>
+    <div class="qs-hint">${esc(tr('', 'Make this server a node of another panel: on the central, Nodes → Add a server gives the code. Tunnels are not touched.'))}</div>`;
+  custModal(tr('', 'Join a central'), html, tr('', 'Join'), async () => {
+    renderNodes(await api('/api/nodes', { action: 'join', code: $('njCode').value.replace(/^.*\b(hn1\.[A-Za-z0-9_-]+).*$/s, '$1'), name: $('ndName').value }));
+    toastOk(tr('', 'Joined'), '');
+  });
+}
+function openNodeRename(id) {
+  const n = nodeFind(id);
+  if (!n) return;
+  custModal(tr('', 'Rename'), `<div class="xr-field"><label class="qs-label" for="ndName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="ndName" maxlength="40" value="${esc(n.name)}"></div>`,
+    tr('', 'Save'), async () => { renderNodes(await api('/api/nodes', { action: 'rename', id, name: $('ndName').value })); });
+}
+async function nodeRemove(id) {
+  const n = nodeFind(id);
+  if (!n || !await entConfirm(tr('', 'Remove this node?'), tr('', 'The central forgets it and it becomes a standalone panel again. Its tunnels keep running.'), tr('', 'Remove'))) return;
+  try { renderNodes(await api('/api/nodes', { action: 'remove', id })); toastOk(tr('', 'Node removed'), n.name); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+async function nodeLeave() {
+  const node = _nodes && _nodes.role === 'node';
+  if (!await entConfirm(node ? tr('', 'Leave the central?') : tr('', 'Stop being a central?'),
+    node ? tr('', 'The central stops managing this server. Its tunnels keep running and this panel works as before.') : tr('', 'This panel becomes a standalone panel again.'), tr('', 'Leave'))) return;
+  try { renderNodes(await api('/api/nodes', { action: 'leave' })); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+async function nodeApprove(id) {
+  try { renderNodes(await api('/api/nodes', { action: 'approve', id })); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+async function nodeCancelInvites() {
+  try { renderNodes(await api('/api/nodes', { action: 'cancel-invites' })); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+
+// ---- moving an existing install to nodes (node_migrate.go) ----
+function migrateCard(m, compact) {
+  if (!m) return '';
+  const peers = m.peers || [];
+  const list = `<ul class="qs-hint">${peers.map(p => `<li><b>${esc(p.name)}</b> <span class="lm-num">${esc(p.ip || '')}</span> · ${p.joined
+    ? esc(tr('', 'joined'))
+    : p.ever ? esc(tr('', 'joined once and was removed: add it with Add a server'))
+    : esc(m.open ? tr('', 'waiting: it joins by itself once it runs this version (hashem update on it; if it was updated more than 14 days ago, hashem node move on it)') : tr('', 'not joined'))}</li>`).join('')}</ul>`;
+  const left = peers.filter(p => !p.ever).length;
+  if (m.open) {
+    return `<div class="lm-row"><div class="lm-head"><div class="lm-name"><b>${esc(tr('', 'Moving your foreign servers here'))}</b>
+      <small>${esc(tr('', 'Each one joins by itself, proven by its tunnel token. Tunnels are not touched. The move closes by itself after 7 days or when all have joined.'))}</small></div>
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="migrateDo('migrate-stop')">${esc(tr('', 'Stop'))}</button></div>${list}</div>`;
+  }
+  if (!m.offer) {
+    return compact || !left ? '' : `<div class="lm-row"><div class="lm-head"><div class="lm-name"><b>${esc(tr('', 'Move your foreign servers here'))}</b>
+      <small>${esc(tr('', '{n} foreign servers have a tunnel with this panel and have not joined.').replace('{n}', left))}</small></div>
+      <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="migrateDo('migrate-start')">${esc(tr('', 'Move them'))}</button></div></div>`;
+  }
+  return `<div class="tunnel-card u-mb-20" role="region"><div class="tc-header"><p class="tc-title">${esc(tr('', 'Manage all your servers from this panel?'))}</p></div>
+    <div class="qs-hint">${esc(tr('', 'This panel becomes the central. Your foreign servers join it by themselves once they run this version; their tunnel token proves who they are. Running tunnels are not touched, and every server keeps its own panel.'))}</div>
+    ${list}
+    <div class="lm-acts"><button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="migrateDo('migrate-start')">${esc(tr('', 'Yes, move to nodes'))}</button>
+    <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="migrateDo('migrate-later')">${esc(tr('', 'Not now'))}</button>
+    <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="migrateDo('migrate-never')">${esc(tr('', 'Don\'t ask again'))}</button></div></div>`;
+}
+async function migrateDo(action) {
+  try {
+    const d = await api('/api/nodes', { action });
+    renderNodes(d);
+    migrateBanner(d);
+    if (action === 'migrate-start') { toastOk(tr('', 'This panel is now the central'), tr('', 'Your foreign servers join as they update.')); goTab('nodes'); }
+  } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+function migrateBanner(d) {
+  const b = $('migrateBanner');
+  if (!b) return;
+  const m = d && d.migrate;
+  b.hidden = !(m && m.offer);
+  b.innerHTML = b.hidden ? '' : migrateCard(m, true);
+}
+async function migrateBannerLoad() {
+  if (NV) return;
+  try {
+    const r = await fetch(BASE + '/api/nodes', { cache: 'no-store' });
+    if (r.ok) migrateBanner(await r.json());
+  } catch (_) { /* offline */ }
+}
+
+// ---- the overview of every server (node_fleet.go) ----
+let _nodeFleet = null;
+async function nodeFleetLoad() {
+  const card = $('nodeFleetCard');
+  if (!card || !_nodes || _nodes.role !== 'central') { if (card) card.hidden = true; return; }
+  card.hidden = false;
+  try { _nodeFleet = await api('/api/nodes', { action: 'fleet' }); } catch (e) { _nodeFleet = { servers: [], totals: {}, errors: [e.message] }; }
+  nodeFleetRender();
+}
+function nodeFleetRender() {
+  const body = $('nodeFleetBody'), f = _nodeFleet;
+  if (!body || !f) return;
+  const t = f.totals || {};
+  const pct = v => (typeof v === 'number' && v >= 0) ? v.toFixed(0) + '%' : '—';
+  const sum = `<div class="cs-sum">${[
+    [String(f.online || 0) + ' / ' + String((f.servers || []).length), tr('', 'Servers online')],
+    [fmtRate(Number(t.speed) || 0), tr('', 'Throughput (both ways)')],
+    [fmtBytes(Number(t.total) || 0), tr('', 'Total transferred')],
+  ].map(([v, k]) => `<div><b class="lm-num">${esc(v)}</b><span>${esc(k)}</span></div>`).join('')}</div>`;
+  const rows = (f.servers || []).map(s => {
+    const st = !s.online ? ['err', tr('', 'Offline')] : s.held ? ['warn', tr('', 'not approved')] : s.error ? ['err', tr('', 'Not read')]
+      : !s.role ? ['info', tr('', 'Not set up')] : s.health === 'healthy' ? ['ok', tr('', 'Healthy')] : s.health === 'degraded' ? ['warn', tr('', 'Degraded')] : s.health === 'down' ? ['err', tr('', 'Down')] : ['info', s.role ? String(s.health || '—') : tr('', 'Not set up')];
+    const tr0 = s.traffic || {};
+    return `<div class="lm-row${s.online ? '' : ' cut'}"><div class="lm-head"><div class="lm-name"><b>${esc(s.id === 0 ? ntName(0) : s.name)}</b>
+      <small class="lm-num">${esc([s.public || '', s.role || '', s.version ? displayVer(s.version) : ''].filter(Boolean).join(' · '))}</small></div>
+      <span class="badge ${st[0]}">${esc(st[1])}</span></div>
+      ${s.error ? `<div class="xr-err">${esc(s.error)}</div>` : ''}
+      <div class="qs-hint lm-num">${esc(tr('', 'Tunnels'))} ${Number(s.tunnels || 0)} · ↓ ${esc(fmtRate(Number(tr0.speed_down) || 0))} ↑ ${esc(fmtRate(Number(tr0.speed_up) || 0))}
+        · CPU ${esc(pct(s.cpu_pct))} · RAM ${esc(pct(s.mem_pct))} · ${esc(tr('', 'Disk'))} ${esc(pct(s.disk_pct))}${s.license_ok ? '' : ' · ' + esc(tr('', 'No license'))}${s.online && !s.counted && s.traffic ? ' · ' + esc(s.partial ? tr('', 'counted at its Iran server; its other tunnels are not in the totals') : tr('', 'its traffic is counted at its Iran server')) : ''}</div>
+      ${s.id && s.online && !s.held ? `<div class="lm-acts"><button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="openNodeHere(${Number(s.id)})">${esc(tr('', 'Open'))}</button></div>` : ''}
+    </div>`;
+  }).join('');
+  const errs = (f.errors || []).length ? `<div class="qs-hint">${esc(tr('', 'Not read'))}: ${esc(f.errors.join(' · '))}</div>` : '';
+  body.innerHTML = sum + `<div class="lm-list">${rows}</div>` + errs;
+}
+function nodeFleetUpdateOpen() {
+  const nodes = ((_nodes && _nodes.nodes) || []).filter(n => n.online && !n.held);
+  if (!nodes.length) { toastErr(tr('', 'Failed'), tr('', 'No node is online.')); return; }
+  const html = `<div class="qs-hint">${esc(tr('', 'The chosen nodes are updated one at a time, each waited for until it is back on its new version. The first failure stops the rest. Update this server (the central) on its own Update page.'))}</div>
+    <div class="lm-list">${nodes.map(n => `<label class="lm-row"><input type="checkbox" class="fu-pick" value="${Number(n.id)}" checked> <b>${esc(n.name)}</b>
+      <small class="lm-num">${esc(displayVer((n.info && n.info.version) || n.link_version || ''))}</small></label>`).join('')}</div>`;
+  custModal(tr('', 'Update nodes'), html, tr('', 'Update'), async () => {
+    const ids = [...document.querySelectorAll('.fu-pick')].filter(x => x.checked).map(x => Number(x.value));
+    if (!ids.length) throw new Error(tr('', 'Pick at least one node.'));
+    await api('/api/nodes', { action: 'fleet-update', ids });
+    toastOk(tr('', 'Updating the nodes'), tr('', 'Follow it under Tunnels between servers.'));
+    loadNodes();
+  });
+}
+async function nodeFleetBackupsOpen() {
+  let d;
+  try { d = await api('/api/nodes', { action: 'fleet-backups' }); } catch (e) { toastErr(tr('', 'Failed'), e.message); return; }
+  const nodes = ((_nodes && _nodes.nodes) || []).filter(n => n.online && !n.held);
+  const name = id => (nodeFind(id) || {}).name || ('#' + id);
+  const list = (d.backups || []).map(b => `<div class="lm-row"><div class="lm-head"><div class="lm-name"><b>${esc(name(b.node))}</b>
+      <small class="lm-num">${esc(b.name)} · ${esc(fmtBytes(b.size))} · ${esc(nodeAgo(b.time))}</small></div>
+      <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="download('/api/nodes/backup?node=${Number(b.node)}&f=${encodeURIComponent(b.name)}')">${esc(tr('', 'Download'))}</button></div></div>`).join('');
+  const now = nodes.map(n => `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="nodeFleetBackupNow(${Number(n.id)})">${esc(n.name)}</button>`).join(' ');
+  custModal(tr('', 'Node backups'), `<div class="qs-hint">${esc(tr('', 'This panel keeps a copy of each node\'s newest backup (made and encrypted by that node\'s Watchdog, with its own key) for {n} days. It checks every 6 hours.').replace('{n}', d.keep_days || 14))}</div>
+    <div class="lm-list">${list || `<div class="qs-hint">${esc(tr('', 'No backups yet.'))}</div>`}</div>
+    ${now ? `<div class="qs-hint u-mt-8">${esc(tr('', 'Copy the newest backup now'))}:</div><div class="lm-acts">${now}</div>` : ''}`);
+}
+async function nodeFleetBackupNow(id) {
+  try {
+    const r = await api('/api/nodes', { action: 'fleet-backup-now', id });
+    toastOk(r.name ? tr('', 'Backup copied') : tr('', 'Nothing new'), r.name || tr('', 'The newest backup is kept already, or the node makes none (its Watchdog, Pro).'));
+    nodeFleetBackupsOpen();
+  } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+async function nodeFleetCustomersOpen() {
+  let d;
+  try { d = await api('/api/nodes', { action: 'fleet-customers' }); } catch (e) { toastErr(tr('', 'Failed'), e.message); return; }
+  const name = id => id === 0 ? tr('', 'This server (the central)') : ((nodeFind(id) || {}).name || ('#' + id));
+  const rows = (d.customers || []).map(c => {
+    const st = c.cut ? ['err', c.cut === 'expired' ? tr('', 'Expired') : c.cut === 'quota' ? tr('', 'Volume used up') : tr('', 'Cut')] : ['ok', tr('', 'Running')];
+    return `<div class="lm-row"><div class="lm-head"><div class="lm-name"><b>${esc(c.name)}</b>
+      <small class="lm-num">${esc(name(c.server))} · ${esc(fmtBytes((c.used_rx || 0) + (c.used_tx || 0)))}${c.quota_gb ? ' / ' + esc(String(c.quota_gb)) + ' GB' : ''}${c.expires_at ? ' · ' + esc(tr('', 'until')) + ' ' + esc(custDate(c.expires_at)) : ''}</small></div>
+      <span class="badge ${st[0]}">${esc(st[1])}</span></div>
+      <div class="lm-acts"><button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="${c.server ? `custModalClose(); openNodeHere(${Number(c.server)}, 'customers')` : `custModalClose(); goTab('customers')`}">${esc(tr('', 'Open'))}</button></div></div>`;
+  }).join('');
+  custModal(tr('', 'Customers of every server'), `<div class="lm-list">${rows || `<div class="qs-hint">${esc(tr('', 'No customers on these servers.'))}</div>`}</div>
+    ${(d.errors || []).length ? `<div class="qs-hint">${esc(tr('', 'Not read'))}: ${esc(d.errors.join(' · '))}</div>` : ''}`);
+}
+function custModalClose() { const ov = $('custModal'); if (ov) modalHide(ov); }
+const displayVer = v => String(v || '').replace(/^v?/, 'v');
+
+// ---- tunnels between servers (node_tunnel.go): made and removed from here ----
+let _ntLinks = null, _ntLinkErrs = [], _ntOpen = {}, _ntJobsRunning = false;
+const ntName = id => id === 0 ? tr('', 'This server (the central)') : ((nodeFind(id) || {}).name || ('#' + id));
+function ntServerOpts(sel) {
+  const ids = [0].concat(((_nodes && _nodes.nodes) || []).filter(n => n.online && !n.held).map(n => n.id));
+  return ids.map(id => `<option value="${Number(id)}"${id === sel ? ' selected' : ''}>${esc(ntName(id))}</option>`).join('');
+}
+function ntJobRow(j) {
+  const st = j.state === 'done' ? ['ok', tr('', 'Done')] : j.state === 'failed' ? ['err', tr('', 'Failed')] : ['info', tr('', 'Working…')];
+  const open = j.id in _ntOpen ? _ntOpen[j.id] : j.state !== 'done';
+  const what = j.kind === 'remove' ? tr('', 'Removing a tunnel') : j.kind === 'update' ? tr('', 'Updating nodes') : tr('', 'Making a tunnel');
+  return `<details class="lm-row"${open ? ' open' : ''} ontoggle="_ntOpen[${Number(j.id)}] = this.open"><summary class="lm-head"><div class="lm-name"><b>${esc(what)}</b>
+    <small>${esc(ntName(j.server))} → ${esc(ntName(j.client))}</small></div><span class="badge ${st[0]}">${esc(st[1])}</span></summary>
+    <pre class="cs-code">${esc(j.log || '')}</pre></details>`;
+}
+function ntLinkRow(l) {
+  return `<div class="lm-row"><div class="lm-head"><div class="lm-name"><b>${esc(ntName(l.server))} → ${esc(ntName(l.client))}</b>
+    <small class="lm-num">${esc([l.server_ip + ' → ' + l.client_ip, l.engine || 'frp', l.name || ''].filter(Boolean).join(' · '))}</small></div>
+    <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 u-c-er" onclick="ntRemove(${Number(l.server)}, ${Number(l.client)}, ${Number(l.peer_id)}, ${Number(l.hub)})">${esc(tr('', 'Remove both ends'))}</button></div></div>`;
+}
+function ntLeftRow(l) {
+  return `<div class="lm-row cut"><div class="lm-head"><div class="lm-name"><b>${esc(tr('', 'Left over'))}: ${esc(ntName(l.server))}</b>
+    <small>${esc(tr('', 'Its client end failed and it could not be removed'))} · ${esc(l.client_ip)}</small></div></div>
+    <div class="xr-err">${esc(l.error || '')}</div>
+    <div class="lm-acts"><button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="ntRemoveLeft(${Number(l.id)})">${esc(tr('', 'Remove it now'))}</button>
+    <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="ntForget(${Number(l.id)})">${esc(tr('', 'Removed by hand'))}</button></div></div>`;
+}
+function renderNodeTunnels(d) {
+  const card = $('ntCard'), body = $('ntBody');
+  if (!card || !body) return;
+  card.hidden = d.role !== 'central';
+  if (card.hidden) return;
+  const jobs = (d.tunnel_jobs || []).filter(j => j.state === 'running' || Date.now() / 1000 - (j.ended || 0) < 1800);
+  const running = jobs.some(j => j.state === 'running');
+  if (_ntJobsRunning && !running) loadNodeTunnels(); // a job ended: the list changed
+  _ntJobsRunning = running;
+  const links = _ntLinks || [];
+  let html = jobs.map(ntJobRow).join('') + (d.left || []).map(ntLeftRow).join('');
+  if (_ntLinks === null) html += '<div class="ent-skel u-h-14"></div>';
+  else if (!links.length) html += `<div class="qs-hint">${esc(tr('', 'No tunnel between these servers yet.'))}</div>`;
+  html += links.map(ntLinkRow).join('');
+  if (_ntLinkErrs.length) html += `<div class="qs-hint">${esc(tr('', 'Not read'))}: ${esc(_ntLinkErrs.join(' · '))}</div>`;
+  body.innerHTML = `<div class="lm-list">${html}</div>`;
+}
+async function loadNodeTunnels() {
+  if (!_nodes || _nodes.role !== 'central') return;
+  try {
+    const r = await api('/api/nodes', { action: 'tunnel-list' });
+    _ntLinks = r.links || [];
+    _ntLinkErrs = r.errors || [];
+  } catch (e) { _ntLinks = []; _ntLinkErrs = [e.message]; }
+  renderNodeTunnels(_nodes);
+}
+function openNodeTunnel() {
+  const nodes = ((_nodes && _nodes.nodes) || []).filter(n => n.online);
+  const iran = nodes.find(n => n.info && n.info.side === 'iran'), out = nodes.find(n => !(n.info && n.info.side === 'iran'));
+  const html = `<div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="ntS">${esc(tr('', 'Iran server (users connect to it)'))}</label><select class="hashem-input" id="ntS">${ntServerOpts(iran ? iran.id : 0)}</select></div>
+      <div class="xr-field"><label class="qs-label" for="ntC">${esc(tr('', 'Foreign server'))}</label><select class="hashem-input" id="ntC">${ntServerOpts(out ? out.id : -1)}</select></div>
+    </div>
+    <div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="ntE">${esc(tr('', 'Engine'))}</label><select class="hashem-input" id="ntE">
+        <option value="frp">FRP</option><option value="backhaul">Backhaul</option><option value="gre-backhaul">Backhaul + GRE</option></select></div>
+      <div class="xr-field"><label class="qs-label" for="ntT">${esc(tr('', 'Transport'))}</label><input class="hashem-input lm-num" id="ntT" dir="ltr" maxlength="12" placeholder="${esc(tr('', 'default'))}"></div>
+      <div class="xr-field"><label class="qs-label" for="ntF">${esc(tr('', 'Control port'))}</label><input class="hashem-input lm-num" id="ntF" type="number" min="1" max="65535" placeholder="${esc(tr('', 'automatic'))}"></div>
+    </div>
+    <div class="xr-field"><label class="qs-label" for="ntP">${esc(tr('', 'Ports users connect to'))}</label><input class="hashem-input lm-num" id="ntP" dir="ltr" maxlength="300" placeholder="443, 2083"></div>
+    <label class="qs-hint hidden" id="ntUdpWrap"><input type="checkbox" id="ntU"> ${esc(tr('', 'Also forward UDP (Backhaul)'))}</label>
+    <div class="qs-hint">${esc(tr('', 'The Iran server\'s end is made first, then the foreign server\'s with its bundle. If the second fails, the first is removed again. Tunnels already running are not touched.'))}</div>
+    <div id="ntPlan"></div>`;
+  let checked = false;
+  const req = () => ({ server: parseInt($('ntS').value, 10), client: parseInt($('ntC').value, 10), engine: $('ntE').value,
+    transport: $('ntT').value.trim(), ports: $('ntP').value.trim(), frp_port: parseInt($('ntF').value, 10) || 0,
+    accept_udp: $('ntE').value !== 'frp' && $('ntU').checked });
+  custModal(tr('', 'New tunnel between servers'), html, tr('', 'Check'), async () => {
+    const q = req();
+    if (!checked) {
+      const d = await api('/api/nodes', Object.assign({ action: 'tunnel-plan' }, q));
+      const li = (k, v) => `<li>${esc(k)}: <b class="lm-num">${esc(v)}</b></li>`;
+      $('ntPlan').innerHTML = `<ul class="qs-hint">${li(tr('', 'Iran server'), ntName(q.server) + ' · ' + (d.server_role === 'iran' ? tr('', 'its first tunnel') : tr('', 'one more tunnel')))}
+        ${li(tr('', 'Foreign server'), ntName(q.client) + ' · ' + (d.client_mode === 'join-hub' ? tr('', 'joins as one more Iran hub (Cluster, Pro)') : tr('', 'its first tunnel')))}
+        ${li(tr('', 'Control port'), String(d.frp_port))}${d.local_gre ? li('GRE', d.local_gre + ' ↔ ' + d.peer_gre) : ''}</ul>`;
+      if ((d.problems || []).length) throw new Error(d.problems.join('\n'));
+      checked = true;
+      $('custModalYes').textContent = tr('', 'Make the tunnel');
+      ['ntS', 'ntC', 'ntE', 'ntT', 'ntF', 'ntP', 'ntU'].forEach(id => { $(id).oninput = $(id).onchange = () => { checked = false; $('custModalYes').textContent = tr('', 'Check'); $('ntPlan').innerHTML = ''; }; });
+      return false;
+    }
+    await api('/api/nodes', Object.assign({ action: 'tunnel-create' }, q));
+    toastOk(tr('', 'Making the tunnel'), ntName(q.server) + ' → ' + ntName(q.client));
+    loadNodes();
+  });  const udp = () => { $('ntUdpWrap').classList.toggle('hidden', $('ntE').value === 'frp'); };
+  $('ntE').addEventListener('change', udp);
+  udp();
+}
+async function ntRemove(server, client, peer, hub) {
+  if (!await entConfirm(tr('', 'Remove this tunnel?'), tr('', 'The foreign server\'s end is removed first, then the Iran server\'s. Users of this tunnel are cut.'), tr('', 'Remove'))) return;
+  try { await api('/api/nodes', { action: 'tunnel-remove', server, client, peer_id: peer, hub }); loadNodes(); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+async function ntRemoveLeft(id) {
+  try { await api('/api/nodes', { action: 'tunnel-remove', left: id }); loadNodes(); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+async function ntForget(id) {
+  try { renderNodes(await api('/api/nodes', { action: 'tunnel-forget', left: id })); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+
+// ---- the node picker (header): which server the pages show ----
+// A node is shown in #nodeView, a sandboxed frame over this page, with a
+// token from /api/nodes that reaches only that node's relay.
+let _nodePickList = [];
+function nodePickRender() {
+  for (const id of ['nodePick', 'nodeViewPick']) {
+    const sel = $(id);
+    if (!sel) continue;
+    const show = _nodePickList.length > 0 && !NV;
+    sel.classList.toggle('hidden', !show);
+    if (!show) continue;
+    const opts = [`<option value="">${esc(tr('', 'This server'))}</option>`].concat(_nodePickList.map(n =>
+      `<option value="${Number(n.id)}"${n.online && !n.held ? '' : ' disabled'}>${esc(n.name)}${!n.online ? ' — ' + esc(tr('', 'Offline')) : n.held ? ' — ' + esc(tr('', 'not approved')) : ''}</option>`));
+    sel.innerHTML = opts.join('');
+    sel.value = NODE ? String(NODE) : '';
+  }
+  const n = _nodePickList.find(x => x.id === NODE);
+  const name = $('nodeViewName');
+  if (name && n) name.textContent = n.name + ((n.info && n.info.public_ip) ? ' · ' + n.info.public_ip : '');
+  const off = $('nodeViewOff');
+  if (off) off.hidden = !n || !!n.online;
+}
+async function nodePickLoad() {
+  if (NV) return;
+  let d;
+  try {
+    const r = await fetch(BASE + '/api/nodes', { cache: 'no-store', headers: Date.now() - userActiveAt < 30000 ? { 'X-User-Active': '1' } : {} });
+    if (r.status === 401) { if (NODE) { _nodeViewTok = null; nodeViewHide(); showLogin(); } return; } // logged out: the login page (the node reopens after it)
+    if (!r.ok) return; // keep what is shown: a failed read is not "no nodes"
+    d = await r.json();
+  } catch (_) { return; }
+  _nodePickList = (d && d.role === 'central' && d.nodes) || [];
+  if (NODE && !_nodePickList.some(n => n.id === NODE)) nodePickSet(null); // removed
+  else if (NODE && !$('nodeFrame')) nodeViewOpen();
+  nodePickRender();
+}
+function nodePickSet(id) {
+  if (NV) return;
+  NODE = id || null;
+  try { if (NODE) sessionStorage.setItem('hashemNode', String(NODE)); else sessionStorage.removeItem('hashemNode'); } catch (_) { /* private mode */ }
+  nodeViewOpen();
+  nodePickRender();
+}
+let _nodeViewTok = null; // {id, token}
+async function nodeViewOpen() {
+  const ov = $('nodeView'), box = $('nodeViewBox');
+  if (!ov || !box) return;
+  const old = $('nodeFrame');
+  if (old) old.remove();
+  if (!NODE) { nodeViewHide(); return; }
+  ov.hidden = false;
+  document.documentElement.classList.add('nv-open');
+  const id = NODE;
+  if (!_nodeViewTok || _nodeViewTok.id !== id) {
+    try {
+      const d = await api('/api/nodes', { action: 'view', id });
+      _nodeViewTok = { id, token: d.token };
+    } catch (e) { _nodeViewTab = ''; toastErr(tr('', 'Failed'), e.message); nodePickSet(null); return; }
+  }
+  if (NODE !== id || $('nodeFrame')) return; // changed meanwhile
+  const f = document.createElement('iframe');
+  f.id = 'nodeFrame';
+  f.className = 'node-frame';
+  f.setAttribute('sandbox', 'allow-scripts allow-forms allow-downloads allow-modals allow-popups');
+  f.setAttribute('referrerpolicy', 'no-referrer');
+  f.title = tr('', 'Node');
+  const q = new URLSearchParams({ nv: String(id), lang: currentLang || 'en', t: document.documentElement.dataset.t || 'dark' });
+  if (document.documentElement.dataset.acc) q.set('acc', document.documentElement.dataset.acc);
+  if (_nodeViewTab) { q.set('tab', _nodeViewTab); _nodeViewTab = ''; }
+  f.src = BASE + '/?' + q.toString();
+  box.appendChild(f);
+}
+window.addEventListener('message', e => {
+  if (NV) return;
+  const f = $('nodeFrame');
+  if (!f || e.source !== f.contentWindow || !_nodeViewTok || _nodeViewTok.id !== NODE) return;
+  const d = e.data || {};
+  // the frame has an opaque origin: '*' is the only target, and the token
+  // goes only to the frame this page made
+  if (d.hnv === 'ready') f.contentWindow.postMessage({ hnv: 'token', token: _nodeViewTok.token }, '*');
+  // only a real click or key press counts: it also activates this page (user
+  // activation reaches the frame's ancestors), which no script can fake
+  const ua = navigator.userActivation;
+  if (d.hnv === 'active' && document.hasFocus() && (!ua || ua.isActive)) { userActiveAt = Date.now(); nodePickLoad(); }
+  if (d.hnv === 'ended' && !f._ended) { f._ended = true; nodeViewEnded(); } // once per frame: its calls may all get it
+});
+// nodeViewHide takes the view off the page; NODE stays chosen.
+function nodeViewHide() {
+  const f = $('nodeFrame'), ov = $('nodeView');
+  if (f) f.remove();
+  if (ov) ov.hidden = true;
+  document.documentElement.classList.remove('nv-open');
+}
+// nodeViewEnded: the frame's token was refused (the central restarted, or
+// its login ended). This page's own login decides: gone, the login page;
+// still there, a reload (fresh CSRF token and view token, the same node);
+// again within a minute, the view is closed, so a node cannot keep the tab
+// reloading.
+async function nodeViewEnded() {
+  let r = null;
+  try { r = await fetch(BASE + '/api/nodes', { cache: 'no-store' }); } catch (_) { /* restarting */ }
+  if (r && r.status === 401) { _nodeViewTok = null; nodeViewHide(); showLogin(); return; } // the node reopens after the login
+  let last = 0;
+  try { last = parseInt(sessionStorage.getItem('hashemNodeEnded') || '0', 10) || 0; } catch (_) { /* private mode */ }
+  if (Date.now() - last < 60000) {
+    toastErr(tr('', 'Failed'), tr('', 'The node view was closed: open the node again.'));
+    nodePickSet(null);
+    return;
+  }
+  try { sessionStorage.setItem('hashemNodeEnded', String(Date.now())); } catch (_) { /* private mode: no cap across the reload */ }
+  setTimeout(() => location.reload(), r ? 0 : 3000); // not answering: give a restart a moment
+}
+let _nodeViewTab = '';
+function openNodeHere(id, tab) { _nodeViewTab = tab || ''; nodePickSet(id); }
+(function initNodePick() {
+  if (NV) {
+    // what this page cannot do for a node: the central's login, access,
+    // HTTPS, 2FA, terminal and node list, and this browser's own settings
+    ['nodesNav', 'termNav', 'logoutBtn', 'logoutBtnM', 'langToggleBtn', 'langToggleBtnM', 'themeBtn', 'themeBtnM',
+      'metricsCard', 'accessCard', 'idleCard', 'twofaCard', 'appearanceCard', 'nodePick'].forEach(id => { const el = $(id); if (el) el.classList.add('nv-off'); });
+    ['curPass', 'termFlagDot', 'tlsDot'].forEach(id => { const el = $(id); const c = el && el.closest('.tunnel-card'); if (c) c.classList.add('nv-off'); });
+    const note = $('settingsNodeNote');
+    if (note) note.hidden = false;
+    return;
+  }
+  for (const id of ['nodePick', 'nodeViewPick']) {
+    const sel = $(id);
+    if (sel) sel.onchange = () => nodePickSet(parseInt(sel.value, 10) || null);
+  }
+  const back = $('nodeViewBack');
+  if (back) back.onclick = () => nodePickSet(null);
+  nodePickLoad();
+  setInterval(() => { if (!document.hidden) nodePickLoad(); }, 30000);
+})();

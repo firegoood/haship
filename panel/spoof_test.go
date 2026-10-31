@@ -275,14 +275,21 @@ func TestSpoofGetRequiresNothingButPostIsPro(t *testing.T) {
 		t.Fatalf("expected pro=true under lab license, got %#v", g["pro"])
 	}
 
-	// genkeys persists a keypair.
+	// save persists the form.
+	rr = httptest.NewRecorder()
+	handleSpoofPost(rr, httptest.NewRequest("POST", "/api/spoof", strings.NewReader(`{"action":"save","peer_public_ip":"198.51.100.10"}`)))
+	if apiCode(t, rr) != "" {
+		t.Fatalf("save failed: %s", rr.Body.String())
+	}
+	if loadSpoofState().PeerPublicIP != "198.51.100.10" {
+		t.Fatal("save should persist the peer IP")
+	}
+
+	// genkeys is gone: it replaced one side's key and broke the pair.
 	rr = httptest.NewRecorder()
 	handleSpoofPost(rr, httptest.NewRequest("POST", "/api/spoof", strings.NewReader(`{"action":"genkeys"}`)))
-	if apiCode(t, rr) != "" {
-		t.Fatalf("genkeys failed: %s", rr.Body.String())
-	}
-	if loadSpoofState().WGPrivKey == "" {
-		t.Fatal("genkeys should persist a private key")
+	if apiCode(t, rr) != "E-ACTION-01" {
+		t.Fatalf("genkeys should be an unknown action, got %s", rr.Body.String())
 	}
 }
 
@@ -293,7 +300,7 @@ func TestSpoofPostGatedWithoutPro(t *testing.T) {
 	spoofDir, wgConfDir, engineUnitDir = t.TempDir(), t.TempDir(), t.TempDir()
 	t.Cleanup(func() { spoofDir, wgConfDir, engineUnitDir = od, owg, ou })
 	rr := httptest.NewRecorder()
-	handleSpoofPost(rr, httptest.NewRequest("POST", "/api/spoof", strings.NewReader(`{"action":"genkeys"}`)))
+	handleSpoofPost(rr, httptest.NewRequest("POST", "/api/spoof", strings.NewReader(`{"action":"save"}`)))
 	if apiCode(t, rr) != "E-LIC-01" {
 		t.Fatalf("want E-LIC-01, got %q (%s)", apiCode(t, rr), rr.Body.String())
 	}
@@ -378,5 +385,145 @@ func TestSpoofTesterStartStop(t *testing.T) {
 	spoofTesterWG.Wait()
 	if v := spoofTesterView(); v.Status != "error" || !strings.Contains(v.Error, "operation not permitted") {
 		t.Fatalf("failed run = %+v", v)
+	}
+}
+
+// The Iran server makes the peer keypair itself, so "up" never stops on a
+// missing peer key; making it twice keeps the same key.
+func TestSpoofEnsurePeerKeypairKeepsKey(t *testing.T) {
+	var s spoofState
+	if err := s.ensurePeerKeypair(); err != nil {
+		t.Fatal(err)
+	}
+	if s.WGPeerPub == "" || s.WGPeerPriv == "" {
+		t.Fatal("the peer keypair was not made")
+	}
+	pub := s.WGPeerPub
+	if err := s.ensurePeerKeypair(); err != nil {
+		t.Fatal(err)
+	}
+	if s.WGPeerPub != pub {
+		t.Fatal("a second call must keep the same peer key")
+	}
+}
+
+// The foreign server can keep spoof port 443; only an unset port takes the
+// role's default, and a role switch re-derives it.
+func TestSpoofPortDefaultsOnlyWhenUnset(t *testing.T) {
+	s := spoofState{Role: "remote", ListenPort: 8090}
+	s.applyRoleDefaults()
+	if s.SpoofPort != 8090 {
+		t.Fatalf("remote default spoof port = %d, want the listen port", s.SpoofPort)
+	}
+	applySpoofForm(&s, spoofPostRequest{SpoofPort: 443})
+	if s.SpoofPort != 443 {
+		t.Fatalf("remote spoof port 443 was changed to %d", s.SpoofPort)
+	}
+	applySpoofForm(&s, spoofPostRequest{Role: "local"})
+	if s.SpoofPort != 443 || s.WGLocalIP != "10.20.0.1" {
+		t.Fatalf("switch to local: port=%d wg=%s", s.SpoofPort, s.WGLocalIP)
+	}
+	applySpoofForm(&s, spoofPostRequest{Role: "remote"})
+	if s.SpoofPort != 8090 {
+		t.Fatalf("switch to remote should take the listen port, got %d", s.SpoofPort)
+	}
+	// Sending the same role again keeps a chosen port.
+	applySpoofForm(&s, spoofPostRequest{Role: "remote", SpoofPort: 443})
+	applySpoofForm(&s, spoofPostRequest{Role: "remote"})
+	if s.SpoofPort != 443 {
+		t.Fatalf("same role must not reset the port, got %d", s.SpoofPort)
+	}
+}
+
+// The spoof core is IPv4 only: an IPv6 peer is refused at Up, and an Iran
+// server with only an IPv6 public IP is refused at bundle time, not later on
+// the foreign server.
+func TestSpoofNeedsIPv4(t *testing.T) {
+	s := spoofState{Role: "local", PeerPublicIP: "2001:db8::1", SpoofIPs: []string{"1.2.3.4"},
+		WGPeerPub: "x", SendTransport: "tcp", RecvTransport: "udp"}
+	if err := s.ready(); err == nil || !strings.Contains(err.Error(), "IPv4") {
+		t.Fatalf("IPv6 peer should be refused, got %v", err)
+	}
+	b := spoofState{Role: "local", LocalPublic: "2001:db8::2", ListenPort: 8090, RecvPort: 5001,
+		SendTransport: "tcp", RecvTransport: "udp", WGListen: 51820, CorePort: 5000}
+	b.applyRoleDefaults()
+	if _, _, err := makeSpoofBundle(b); err == nil || !strings.Contains(err.Error(), "IPv4") {
+		t.Fatalf("bundle on an IPv6-only Iran server should fail there, got %v", err)
+	}
+}
+
+// Max loss 0 means "only IPs that lost nothing", not the default 20%.
+func TestSpoofTesterKeepsZeroLoss(t *testing.T) {
+	if got := (spoofTesterRequest{MaxLoss: 0}).normalize().MaxLoss; got != 0 {
+		t.Fatalf("max loss 0 became %v", got)
+	}
+	if got := (spoofTesterRequest{MaxLoss: -5}).normalize().MaxLoss; got != 20 {
+		t.Fatalf("negative max loss should take the default, got %v", got)
+	}
+}
+
+// A bundle imported while the tunnel runs is applied at once; when that
+// fails the reason is saved and returned instead of a silent success.
+func TestSpoofImportOnRunningTunnelApplies(t *testing.T) {
+	spoofLab(t)
+	// No spoof binary, whatever this host has, so nothing real is restarted.
+	ob := engineBinDirs
+	engineBinDirs = []string{t.TempDir()}
+	t.Cleanup(func() { engineBinDirs = ob })
+	iran := spoofState{Role: "local", LocalPublic: "198.51.100.10", ListenPort: 8090, RecvPort: 5001,
+		SendTransport: "tcp", RecvTransport: "udp", WGListen: 51820, CorePort: 5000}
+	iran.applyRoleDefaults()
+	bundle, _, err := makeSpoofBundle(iran)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveSpoofState(spoofState{Role: "remote", Enabled: true, SpoofIPs: []string{"1.2.3.4"}}); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"action": "import", "bundle": bundle})
+	rr := httptest.NewRecorder()
+	handleSpoofPost(rr, httptest.NewRequest("POST", "/api/spoof", strings.NewReader(string(body))))
+	var resp map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	// The lab has no spoof binary, so the restart fails and says so.
+	if w, _ := resp["warning"].(string); !strings.Contains(w, "not installed") {
+		t.Fatalf("want a restart warning, got %s", rr.Body.String())
+	}
+	got := loadSpoofState()
+	if got.PeerPublicIP != "198.51.100.10" || got.LastError == "" {
+		t.Fatalf("import not saved with its error: peer=%q err=%q", got.PeerPublicIP, got.LastError)
+	}
+}
+
+// A server running only the Spoof Tunnel has no setup.json: the bundle finds
+// the public IPv4 itself, takes one typed into the form, and says what to fill
+// in when there is none.
+func TestSpoofBundleFindsPublicIPv4(t *testing.T) {
+	old := spoofPublicIPv4
+	t.Cleanup(func() { spoofPublicIPv4 = old })
+	s := defaultSpoofState()
+	s.Role = "local"
+	s.PeerPublicIP = "198.51.100.20"
+	s.applyRoleDefaults()
+
+	spoofPublicIPv4 = func() string { return "203.0.113.5" }
+	b, s2, err := makeSpoofBundle(s)
+	if err != nil || s2.LocalPublic != "203.0.113.5" || !strings.HasPrefix(b, "spf1_") {
+		t.Fatalf("detected IPv4: bundle %q, local %q, err %v", b, s2.LocalPublic, err)
+	}
+
+	spoofPublicIPv4 = func() string { return "" }
+	applySpoofForm(&s, spoofPostRequest{LocalPublicIP: "203.0.113.9"})
+	if _, s2, err := makeSpoofBundle(s); err != nil || s2.LocalPublic != "203.0.113.9" {
+		t.Fatalf("typed IPv4: local %q, err %v", s2.LocalPublic, err)
+	}
+
+	s.LocalPublic = ""
+	if _, _, err := makeSpoofBundle(s); err == nil || !strings.Contains(err.Error(), "This server's public IPv4") {
+		t.Fatalf("no IPv4: want a message naming the field, got %v", err)
+	}
+	applySpoofForm(&s, spoofPostRequest{LocalPublicIP: "2001:db8::1"})
+	if s.LocalPublic != "" {
+		t.Fatalf("an IPv6 address was taken as the public IPv4: %q", s.LocalPublic)
 	}
 }

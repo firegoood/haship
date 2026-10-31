@@ -19,6 +19,7 @@ package main
 //   E-SYS-xx     host tooling (journalctl/systemctl missing)
 //   E-WD-xx      watchdog / telegram alerts / backup
 //   E-XRAY-xx    Xray tunnel (links, ports, the core)
+//   E-CUST-xx    sold customer tunnels (customers, plans, links)
 
 import (
 	"encoding/json"
@@ -74,11 +75,13 @@ var errCatalog = map[string]errInfo{
 	"E-CARRIER-01":  {500, "carrier switch failed", "See the detail; both servers must be able to apply the same carrier (check the Peer Link)."},
 	"E-PATHTEST-01": {400, "path test could not start", "See the detail: usually a port in use (pick another first port) or a damaged code (copy it again from the Iran server)."},
 	"E-ENGINE-01":   {500, "engine switch failed", "See the detail: nothing changed or the previous engine was restored. Check journalctl for the unit it names."},
+	"E-ENGINE-02":   {400, "engine settings are incomplete", "Fill in what the detail names first: on the foreign server paste the bundle from the Iran server (Spoof tab → Bundle); nothing was changed."},
 	// installer
 	"E-INSTALL-01": {500, "hashem.sh installer not found", "Reinstall the panel or set HASHEM_SCRIPT=/path/to/hashem.sh (legacy GRE_SCRIPT still works)."},
 	"E-INSTALL-02": {500, "installer (hashem.sh) failed", "Open the steps output — failing detail is appended. \"Unknown command\" = panel hashem.sh is an old version: run Update to latest."},
 	// actions
 	"E-ACTION-01": {400, "unknown action", "Reload the page; the button may be from an older version."},
+	"E-SPOOF-01":  {400, "the spoof bundle could not be made", "Fill in what the message names in the Spoof form, then make the bundle again."},
 	"E-ACTION-02": {400, "bad action request (invalid JSON)", "Reload the page and try again."},
 	"E-ACTION-03": {400, "action command failed", "See the Logs tab for this service right after the failure."},
 	// update
@@ -115,6 +118,20 @@ var errCatalog = map[string]errInfo{
 	"E-XRAY-07": {409, "an Xray-core install is already running", "Wait for it to finish; the tab shows its progress."},
 	// speed and volume limits
 	"E-LIMIT-01": {400, "bad limits request", "The detail names the field; fix it and try again."},
+	// sold customer tunnels
+	"E-CUST-01": {400, "bad customers request", "Reload the page and try again."},
+	"E-CUST-02": {400, "invalid customer or plan", "The detail names the field; fix it and try again."},
+	"E-CUST-03": {409, "a foreign server's ports are not usable", "The detail names the port and what holds it: pick another port."},
+	"E-CUST-04": {404, "unknown customer or foreign server", "Refresh the page; it may have been removed."},
+	"E-CUST-05": {409, "not possible in the customer's current state", "The detail says what to do first (renew, reset the usage, or set an address)."},
+	"E-NODE-01": {400, "bad nodes request", "The detail names the field; fix it and try again."},
+	"E-NODE-02": {409, "not possible in this panel's role", "The detail says what to do first (leave the central, remove the nodes, or make this panel the central)."},
+	"E-NODE-03": {404, "unknown node", "Refresh the page; it may have been removed."},
+	"E-NODE-04": {502, "the node or server cannot be reached", "Check the address and that the server is up; the detail has the network error."},
+	"E-NODE-07": {409, "a tunnel job on these servers is running", "Wait for it to finish (its log is on the Nodes page), then try again."},
+	"E-NODE-06": {403, "not available through the central", "Open the node's own panel for this (terminal, logins and the panel's access settings stay local)."},
+	"E-NODE-05": {500, "cannot save the node settings", "The detail names the file: check free space and /etc/gre-panel permissions."},
+	"E-CUST-06": {500, "cannot save customers.json", "Disk write failed: check free space and /etc/gre-panel permissions."},
 	// log diagnostics (annotation only, also reused by status hints)
 	"E-GRE-01":     {0, "GRE interface missing / down", "Tunnel setup did not create it, or it was deleted — reinstall that peer."},
 	"E-GRE-02":     {0, "GRE ping failed (100% loss / unreachable)", "Peers cannot reach each other: firewall, wrong public IP, or GRE blocked."},
@@ -240,7 +257,7 @@ func writeAPIError(w http.ResponseWriter, r *http.Request, code, detail string) 
 	}
 	ep := ""
 	if r != nil {
-		ep = r.Method + " " + r.URL.Path
+		ep = r.Method + " " + nodeViewRedact(r.URL.Path) // a node view's token stays out of the log
 	}
 	recordError(code, ep, msg)
 	w.Header().Set("Content-Type", "application/json")

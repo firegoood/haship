@@ -3,6 +3,135 @@
 Format: newest first. Versions are git tags; every tag has a GitHub release with `checksums.txt`.
 Builds before `v0.1.0` were numbered `panel-rN` (see the releases page).
 
+## v3.0.0 — 2026-10-31
+
+**Manage all your servers from one panel**, **sell tunnels to customers**, and a dashboard whose traffic numbers add up. Run `hashem update` on every server. Running tunnels are not touched by the update; node mode stays off until you turn it on.
+
+### Nodes: one panel for all your servers
+
+One panel is the **central**; your other servers join it as **nodes**. Every node keeps its full local panel, and its tunnels keep running when the central is away. Guide: [docs/NODES.md](docs/NODES.md) ([فارسی](docs/NODES.fa.md)).
+
+![The Nodes page on the central](https://raw.githubusercontent.com/pdnczone/hashem-panel/v3.0.0/docs/img/v3/nodes.jpg)
+
+- **Add a server** with the one line the panel gives (`hashem node-join <code>`, or the installer line on a server without Hashem), or let the central log in once with **SSH** and do it. The SSH host key is shown before any password or key is sent, and neither is stored. A join code works once, for 30 minutes.
+- **The channel**: the node dials the central's panel port (a WebSocket with TLS 1.3 inside, both keys pinned, Ed25519). Only the central a node joined can talk to it, and a node can only answer, never command. Removing a node revokes it at once.
+- **Manage a node from the central**: pick it in the server picker at the top. Every page (dashboard, tunnels, setup, customers, cluster, logs, diagnostics, updates, license) then shows that server; the node runs each request with its own checks, Pro gates and audit (`via_central`). Its pages open in a sandboxed frame of their own: even a node that was broken into cannot act as the central. The terminal, logins, 2FA and HTTPS stay on each panel.
+- **Licenses**: a key active on the central that is not locked to one machine is activated on every node without a key of its own, by the node's own license check. A machine-locked key goes only to its machine. A node's own key is never replaced; renewing or removing the central's key changes only the copy it gave. The license check itself is unchanged.
+
+![A node opened from the central](https://raw.githubusercontent.com/pdnczone/hashem-panel/v3.0.0/docs/img/v3/node-view.jpg)
+
+**Tunnels between servers**: **New tunnel** makes a tunnel between two of your servers from one page (the central counts as one). **Check** asks both servers for a free control port and GRE pair and says what it will do (and what would fail: a port in use, a missing license, the wrong way round). Then the Iran end is set up, its bundle is checked against the plan, and the foreign end is set up with it (or joins as one more Iran hub). If the foreign end fails, the Iran end is removed again; if that fails too, it is listed as left over. The list shows every tunnel whose two ends are your servers (paired only when both prove the same tunnel token); **Remove both ends** removes the foreign end first.
+
+![A new tunnel between two servers, checked](https://raw.githubusercontent.com/pdnczone/hashem-panel/v3.0.0/docs/img/v3/new-tunnel.jpg)
+
+**All servers** on the central:
+- every server's health, tunnels, speeds, CPU, RAM and disk on one page; a tunnel between two of your servers is counted once, at its Iran server;
+- **Update nodes** one at a time, each waited for until it is back on the new version; the first failure stops the rest;
+- **Backups**: the central keeps each node's newest Watchdog backup (encrypted with that node's key) for 14 days; save each node's backup key;
+- **Customers** of every server in one list;
+- **Alerts**: with Telegram or a webhook set up on the central, the nodes' alerts come through it too (rate-limited, named by the node).
+
+![Updating nodes from the central](https://raw.githubusercontent.com/pdnczone/hashem-panel/v3.0.0/docs/img/v3/update-nodes.jpg)
+
+**Moving an existing install**: after the update, an Iran panel with foreign servers asks once: **Manage all your servers from this panel?** (Yes / Not now / Don't ask again; `hashem update` prints the same hint). On yes it becomes the central, and each foreign server joins by itself once it runs this version, proving itself with the tunnel token the two already share. The move closes after 7 days or when all have joined, and a server that joined this way gets no license copy until you **Approve** it. A foreign server looks for the offer for 14 days after its update (`hashem node move` starts that again). The Peer Link carries the tunnel token in clear, as it always has: someone on the path who learns it could try to pose as one side while the move is open; to avoid any window, add the servers with **Add a server** instead.
+
+![The move offer on an Iran panel](https://raw.githubusercontent.com/pdnczone/hashem-panel/v3.0.0/docs/img/v3/move-offer.jpg)
+
+![Adding a server](https://raw.githubusercontent.com/pdnczone/hashem-panel/v3.0.0/docs/img/v3/add-server.jpg)
+
+### Customers: sell tunnels (Hashem Pro)
+
+The **Customers** tab sells the Iran end of a tunnel. Guide: [docs/CUSTOMERS.md](docs/CUSTOMERS.md) ([فارسی](docs/CUSTOMERS.fa.md)).
+
+- Each customer brings one or more foreign servers; each gets its own relay on your server, on the engine you choose: **FRP** (TCP, WebSocket, KCP, QUIC), **Backhaul** (TCP, TCP mux, WS, WS mux, WSS, WSS mux), **Xray reverse** or **Xray direct** (Reality, XHTTP + Reality, gRPC + Reality, mKCP), or **Bagher** (SSH). One customer can mix engines.
+- A plan per customer: days, volume (both directions, all its servers) and one speed cap. When it ends, the volume is used up or you pause it, its tunnels stop and its ports are blocked; renew, more volume, reset or resume brings them back. Billing counts only users' traffic, where it comes in, so dropped bytes are never billed.
+- The customer runs one installer line (`hashem-customer.sh install <kit>`) on each foreign server: no license and no panel needed there. The kit is data only; the installer checks every value. A customer's link may only open the ports you sold.
+- FRP and Backhaul links can run **inside GRE**, fenced on both ends (only the link's control port and ping).
+- Reminders 3 days and 1 day before a plan ends, history per customer, plan templates, renew several at once, CSV export, and a status page for each customer.
+- Without your license the existing customers keep running and can still be paused or removed; creating, renewing and resuming need it.
+
+### Dashboard traffic, checked
+
+The dashboard's traffic system was audited; every finding is fixed and tested:
+- a stale reading early in a speed window was taken for a counter reset and counted the whole counter again;
+- Backhaul and Bagher counters summed IPv4 and IPv6, so one family failing or being rebuilt counted the other's total again; each family now adds its own change;
+- the 30 s flush could write zero totals over the saved state before the first reading;
+- a sold tunnel's GRE was counted as this server's tunnel;
+- a link's history rate after a gap used the wrong interval; a race on the history fallback.
+
+### Also
+- **One list of ports** Hashem's configs take (panel, relays, peers, Bagher, Xray, cluster pools, customers): every port check asks it, so one feature can no longer take another's port.
+- **Xray**: runs without MPTCP, so the Iran end of a reverse link drops dead connections instead of retrying them for minutes.
+- **FRP with ufw**: every port frps listens on is opened (KCP, QUIC and the users' ports, not only the control port).
+- **Logs**: a peer that does not answer ping is one log line, not one per poll.
+
+### Updating
+- Run `hashem update` on every server, in any order. Nothing changes until you use the new features.
+- Nodes need the central and the node on v3.0.0. For the move, update the Iran panel and press **Yes**, then update its foreign servers.
+- `hashem node-join` on a server without Hashem uses the installer line the panel gives.
+
+## v2.8.5 — 2026-10-29
+
+Lower ping on reverse Xray links under load, and removing the first tunnel without removing the others. Run `hashem update` on both servers, in any order.
+
+**Performance**
+- **A download no longer slows every other user on a reverse Xray link.** The reverse link carries every user connection over one connection to Iran (Xray adds a second only past 16 on it), so one download filled its send queue and every other request waited behind it. The foreign server now keeps 4 reverse connections (set 1–16 under "Reverse connections"), and Iran gives each new user connection to the least busy one. Links that carry many connections on one (reverse, mux, XHTTP, gRPC) also keep at most 16 KiB waiting in each socket. In the lab, a request during a download that fills a 30 Mbit/s link took 77 ms instead of 560 ms (81 ms on a direct link).
+- After the update the panel rebuilds and restarts every running Xray link whose config changes, so Xray connections drop for a moment.
+
+**Fixes**
+- Spoof Tunnel: **Copy Bundle** on a server that runs only the Spoof Tunnel no longer fails with "this server's public IPv4 is unknown". The bundle read the address only from a GRE or Backhaul setup; it now finds it itself, and a new field "This server's public IPv4" takes it by hand (for a server behind NAT).
+- The first tunnel has its own **Remove** button and is removed alone when there are other tunnels. Before, the only way was "Remove Tunnel", which removed every tunnel on the server; removing peer 1 on the old names did the same. With no other tunnel, Remove Tunnel still removes everything as before. The terminal menu's Remove Tunnel still removes every tunnel.
+
+## v2.8.4 — 2026-10-29
+
+Lower ping on direct Xray links, a working Spoof IP tester and Spoof form, the panel's domain in the terminal, and honest Benchmark numbers. Run `hashem update` on the **foreign server first**, then the Iran server.
+
+**Performance**
+- **A direct Xray link no longer pays a full handshake for each new connection.** Every user connection opened a new TCP connection and a new Reality/TLS handshake before its first byte, so clients that test the delay with a new connection saw about 4x the real ping (94–131 ms over a 30 ms round trip, against 31 ms in reverse mode). The Iran end now keeps 4 connections ready (Xray's pre-connect, on raw, WS and HTTPUpgrade; set it from 1 to 32, or -1 to turn it off, next to Mux), and a new connection takes one round trip. HTTP/2 transports, CDN links, mux and reverse mode are unchanged. The foreign end waits up to 150 s for the first request on a ready connection. After the update the panel rebuilds and restarts every running link whose config changes, so Xray connections drop for a moment. If only the Iran server is updated, the foreign server closes ready connections after 4 s and Xray logs a warning each time it redials.
+
+**Spoof Tunnel**
+- The IP tester's results now go to the right server: the receiver lists the IPs the *sender* can forge, so the button copies them for the sender server instead of filling them on the receiver. The sender also gets a destination port, the tunnel's port by default instead of a fixed 80, and a max loss of 0 stays 0.
+- The send/receive transport you choose is kept. The selects never showed the saved value, so every Save or Up went back to TCP/TCP and stopped matching the bundle.
+- "Peer reachable" comes from the WireGuard handshake instead of ping. A server that receives over ICMP turns off ping replies for the whole host, and the form now says so.
+- The tab shows the last error and a Failed badge instead of "Starting…" forever; Stop clears it. `hashem spoof up`/`down` record the state the panel shows.
+- An IPv6 peer is refused at Up, and an IPv6-only Iran server when making the bundle, instead of failing later on the foreign server. The core is IPv4 only.
+- A bundle imported while the tunnel runs is applied at once. The foreign server can keep spoof port 443.
+- `hashem update` replaces a Spoof core that is not the pinned build.
+- The "generate keys" action is gone: it replaced one side's key and broke the pair.
+
+**Fixes**
+- The `hashem` menu and `hashem show-panel-url` show `https://DOMAIN:port/` once a domain certificate is set, instead of `http://IP:port`. `show-panel-url` keeps the plain HTTP address on a second line.
+- Benchmark: a ping without a summary line is a failed probe, not 15 ms; asking for a run while one is in progress no longer returns an empty page; a WSS port whose TLS handshake fails no longer counts as working.
+
+## v2.8.0 — 2026-10-27
+
+Less CPU under heavy use, on every tunnel type and most of all on Bagher, and a fix for saving Xray links. Run `hashem update` on both servers of a tunnel; Bagher's gain needs the foreign server updated.
+
+**Performance**
+- **Bagher no longer encrypts every byte twice.** frpc reaches frps inside the SSH tunnel, but frp turns TLS on by default, so each user connection also paid a TLS handshake with an RSA-2048 key on both servers. Under heavy use that alone could fill a core. frpc now runs with `transport.tls.enable = false`. New configs get it from the panel and `hashem.sh`; after the update the panel adds it to an existing Bagher `frpc.toml` once and restarts frpc, so Bagher connections drop for a moment. A `frpc.toml` that already sets TLS, or has a `[transport]` table, is left as it is.
+- **The panel's own polling no longer grows with the number of user connections.** The 5-second snapshot read every socket on the server with `ss` (about 42 MB of output a tick at 100k connections) only to find the tunnel's control sessions; `ss` now asks the kernel for the control ports alone. A foreign server without a connected Peer Link stops a second full scan every 10 seconds, and the active connection count is read every 30 seconds instead of twice every 5.
+
+**Fixes**
+- Saving an Xray link no longer fails with `E-XRAY-04` "Failed to get format of …/link-1.json.new". The config is tested as `link-N.new.json`, since Xray takes the format from the file extension.
+
+**If you update only with `hashem.sh`**
+- On a foreign server whose Bagher config was written by an older `hashem.sh`, add `transport.tls.enable = false` as the first line of `/etc/gre-panel/bagher/frpc.toml`, then run `systemctl restart hashem-bagher-frpc`.
+
+## v2.7.2 — 2026-10-25
+
+A fix for the Spoof Tunnel. Run `hashem update` on the Iran server; update the foreign server too for the clearer messages.
+
+**Fixes**
+- **Up** on the Iran server no longer stops with `E-ENGINE-01` "the peer WireGuard key is missing" when the bundle has not been shown yet. The Iran server owns both WireGuard keypairs and now makes any that are missing when it brings the tunnel up; showing the bundle later gives the same keys.
+- Spoof settings that are still incomplete (no bundle imported on the foreign server, no spoof IP, no peer IP) now return the new `E-ENGINE-02` (400) with a hint that fits, instead of `E-ENGINE-01` (500) with a journalctl hint. The missing peer key message now tells the foreign server to import the bundle from the Iran server.
+
+## v2.7.1 — 2026-10-24
+
+A fix for servers with more than one foreign server. Run `hashem update` on the Iran server; nothing else to do.
+
+**Fixes**
+- A second, third or later foreign server no longer disappears from the Tunnels tab and the dashboard while its tunnel is connected. `hashem.sh` wrote a Backhaul tunnel's forwarded ports to `peers.json` as one string, the panel could not read that file, and it then showed no extra tunnel at all. The panel now reads both forms, `hashem.sh` writes a list, and Edit Peer opens for these tunnels again.
+
 ## v2.7.0 — 2026-10-24
 
 IPv6 in every tunnel, with two new GRE wraps (**6to4** when protocol 47 is blocked but 41 is not, **4in6** over the servers' real IPv6); a new **Xray** tunnel (Reality, XHTTP, gRPC, mKCP, CDN, direct or reverse); **speed and volume limits** per foreign server; Bagher with lower ping and several foreign servers; traffic counters you can trust; and the carrier can be changed from the foreign server too. Update both servers of a tunnel: 6to4/4in6 and a swap from the foreign side need this version on each.

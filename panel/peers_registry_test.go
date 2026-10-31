@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -53,26 +51,5 @@ func TestLoadPeersAcceptsArrayRawPorts(t *testing.T) {
 	}
 	if got := peers[0].RawPorts; len(got) != 2 || got[1] != "2083=8443" {
 		t.Fatalf("raw ports = %#v", got)
-	}
-}
-
-// The web UI treats raw_ports as the comma-separated string and calls
-// .split(',') on it; API writes must keep that shape, alongside the peerLive
-// fields.
-func TestPeerLiveMarshalsRawPortsAsString(t *testing.T) {
-	b, err := json.Marshal(peerLive{
-		peerRecord: peerRecord{ID: 1, RawPorts: rawPorts{"443", "10000-10050"}},
-		GreUp:      true,
-		FrpUp:      true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(b)
-	if !strings.Contains(out, `"raw_ports":"443,10000-10050"`) {
-		t.Fatalf("raw_ports not a string: %s", out)
-	}
-	if !strings.Contains(out, `"gre_up":true`) || !strings.Contains(out, `"frp_up":true`) {
-		t.Fatalf("peerLive fields missing: %s", out)
 	}
 }

@@ -67,6 +67,10 @@ func (e *xrayEnv) use() {
 	runner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		switch {
 		case name == bin && len(args) > 1 && args[1] == "-test":
+			// like Xray: the config format comes from the file extension
+			if c := args[len(args)-1]; !strings.HasSuffix(c, ".json") {
+				return []byte("Failed to start: main: failed to load config files: [" + c + "] > core: Failed to get format of " + c), fmt.Errorf("exit status 23")
+			}
 			if !strings.Contains(e.testOut, "OK") {
 				return []byte(e.testOut), fmt.Errorf("exit status 23")
 			}
@@ -168,7 +172,7 @@ func TestXrayCreateDirectAndImport(t *testing.T) {
 		}
 	}
 	unit := iran.read(xrayUnitPath(1))
-	if !strings.Contains(unit, "ExecStart="+xrayBinPath+" run -c "+xrayLinkConfPath(1)) || !strings.Contains(unit, "XRAY_LOCATION_ASSET="+xrayDir) {
+	if !strings.Contains(unit, "ExecStart="+xrayBinPath+" run -c "+xrayLinkConfPath(1)) || !strings.Contains(unit, "XRAY_LOCATION_ASSET="+xrayDir) || !strings.Contains(unit, "Environment=GODEBUG=multipathtcp=0") {
 		t.Errorf("unit:\n%s", unit)
 	}
 	if got := strings.Join(iran.systemctl, ","); got != "daemon-reload,enable hashem-xray-1,restart hashem-xray-1" {
@@ -515,5 +519,39 @@ func TestXrayConnsCountsOnlyTheLink(t *testing.T) {
 	}
 	if len(got) != 1 || !strings.Contains(got[0], "( dport = :443 and dst 198.51.100.7 )") {
 		t.Errorf("ss filter: %v", got)
+	}
+}
+
+// A link made by an older version gets this version's config and a restart
+// at start; an unchanged one is left alone.
+func TestXrayMigrateConfigs(t *testing.T) {
+	e := newXrayEnv(t)
+	l := xrayTestLink(t, "reality", xrayModeDirect, xraySideIran)
+	st := xrayState{}
+	l = st.add(l)
+	if err := saveXrayState(st); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(xrayConfDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"outbounds": []}`
+	if err := os.WriteFile(xrayLinkConfPath(l.ID), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if n := migrateXrayConfigs(); n != 1 {
+		t.Fatalf("want 1 link rebuilt, got %d", n)
+	}
+	if got := e.read(xrayLinkConfPath(l.ID)); !strings.Contains(got, `"testpre"`) {
+		t.Fatalf("config not rebuilt:\n%s", got)
+	}
+	if !strings.Contains(e.read(xrayUnitPath(l.ID)), "LogRateLimitBurst") {
+		t.Fatal("unit not rewritten")
+	}
+	if !strings.Contains(strings.Join(e.systemctl, "\n"), "try-restart "+xrayUnitName(l.ID)) {
+		t.Fatalf("link not restarted: %v", e.systemctl)
+	}
+	if n := migrateXrayConfigs(); n != 0 {
+		t.Fatalf("an up-to-date link must not restart, got %d", n)
 	}
 }

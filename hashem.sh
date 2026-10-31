@@ -1403,8 +1403,9 @@ carrier_apply() {
     else
         local dev
         for dev in $( (ip -o link show type gre; ip -o link show type ip6gre) 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1); do
-            # hpt0: the panel's path test, never a tunnel (keyed GRE, removed after the test)
-            [[ "$dev" == "gre0" || "$dev" == "gretap0" || "$dev" == "ip6gre0" || "$dev" == hpt* ]] && continue
+            # hpt0: the panel's path test, never a tunnel (keyed GRE, removed after the test);
+            # hcg*/hcc*: a GRE sold to a customer / bought from a seller (plain GRE at both ends)
+            [[ "$dev" == "gre0" || "$dev" == "gretap0" || "$dev" == "ip6gre0" || "$dev" == hpt* || "$dev" == hcg* || "$dev" == hcc* ]] && continue
             IFS_TO_APPLY+=("$dev")
         done
         if [[ ${#IFS_TO_APPLY[@]} -eq 0 ]]; then
@@ -2293,19 +2294,28 @@ SPOOF_SHA256_arm64="caf08b3960d4eea72910fb0613a8893560a41f5b2f2e18f9a6c595c9ad7e
 # install_spoof_binary: download the pinned spoof core, verify its sha256, and
 # install it to INSTALL_DIR/spoof. WireGuard tools are pulled in too, since the
 # panel wraps the pipe with WireGuard.
+# An installed core is kept only while it is the pinned build (same sha256), so
+# a new DEFAULT_SPOOF_VERSION reaches servers that already have one; a running
+# core is restarted onto the new build.
 install_spoof_binary() {
     install_wireguard_tools
-    if [[ -x "${INSTALL_DIR}/spoof" ]]; then
-        return 0
-    fi
     detect_arch
     if [[ "$FRP_ARCH" != "amd64" && "$FRP_ARCH" != "arm64" ]]; then
+        [[ -x "${INSTALL_DIR}/spoof" ]] && return 0
         echo -e "${RED}[!] Spoof Tunnel has no release for ${FRP_ARCH} (amd64/arm64 only).${NC}"
         return 1
     fi
     local SPOOF_VER="$DEFAULT_SPOOF_VERSION"
     local WANT_SHA
     eval "WANT_SHA=\${SPOOF_SHA256_${FRP_ARCH}}"
+    local WAS_RUNNING=0
+    if [[ -x "${INSTALL_DIR}/spoof" ]]; then
+        if [[ -z "$WANT_SHA" || "$(sha256sum "${INSTALL_DIR}/spoof" 2>/dev/null | awk '{print $1}')" == "$WANT_SHA" ]]; then
+            return 0
+        fi
+        echo -e "${CYAN}[*] The installed Spoof core is not ${SPOOF_VER}; replacing it.${NC}"
+        systemctl is-active --quiet spoof-core 2>/dev/null && WAS_RUNNING=1
+    fi
     echo -e "${CYAN}[*] Downloading Spoof Tunnel ${SPOOF_VER} (${FRP_ARCH})...${NC}"
 
     local TMP_DIR
@@ -2330,6 +2340,7 @@ install_spoof_binary() {
     rm -rf "$TMP_DIR"
     if [[ -x "${INSTALL_DIR}/spoof" ]]; then
         echo -e "${GREEN}[OK] Spoof Tunnel ${SPOOF_VER} installed to ${INSTALL_DIR}/spoof.${NC}"
+        [[ $WAS_RUNNING -eq 1 ]] && systemctl restart spoof-core 2>/dev/null || true
         return 0
     fi
     echo -e "${RED}[!] Spoof binary install failed.${NC}"
@@ -2357,6 +2368,16 @@ install_wireguard_tools() {
     command -v wg >/dev/null 2>&1 || echo -e "${YELLOW}[!] WireGuard tools not found; install 'wireguard-tools' manually.${NC}"
 }
 
+# spoof_mark_enabled true|false: record a start/stop from the terminal in the
+# panel's spoof.json, so the Spoof tab shows the real state. A start clears the
+# last error the panel recorded.
+spoof_mark_enabled() {
+    local F="${PANEL_CONFIG_DIR}/spoof.json"
+    [[ -f "$F" ]] || return 0
+    sed -i -E "s/(\"enabled\":[[:space:]]*)(true|false)/\1$1/" "$F" 2>/dev/null || true
+    [[ "$1" == "true" ]] && sed -i -E '/^[[:space:]]*"last_error":/d' "$F" 2>/dev/null || true
+}
+
 # cli_spoof: terminal entry for the Spoof Tunnel. Mutating actions need Pro,
 # checked through the panel binary (same key/rules as the panel).
 cli_spoof() {
@@ -2379,13 +2400,17 @@ cli_spoof() {
         up|start)
             pro_ok spoof "Spoof Tunnel" || return 1
             install_spoof_binary || return 1
-            systemctl restart spoof-core 2>/dev/null && systemctl restart wg-quick@wg-spoof 2>/dev/null \
-                && echo -e "${GREEN}[OK] Spoof tunnel started.${NC}" \
-                || echo -e "${RED}[!] Could not start; set it up in the panel's Spoof tab first.${NC}"
+            if systemctl restart spoof-core 2>/dev/null && systemctl restart wg-quick@wg-spoof 2>/dev/null; then
+                spoof_mark_enabled true
+                echo -e "${GREEN}[OK] Spoof tunnel started.${NC}"
+            else
+                echo -e "${RED}[!] Could not start; set it up in the panel's Spoof tab first.${NC}"
+            fi
             ;;
         down|stop)
             systemctl disable --now wg-quick@wg-spoof 2>/dev/null || true
             systemctl disable --now spoof-core 2>/dev/null || true
+            spoof_mark_enabled false
             echo -e "${GREEN}[OK] Spoof tunnel stopped.${NC}"
             ;;
         *)
@@ -3250,6 +3275,63 @@ limits_drop() {
     done
 }
 
+# Sold customer tunnels (panel/customers.go): the hsell-<customer>-<link>
+# units, their engine copies (frps, backhaul, xray), configs, the HASHEM_CUST chain and the speed caps
+# (tc pref 4919, IPv6 4920, police actions 0x48530000-0x4853ffff). Only a
+# full uninstall calls it: removing or rebuilding the seller's own tunnel
+# never touches paying customers.
+customers_teardown() {
+    local f d n p idx
+    for f in "${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"/hsell-[0-9]*-[0-9]*.service; do
+        [[ -e "$f" ]] || continue
+        systemctl disable --now "${f##*/}" >/dev/null 2>&1 || true
+        rm -f "$f"
+    done
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    pkill -9 -f "^/usr/local/lib/hashem-sell/" >/dev/null 2>&1 || true
+    rm -rf /usr/local/lib/hashem-sell "${PANEL_CONFIG_DIR}/customers"
+    if command -v iptables >/dev/null 2>&1; then
+        for p in INPUT OUTPUT; do
+            iptables -w 5 -D "$p" -j HASHEM_CUST 2>/dev/null || true
+        done
+        iptables -w 5 -F HASHEM_CUST 2>/dev/null || true
+        iptables -w 5 -X HASHEM_CUST 2>/dev/null || true
+        # GRE-wrapped links: their fence (raw PREROUTING, FORWARD; INPUT in an early build)
+        iptables -w 5 -t raw -D PREROUTING -j HASHEM_CUST_GRE 2>/dev/null || true
+        iptables -w 5 -t raw -F HASHEM_CUST_GRE 2>/dev/null || true
+        iptables -w 5 -t raw -X HASHEM_CUST_GRE 2>/dev/null || true
+        iptables -w 5 -D INPUT -j HASHEM_CUST_GRE 2>/dev/null || true
+        iptables -w 5 -D FORWARD -j HASHEM_CUST_GREF 2>/dev/null || true
+        for p in HASHEM_CUST_GRE HASHEM_CUST_GREF; do
+            iptables -w 5 -F "$p" 2>/dev/null || true
+            iptables -w 5 -X "$p" 2>/dev/null || true
+        done
+    fi
+    if command -v ip6tables >/dev/null 2>&1; then
+        ip6tables -w 5 -D INPUT -i hcg+ -j DROP 2>/dev/null || true
+        ip6tables -w 5 -D FORWARD -i hcg+ -j DROP 2>/dev/null || true
+        ip6tables -w 5 -D FORWARD -o hcg+ -j DROP 2>/dev/null || true
+    fi
+    for d in "${HASHEM_SYSFS_NET:-/sys/class/net}"/hcg[0-9]*x[0-9]*; do
+        [[ -e "$d" ]] || continue
+        ip link del dev "${d##*/}" 2>/dev/null || true
+    done
+    command -v tc >/dev/null 2>&1 || return 0
+    for d in /sys/class/net/*; do
+        n=${d##*/}
+        for p in 4919 4920; do
+            tc filter del dev "$n" egress pref "$p" 2>/dev/null || true
+            tc filter del dev "$n" ingress pref "$p" 2>/dev/null || true
+        done
+    done
+    for idx in $(tc actions ls action police 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "index") print $(i + 1)}'); do
+        [[ "$idx" =~ ^[0-9]+$ ]] || continue
+        if (( idx >= 0x48530000 && idx <= 0x4853ffff )); then
+            tc actions del action police index "$idx" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
 # ---- Performance & Obfuscation Controls (CLI + Menu 22) ----
 
 perf_apply() {
@@ -3752,6 +3834,24 @@ UNIT
     echo -e "${GREEN}[OK] WSS TLS front listening on :${FPORT} (-> frps :${CPORT})${NC}"
 }
 
+# frps_ufw_open CONTROL_PORT [PORTS]: with ufw active, open what frps listens
+# on: the control port (tcp, and udp for kcp), quic on the next port, and the
+# users' ports (tcp and udp). Opening the control port's tcp alone left kcp,
+# quic and every user port dropped.
+frps_ufw_open() {
+    command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active" || return 0
+    local CPORT=$1 QPORT=$(($1 + 1)) p
+    (( QPORT > 65535 )) && QPORT=$(($1 - 1))
+    ufw allow "${CPORT}/tcp" >/dev/null 2>&1 || true
+    ufw allow "${CPORT}/udp" >/dev/null 2>&1 || true
+    ufw allow "${QPORT}/udp" >/dev/null 2>&1 || true
+    for p in $(echo "${2:-}" | tr ',' ' '); do
+        is_valid_port "$p" || continue
+        ufw allow "$((10#$p))/tcp" >/dev/null 2>&1 || true
+        ufw allow "$((10#$p))/udp" >/dev/null 2>&1 || true
+    done
+}
+
 # frps_wss_front_remove <suffix>
 frps_wss_front_remove() {
     local SVC="frps-wss${1}"
@@ -3854,9 +3954,7 @@ EOF
         log_msg "tunnel" "ERROR" "frps service failed to start"
     fi
 
-    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-        ufw allow "${BIND_PORT}/tcp" >/dev/null 2>&1
-    fi
+    frps_ufw_open "$BIND_PORT" "$PORTS_CLEANED"
 
     tune_apply >/dev/null 2>&1 || true
     watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
@@ -4679,11 +4777,13 @@ peer_token() {
 # Any other owner is reported and left running; frps then fails to start and
 # the caller reports that.
 release_frps_port() {
-    local port=$1 pid comm busy=0
+    local port=$1 pid comm exe busy=0
     command -v fuser >/dev/null 2>&1 || return 0
     for pid in $(fuser "${port}/tcp" 2>/dev/null); do
         comm=$(cat "/proc/${pid}/comm" 2>/dev/null)
-        if [[ "$comm" == frps* ]]; then
+        exe=$(readlink "/proc/${pid}/exe" 2>/dev/null)
+        # a sold customer tunnel's frps (panel Customers tab) is never a stray
+        if [[ "$comm" == frps* && "$exe" != /usr/local/lib/hashem-sell/* ]]; then
             kill "$pid" 2>/dev/null || true
         else
             echo -e "${RED}[!] Port ${port} is held by '${comm:-unknown}' (pid ${pid}); not killing it. Pick another control port or stop that service.${NC}" >&2
@@ -4764,9 +4864,7 @@ EOF
     release_frps_port "$BIND_PORT" || true
     reserve_service_ports
     systemctl restart "$SVC"
-    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-        ufw allow "${BIND_PORT}/tcp" >/dev/null 2>&1
-    fi
+    frps_ufw_open "$BIND_PORT"
 }
 
 # add a peer tunnel on the Iran side.
@@ -4874,6 +4972,7 @@ cli_add_peer() {
         echo -e "${RED}[!] Error: ${FRPS_SVC} failed to start. Generated configuration might be invalid.${NC}"
         return 1
     fi
+    frps_ufw_open "$FRP_PORT" "$CLEANED"
     if [[ "${PEER_FRP_TRANSPORT:-tcp}" == "wss" ]]; then
         local _fsuf=""; [[ "$LEGACY" == "true" ]] || _fsuf="-${ID}"
         frps_wss_front_ensure "$_fsuf" "$FRP_PORT" || echo -e "${YELLOW}[!] WSS TLS front could not be started for this peer.${NC}"
@@ -4924,7 +5023,8 @@ cli_remove_peer() {
         [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo -e "${YELLOW}[*] Aborted.${NC}"; return 0; }
     fi
     if [[ "$LEG" == "1" ]]; then
-        remove_tunnel_force
+        # peer 1 on the legacy names is the first tunnel: only it goes
+        remove_base_tunnel "$ID"
     else
         frps_wss_front_remove "-${ID}"
         [[ "$SVC" == backhaul-* ]] && backhaul_udp_remove "$SVC"
@@ -4936,9 +5036,8 @@ cli_remove_peer() {
             ip tunnel del "$GIF" >/dev/null 2>&1 || true
         fi
     fi
-    PEERS_F="$PEERS_FILE" PEER_ID="$ID" python3 -c \
-'import json,os; f=os.environ["PEERS_F"]; d=json.load(open(f)); d["peers"]=[p for p in d.get("peers",[]) if p["id"]!=int(os.environ["PEER_ID"])]; json.dump(d,open(f,"w"),indent=2)' \
-        || echo -e "${YELLOW}[!] peers registry already gone — nothing left to clean.${NC}"
+    [[ -f "$PEERS_FILE" ]] && PEERS_F="$PEERS_FILE" PEER_ID="$ID" python3 -c \
+'import json,os; f=os.environ["PEERS_F"]; d=json.load(open(f)); d["peers"]=[p for p in d.get("peers",[]) if p["id"]!=int(os.environ["PEER_ID"])]; json.dump(d,open(f,"w"),indent=2)'
     echo -e "${GREEN}[OK] Peer '${NAME}' (id ${ID}) removed.${NC}"
 }
 
@@ -5070,13 +5169,14 @@ print(json.dumps(nums))
 import json, os, sys
 f = os.environ["PEERS_F"]
 iid, name, lip, rip, fport, tok, lgre, pgre, pjson, gif, svc, eng, trans, nogre, raw_p = sys.argv[1:]
+# raw_ports is a list: a string here failed the panel's peers.json decode
+raw_list = [x for x in raw_p.replace(",", " ").split() if x]
 d = json.load(open(f))
 d.setdefault("peers", []).append({
   "id": int(iid), "name": name, "local_pub": lip, "remote_pub": rip,
   "frp_port": int(fport), "token": tok, "local_gre": lgre, "peer_gre": pgre,
   "ports": json.loads(pjson), "gre_if": gif, "frps_svc": svc, "legacy": False,
-  "engine": eng, "transport": trans, "no_gre": nogre == "1",
-  "raw_ports": [p.strip() for p in raw_p.replace(",", " ").split() if p.strip()]
+  "engine": eng, "transport": trans, "no_gre": nogre == "1", "raw_ports": raw_list
 })
 json.dump(d, open(f, "w"), indent=2)
 PYEOF
@@ -5577,7 +5677,7 @@ doctor_diagnostics() {
         TARGET_IP="$IRAN_GRE_IP"
     else
         local IFACE
-        IFACE=$(ip -o link show type gre 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -v '^hpt' | head -n1)
+        IFACE=$(ip -o link show type gre 2>/dev/null | awk -F': ' '{print $2}' | cut -d'@' -f1 | grep -v -e '^hpt' -e '^hcg' -e '^hcc' | head -n1)
         if [[ -n "$IFACE" ]]; then
             LOCAL_IP=$(ip -o -4 addr show dev "$IFACE" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)
             if [[ "$LOCAL_IP" =~ \.1$ ]]; then
@@ -6059,6 +6159,9 @@ uninstall_all_force() {
         systemctl disable frps frpc "${TUNNEL_NAME}.service" gre-panel hashem-watchdog.timer hashem-watchdog.service backhaul-server backhaul-client backhaul >/dev/null 2>&1 || true
         systemctl disable 'frps*' 'frpc*' 'backhaul*' 'gre-t*' 'gre-h*' hashem-lb-net >/dev/null 2>&1 || true
         purge_legacy_obfuscation
+        # sold customer tunnels (panel Customers tab), stopped before the panel
+        # binary goes so it cannot restart them
+        customers_teardown
 
         # 2. Terminate any leftover processes
         pkill -9 -f "${INSTALL_DIR}/frps" >/dev/null 2>&1 || true
@@ -6145,6 +6248,7 @@ remove_tunnel() {
 # Non-interactive core: stop/disable units, drop interface, remove FRP files.
 # Panel files/services are never touched here.
 remove_tunnel_force() {
+    rm -f "${PANEL_CONFIG_DIR}/first_tunnel.json" 2>/dev/null # the panel's record of the first tunnel (setup_plan.go)
         echo -e "${CYAN}[*] Removing all tunnel components...${NC}"
         # Stop & disable services
         frps_wss_front_remove ""
@@ -6190,6 +6294,39 @@ remove_tunnel_force() {
         rm -f "$PEERS_FILE"
 
         echo -e "${GREEN}[OK] Tunnel removed — GRE interface, FRP/Backhaul services, binaries and configs gone. Panel still running.${NC}"
+}
+
+# peers_other_than ID: how many peer records other than ID are in the registry.
+peers_other_than() {
+    [[ -f "$PEERS_FILE" ]] || { echo 0; return; }
+    grep -o '"id": *[0-9]*' "$PEERS_FILE" 2>/dev/null | grep -o '[0-9]*$' | grep -cvx "${1:-0}"
+}
+
+# remove_base_tunnel: the first tunnel only (gre-tunnel, frps/frpc or the base
+# Backhaul unit, and their configs). The other tunnels' units, interfaces and
+# configs stay, and so do the rules every tunnel shares (MSS clamp, pools,
+# limits). With no other tunnel left this is remove_tunnel_force.
+remove_base_tunnel() {
+    if [[ "$(peers_other_than "${1:-0}")" -eq 0 ]]; then
+        remove_tunnel_force
+        return
+    fi
+    local d="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}" u
+    echo -e "${CYAN}[*] Removing the first tunnel; the other tunnels keep running...${NC}"
+    rm -f "${PANEL_CONFIG_DIR}/first_tunnel.json" 2>/dev/null
+    frps_wss_front_remove ""
+    backhaul_udp_remove backhaul-server
+    for u in frps frpc backhaul-server backhaul-client backhaul "$TUNNEL_NAME"; do
+        systemctl disable --now "${u}.service" >/dev/null 2>&1 || true
+        rm -f "$d/${u}.service"
+    done
+    systemctl daemon-reload; systemctl reset-failed >/dev/null 2>&1 || true
+    ip link del "$TUNNEL_NAME" >/dev/null 2>&1 || ip tunnel del "$TUNNEL_NAME" >/dev/null 2>&1 || true
+    ip link del "$(gre6_sit_name "$TUNNEL_NAME")" >/dev/null 2>&1 || true
+    rm -f "${CONFIG_DIR}/frps.toml" "${CONFIG_DIR}/frpc.toml" \
+          "${BACKHAUL_CONFIG_DIR}/config.toml" "${BACKHAUL_CONFIG_DIR}/server.toml" "${BACKHAUL_CONFIG_DIR}/client.toml" \
+          "${PANEL_CONFIG_DIR}/server.toml" "${PANEL_CONFIG_DIR}/client.toml"
+    echo -e "${GREEN}[OK] First tunnel removed. The other tunnels are untouched.${NC}"
 }
 
 PANEL_DIR="/usr/local/gre-panel"
@@ -6281,6 +6418,10 @@ reserve_service_ports() {
         ports+=" $(PEERS_F="$PEERS_FILE" python3 -c 'import json,os
 d=json.load(open(os.environ["PEERS_F"]))
 print(" ".join(str(x) for p in d.get("peers",[]) for x in [p.get("frp_port")]+list(p.get("ports") or []) if isinstance(x,int)))' 2>/dev/null)"
+    fi
+    # every port the panel's configs take (sold customer tunnels, Xray, Bagher...)
+    if [[ -f "${PANEL_CONFIG_DIR}/ports.reserved" ]]; then
+        ports+=" $(grep -E '^[0-9]+$' "${PANEL_CONFIG_DIR}/ports.reserved" | tr '\n' ' ')"
     fi
     # keep 1024-65535 only (lower ports are never ephemeral), dedupe, sort
     local list
@@ -7095,23 +7236,44 @@ EOF
     fi
 }
 
+# panel_address [http]: the address to open the panel at. With a certificate
+# the panel serves HTTPS on tls_port, named after the domain it was issued for
+# (Settings → HTTPS, `hashem tls issue`), so that is shown instead of the IP;
+# "http" asks for the plain-HTTP address, which stays on "port".
+panel_address() {
+    local cfg="${PANEL_CONFIG_DIR}/panel.json" tls="${PANEL_CONFIG_DIR}/tls"
+    [[ ! -f "$cfg" && -f "${PANEL_CONFIG_DIR}/config.json" ]] && cfg="${PANEL_CONFIG_DIR}/config.json"
+    local port base tport ip name
+    port=$(grep -o '"port": *[0-9]*' "$cfg" 2>/dev/null | grep -o '[0-9]*' | head -n1)
+    base=$(grep -o '"base_path": *"[^"]*"' "$cfg" 2>/dev/null | cut -d'"' -f4)
+    ip=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
+    if [[ "${1:-}" != "http" && -s "${tls}/server.crt" && -s "${tls}/server.key" ]]; then
+        tport=$(grep -o '"tls_port": *[0-9]*' "$cfg" 2>/dev/null | grep -o '[0-9]*$' | head -n1)
+        name=$(grep -o '"domain": *"[^"]*"' "${tls}/meta.json" 2>/dev/null | cut -d'"' -f4)
+        name=${name:-${ip:-<this-server-ip>}}
+        [[ "$name" == *:* ]] && name="[${name}]"
+        echo "https://${name}:${tport:-7443}/${base}${base:+/}"
+        return
+    fi
+    echo "http://${ip:-<this-server-ip>}:${port:-7777}/${base}${base:+/}"
+}
+
 show_panel_url() {
-    local cfg="/etc/gre-panel/panel.json"
-    if [[ ! -f "$cfg" && -f /etc/gre-panel/config.json ]]; then
-        cfg="/etc/gre-panel/config.json"
+    local cfg="${PANEL_CONFIG_DIR}/panel.json"
+    if [[ ! -f "$cfg" && -f "${PANEL_CONFIG_DIR}/config.json" ]]; then
+        cfg="${PANEL_CONFIG_DIR}/config.json"
     fi
     if [[ ! -f "$cfg" ]]; then
-        echo -e "${YELLOW}Panel is not installed on this server (no /etc/gre-panel/panel.json). Run Setup first.${NC}"
+        echo -e "${YELLOW}Panel is not installed on this server (no ${PANEL_CONFIG_DIR}/panel.json). Run Setup first.${NC}"
         return 1
     fi
-    local port base user
-    port=$(grep -o '"port": *[0-9]*' "$cfg" 2>/dev/null | grep -o '[0-9]*')
-    base=$(grep -o '"base_path": *"[^"]*"' "$cfg" 2>/dev/null | cut -d'"' -f4)
+    local user url http
     user=$(grep -o '"username": *"[^"]*"' "$cfg" 2>/dev/null | cut -d'"' -f4)
-    port=${port:-7777}
     user=${user:-admin}
-    MYIP=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-    echo -e "${GREEN}Panel URL:  ${CYAN}http://${MYIP:-<this-server-ip>}:${port}/${base}${NC}"
+    url=$(panel_address)
+    http=$(panel_address http)
+    echo -e "${GREEN}Panel URL:  ${CYAN}${url}${NC}"
+    [[ "$url" != "$http" ]] && echo -e "${GREEN}HTTP:       ${CYAN}${http}${NC}"
     echo -e "${GREEN}Username:   ${CYAN}${user}${NC}"
     if [[ -n "$PANEL_PASS" ]]; then
         echo -e "${GREEN}Password:   ${CYAN}${PANEL_PASS}${NC} ${YELLOW}(Please record this password now!)${NC}"
@@ -8811,11 +8973,31 @@ update_all() {
         done
     fi
     perf_apply >/dev/null 2>&1 || true
+    # An installed Spoof core moves to the pinned build (the new script's
+    # install_spoof_binary does the sha256 check and the restart).
+    if [[ -x "${INSTALL_DIR}/spoof" ]]; then
+        "$HASHEM_BIN" spoof install </dev/null >/dev/null 2>&1 || true
+    fi
     # The timer runs whether or not alerts are on: scheduled backups,
     # restarts and Auto-Pool depend on it (M6).
     watchdog_timer_ensure >/dev/null 2>&1 || true
     PANEL_VER=$("$PANEL_BIN" --version 2>/dev/null || echo "unknown")
     echo -e "${GREEN}[OK] Update complete — script + panel are latest (panel: ${PANEL_VER}). Re-run the script to use the new menu.${NC}"
+    node_migrate_hint
+}
+
+# node_migrate_hint: once after an update, an Iran server with foreign
+# servers is told it can manage them all from its panel (nodes). Nothing is
+# changed here; the panel's Nodes page has the offer.
+node_migrate_hint() {
+    local d="$PANEL_CONFIG_DIR" mark="$PANEL_CONFIG_DIR/node_migrate_hint"
+    [[ -f $mark || -f $d/node.json ]] && return 0
+    grep -q '"never": *true' "$d/node_migrate.json" 2>/dev/null && return 0
+    if grep -q '"id"' "$d/peers.json" 2>/dev/null || { grep -q '"role": *"master"' "$d/peer_link.json" 2>/dev/null &&
+        { [[ -f $d/first_tunnel.json ]] || ip link show gre-tunnel >/dev/null 2>&1 || [[ -f ${FRP_CONF_DIR:-/etc/frp}/frps.toml ]]; }; }; then
+        echo -e "${CYAN}[i] New: manage all your foreign servers from this panel. Open the panel → Nodes → \"Yes, move to nodes\". Running tunnels are not touched.${NC}"
+        : >"$mark" 2>/dev/null || true
+    fi
 }
 
 cli_carrier() {
@@ -9265,11 +9447,7 @@ ui_status_refresh() {
     UI_URL=""
     if systemctl is-active --quiet gre-panel 2>/dev/null; then
         UI_PANEL="${GREEN}running${NC}"
-        local port base ip
-        port=$(grep -o '"port": *[0-9]*' "${PANEL_CONFIG_DIR}/panel.json" 2>/dev/null | grep -o '[0-9]*' | head -n1)
-        base=$(grep -o '"base_path": *"[^"]*"' "${PANEL_CONFIG_DIR}/panel.json" 2>/dev/null | cut -d'"' -f4)
-        ip=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}')
-        UI_URL="http://${ip:-<server-ip>}:${port:-7777}/${base}${base:+/}"
+        UI_URL=$(panel_address)
     fi
     UI_LIC="Free"
     [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" license check performance >/dev/null 2>&1 && UI_LIC="${GREEN}Pro${NC}"
@@ -10198,6 +10376,7 @@ Usage:
   hashem settings [show | 2fa off | terminal on|off | terminal-allow [IP ...] | idle MIN]  # panel settings
   hashem license [status | activate KEY | machine-id | deactivate]
   hashem cluster [status | pool add PORT [--mode M] | pool rm|mode ... | member add|rm|drain|resume PORT LINK | join-code | add-hub CODE | events | rules]
+  hashem node-join <hn1.code | -> [--name N] | node [status | leave | move]   # this server as a node of a central panel (move: look for the Iran panel's move offer again)
   hashem join-hub --bundle hsh1_...|bh1_...|gh1_... | leave-hub --id N | hubs   # foreign side: serve several Iran hubs
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
@@ -10833,6 +11012,7 @@ serverAddr = "127.0.0.1"
 serverPort = ${FRP_PORT}
 auth.token = "hashem-bagher-sec"
 transport.tcpMux = false
+transport.tls.enable = false
 transport.poolCount = ${POOL_COUNT}
 $(echo -e "$PROXY_CFG")
 EOF_FRPC
@@ -11003,6 +11183,7 @@ serverAddr = "127.0.0.1"
 serverPort = ${FRP_PORT}
 auth.token = "hashem-bagher-sec"
 transport.tcpMux = false
+transport.tls.enable = false
 transport.poolCount = ${POOL_COUNT}
 loginFailExit = false
 
@@ -11225,6 +11406,61 @@ lb_prefix_ports() {
         out="${out:+$out,}$e"
     done
     echo "$out"
+}
+
+# node: this server as a node of a central panel (docs/PLAN_NODES.md).
+cli_node() {
+    local bin="${PANEL_BIN:-/usr/local/bin/gre-panel}"
+    if ! panel_supports "node \\["; then
+        echo -e "${RED}[!] This panel has no node support yet: update it first (hashem update).${NC}"
+        return 1
+    fi
+    "$bin" node "$@"
+}
+
+# node-join CODE [--name N]: install the panel if it is missing (or too old
+# for nodes), then join the central that made CODE. Tunnels are not touched.
+cli_node_join() {
+    local code="" name="" a
+    while [[ $# -gt 0 ]]; do
+        a="$1"
+        case "$a" in
+            --name)
+                [[ $# -ge 2 ]] || { echo -e "${RED}[!] --name needs a value${NC}"; return 1; }
+                name="$2"; shift 2 ;;
+            -h|--help) echo "Usage: hashem node-join <hn1.code | -> [--name NAME]   (-: the code on stdin)"; return 0 ;;
+            *) [[ -z "$code" ]] && code="$a"; shift ;;
+        esac
+    done
+    # "-": the code on stdin (the central's SSH setup sends it so: not in
+    # the process list). Read before anything else can read stdin.
+    if [[ "$code" == "-" ]]; then
+        IFS= read -r code || true
+        code="${code//[[:space:]]/}"
+    fi
+    if [[ "$code" != hn1.* ]]; then
+        echo -e "${RED}[!] Usage: hashem node-join <hn1.code> [--name NAME] (the central's Nodes page gives the line)${NC}"
+        return 1
+    fi
+    if [[ ! -x "$PANEL_BIN" ]]; then
+        echo -e "${CYAN}[*] Installing the Hashem panel on this server...${NC}"
+        install_panel_smart || return 1
+    elif ! panel_supports "node \\["; then
+        echo -e "${CYAN}[*] Updating the panel: this version has no node support...${NC}"
+        install_panel || return 1
+    fi
+    if ! panel_supports "node \\["; then
+        echo -e "${RED}[!] The installed panel has no node support (is the update channel on a release that has it?).${NC}"
+        return 1
+    fi
+    local -a nm=()
+    [[ -n "$name" ]] && nm=(--name "$name")
+    if panel_supports "join CODE|-"; then
+        # on stdin to the panel too: printf is a builtin, so the code is in no argv
+        printf '%s\n' "$code" | "$PANEL_BIN" node join - "${nm[@]}"
+    else
+        "$PANEL_BIN" node join "$code" "${nm[@]}"  # a first node build: no stdin yet
+    fi
 }
 
 cli_cluster() {
@@ -11519,6 +11755,8 @@ if [[ $# -gt 0 ]]; then
         license|lic) shift; cli_license "$@" ;;
         cluster|mesh) shift; cli_cluster "$@" ;;
         join-hub) shift; cli_join_hub "$@" ;;
+        node) shift; cli_node "$@" ;;
+        node-join) shift; cli_node_join "$@" ;;
         leave-hub) shift; cli_leave_hub "$@" ;;
         hubs) cli_hubs ;;
         carrier-kernel-init) carrier_init_kernel ;;
@@ -11542,7 +11780,11 @@ if [[ $# -gt 0 ]]; then
         spoof|spoof-tunnel) shift; cli_spoof "$@" ;;
         xray|xray-tunnel) shift; cli_xray "$@" ;;
         remove-tunnel)
-            if [[ "${2:-}" == "--force" ]]; then remove_tunnel_force; else remove_tunnel; fi ;;
+            case "${2:-}" in
+                --force) remove_tunnel_force ;;
+                --base) remove_base_tunnel ;;
+                *) remove_tunnel ;;
+            esac ;;
         uninstall)
             if [[ "${2:-}" == "--force" ]]; then uninstall_all_force; else uninstall_all; fi ;;
         show-panel-url) show_panel_url ;;

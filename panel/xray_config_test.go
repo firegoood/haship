@@ -244,7 +244,7 @@ func TestXrayConfigTuning(t *testing.T) {
 	for _, w := range []string{
 		`"finalmask":{"tcp":[{"settings":{"delay":"10-20","length":"100-200","packets":"tlshello"},"type":"fragment"}]}`,
 		`"mux":{"concurrency":8,"enabled":true,"xudpConcurrency":16}`,
-		`"sockopt":{"mark":255,"tcpCongestion":"bbr","tcpFastOpen":true,"tcpMptcp":true}`,
+		`"mark":255,"tcpCongestion":"bbr","tcpFastOpen":true,"tcpMptcp":true}`,
 		`"spiderX":"/search?q=1"`,
 	} {
 		if !strings.Contains(s, w) {
@@ -608,5 +608,129 @@ func TestXrayNoise(t *testing.T) {
 	r.Profile.Noise = &XrayNoise{Type: "str", Packet: "x"}
 	if err := r.validate(); err == nil || !strings.Contains(err.Error(), "UDP") {
 		t.Errorf("noise on a TCP link: %v", err)
+	}
+}
+
+// Pre-connect: the dialing end in direct mode keeps connections ready
+// (testpre) on the transports that open one per user connection, and the
+// server end waits long enough for them.
+func TestXrayPreConnect(t *testing.T) {
+	testpre := func(l XrayLink) any {
+		cfg, err := buildXrayConfig(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, o := range cfg["outbounds"].([]any) {
+			if m := o.(map[string]any); m["tag"] == xrayTagTunnel {
+				return m["settings"].(map[string]any)["testpre"]
+			}
+		}
+		return nil
+	}
+	iran := xrayTestLink(t, "reality", xrayModeDirect, xraySideIran)
+	if got := testpre(iran); got != xrayPreConnectDefault {
+		t.Fatalf("direct Reality: testpre = %v, want %d", got, xrayPreConnectDefault)
+	}
+	iran.Profile.PreConnect = 9
+	if got := testpre(iran); got != 9 {
+		t.Fatalf("chosen count: testpre = %v", got)
+	}
+	iran.Profile.PreConnect = -1
+	if got := testpre(iran); got != nil {
+		t.Fatalf("-1 should turn it off, got %v", got)
+	}
+	for _, preset := range []string{"xhttp", "grpc", "cdn"} {
+		if got := testpre(xrayTestLink(t, preset, xrayModeDirect, xraySideIran)); got != nil {
+			t.Fatalf("%s reuses its connections: testpre = %v", preset, got)
+		}
+	}
+	if got := testpre(xrayTestLink(t, "reality", xrayModeReverse, xraySideForeign)); got != nil {
+		t.Fatalf("the reverse link is already open: testpre = %v", got)
+	}
+
+	// The server end of a direct link waits 150 s for the first request.
+	cfg, err := buildXrayConfig(xrayTestLink(t, "reality", xrayModeDirect, xraySideForeign))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(xrayJSON(t, cfg["policy"]), `"handshake":150`) {
+		t.Fatalf("server end policy missing: %s", xrayJSON(t, cfg["policy"]))
+	}
+	cfg, _ = buildXrayConfig(xrayTestLink(t, "reality", xrayModeDirect, xraySideIran))
+	if cfg["policy"] != nil {
+		t.Fatal("the dialing end needs no policy")
+	}
+
+	bad := xrayTestLink(t, "reality", xrayModeDirect, xraySideIran)
+	bad.Profile.PreConnect = 99
+	if err := bad.validate(); err == nil {
+		t.Fatal("pre-connect above the maximum must be refused")
+	}
+}
+
+// The reverse link: several connections from the foreign server, a capped send
+// queue on every link that multiplexes, and a dead connection noticed in
+// seconds instead of minutes.
+func TestXrayReverseLink(t *testing.T) {
+	build := func(l XrayLink) map[string]any {
+		cfg, err := buildXrayConfig(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	tunnels := func(cfg map[string]any) (tags []string) {
+		for _, o := range cfg["outbounds"].([]any) {
+			if m := o.(map[string]any); m["protocol"] == "vless" {
+				tags = append(tags, m["tag"].(string))
+				if m["settings"].(map[string]any)["reverse"] == nil {
+					t.Fatalf("%s is no reverse outbound", m["tag"])
+				}
+			}
+		}
+		return tags
+	}
+	fo := xrayTestLink(t, "reality", xrayModeReverse, xraySideForeign)
+	if got := tunnels(build(fo)); strings.Join(got, " ") != "tunnel tunnel-2 tunnel-3 tunnel-4" {
+		t.Fatalf("default reverse outbounds: %v", got)
+	}
+	fo.Profile.RevConns = 1
+	if got := tunnels(build(fo)); len(got) != 1 {
+		t.Fatalf("one reverse connection: %v", got)
+	}
+	fo.Profile.RevConns = xrayRevConnsMax + 1
+	if _, err := buildXrayConfig(fo); err == nil {
+		t.Fatal("more reverse connections than the maximum was accepted")
+	}
+
+	lowat := `"opt":"25","system":"linux","type":"int","value":"16384"`
+	for _, c := range []struct {
+		preset, mode, side string
+		lowat, keep        bool
+	}{
+		{"reality", xrayModeReverse, xraySideForeign, true, true},
+		{"reality", xrayModeReverse, xraySideIran, true, true},
+		{"xhttp", xrayModeDirect, xraySideIran, true, false},
+		{"grpc", xrayModeDirect, xraySideForeign, true, false},
+		{"reality", xrayModeDirect, xraySideIran, false, false},
+		{"kcp", xrayModeReverse, xraySideForeign, false, false},
+	} {
+		js := xrayJSON(t, build(xrayTestLink(t, c.preset, c.mode, c.side)))
+		if got := strings.Contains(js, lowat); got != c.lowat {
+			t.Errorf("%s %s %s: TCP_NOTSENT_LOWAT %v, want %v", c.preset, c.mode, c.side, got, c.lowat)
+		}
+		if got := strings.Contains(js, `"tcpKeepAliveIdle":10,"tcpKeepAliveInterval":5,"tcpUserTimeout":25000`); got != c.keep {
+			t.Errorf("%s %s %s: keepalive and user timeout %v, want %v", c.preset, c.mode, c.side, got, c.keep)
+		}
+	}
+	// a direct link keeps one outbound
+	n := 0
+	for _, o := range build(xrayTestLink(t, "reality", xrayModeDirect, xraySideIran))["outbounds"].([]any) {
+		if o.(map[string]any)["protocol"] == "vless" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("direct link: %d VLESS outbounds", n)
 	}
 }

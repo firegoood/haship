@@ -10,11 +10,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -200,6 +202,9 @@ var (
 	xrayLinkWait = 8 * time.Second
 )
 
+// xrayUnit is the link's service. The log rate limit keeps journald from
+// filling when the other end refuses connections: Xray's pre-connect redials
+// at once after a failure and logs a warning each time.
 func xrayUnit(l XrayLink) string {
 	return fmt.Sprintf(`[Unit]
 Description=Hashem Xray tunnel, link %d (%s, %s end)
@@ -210,38 +215,28 @@ Wants=network-online.target
 Type=simple
 User=root
 Environment=XRAY_LOCATION_ASSET=%s
+# Go listens with MPTCP by default, and Linux refuses TCP_USER_TIMEOUT on an
+# MPTCP socket: Xray then skips the rest of the inbound sockopt, and the Iran
+# end keeps a dead reverse connection for minutes.
+Environment=GODEBUG=multipathtcp=0
 ExecStart=%s run -c %s
 Restart=always
 RestartSec=3s
 LimitNOFILE=1048576
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
 
 [Install]
 WantedBy=multi-user.target
 `, l.ID, l.Mode, l.Side, xrayDir, xrayBinPath, xrayLinkConfPath(l.ID))
 }
 
-// xrayClaimedPorts are the ports another tunnel's config takes on this
-// server even while it is down: Bagher's on the Iran server.
+// xrayClaimedPorts are the ports another of Hashem's configs takes on this
+// server even while its unit is down (ports_registry.go): other tunnels,
+// relays' control ports, Bagher, pools, sold customer tunnels and the panel.
+// Other Xray links are checked by xrayPortConflicts itself.
 func xrayClaimedPorts(l XrayLink) map[string]string {
-	m := map[string]string{}
-	if l.Side != xraySideIran {
-		return m
-	}
-	sshFwdMu.Lock()
-	cfg := loadSSHFwdConfigLocked()
-	sshFwdMu.Unlock()
-	if !cfg.Enabled || cfg.Role == "foreign" || cfg.Role == "server" {
-		return m
-	}
-	for _, p := range l.Ports {
-		if owner := bagherPortOwner(cfg, p, 0); owner != 0 {
-			m["tcp:"+strconv.Itoa(p)] = fmt.Sprintf("Bagher (foreign server %d)", owner)
-			if cfg.UDP {
-				m["udp:"+strconv.Itoa(p)] = fmt.Sprintf("Bagher (foreign server %d)", owner)
-			}
-		}
-	}
-	return m
+	return claimedPortsByKey(hashemPortClaims(), func(c portClaim) bool { return c.Kind == claimXray })
 }
 
 // xrayPortsError explains taken ports, with a free tunnel port to use.
@@ -309,7 +304,9 @@ func applyXrayLink(l XrayLink, others []XrayLink) ([]xrayStep, error) {
 	}
 	raw, _ := json.MarshalIndent(cfg, "", "  ")
 	path := xrayLinkConfPath(l.ID)
-	tmp := path + ".new"
+	// Xray picks the config format from the extension: "link-1.json.new" fails
+	// with "Failed to get format", so the test copy keeps .json.
+	tmp := strings.TrimSuffix(path, ".json") + ".new.json"
 	if err := writeFileAtomic(tmp, raw, 0o600); err != nil {
 		return fail("config", "E-XRAY-04", err.Error())
 	}
@@ -378,6 +375,52 @@ func stopXrayLink(id int, removeFiles bool) {
 		_ = runSystemctl("daemon-reload")
 	}
 	xrayHealthDrop(id)
+}
+
+// migrateXrayConfigs rewrites the config and unit of every running link that
+// this version builds differently and restarts it, so a new default (such as
+// pre-connect, or the server end's wait for it) reaches links made before the
+// update. A config Xray does not accept is left as it was.
+func migrateXrayConfigs() int {
+	if !fileExists(xrayBinPath) {
+		return 0
+	}
+	xrayMu.Lock()
+	defer xrayMu.Unlock()
+	n := 0
+	for _, l := range loadXrayState().Links {
+		path := xrayLinkConfPath(l.ID)
+		if l.Disabled || !fileExists(path) {
+			continue
+		}
+		cfg, err := buildXrayConfig(l)
+		if err != nil {
+			continue
+		}
+		raw, _ := json.MarshalIndent(cfg, "", "  ")
+		oldCfg, _ := os.ReadFile(path)
+		oldUnit, _ := os.ReadFile(xrayUnitPath(l.ID))
+		if bytes.Equal(oldCfg, raw) && string(oldUnit) == xrayUnit(l) {
+			continue
+		}
+		tmp := strings.TrimSuffix(path, ".json") + ".new.json"
+		if writeFileAtomic(tmp, raw, 0o600) != nil {
+			continue
+		}
+		if err := xrayTestConfig(tmp); err != nil {
+			_ = os.Remove(tmp)
+			log.Printf("xray: link %d keeps its old config: %v", l.ID, err)
+			continue
+		}
+		if os.Rename(tmp, path) != nil || writeUnitFile(xrayUnitPath(l.ID), xrayUnit(l)) != nil {
+			continue
+		}
+		_ = runSystemctl("daemon-reload")
+		_ = runSystemctl("try-restart", xrayUnitName(l.ID))
+		xrayHealthDrop(l.ID)
+		n++
+	}
+	return n
 }
 
 // xrayFreeLoopbackPort is a TCP port free on 127.0.0.1 for the probe.

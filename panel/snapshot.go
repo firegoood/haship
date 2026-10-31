@@ -28,6 +28,7 @@ package main
 import (
 	"context"
 	"hash/fnv"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -209,11 +210,6 @@ func timedStep(name string, f func()) {
 // collectHost gathers the per-tick host view with a fixed number of commands.
 func collectHost(recs []peerRecord, prev map[string]devCounters) *hostView {
 	v := &hostView{inner: map[string]string{}, active: map[string]bool{}, flowing: map[string]bool{}}
-	timedStep("ss", func() {
-		if out, err := runCmdTimeoutOut(5*time.Second, "ss", "-Htin", "state", "established"); err == nil {
-			v.sessions = parseSS(string(out))
-		}
-	})
 	timedStep("ip_tunnel", func() {
 		if out, err := runCmdTimeout(5*time.Second, "ip", "tunnel", "show"); err == nil {
 			v.tunnelShow, v.tunnelOK = string(out), true
@@ -254,14 +250,44 @@ func collectHost(recs []peerRecord, prev map[string]devCounters) *hostView {
 			}
 		}
 	})
+	timedStep("ss", func() {
+		// Only the tunnel control sessions are matched, so ask ss for those ports:
+		// unfiltered, ss -i dumps every socket on the host (about 42MB a tick at
+		// 100k connections) and the kernel fills tcp_info for each.
+		filter := ssPortFilter(controlPortsOf(recs, localStatusFrom(v).BindPort))
+		if filter == "" {
+			return // no tunnel ports: no session can match
+		}
+		if out, err := runCmdTimeoutOut(5*time.Second, "ss", "-Htin", "state", "established", filter); err == nil {
+			v.sessions = parseSS(string(out))
+		}
+	})
 	v.owners = portOwners(controlPortsOf(recs))
 	return v
 }
 
-// pingOnce is one ICMP echo with a hard timeout; ms is the wall time.
+var (
+	pingDownMu sync.Mutex
+	pingDown   = map[string]bool{}
+)
+
+// pingOnce is one ICMP echo with a hard timeout; ms is the wall time. The log
+// gets one line when a target stops answering and one when it answers again,
+// not one per poll.
 func pingOnce(target string) (bool, float64) {
 	start := time.Now()
-	if _, err := runCmdTimeout(4*time.Second, "ping", "-c", "1", "-W", "2", target); err != nil {
+	_, err := runCmdTimeout(4*time.Second, "ping", "-c", "1", "-W", "2", target)
+	pingDownMu.Lock()
+	if down := err != nil; down != pingDown[target] {
+		pingDown[target] = down
+		if down {
+			log.Printf("[ICMP] %s does not answer ping", target)
+		} else {
+			log.Printf("[ICMP] %s answers ping again", target)
+		}
+	}
+	pingDownMu.Unlock()
+	if err != nil {
 		return false, -1
 	}
 	return true, float64(time.Since(start).Microseconds()) / 1000

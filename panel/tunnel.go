@@ -9,15 +9,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -248,16 +251,45 @@ func runAction(action string, peerID int) (string, error) {
 		if peerID > 0 {
 			return removePeerViaInstaller(peerID)
 		}
+		// The first tunnel next to other tunnels: remove it alone. The full
+		// removal stops every frps*, backhaul* and gre-t* and drops peers.json.
+		if peers := loadPeers(); len(peers) > 0 {
+			if p := basePeer(peers); p != nil {
+				out, err := removePeerViaInstaller(p.ID)
+				if err == nil {
+					firstTunnelForget()
+				}
+				return out, err
+			}
+			out, err := removeViaInstaller("--base")
+			invalidatePeerIfsCache()
+			if err == nil {
+				firstTunnelForget()
+			}
+			return out, err
+		}
 		// mirror of hashem.sh remove_tunnel_force(): GRE + FRP gone, panel untouched.
 		// Implemented via the installer itself (single source of truth) so the
 		// shell-out path and the menu path can never drift apart.
-		out, err := removeViaInstaller()
+		out, err := removeViaInstaller("--force")
 		if err != nil {
 			return "", err
 		}
+		firstTunnelForget()
 		return out, nil
 	}
 	return "", fmt.Errorf("unknown action")
+}
+
+// basePeer is the peer record that is the first tunnel itself (peer 1 on the
+// legacy names, or a peer that took gre-tunnel), or nil.
+func basePeer(peers []peerRecord) *peerRecord {
+	for i, p := range peers {
+		if p.Legacy || p.GreIf == "gre-tunnel" || slices.Contains(baseUnits, p.FrpsSvc) {
+			return &peers[i]
+		}
+	}
+	return nil
 }
 
 // tuneViaInstaller runs `hashem.sh optimize|restore|tune-status` and returns its
@@ -285,17 +317,18 @@ func tuneViaInstaller(action string) (string, error) {
 	return o, nil
 }
 
-// removeViaInstaller runs `hashem.sh remove-tunnel --force` and returns its
-// output as the action result. GRE_SKIP_PANEL is irrelevant here (removal
-// never touches the panel), but kept for symmetry with runInstaller.
-func removeViaInstaller() (string, error) {
+// removeViaInstaller runs `hashem.sh remove-tunnel --force` (every tunnel) or
+// `--base` (the first tunnel only) and returns its output as the action
+// result. GRE_SKIP_PANEL is irrelevant here (removal never touches the
+// panel), but kept for symmetry with runInstaller.
+func removeViaInstaller(mode string) (string, error) {
 	script, err := greScriptPath()
 	if err != nil {
 		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", script, "remove-tunnel", "--force")
+	cmd := exec.CommandContext(ctx, "bash", script, "remove-tunnel", mode)
 	cmd.Env = append(os.Environ(), "GRE_SKIP_PANEL=1", "TERM=dumb", "GRE_PANEL_DIR="+configDir)
 	out, runErr := cmd.CombinedOutput()
 	o := strings.TrimSpace(string(out))
@@ -313,58 +346,6 @@ func removeViaInstaller() (string, error) {
 // many foreign servers hang off this Iran. Legacy single installs without
 // a registry fall back to the old single-tunnel view.
 
-// rawPorts is the registry's port spelling ("443, 10000-10050"). hashem.sh
-// writes one comma-separated string and the web UI reads it as one; panel
-// builds wrote an array. Accept both on read, emit the string form on write.
-// Decoding the old array-only struct from a script-written string failed the
-// whole peers.json unmarshal, which silently emptied the hub's tunnel list.
-type rawPorts []string
-
-func (r *rawPorts) UnmarshalJSON(data []byte) error {
-	trimmed := strings.TrimSpace(string(data))
-	if trimmed == "" || trimmed == "null" {
-		*r = nil
-		return nil
-	}
-	if strings.HasPrefix(trimmed, `"`) {
-		var s string
-		if err := json.Unmarshal(data, &s); err != nil {
-			return err
-		}
-		var out []string
-		for _, part := range strings.FieldsFunc(s, func(c rune) bool {
-			return c == ',' || c == ' ' || c == '\t' || c == '\n'
-		}) {
-			if part = strings.TrimSpace(part); part != "" {
-				out = append(out, part)
-			}
-		}
-		*r = out
-		return nil
-	}
-	var items []any
-	if err := json.Unmarshal(data, &items); err != nil {
-		return err
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		switch v := item.(type) {
-		case string:
-			if v = strings.TrimSpace(v); v != "" {
-				out = append(out, v)
-			}
-		case float64:
-			out = append(out, strconv.FormatFloat(v, 'f', -1, 64))
-		}
-	}
-	*r = out
-	return nil
-}
-
-func (r rawPorts) MarshalJSON() ([]byte, error) {
-	return json.Marshal(strings.Join(r, ","))
-}
-
 type peerRecord struct {
 	ID             int      `json:"id"`
 	Name           string   `json:"name"`
@@ -374,7 +355,7 @@ type peerRecord struct {
 	LocalGre       string   `json:"local_gre"`
 	PeerGre        string   `json:"peer_gre"`
 	Ports          []int    `json:"ports"`
-	RawPorts       rawPorts `json:"raw_ports,omitempty"`
+	RawPorts       portList `json:"raw_ports,omitempty"`
 	Token          string   `json:"token,omitempty"`
 	GreIf          string   `json:"gre_if"`
 	FrpsSvc        string   `json:"frps_svc"`
@@ -387,6 +368,25 @@ type peerRecord struct {
 	FRPTransport   string   `json:"frp_transport,omitempty"`   // "tcp" | "kcp" | "quic" | "websocket" | "wss"
 	UseEncryption  bool     `json:"use_encryption,omitempty"`  // transport.useEncryption
 	UseCompression bool     `json:"use_compression,omitempty"` // transport.useCompression
+}
+
+// portList is raw_ports. Older hashem.sh wrote it for Backhaul peers as one
+// string ("443, 2083"); that failed the whole peers.json decode and hid every
+// peer tunnel from the panel. Both forms are read; it is written as a list.
+type portList []string
+
+func (l *portList) UnmarshalJSON(b []byte) error {
+	var list []string
+	if err := json.Unmarshal(b, &list); err == nil {
+		*l = list
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*l = strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' })
+	return nil
 }
 
 type peerLive struct {
@@ -426,10 +426,19 @@ func loadPeers() []peerRecord {
 	var v struct {
 		Peers []peerRecord `json:"peers"`
 	}
-	if json.Unmarshal(data, &v) != nil {
+	if err := json.Unmarshal(data, &v); err != nil {
+		logPeersDecodeErr(err)
 		return nil
 	}
 	return v.Peers
+}
+
+var peersDecodeErr sync.Once
+
+// logPeersDecodeErr says once why peers.json was not read: every peer tunnel
+// disappears from the panel then, while its services keep running.
+func logPeersDecodeErr(err error) {
+	peersDecodeErr.Do(func() { log.Printf("peers.json: cannot read it, peer tunnels are hidden: %v", err) })
 }
 
 func findPeer(id int) *peerRecord {
@@ -594,10 +603,11 @@ func stripANSI(s string) string {
 
 // removePeerDirect deletes one peer using its registry record: stop + disable
 // its units, delete unit files + frps toml + GRE iface, drop the record.
-// Legacy peer 1 also drops the old single tunnel (same as remove_tunnel_force).
+// Legacy peer 1 is the first tunnel; an installer this old can only remove
+// every tunnel with it, so it is refused until hashem.sh is updated.
 func removePeerDirect(p *peerRecord) (string, error) {
 	if p.Legacy {
-		return removeViaInstaller()
+		return "", fmt.Errorf("this hashem.sh cannot remove the first tunnel alone; run `hashem update` first")
 	}
 	greSvc := p.GreIf
 	if greSvc == "" {
