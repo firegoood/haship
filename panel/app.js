@@ -2573,16 +2573,27 @@ async function refreshDash() {
         };
       });
     }
-    let ms = null;
+    // With several servers the big number is the average of their pings (the
+    // best one hid a slow server); each server counts once, the main tunnel too.
+    let ms = null, pingN = 0;
+    const lat1 = o => (o.ping_ok && o.ping_ms) ? parseFloat(o.ping_ms) : (o.health_state === 'healthy' && o.latency_ms >= 0 ? o.latency_ms : null);
+    const avgOf = vals => { const v = vals.filter(x => x != null && isFinite(x)); pingN = v.length; return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
     if (multi) {
-      peers.forEach(p => { const v = (p.ping_ok && p.ping_ms) ? parseFloat(p.ping_ms) : (p.health_state === 'healthy' && p.latency_ms >= 0 ? p.latency_ms : null); if (v != null && (ms == null || v < ms)) ms = v; });
+      const vals = peers.map(lat1);
+      if (hasMain) vals.push((d.ping_ok && d.ping) ? parseFloat(d.ping) : (d.health_state === 'healthy' && d.latency_ms >= 0 ? d.latency_ms : null));
+      ms = avgOf(vals);
     } else {
       ms = d.ping_ok && d.ping ? parseFloat(d.ping) : (d.health_state === 'healthy' && d.latency_ms >= 0 ? d.latency_ms : null);
       if (ms == null && bagherUp && bObj.latency_ms > 0) ms = bObj.latency_ms;
     }
     const hasMs = ms != null && isFinite(ms);
+    const avgMode = multi && nSrv > 1;
+    { const lb = $('kpiPingLbl'); if (lb) {
+      if (avgMode) { lb.removeAttribute('data-i18n'); lb.textContent = tr('', 'Average latency'); }
+      else { lb.setAttribute('data-i18n', 'kpi_latency'); lb.textContent = tr('kpi_latency', 'Latency'); } } }
     set('kpiPing', hasMs ? Math.round(ms) + ' ms' : '—');
-    setHTML('kpiPingSub', hasMs ? latBadge(ms) + (d.icmp_filtered ? icmpChip() : '') : esc(tr('', unset ? 'No tunnel yet' : 'No answer')));
+    const avgNote = avgMode && hasMs ? `<span class="qs-hint u-ml-8 u-o-70">${esc(tr('', 'average of') + ' ' + pingN + (pingN < nSrv ? ' / ' + nSrv : '') + ' ' + tr('', 'servers'))}</span>` : '';
+    setHTML('kpiPingSub', hasMs ? latBadge(ms) + (d.icmp_filtered ? icmpChip() : avgNote) : esc(tr('', unset ? 'No tunnel yet' : 'No answer')));
 
     // Live traffic
     const t = d.traffic || {};
@@ -2801,44 +2812,79 @@ async function refreshDash() {
     renderDashPeers(peers);
 
     // Details: what is configured, and nothing about parts that do not exist.
-    const dval = v => `<span class="det-v">${esc(v ?? NA)}</span>`;
-    const dmono = v => (!v || v === NA)
-      ? `<span class="det-v">—</span>`
-      : `<span class="u-flex u-ai-c u-gap-8 u-minw-0"><span class="det-v mono">${esc(v)}</span><button class="det-copy" data-copy="${esc(v)}" title="Copy" aria-label="Copy">⧉</button></span>`;
-    const dbadge = (txt, cls) => `<span class="det-v"><span class="badge ${cls || ''}"><span class="dot"></span>${esc(txt)}</span></span>`;
-    const detCard = (icon, title, rows) =>
-      `<div class="det-card"><div class="det-head"><span class="det-ico">${icon}</span>${esc(title)}</div><div class="det-rows">${rows}</div></div>`;
-    const detRow = (k, cell) => `<div class="det-row"><span class="det-k">${esc(k)}</span>${cell}</div>`;
-    const roleCell = iran ? dbadge(tr('', 'Iran server'), 'ok') : foreign ? dbadge(tr('', 'Foreign server'), '') : dval(tr('', 'Not configured'));
-    const bindPort = (f.port && f.port !== NA) ? String(f.port) : '';
-    const proxyPorts = (f.proxy_ports || []).filter(p => p && String(p) !== bindPort);
-    const isFrpc = (f.svc === 'frpc') || foreign;
-    const portLabel = isFrpc ? tr('lbl_control_port', 'Server Port') : tr('lbl_bind_port', 'Bind Port');
-    const proxyList = (f.proxy_ports && f.proxy_ports.length) ? f.proxy_ports.join(', ') : ((f.proxies || []).join(', ') || '—');
+    // Each value says whose it is (this server / the other one), and the same
+    // fact is shown once: the forwarded ports sit in the Server card only.
+    const ICO_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
+    const ICO_TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
     const ICO_BOLT = '<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
-    const serverCard = detCard(ICO_SRV, tr('card_server_title', 'Server & Role'), detRow(tr('lbl_public_ip', 'Public IP'), dmono(d.local_pub)) + detRow(tr('lbl_role', 'Role'), roleCell)
-      + (unset ? '' : detRow(tr('lbl_forwarded_ports', 'Forwarded'), dval(proxyList))));
-    let det;
+    const noVal = v => !v || v === NA;
+    const dval = v => `<span class="det-v">${esc(v ?? NA)}</span>`;
+    const dpill = v => noVal(v)
+      ? `<span class="det-v det-na">—</span>`
+      : `<span class="det-pill"><span class="det-v mono">${esc(v)}</span><button type="button" class="det-copy" data-copy="${esc(v)}" title="${esc(tr('', 'Copy'))}" aria-label="${esc(tr('', 'Copy'))}">${ICO_COPY}</button></span>`;
+    const dbadge = (txt, cls) => `<span class="det-v"><span class="badge ${cls || ''}"><span class="dot"></span>${esc(txt)}</span></span>`;
+    const dchips = list => `<span class="det-chips">${list.map(p => `<span class="det-chip">${esc(String(p))}</span>`).join('')}</span>`;
+    const detCard = (icon, title, rows, state) =>
+      `<div class="det-card"><div class="det-head"><span class="det-ico">${icon}</span><span class="det-title">${esc(title)}</span>${state ? `<span class="det-dot ${state}" aria-hidden="true"></span>` : ''}</div><div class="det-rows">${rows}</div></div>`;
+    const detRow = (k, cell, hint) => `<div class="det-row"><span class="det-k">${esc(k)}${hint ? `<span class="det-hint">${esc(hint)}</span>` : ''}</span>${cell}</div>`;
+    const detStack = (k, count, cell) => `<div class="det-row stack"><span class="det-k">${esc(k)}${count ? `<span class="det-count">${count}</span>` : ''}</span>${cell}</div>`;
+    const roleCell = iran ? dbadge(tr('', 'Iran server'), 'ok') : foreign ? dbadge(tr('', 'Foreign server'), 'info') : dbadge(tr('', 'Not configured'), 'dim');
+    const otherLabel = iran ? tr('', 'Foreign server') : tr('', 'Iran server');
+    const otherIP = d.remote_pub || g.peer || '';
+    const bindPort = (f.port && f.port !== NA) ? String(f.port) : '';
+    const fwd = ((f.proxy_ports && f.proxy_ports.length) ? f.proxy_ports : (f.proxies || [])).filter(p => p !== '' && p != null);
+    const innerPeer = c => { const m = /^(\d+\.\d+\.\d+)\.(\d+)(?:\/\d+)?$/.exec(c || ''); if (!m) return ''; const n = +m[2]; return m[1] + '.' + (n % 2 === 0 ? n - 1 : n + 1); };
+    const serverCard = detCard(ICO_SRV, tr('card_server_title', 'Server & Role'),
+      detRow(tr('', 'Role'), roleCell)
+      + detRow(tr('', 'This server'), dpill(d.local_pub), tr('', 'public IP'))
+      + (otherIP ? detRow(otherLabel, dpill(otherIP), tr('', 'public IP')) : '')
+      + (!unset && fwd.length ? detStack(tr('lbl_forwarded_ports', 'Forwarded'), fwd.length, dchips(fwd)) : ''));
+    let det, n = 1;
     if (unset) {
       det = serverCard + `<div class="det-empty">${esc(tr('', 'Tunnel, engine and carrier details appear here after Setup.'))}</div>`;
     } else {
-      const engCell = f.up ? dbadge(tr('status_running', 'Running'), 'ok') : dbadge(tr('', 'Stopped'), 'err');
-      const failCell = d.auto_failover ? dbadge(tr('', 'On'), 'ok') : dbadge(tr('', 'Off'), '');
+      const parts = [serverCard];
+      if (g.exists || g.local || g.peer || g.inner) {
+        const ip2 = innerPeer(g.inner);
+        parts.push(detCard(ICO_GRE, tr('card_gre_title', 'GRE Tunnel'),
+          detRow(tr('', 'Interface'), dbadge(gre_name(g), g.exists ? 'ok' : 'err'))
+          + detRow(tr('', 'This side'), dpill(g.local), tr('', 'tunnel endpoint'))
+          + detRow(tr('', 'Other side'), dpill(g.peer), tr('', 'tunnel endpoint'))
+          + detRow(tr('', 'This side'), dpill(g.inner), tr('', 'inner address'))
+          + (ip2 ? detRow(tr('', 'Other side'), dpill(ip2), tr('', 'inner address')) : ''), g.exists ? 'ok' : 'err'));
+      }
+      if (f.svc || f.up || f.port) {
+        const lat = (typeof d.latency_ms === 'number' && d.latency_ms > 0) ? d.latency_ms : 0;
+        const latKind = { icmp: 'ping', tcp: 'TCP session', bagher: 'Bagher' }[d.latency_kind] || '';
+        const mm = /(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d) UTC/.exec(u.frp_since || '');
+        const t0 = mm ? Date.parse(mm[1] + 'T' + mm[2] + 'Z') : NaN;
+        const runFor = f.up && u.frp_since
+          ? (isNaN(t0) ? detRow(tr('lbl_uptime_since', 'Since'), dval(u.frp_since))
+            : detRow(tr('', 'Running for'), `<span class="det-v" title="${esc(u.frp_since)}">${esc(fmtSecs(Math.max(0, Math.floor((Date.now() - t0) / 1000))))}</span>`)) : '';
+        parts.push(detCard(ICO_FRP, tr('card_frp_title', 'Tunnel Engine'),
+          detRow(tr('x007', 'Engine'), dval(engine || f.svc || '—'))
+          + detRow(tr('lbl_frp_status', 'Status'), f.up ? dbadge(tr('status_running', 'Running'), 'ok') : dbadge(tr('', 'Stopped'), 'err'))
+          + detRow(foreign ? tr('', 'Iran server port') : tr('', 'Control port'), bindPort ? dpill(bindPort) : dval('—'), foreign ? tr('', 'it connects to') : tr('', 'it listens on'))
+          + (lat ? detRow(tr('', 'Latency'), `<span class="det-v">${esc(lat.toFixed(lat < 10 ? 1 : 0))} ms${latKind ? `<span class="det-hint">${esc(tr('', latKind))}</span>` : ''}</span>`) : '')
+          + runFor, f.up ? 'ok' : 'err'));
+      }
+      const failCell = d.auto_failover ? dbadge(tr('', 'On'), 'ok') : dbadge(tr('', 'Off'), 'dim');
       const diagCell = d.last_error
         ? `<span class="badge err" title="${esc(d.last_error.detail || '')}"><span class="dot"></span>${esc(d.last_error.code || 'ERR')} (${esc(String(d.last_error.time || '').slice(11, 19))})</span>`
-        : dbadge(tr('x006', 'No recent errors'), on ? 'ok' : '');
-      det = serverCard
-        + ((g.exists || g.local || g.peer || g.inner) ? detCard(ICO_GRE, tr('card_gre_title', 'GRE Tunnel'), detRow(tr('lbl_gre_local', 'Local'), dmono(g.local)) + detRow(tr('lbl_gre_peer', 'Peer'), dmono(g.peer)) + detRow(tr('lbl_gre_interface', 'Inner'), dmono(g.inner))) : '')
-        + ((f.svc || f.up || f.port) ? detCard(ICO_FRP, tr('card_frp_title', 'Tunnel Engine'), detRow(tr('x007', 'Engine'), dval(engine || f.svc || '—')) + detRow(tr('lbl_frp_status', 'Status'), engCell) + detRow(portLabel, bindPort ? dmono(bindPort) : dval('—'))
-          + (proxyPorts.length ? detRow(tr('lbl_tunnel_ports', 'Tunnel Ports'), `<span class="det-v det-ports">${proxyPorts.map(p => `<span class="det-v mono">${esc(String(p))}</span>`).join('')}</span>`) : '')
-          + (u.frp_since ? detRow(tr('lbl_uptime_since', 'Since'), dval(u.frp_since)) : '')) : '')
-        + detCard(ICO_BOLT, tr('', 'Carrier'), detRow(tr('x009', 'Active Carrier'), dmono(String(d.active_carrier || 'direct'))) + detRow(tr('', 'Autopilot'), failCell) + detRow(tr('x011', 'Diagnostics'), diagCell));
+        : dbadge(tr('x006', 'No recent errors'), on ? 'ok' : 'dim');
+      parts.push(detCard(ICO_BOLT, tr('', 'Carrier'),
+        detRow(tr('x009', 'Active Carrier'), dpill(String(d.active_carrier || 'direct')))
+        + detRow(tr('', 'Autopilot'), failCell)
+        + detRow(tr('x011', 'Diagnostics'), diagCell), d.last_error ? 'err' : ''));
+      n = parts.length;
+      det = parts.join('');
     }
+    { const grid = $('dashDetails'); if (grid) grid.dataset.n = String(n); }
     setHTML('dashDetails', det);
     // one-click copy for IP/port pills
     document.querySelectorAll('#dashDetails [data-copy]').forEach(b => { if (!b.dataset.cpBound) { b.dataset.cpBound = '1';
       b.onclick = () => { const v = b.dataset.copy; (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject())
-        .then(() => { b.textContent = '✓'; b.classList.add('ok'); setTimeout(() => { b.textContent = '⧉'; b.classList.remove('ok'); }, 1200); })
+        .then(() => { b.innerHTML = ICO_TICK; b.classList.add('ok'); setTimeout(() => { b.innerHTML = ICO_COPY; b.classList.remove('ok'); }, 1200); })
         .catch(() => toastWarn('copy failed', v)); }; } });
     { const dp = $('detPulse'); if (dp) dp.classList.toggle('off', !on); }
     const ck = d.checked ? new Date(d.checked) : null;
@@ -2846,6 +2892,8 @@ async function refreshDash() {
   } catch(e) { reportErr('dashboard', e); /* keep old values; N/A already default */ return false; }
   return true;
 }
+// gre_name: the GRE interface as shown in the Details card ("missing" when it does not exist).
+function gre_name(g) { return (g.name || 'gre-tunnel') + (g.exists ? '' : ' · ' + tr('', 'missing')); }
 function drawActivityChart(hist, isDown) {
   const cv = $('activityChart');
   if (!cv) return;
@@ -6860,40 +6908,15 @@ async function loadWatchdog() {
     // Telegram card
     if ($('wdBotToken')) $('wdBotToken').value = s.tg_bot_token_masked || '';
     if ($('wdChatId')) $('wdChatId').value = s.tg_chat_id || '';
+    rtRender($('wdRoutePick'), s.tunnels || [], { route: s.tg_route, tunnel_id: s.tg_tunnel_id, tunnel_port: s.tg_tunnel_port });
+    $('wdProbeRow').classList.toggle('hidden', rtValue($('wdRoutePick')).route !== 'tunnel');
     if (s.tg_route === 'tunnel') {
-      $('wdRouteTunnel').checked = true;
-      $('wdTunnelPortGroup').classList.remove('hidden');
-      $('wdTgRouteBadge').textContent = 'Tunnel (SOCKS5)';
+      const t = (s.tunnels || []).find(x => x.id === s.tg_tunnel_id);
+      $('wdTgRouteBadge').textContent = tr('', 'Tunnel') + (t ? ' · ' + t.name : '');
       $('wdTgRouteBadge').className = 'badge info';
     } else {
-      $('wdRouteDirect').checked = true;
-      $('wdTunnelPortGroup').classList.add('hidden');
-      $('wdTgRouteBadge').textContent = 'Direct';
+      $('wdTgRouteBadge').textContent = tr('', 'Direct');
       $('wdTgRouteBadge').className = 'badge';
-    }
-
-    // Tunnel ports dropdown
-    const sel = $('wdTunnelPortSelect');
-    if (sel) {
-      sel.innerHTML = '';
-      const ports = s.tunnel_ports || [];
-      if (ports.length === 0 && s.tg_tunnel_port) ports.push(s.tg_tunnel_port);
-      ports.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p;
-        opt.textContent = 'Port ' + p;
-        if (p === s.tg_tunnel_port) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      const optManual = document.createElement('option');
-      optManual.value = 'custom';
-      optManual.textContent = 'Custom port…';
-      sel.appendChild(optManual);
-      if (s.tg_tunnel_port && !ports.includes(s.tg_tunnel_port)) {
-        optManual.selected = true;
-        $('wdTunnelPortManual').value = s.tg_tunnel_port;
-        $('wdTunnelPortManual').classList.remove('hidden');
-      }
     }
 
     // Tunnel Auto-Restart Scheduler card
@@ -7021,56 +7044,49 @@ $('wdShowTokenBtn').onclick = () => {
   inp.type = inp.type === 'password' ? 'text' : 'password';
 };
 
-$('wdRouteDirect').onchange = () => {
-  $('wdTunnelPortGroup').classList.add('hidden');
-};
-$('wdRouteTunnel').onchange = () => {
-  $('wdTunnelPortGroup').classList.remove('hidden');
-};
+// The route picker's choice in the Telegram card changed: check it at once.
+$('wdRoutePick').addEventListener('change', () => {
+  const v = rtValue($('wdRoutePick'));
+  $('wdProbeRow').classList.toggle('hidden', v.route !== 'tunnel');
+  $('wdProbeOut').textContent = '';
+  if (v.route === 'tunnel') $('wdProbeBtn').click();
+});
 
-$('wdTunnelPortSelect').onchange = () => {
-  if ($('wdTunnelPortSelect').value === 'custom') {
-    $('wdTunnelPortManual').classList.remove('hidden');
-    $('wdTunnelPortManual').focus();
-  } else {
-    $('wdTunnelPortManual').classList.add('hidden');
-  }
-};
-
-$('wdSaveTgBtn').onclick = async () => {
+// wdSaveTelegram saves what the card shows; false when it cannot.
+async function wdSaveTelegram() {
   const botToken = $('wdBotToken').value.trim();
   const chatId = $('wdChatId').value.trim();
-  const route = $('wdRouteTunnel').checked ? 'tunnel' : 'direct';
-  let port = 0;
-  if (route === 'tunnel') {
-    const selVal = $('wdTunnelPortSelect').value;
-    port = selVal === 'custom' ? parseInt($('wdTunnelPortManual').value) : parseInt(selVal);
-    if (!port || port < 1 || port > 65535) {
-      toastWarn('invalid port', 'Please select or enter a valid tunnel port (1-65535).');
-      return;
-    }
-  }
+  const v = rtValue($('wdRoutePick'));
+  const body = { action: 'set-telegram', bot_token: botToken, chat_id: chatId, route: v.route };
+  if (v.tunnel_id != null) body.tunnel_id = v.tunnel_id;
+  else if (v.tunnel_port) body.tunnel_port = v.tunnel_port;
   try {
-    await api('/api/watchdog', {
-      action: 'set-telegram',
-      bot_token: botToken,
-      chat_id: chatId,
-      route: route,
-      tunnel_port: port,
-    });
-    toastOk('Telegram settings saved');
-    $('wdTgMsg').textContent = 'Saved at ' + new Date().toLocaleTimeString();
-    loadWatchdog();
-  } catch(e) {
+    await api('/api/watchdog', body);
+    $('wdRoutePick').dataset.touched = '';
+    return true;
+  } catch (e) {
     toastErr('save failed', e.message);
+    return false;
   }
+}
+
+$('wdSaveTgBtn').onclick = async () => {
+  if (!await wdSaveTelegram()) return;
+  toastOk('Telegram settings saved');
+  $('wdTgMsg').textContent = 'Saved at ' + new Date().toLocaleTimeString();
+  loadWatchdog();
 };
+
+$('wdProbeBtn').onclick = () => routeProbe(rtValue($('wdRoutePick')), $('wdProbeOut'), 'telegram');
 
 $('wdTestTgBtn').onclick = async () => {
   const btn = $('wdTestTgBtn');
   btn.disabled = true;
   btn.textContent = 'Testing…';
-  $('wdTgMsg').textContent = 'Sending test alert via ' + ($('wdRouteTunnel').checked ? 'tunnel' : 'direct') + '…';
+  // the test uses the saved settings: save what the card shows first, or a
+  // route or port chosen but not saved yet would be ignored
+  if (!await wdSaveTelegram()) { btn.disabled = false; btn.textContent = 'Test Alert'; return; }
+  $('wdTgMsg').textContent = 'Sending test alert ' + (rtValue($('wdRoutePick')).route === 'tunnel' ? 'through the tunnel' : 'directly') + '…';
   try {
     const res = await api('/api/watchdog', { action: 'test' });
     toastOk('Telegram test OK', res.detail);
@@ -9105,6 +9121,7 @@ document.addEventListener('keydown', e => {
 let _editPortsPeerId = null;
 let _editPortsList   = [];
 let _editPeerBundle  = '';
+let _editPeerEngine  = 'frp';
 
 function openEditPeer(peerId) {
   _editPortsPeerId = peerId;
@@ -9143,6 +9160,10 @@ function openEditPeer(peerId) {
   }
 
   _editPortsList = [...ports];
+  _editPeerEngine = engine;
+  if ($('editPortsNew')) {
+    $('editPortsNew').placeholder = editPortsBackhaul() ? 'e.g. 8080, 10000-10050, 2083=8443' : 'e.g. 443, 1051-1060';
+  }
 
   $('editPortsTitle').textContent = 'Edit Tunnel \u2014 ' + (name || tr('', 'Main tunnel'));
   $('editPortsSub').textContent   = tr('', 'Rename the tunnel or change its foreign IP and forwarded ports. To change how it travels, use Swap carrier.');
@@ -9197,50 +9218,60 @@ function removeEditPort(port) {
   renderEditPortsChips();
 }
 
+function editPortsBackhaul() {
+  return _editPeerEngine === 'backhaul' || _editPeerEngine === 'gre-backhaul';
+}
+
+// editPortEntryErr checks one forwarded-port entry the way the server does.
+// Backhaul takes 443, 10000-10050, 2083=8443 and 10000-10050=443, with an
+// optional IPv4: before either side. FRP forwards a port to the same port on
+// the other server, so it takes 443 and ranges like 1051-1060 (every port of
+// the range is forwarded). '' when the entry is fine.
+function editPortEntryErr(val, backhaul) {
+  const v4 = '(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)){3}:)?';
+  const m = backhaul
+    ? val.match(new RegExp('^' + v4 + '(\\d{1,5})(?:-(\\d{1,5}))?(?:=' + v4 + '(\\d{1,5}))?$'))
+    : val.match(/^(\d{1,5})(?:-(\d{1,5}))?$/);
+  if (!m) {
+    return backhaul
+      ? 'Enter a port (8080), a range (10000-10050) or a mapping (2083=8443), with an optional IP: before either side.'
+      : 'FRP forwards a port to the same port: enter 443 or a range like 1051-1060. Mappings and IP: need Backhaul.';
+  }
+  const ok = n => n === undefined || (Number(n) >= 1 && Number(n) <= 65535);
+  if (!ok(m[1]) || !ok(m[2]) || !ok(m[3])) return 'Port must be between 1 and 65535.';
+  if (m[2] !== undefined && Number(m[1]) >= Number(m[2])) return 'Invalid port range: start must be less than end (1-65535).';
+  if (!backhaul && m[2] !== undefined && Number(m[2]) - Number(m[1]) + 1 > 1000) return 'FRP forwards at most 1000 ports: use a smaller range.';
+  return '';
+}
+
 function addEditPort() {
   const inp    = $('editPortsNew');
   const warnEl = $('editPortsWarn');
-  const val    = inp.value.trim();
   warnEl.classList.add('hidden');
-  const portRe = /^(\d{1,5}|\d{1,5}-\d{1,5}|\d{1,5}=\d{1,5})$/;
-  if (!portRe.test(val)) {
-    warnEl.textContent = 'Enter a valid port (e.g. 8080), range (10000-10050), or mapping (2083=8443).';
+  const warn = msg => {
+    warnEl.textContent = msg;
     warnEl.classList.remove('hidden');
     inp.focus();
+  };
+  // one entry or several: "443, 1051-1060 2083"
+  const entries = inp.value.trim().split(/[\s,]+/).filter(Boolean);
+  if (!entries.length) {
+    warn(editPortEntryErr('', editPortsBackhaul()));
     return;
   }
-  if (val.includes('-')) {
-    const [s, e] = val.split('-').map(Number);
-    if (s < 1 || s > 65535 || e < 1 || e > 65535 || s >= e) {
-      warnEl.textContent = 'Invalid port range: start must be less than end (1-65535).';
-      warnEl.classList.remove('hidden');
-      inp.focus();
-      return;
-    }
-  } else if (val.includes('=')) {
-    const [s, e] = val.split('=').map(Number);
-    if (s < 1 || s > 65535 || e < 1 || e > 65535) {
-      warnEl.textContent = 'Invalid port mapping: ports must be 1-65535.';
-      warnEl.classList.remove('hidden');
-      inp.focus();
-      return;
-    }
-  } else {
-    const n = Number(val);
-    if (n < 1 || n > 65535) {
-      warnEl.textContent = 'Port must be between 1 and 65535.';
-      warnEl.classList.remove('hidden');
-      inp.focus();
+  for (const val of entries) {
+    const err = editPortEntryErr(val, editPortsBackhaul());
+    if (err) {
+      warn('"' + val + '": ' + err);
       return;
     }
   }
-  if (_editPortsList.includes(val)) {
-    warnEl.textContent = 'Port/range "' + val + '" is already in the list.';
-    warnEl.classList.remove('hidden');
-    inp.focus();
+  const fresh = entries.filter((v, i) => !_editPortsList.includes(v) && entries.indexOf(v) === i);
+  if (!fresh.length) {
+    warn('Port/range "' + entries[0] + '" is already in the list.');
     return;
   }
-  _editPortsList.push(val);
+  _editPortsList.push(...fresh);
   inp.value = '';
   renderEditPortsChips();
   inp.focus();
@@ -11015,6 +11046,59 @@ async function clRulesShow() {
   box.classList.remove('hidden');
 }
 
+// ---- the route picker: Direct, or one of this server's tunnels ----
+// Telegram alerts and the DNS failover use it when this server cannot reach
+// Telegram or Cloudflare directly. The choice is a tunnel, never a port: the
+// panel sends the call out from that tunnel's foreign server.
+const RT_STATE = { healthy: ['ok', 'Healthy'], degraded: ['warn', 'Degraded'], down: ['err', 'Down'] };
+
+// rtRender draws the choices into box. cfg is the saved route
+// ({route, tunnel_id, tunnel_port}); a choice the user made but has not saved
+// is kept when the card is redrawn.
+function rtRender(box, tunnels, cfg) {
+  const name = box.id;
+  let sel = 'direct';
+  if (cfg.route === 'tunnel') sel = cfg.tunnel_id != null ? 't:' + cfg.tunnel_id : (cfg.tunnel_port ? 'p:' + cfg.tunnel_port : 'direct');
+  if (box.dataset.touched === '1') { const cur = box.querySelector('input:checked'); if (cur) sel = cur.value; }
+  const rows = [{ v: 'direct', name: tr('', 'Direct'), sub: tr('', 'Straight out from this server'), state: '' }];
+  tunnels.forEach(t => rows.push({ v: 't:' + t.id, name: t.name, sub: t.remote || '', state: t.state }));
+  if (cfg.route === 'tunnel' && cfg.tunnel_id == null && cfg.tunnel_port) rows.push({ v: 'p:' + cfg.tunnel_port, name: tr('', 'Port') + ' ' + cfg.tunnel_port, sub: tr('', 'A SOCKS5 port saved by an older version'), state: '' });
+  if (sel.startsWith('t:') && !tunnels.some(t => 't:' + t.id === sel)) rows.push({ v: sel, name: tr('', 'Tunnel') + ' ' + sel.slice(2), sub: tr('', 'No longer on this server'), state: 'down' });
+  box.innerHTML = rows.map(r => {
+    const st = RT_STATE[r.state];
+    return `<label class="rt-opt"><input type="radio" name="${esc(name)}" value="${esc(r.v)}"${r.v === sel ? ' checked' : ''}>`
+      + `<span class="rt-main"><span class="rt-name">${esc(r.name)}</span>${r.sub ? `<span class="rt-sub u-mono">${esc(r.sub)}</span>` : ''}</span>`
+      + (st ? `<span class="badge ${st[0]}">${esc(tr('', st[1]))}</span>` : '') + '</label>';
+  }).join('') + (tunnels.length ? '' : `<div class="rt-empty">${esc(tr('', 'This server has no tunnels to choose from.'))}</div>`);
+  box.querySelectorAll('input').forEach(i => i.addEventListener('change', () => { box.dataset.touched = '1'; }));
+}
+
+// rtValue is what the picker shows now: {route:'direct'} or
+// {route:'tunnel', tunnel_id} (or {route:'tunnel', tunnel_port} for a saved old port).
+function rtValue(box) {
+  const c = box.querySelector('input:checked');
+  const v = c ? c.value : 'direct';
+  if (v.startsWith('t:')) return { route: 'tunnel', tunnel_id: Number(v.slice(2)) };
+  if (v.startsWith('p:')) return { route: 'tunnel', tunnel_port: Number(v.slice(2)) };
+  return { route: 'direct' };
+}
+
+// routeProbe makes a real connection to Telegram or Cloudflare out of the chosen
+// tunnel and shows whether it worked, which address of the foreign panel
+// carried it, or what is wrong. what is "telegram" or "cloudflare".
+async function routeProbe(v, el, what) {
+  if (v.route !== 'tunnel') { el.textContent = ''; return true; }
+  el.textContent = tr('', 'Checking…');
+  try {
+    const r = await api('/api/proxy/probe', v.tunnel_id != null ? { tunnel: v.tunnel_id, for: what } : { port: v.tunnel_port, for: what });
+    el.innerHTML = r.ok
+      ? `<span class="badge ok">${esc(tr('', 'Connected'))}</span> <span class="u-mono">${esc(r.via || '')}</span>`
+      : `<span class="badge err">${esc(tr('', 'Not working'))}</span> ${esc(r.why)}`;
+    return !!r.ok;
+  } catch (e) { el.textContent = e.message || String(e); return false; }
+}
+function clDnsProbe() { return routeProbe(rtValue($('clDnsRoutePick')), $('clDnsProbeOut'), 'cloudflare'); }
+
 function clRenderDNS(dns) {
   const b = $('clDnsBadge');
   b.className = 'badge ' + (!dns.enabled ? 'dim' : dns.error ? 'err' : 'ok');
@@ -11023,21 +11107,63 @@ function clRenderDNS(dns) {
     _clDnsFilled = true;
     $('clDnsName').value = dns.name || '';
     $('clDnsTTL').value = dns.ttl || 60;
+    $('clDnsWeight').value = dns.weight || 1;
+    $('clDnsMaster').checked = !!dns.master;
     $('clDnsEnabled').checked = !!dns.enabled;
     $('clDnsProvider').value = dns.provider === 'webhook' ? 'webhook' : 'cloudflare';
     $('clDnsURL').value = dns.url || '';
     _clDnsSaved = { provider: dns.provider === 'webhook' ? 'webhook' : 'cloudflare', hasToken: !!dns.has_token };
     clDnsProviderChanged();
   }
-  const lines = [];
+  rtRender($('clDnsRoutePick'), dns.tunnels || [], { route: dns.route, tunnel_id: dns.tunnel_id, tunnel_port: dns.tunnel_port });
+  clDnsRouteChanged();
+  clDnsRenderMembers(dns.members || []);
+  clDnsMasterChanged();
+  clDnsRenderShares(dns.shares || []);
+  const kpi = (k, v, cls) => `<div class="cl-kpi ${cls || ''}"><span>${esc(tr('', k))}</span><b class="u-fs-14">${v}</b></div>`;
+  const kp = $('clDnsKpis');
+  kp.classList.toggle('hidden', !dns.enabled);
   if (dns.enabled) {
-    lines.push(tr('', 'Points to:') + ' ' + ((dns.records || []).join(', ') || '—'));
-    if ((dns.want || []).length) lines.push(tr('', 'Working hubs:') + ' ' + dns.want.join(', '));
-    lines.push(tr('', dns.leader ? 'This hub writes the record.' : 'Another hub writes the record (the one with the lowest id).'));
-    if (dns.last_run) lines.push(tr('', 'Last check:') + ' ' + dns.last_run);
+    kp.innerHTML = kpi('Points to', esc((dns.records || []).join(', ') || '—'), (dns.records || []).length ? 'ok' : '')
+      + kpi('Writes the record', esc(tr('', dns.leader ? 'This hub' : 'Another hub')))
+      + kpi('Last check', esc(dns.last_run || '—'));
   }
-  if (dns.error) lines.push(tr('', 'Error:') + ' ' + dns.error);
-  $('clDnsState').textContent = lines.join('\n');
+  const er = $('clDnsErr');
+  er.classList.toggle('hidden', !dns.error);
+  er.textContent = dns.error ? tr('', 'Error:') + ' ' + dns.error : '';
+}
+
+// A bar of who gets what share, drawn like a pool's bar.
+function clDnsRenderShares(shares) {
+  const box = $('clDnsShareViz');
+  box.classList.toggle('hidden', shares.length < 2);
+  if (shares.length < 2) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="cl-bar" role="img" aria-label="${esc(tr('', 'Share of users'))}">`
+    + shares.map((h, i) => `<span class="cl-c${i % 6}" style="width:${h.percent}%"></span>`).join('') + '</div>'
+    + '<div class="cl-share-leg">' + shares.map((h, i) => `<span><span class="cl-sw cl-c${i % 6}"></span>${esc(h.name || h.ip)} <b>${h.percent}%</b></span>`).join('') + '</div>';
+}
+
+function clDnsRouteChanged() {
+  $('clDnsProbeRow').classList.toggle('hidden', rtValue($('clDnsRoutePick')).route !== 'tunnel');
+}
+$('clDnsRoutePick').addEventListener('change', () => {
+  clDnsRouteChanged();
+  $('clDnsProbeOut').textContent = '';
+  if (rtValue($('clDnsRoutePick')).route === 'tunnel') clDnsProbe();
+});
+
+// The master's table of shares. Redrawn only when the hubs change, so typing is not lost.
+let _clDnsMemSig = '';
+function clDnsRenderMembers(members) {
+  const sig = members.map(m => m.id).join(',');
+  if (sig === _clDnsMemSig && $('clDnsMembers').children.length) return;
+  _clDnsMemSig = sig;
+  $('clDnsMembers').innerHTML = `<div class="wd-lbl">${esc(tr('', 'Share of users for each hub (1-100)'))}</div>` + members.map(m => `<div class="u-flex-gap-8 u-mb-8 u-ai-c"><span class="u-flex-1">${esc(m.name || m.id)}${m.self ? ' <span class="badge dim">' + esc(tr('', 'this hub')) + '</span>' : ''}${m.up ? '' : ' <span class="badge warn">' + esc(tr('', 'down')) + '</span>'}</span><input class="hashem-input cl-num" type="number" min="1" max="100" data-hub="${esc(m.id)}" data-self="${m.self ? 1 : 0}" value="${m.weight || 1}" aria-label="${esc(m.name || m.id)}"></div>`).join('');
+}
+function clDnsMasterChanged() {
+  const on = $('clDnsMaster').checked;
+  $('clDnsMembersRow').classList.toggle('hidden', !on);
+  $('clDnsWeightRow').classList.toggle('hidden', on);
 }
 
 // The token saved for one provider is never used by the other one.
@@ -11047,17 +11173,34 @@ function clDnsProviderChanged() {
   $('clDnsURLRow').classList.toggle('hidden', !hook);
   $('clDnsTokenLabel').textContent = tr('', hook ? 'Secret (optional, sent as Authorization: Bearer)' : 'Cloudflare API token (Zone, DNS, Edit)');
   $('clDnsHookHelp').classList.toggle('hidden', !hook);
+  $('clDnsRouteSub').classList.toggle('hidden', hook);
+  $('clDnsCfWeightHelp').classList.toggle('hidden', hook);
   const saved = _clDnsSaved.provider === prov && _clDnsSaved.hasToken;
   $('clDnsToken').placeholder = tr('', saved ? 'Saved; paste a new one to replace it' : hook ? 'Optional' : 'API token');
 }
 
 async function clDnsSave(test) {
   const provider = $('clDnsProvider').value;
-  const body = { provider, url: $('clDnsURL').value.trim(), name: $('clDnsName').value.trim(), ttl: Number($('clDnsTTL').value) || 60, enabled: $('clDnsEnabled').checked, test: !!test };
+  const body = { provider, url: $('clDnsURL').value.trim(), name: $('clDnsName').value.trim(), ttl: Number($('clDnsTTL').value) || 60, weight: Math.min(100, Math.max(1, Math.round(Number($('clDnsWeight').value)) || 1)), enabled: $('clDnsEnabled').checked, master: $('clDnsMaster').checked, test: !!test };
+  if (provider !== 'webhook') {
+    const v = rtValue($('clDnsRoutePick'));
+    body.route = v.route;
+    if (v.tunnel_id != null) body.tunnel_id = v.tunnel_id;
+    else if (v.tunnel_port) body.tunnel_port = v.tunnel_port;
+  }
+  if (body.master) {
+    const hw = {};
+    document.querySelectorAll('#clDnsMembers input[data-hub]').forEach(i => {
+      const w = Math.min(100, Math.max(1, Math.round(Number(i.value)) || 1));
+      if (i.dataset.self === '1') body.weight = w; else hw[i.dataset.hub] = w;
+    });
+    body.hub_weights = hw;
+  }
   const tok = $('clDnsToken').value.trim();
   if (tok) body.token = tok;
   try {
     const r = await api('/api/cluster/dns', body);
+    $('clDnsRoutePick').dataset.touched = '';
     if (test) toastOk(tr('', provider === 'webhook' ? 'The webhook answered' : 'Cloudflare answered'), tr('', provider === 'webhook' ? 'Working hubs sent:' : 'The record points to:') + ' ' + ((r.records || []).join(', ') || '—'));
     else { toastOk(tr('', 'DNS failover saved')); $('clDnsToken').value = ''; _clDnsFilled = false; }
   } catch (e) { toastErr(tr('', test ? 'The test failed' : 'Cannot save'), e.message || String(e)); }

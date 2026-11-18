@@ -575,6 +575,40 @@
   .det-row > :last-child { margin-inline-start:auto; max-width:100%; }
   .det-k { font-size:12px; color:var(--dim); font-weight:500; flex:0 1 auto; }
   .det-v.det-ports { flex:1 1 100%; } /* a port list gets its own line */
+  /* Dashboard Details: two columns (three or four when the card is wide), rows split by
+     hairlines, a value always says whose it is, IPs and ports are copy pills, ports are chips. */
+  .det-wrap { container:det / inline-size; }
+  #dashDetails { grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; align-items:stretch; }
+  #dashDetails > .det-card:last-child:nth-child(odd) { grid-column:1 / -1; }
+  @container det (min-width:1020px) { #dashDetails[data-n="3"] { grid-template-columns:repeat(3,minmax(0,1fr)); } #dashDetails[data-n="3"] > .det-card:last-child { grid-column:auto; } }
+  @container det (min-width:1400px) { #dashDetails[data-n="4"] { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+  @container det (max-width:560px) { #dashDetails { grid-template-columns:minmax(0,1fr); } }
+  #dashDetails .det-card { padding:16px 18px 8px; gap:6px; }
+  #dashDetails .det-head { gap:10px; padding-bottom:10px; border-bottom:1px solid var(--ln); font-size:14px; }
+  #dashDetails .det-title { min-width:0; overflow-wrap:anywhere; }
+  .det-dot { margin-inline-start:auto; width:8px; height:8px; border-radius:50%; background:var(--dim); flex:none; }
+  .det-dot.ok { background:var(--ok); box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
+  .det-dot.err { background:var(--er); box-shadow:0 0 0 3px color-mix(in srgb, var(--er) 18%, transparent); }
+  #dashDetails .det-rows { gap:0; }
+  #dashDetails .det-row { padding:10px 0; min-height:44px; flex-wrap:wrap; gap:6px 12px; }
+  #dashDetails .det-row + .det-row { border-top:1px solid color-mix(in srgb, var(--ln) 65%, transparent); }
+  #dashDetails .det-k { display:flex; flex-direction:column; gap:1px; font-size:12.5px; line-height:1.25; white-space:nowrap; }
+  #dashDetails .det-hint { font-size:12px; color:var(--dim); font-weight:400; opacity:.85; }
+  #dashDetails .det-v > .det-hint { margin-inline-start:6px; }
+  #dashDetails .det-row.stack { flex-direction:column; align-items:stretch; gap:9px; }
+  #dashDetails .det-row.stack > :last-child { margin-inline-start:0; }
+  #dashDetails .det-row.stack .det-k { flex-direction:row; align-items:center; gap:8px; }
+  .det-na { color:var(--dim); font-weight:400; }
+  .det-pill { display:inline-flex; align-items:stretch; max-width:100%; background:var(--s2); border:1px solid var(--ln); border-radius:9px; overflow:hidden; transition:border-color .15s ease; }
+  .det-pill:hover { border-color:var(--ln2); }
+  .det-pill .det-v.mono { min-width:0; white-space:normal; overflow-wrap:anywhere; text-align:start; border:0; background:none; border-radius:0; padding:5px 10px; }
+  .det-pill .det-copy { display:grid; place-items:center; min-width:32px; min-height:0; padding:0 8px; border:0; border-inline-start:1px solid var(--ln); border-radius:0; background:transparent; }
+  .det-pill .det-copy svg { width:14px; height:14px; }
+  .det-pill .det-copy:hover { background:var(--ac-soft); color:var(--ac); }
+  .det-pill .det-copy.ok { background:var(--ok-soft); }
+  .det-chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .det-chip { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; font-weight:600; font-variant-numeric:tabular-nums;
+    padding:3px 9px; border-radius:7px; background:var(--s2); border:1px solid var(--ln); color:var(--tx); }
   /* Bagher card: one row per extra foreign server */
   #peer-card-bagher .det-grid { grid-template-columns:repeat(2,1fr); }
   @media (max-width:900px) { #peer-card-bagher .det-grid { grid-template-columns:1fr; } }
@@ -962,6 +996,23 @@
   .wd-seg label:hover span { color:var(--tx2); }
   .wd-seg input:checked + span { background:var(--ac-soft); color:var(--ac); box-shadow:inset 0 0 0 1px var(--ac-b30); }
   .wd-seg input:focus-visible + span { outline:2px solid var(--ac); outline-offset:2px; }
+  #clDnsCard .wd-sub { display:grid; gap:12px; }
+  #clDnsCard .wd-sub-h { margin-bottom:0; }
+  #clDnsCard .wd-seg { justify-self:start; }
+  #clDnsMembers { max-width:440px; }
+  .rt-pick { display:grid; gap:6px; max-width:520px; }
+  .rt-opt { position:relative; display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--ln); border-radius:var(--r-md); background:var(--s2); cursor:pointer; transition:border-color .18s ease, background .18s ease; }
+  .rt-opt input { position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
+  .rt-opt:hover { border-color:var(--ac-b30); }
+  .rt-opt:has(input:checked) { border-color:var(--ac); background:var(--ac-soft); }
+  .rt-opt:has(input:focus-visible) { outline:2px solid var(--ac); outline-offset:2px; }
+  .rt-main { flex:1; min-width:0; display:grid; gap:2px; }
+  .rt-name { font-weight:600; color:var(--tx); overflow-wrap:anywhere; }
+  .rt-sub { font-size:var(--fs-small); color:var(--mu); overflow-wrap:anywhere; }
+  .rt-empty { font-size:var(--fs-small); color:var(--mu); }
+  .cl-dns-kpis { margin-top:0; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); }
+  .cl-share-leg { display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:8px; font-size:var(--fs-small); color:var(--tx2); }
+  .cl-share-leg b { color:var(--tx); font-variant-numeric:tabular-nums; }
   .wd-sub { margin-top:6px; padding-top:16px; border-top:1px solid var(--ln); }
   .wd-sub-h { font-weight:600; color:var(--tx); font-size:var(--fs-h4); margin-bottom:8px; }
   .wd-backup-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
@@ -1880,7 +1931,7 @@
               </div>
             </div>
             <div class="hero-lat">
-              <span class="kpi-label" data-i18n="kpi_latency">Latency</span>
+              <span class="kpi-label" id="kpiPingLbl" data-i18n="kpi_latency">Latency</span>
               <div class="hero-val" id="kpiPing">—</div>
               <div class="kpi-sub" id="kpiPingSub">—</div>
             </div>
@@ -1951,7 +2002,7 @@
               <div id="dashPeersList" role="rowgroup"></div>
             </div>
           </div>
-          <div class="tunnel-card dash-span">
+          <div class="tunnel-card dash-span det-wrap">
             <div class="tc-header">
               <div class="det-head-live">
                 <span class="det-pulse" id="detPulse"></span>
@@ -2231,30 +2282,59 @@
             <div id="clHubs"></div>
           </div>
 
-          <div class="tunnel-card">
+          <div class="tunnel-card" id="clDnsCard">
             <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-8">
               <div class="u-flex-1 cl-head-txt">
                 <p class="tc-title u-m-0">DNS Failover</p>
-                <div class="ent-help u-m-0">A domain that always points to the Iran hubs that work. Users who connect by name move to a working hub when one dies. Cloudflare (DNS only, grey cloud), or a webhook for any other DNS provider.</div>
+                <div class="ent-help u-m-0">One domain that always points to the Iran hubs that work, so users who connect by name move to a working hub when one dies.</div>
               </div>
               <span class="badge dim" id="clDnsBadge">Off</span>
             </div>
-            <div class="ent-grid-2">
-              <div class="fg"><label for="clDnsName">Record name</label><input class="hashem-input u-mono" id="clDnsName" placeholder="vpn.example.com" autocomplete="off"></div>
-              <div class="fg"><label for="clDnsTTL">TTL (seconds)</label><input class="hashem-input" id="clDnsTTL" type="number" min="60" max="3600" value="60"></div>
+            <div class="cl-kpis cl-dns-kpis hidden" id="clDnsKpis"></div>
+            <div class="cl-alert hidden" id="clDnsErr" role="alert"></div>
+            <label class="u-check-row"><input type="checkbox" id="clDnsEnabled"> Keep the record pointed at the working hubs</label>
+
+            <div class="wd-sub">
+              <div class="wd-sub-h">Record</div>
+              <div class="ent-grid-2">
+                <div class="fg"><label for="clDnsName">Record name</label><input class="hashem-input u-mono" id="clDnsName" placeholder="vpn.example.com" autocomplete="off"></div>
+                <div class="fg"><label for="clDnsTTL">TTL (seconds)</label><input class="hashem-input" id="clDnsTTL" type="number" min="60" max="3600" value="60"></div>
+                <div class="fg"><label for="clDnsProvider">Provider</label>
+                  <select class="hashem-input" id="clDnsProvider" onchange="clDnsProviderChanged()">
+                    <option value="cloudflare">Cloudflare (DNS only, grey cloud)</option>
+                    <option value="webhook">Webhook (any DNS provider or script)</option>
+                  </select></div>
+                <div class="fg"><label for="clDnsToken" id="clDnsTokenLabel">Cloudflare API token (Zone, DNS, Edit)</label><input class="hashem-input u-mono" id="clDnsToken" type="password" autocomplete="off" placeholder="Saved; paste a new one to replace it"></div>
+              </div>
+              <div class="fg hidden" id="clDnsURLRow"><label for="clDnsURL">Webhook URL</label><input class="hashem-input u-mono" id="clDnsURL" autocomplete="off" placeholder="https://example.com/hashem-dns"></div>
             </div>
-            <div class="fg"><label for="clDnsProvider">Provider</label>
-              <select class="hashem-input" id="clDnsProvider" onchange="clDnsProviderChanged()">
-                <option value="cloudflare">Cloudflare</option>
-                <option value="webhook">Webhook (any DNS provider or script)</option>
-              </select></div>
-            <div class="fg hidden" id="clDnsURLRow"><label for="clDnsURL">Webhook URL</label><input class="hashem-input u-mono" id="clDnsURL" autocomplete="off" placeholder="https://example.com/hashem-dns"></div>
-            <div class="ent-help hidden" id="clDnsHookHelp">The hub that leads POSTs JSON {"name", "ips", "ips6", "ttl", "hub", "at"} whenever the working hubs change, and every 30 seconds. Your script sets the record to exactly "ips" (A) and "ips6" (AAAA). Any 2xx answer counts as done.</div>
-            <div class="fg"><label for="clDnsToken" id="clDnsTokenLabel">Cloudflare API token (Zone, DNS, Edit)</label><input class="hashem-input u-mono" id="clDnsToken" type="password" autocomplete="off" placeholder="Saved; paste a new one to replace it"></div>
-            <label class="u-check-row u-mb-8"><input type="checkbox" id="clDnsEnabled"> Keep the record pointed at the working hubs</label>
-            <div class="ent-help cl-pre" id="clDnsState"></div>
+
+            <div class="wd-sub" id="clDnsRouteSub">
+              <div class="wd-sub-h" id="clDnsRouteLbl">Reach Cloudflare through</div>
+              <div class="rt-pick" id="clDnsRoutePick" role="radiogroup" aria-labelledby="clDnsRouteLbl"></div>
+              <div class="u-flex-center-wrap8 hidden" id="clDnsProbeRow">
+                <button type="button" class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="clDnsProbe()">Check connection</button>
+                <span class="ent-help u-m-0" id="clDnsProbeOut" aria-live="polite"></span>
+              </div>
+              <div class="ent-help" id="clDnsRouteHelp">Pick a tunnel when this Iran server cannot reach Cloudflare. The call goes out from the foreign server of that tunnel; nothing to set up there.</div>
+            </div>
+
+            <div class="wd-sub">
+              <div class="wd-sub-h">Share of users</div>
+              <div id="clDnsShareViz" class="hidden"></div>
+              <label class="u-check-row"><input type="checkbox" id="clDnsMaster" onchange="clDnsMasterChanged()"> This hub is the master: it writes the record and sets every hub's share</label>
+              <div class="fg hidden" id="clDnsMembersRow"><div id="clDnsMembers" role="group" aria-label="Share of users for each hub (1-100)"></div></div>
+              <div class="fg" id="clDnsWeightRow"><label for="clDnsWeight">Share of users for this hub (1-100)</label><input class="hashem-input cl-num" id="clDnsWeight" type="number" min="1" max="100" value="1"></div>
+              <div class="ent-help" id="clDnsCfWeightHelp">Equal shares keep every working hub in the record. With different shares the record points to one hub at a time, in turns of about the TTL, so each hub gets its share of users over time (approximate).</div>
+            </div>
+
+            <details class="hidden" id="clDnsHookHelp">
+              <summary class="u-cursor-pointer ent-help">What the webhook receives</summary>
+              <div class="ent-help u-mt-8">The hub that writes the record POSTs JSON {"name", "ips", "ips6", "weights", "ttl", "hub", "at"} whenever the working hubs or their shares change, and every 30 seconds. Your script sets the record to exactly "ips" (A) and "ips6" (AAAA), and can split users by "weights" (the share of each address). Any 2xx answer counts as done.</div>
+            </details>
+
             <div class="u-flex u-gap-8 u-wrap">
-              <button class="hashem-btn hashem-btn-secondary" onclick="clDnsSave(true)">Test</button>
+              <button class="hashem-btn hashem-btn-secondary" onclick="clDnsSave(true)">Test Connection</button>
               <button class="hashem-btn hashem-btn-primary" onclick="clDnsSave(false)">Save</button>
             </div>
           </div>
@@ -2875,25 +2955,13 @@
             <input class="hashem-input" id="wdChatId" placeholder="e.g. 123456789 or -100123456789" autocomplete="off" spellcheck="false">
           </div>
           <div class="fg">
-            <span class="wd-lbl" id="wdRouteLbl">Telegram Route</span>
-            <div class="wd-seg" role="radiogroup" aria-labelledby="wdRouteLbl">
-              <label>
-                <input type="radio" name="wdRoute" value="direct" id="wdRouteDirect" checked>
-                <span>Direct (standard HTTPS)</span>
-              </label>
-              <label>
-                <input type="radio" name="wdRoute" value="tunnel" id="wdRouteTunnel">
-                <span>Via Tunnel (SOCKS5 through tunnel port)</span>
-              </label>
+            <span class="wd-lbl" id="wdRouteLbl">Send Telegram alerts through</span>
+            <div class="rt-pick" id="wdRoutePick" role="radiogroup" aria-labelledby="wdRouteLbl"></div>
+            <div class="u-flex-center-wrap8 u-mt-8 hidden" id="wdProbeRow">
+              <button type="button" class="hashem-btn hashem-btn-secondary u-btn-xs" id="wdProbeBtn">Check connection</button>
+              <span class="ent-help u-m-0" id="wdProbeOut" aria-live="polite"></span>
             </div>
-          </div>
-          <div class="fg hidden" id="wdTunnelPortGroup">
-            <label for="wdTunnelPortSelect">Tunnel SOCKS5 Proxy Port</label>
-            <div class="u-flex-center-wrap8">
-              <select class="hashem-input u-min-w-180" id="wdTunnelPortSelect" ></select>
-              <input class="hashem-input hidden u-max-w-140" id="wdTunnelPortManual" aria-label="Custom port" type="number" min="1" max="65535" placeholder="Custom port" >
-            </div>
-            <div class="ent-help">Routed through 127.0.0.1:PORT via SOCKS5 proxy on Foreign side.</div>
+            <div class="ent-help">Pick a tunnel when this server cannot reach Telegram. The alert goes out from the foreign server of that tunnel; nothing to set up there.</div>
           </div>
           <div class="qs-actions">
             <button class="hashem-btn hashem-btn-primary" id="wdSaveTgBtn">Save Telegram Settings</button>

@@ -374,7 +374,7 @@ func swapLocal(t swapTunnel, to carrierChoice) (string, error) {
 		return "", fmt.Errorf("%s needs GRE, and this tunnel was set up without it", carrierLabel(to))
 	}
 	if t.Main {
-		out, err := switchTunnelEngineWith(to.Engine, to.Transport, engineOpts{Ports: t.Ports, Raw: t.Raw})
+		out, err := switchTunnelEngineWith(to.Engine, to.Transport, engineOpts{Ports: t.portsFor(to.Engine), Raw: t.Raw})
 		if err != nil {
 			return out, err
 		}
@@ -397,6 +397,10 @@ func mainUnitFor(to carrierChoice) string {
 func recordCarrier(p *peerRecord, to carrierChoice, svc string) {
 	p.Engine, p.FrpsSvc = to.Engine, svc
 	p.NoGre = to.Engine == "backhaul"
+	if len(p.RawPorts) > 0 {
+		// FRP forwards every port of a range; Backhaul names it by its first
+		p.Ports = numericPortsFor(to.Engine, p.RawPorts)
+	}
 	if to.Engine == "frp" {
 		p.FRPTransport, p.Transport = to.Transport, ""
 		if to.Transport == "tcp" {
@@ -910,6 +914,31 @@ func tunnelPeerBases(t swapTunnel, l tunnelLink) []string {
 	return out
 }
 
+// tunnelPinnedTLS is the TLS client config for a tunnel's foreign panel: its
+// certificate is self-signed, so it is pinned (trust on first use) instead of
+// verified against a CA.
+func tunnelPinnedTLS(id int, pin string) *tls.Config {
+	return &tls.Config{
+		InsecureSkipVerify: true, // checked against the pin below (trust on first use)
+		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
+			if len(raw) == 0 {
+				return errors.New("no TLS certificate")
+			}
+			sum := sha256.Sum256(raw[0])
+			got := hex.EncodeToString(sum[:])
+			if pin == "" {
+				pin = got
+				updateTunnelLink(id, func(x *tunnelLink) { x.TLSPin = got })
+				return nil
+			}
+			if subtle.ConstantTimeCompare([]byte(pin), []byte(got)) != 1 {
+				return errors.New("foreign panel TLS certificate changed (pinned fingerprint does not match)")
+			}
+			return nil
+		},
+	}
+}
+
 func tunnelPeerCall(t swapTunnel, method, path string, payload any, timeout time.Duration) ([]byte, error) {
 	var body []byte
 	if payload != nil {
@@ -944,28 +973,9 @@ func tunnelPeerCall(t swapTunnel, method, path string, payload any, timeout time
 			break // the secret was right; another one will not help
 		}
 	}
-	pin := l.TLSPin
 	tr := &http.Transport{
-		DialContext: (&net.Dialer{Timeout: peerDialTimeout}).DialContext,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // checked against the pin below (trust on first use)
-			VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
-				if len(raw) == 0 {
-					return errors.New("no TLS certificate")
-				}
-				sum := sha256.Sum256(raw[0])
-				got := hex.EncodeToString(sum[:])
-				if pin == "" {
-					pin = got
-					updateTunnelLink(t.ID, func(x *tunnelLink) { x.TLSPin = got })
-					return nil
-				}
-				if subtle.ConstantTimeCompare([]byte(pin), []byte(got)) != 1 {
-					return errors.New("foreign panel TLS certificate changed (pinned fingerprint does not match)")
-				}
-				return nil
-			},
-		},
+		DialContext:     (&net.Dialer{Timeout: peerDialTimeout}).DialContext,
+		TLSClientConfig: tunnelPinnedTLS(t.ID, l.TLSPin),
 	}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Timeout: timeout, Transport: tr,
@@ -1197,7 +1207,7 @@ func swapLinked(t swapTunnel, to carrierChoice) bool {
 }
 
 func (t swapTunnel) foreignRequest(to carrierChoice) peerSwapRequest {
-	return peerSwapRequest{Engine: to.Engine, Transport: to.Transport, Port: t.Port, Ports: t.Ports, Raw: t.Raw,
+	return peerSwapRequest{Engine: to.Engine, Transport: to.Transport, Port: t.Port, Ports: t.portsFor(to.Engine), Raw: t.Raw,
 		Remote: t.LocalPub, PeerGre: t.LocalGre, DelayMs: int(swapForeignWait / time.Millisecond)}
 }
 
@@ -1385,7 +1395,16 @@ func swapBundle(t swapTunnel, to carrierChoice) string {
 	case "gre-backhaul":
 		return MakeGreBackhaulBundle(t.LocalPub, t.Port, t.LocalGre, t.PeerGre, tr, t.Token, t.Raw)
 	}
-	return MakeBundle(t.LocalPub, t.Port, t.LocalGre, t.PeerGre, t.Token, t.Ports, to.Transport)
+	return MakeBundle(t.LocalPub, t.Port, t.LocalGre, t.PeerGre, t.Token, t.portsFor(to.Engine), to.Transport)
+}
+
+// portsFor is the numeric port list for the engine a swap moves to: FRP
+// forwards every port of a Backhaul range on its own.
+func (t swapTunnel) portsFor(engine string) []int {
+	if len(t.Raw) == 0 {
+		return t.Ports
+	}
+	return numericPortsFor(engine, t.Raw)
 }
 
 // ---- HTTP ----
