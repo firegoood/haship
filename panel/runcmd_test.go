@@ -144,11 +144,13 @@ func TestRunCmdSilencesInactiveUnitProbe(t *testing.T) {
 }
 
 func TestRunCmdQuietSkipsErrorLog(t *testing.T) {
+	// -n -L is a chain-existence probe: exit 1 means "no such chain" and is not
+	// one of the exits exitIsAnswer accepts, so without quietKey it would log.
 	withRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return []byte("iptables: No chain/target/match by that name."), realExitError(t, 1)
 	})
 	logs := captureLog(t)
-	out, err := runCmdQuiet(time.Second, "iptables", "-C", "HASHEM-REVPATH", "-j", "ACCEPT")
+	out, err := runCmdQuiet(time.Second, "iptables", "-n", "-L", "HASHEM-REVPATH")
 	if err == nil || !strings.Contains(string(out), "No chain") {
 		t.Fatalf("quiet probe must still return output and error, got %q %v", out, err)
 	}
