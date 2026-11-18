@@ -51,6 +51,10 @@ type doctorReport struct {
 	LastError       *errEvent       `json:"last_error,omitempty"`
 	// RevPath is the cached read-only reverse-path diagnosis (never probes here).
 	RevPath []revPathEntry `json:"revpath,omitempty"`
+	// Reach is TCP (and TLS) to the other server; Clock its clock and ours (doctor_more.go).
+	Reach reachSummary `json:"reach"`
+	Clock clockSummary `json:"clock"`
+	Auto  bool         `json:"auto,omitempty"` // a scheduled run (no iPerf3)
 }
 
 // doctorFinding is one problem. Title and Fix are English; TitleTpl/FixTpl
@@ -120,7 +124,17 @@ type speedSummary struct {
 }
 
 type doctorPostRequest struct {
-	Action string `json:"action"` // "run", "fix", "iperf-start", "iperf-stop"
+	Action string `json:"action"` // "run", "fix", "iperf-start", "iperf-stop", and doctor_more.go's
+	// trace and stability
+	Target  string `json:"target,omitempty"` // a docTarget ID
+	Mode    string `json:"mode,omitempty"`   // trace: "icmp" | "tcp"
+	Install bool   `json:"install,omitempty"`
+	Seconds int    `json:"seconds,omitempty"`
+	// ports: the keys to test (none = all)
+	Keys []string `json:"keys,omitempty"`
+	// schedule
+	EveryHours int  `json:"every_hours,omitempty"`
+	Alert      bool `json:"alert,omitempty"`
 }
 
 var (
@@ -132,7 +146,11 @@ var (
 
 // doctorRefresh runs diagnostics, or returns a report that finished while
 // this caller waited for the running one (two clicks never probe twice).
-func doctorRefresh() *doctorReport {
+func doctorRefresh() *doctorReport { return doctorRefreshAuto(false) }
+
+// doctorRefreshAuto: auto is a scheduled run, which skips iPerf3. Every
+// fresh report goes to the history.
+func doctorRefreshAuto(auto bool) *doctorReport {
 	arrived := time.Now()
 	doctorRunMu.Lock()
 	defer doctorRunMu.Unlock()
@@ -142,10 +160,11 @@ func doctorRefresh() *doctorReport {
 	if c != nil && at.After(arrived) {
 		return c
 	}
-	rep := runFullDiagnostics()
+	rep := runFullDiagnostics(auto)
 	lastDoctorMu.Lock()
 	lastDoctorReport, lastDoctorAt = rep, time.Now()
 	lastDoctorMu.Unlock()
+	docHistRecord(rep, auto)
 	return rep
 }
 
@@ -169,6 +188,9 @@ func handleDoctorPost(w http.ResponseWriter, r *http.Request) {
 	var req doctorPostRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		req.Action = "run"
+	}
+	if doctorPostMore(w, r, req) {
+		return
 	}
 
 	switch req.Action {
@@ -213,6 +235,9 @@ type doctorInputs struct {
 	kernel     kernelAudit
 	speed      speedSummary
 	health     *tunnelHealthResult
+	reach      reachSummary
+	clock      clockSummary
+	auto       bool // scheduled: no iPerf3
 	bagher     *doctorBagher
 	extra      []doctorFinding // config / log findings (stale config, frpc EOF, Backhaul)
 	lastErr    *errEvent
@@ -227,16 +252,16 @@ var (
 	doctorIfMTUFn  = interfaceMTU
 )
 
-func runFullDiagnostics() *doctorReport {
+func runFullDiagnostics(auto bool) *doctorReport {
 	start := time.Now()
-	rep := evaluateDoctor(collectDoctorInputs())
+	rep := evaluateDoctor(collectDoctorInputs(auto))
 	rep.DurationMs = time.Since(start).Milliseconds()
 	return rep
 }
 
-func collectDoctorInputs() doctorInputs {
+func collectDoctorInputs(auto bool) doctorInputs {
 	st := localStatus()
-	in := doctorInputs{st: st, gre: greExpected(st), bagher: doctorBagherFn(), lastErr: lastErrorEvent()}
+	in := doctorInputs{st: st, gre: greExpected(st), bagher: doctorBagherFn(), lastErr: lastErrorEvent(), auto: auto}
 	if st.Gre.Inner != "" {
 		in.innerPeer = grePeerInner(st.Gre.Inner)
 	}
@@ -251,7 +276,15 @@ func collectDoctorInputs() doctorInputs {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(5)
+	go func() { // TCP to the other server: a filtered port or IP (doctor_more.go)
+		defer wg.Done()
+		in.reach = doctorReachFn(reachTargets(st, in.publicPeer, loadPeerConfig()))
+	}()
+	go func() { // time sync here, and the other server's clock
+		defer wg.Done()
+		in.clock = doctorClockFn()
+	}()
 	go func() { // engine-aware verdict for every tunnel (bounded by its own timeouts)
 		defer wg.Done()
 		defer func() { _ = recover() }()
@@ -273,6 +306,10 @@ func collectDoctorInputs() doctorInputs {
 		in.ping = doctorPingFn(in.innerPeer, 10)
 		if in.ping.Success {
 			in.mtu = executeMTUTest(in.innerPeer, doctorIfMTUFn(st.Gre.Name))
+		}
+		if auto {
+			in.speed = speedSummary{Mode: "iperf3", ServerActive: isIperfServerRunning(), Detail: "Not measured on scheduled runs"}
+			return
 		}
 		in.speed = executeThroughputTest(in.innerPeer, in.ping.Success)
 	}()
@@ -296,6 +333,13 @@ func doctorConfigFindings(st tunnelStatus) []doctorFinding {
 				"Remove the stale config or reinstall the engine (Setup tab)",
 				filepath.Base(c.path), c.path, c.engine))
 		}
+	}
+	// frp on this server and on the other end of its tunnels (said over the Peer Link)
+	if drift := frpVersionDrift(localFrpVersion(), loadPeerConfig().PeerFrpVersion, loadTunnelLinks(), loadPeers()); len(drift) > 0 {
+		out = append(out, newFinding("minor", "config", 3, false,
+			"FRP versions differ: this server runs {0}, the other end runs {1}",
+			"The two work together, but options and fixes of the newer version are missing on the older side. Install the same FRP version on both servers",
+			localFrpVersion(), strings.Join(drift, ", ")))
 	}
 	// frpc EOF on login = hub/spoke tcpMux mismatch (hint only, never auto-changed)
 	if st.FrpSvc == "frpc" && frpcLoginEOF() {
@@ -391,6 +435,9 @@ func evaluateDoctor(in doctorInputs) *doctorReport {
 		Notes:        []string{},
 		LastError:    in.lastErr,
 		RevPath:      revPathCached(),
+		Reach:        in.reach,
+		Clock:        in.clock,
+		Auto:         in.auto,
 	}
 	if rep.Engine == "" && in.gre {
 		rep.Engine = "gre"
@@ -497,6 +544,30 @@ func evaluateDoctor(in doctorInputs) *doctorReport {
 	}
 	if in.underlay.Tested && !in.underlay.Success && (in.ping.Success || mainPass) {
 		rep.Notes = append(rep.Notes, "The peer's public IP does not answer ping (ICMP filtered); the tunnel itself works")
+	}
+
+	// 4b. TCP to the other server. A working tunnel needs no explanation:
+	// the card shows the ports, and no finding is added.
+	if len(in.reach.Probes) > 0 {
+		icmp := in.underlay.Success // ping of the address the anchor is on
+		for _, p := range in.reach.Probes {
+			if p.Anchor && p.Host != normHost(in.publicPeer) {
+				icmp = p.Host == in.innerPeer && in.ping.Success
+			}
+		}
+		v, at := reachVerdict(in.reach.Probes, icmp)
+		rep.Reach.Verdict, rep.Reach.TunnelOK = v, mainPass
+		if f, ok := reachFinding(v, at); ok && !mainPass {
+			add(f)
+		}
+	}
+
+	// 4c. Clocks
+	for _, f := range clockFindings(in.clock) {
+		add(f)
+	}
+	if n := clockNote(in.clock); n != "" {
+		rep.Notes = append(rep.Notes, n)
 	}
 
 	// 5. MTU through the tunnel
@@ -1038,7 +1109,10 @@ func interfaceFixes(st tunnelStatus, restartGre func() error) []string {
 func frpcLoginEOF() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "journalctl", "-u", "frpc", "-n", "50", "--no-pager").Output()
+	// The last 5 minutes only: at log.level warn frpc does not write the
+	// "login to server success" line, so an old EOF would never be answered.
+	// A mismatch repeats the EOF every few seconds; a recovered tunnel is quiet.
+	out, err := exec.CommandContext(ctx, "journalctl", "-u", "frpc", "--since", "-5min", "-n", "50", "--no-pager").Output()
 	if err != nil {
 		return false
 	}

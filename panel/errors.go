@@ -94,6 +94,7 @@ var errCatalog = map[string]errInfo{
 	"E-UPDATE-07": {502, "checksum verification failed", "Downloaded binary or script failed SHA256 checksum check."},
 	"E-UPDATE-08": {400, "invalid update channel", "Channel must be stable or dev."},
 	"E-UPDATE-09": {500, "new version did not start (rolled back)", "The panel went back to the previous version. Check the Logs tab, then try again or pick another version."},
+	"E-UPDATE-10": {500, "FRP was not upgraded (old FRP kept)", "The download failed, a config did not pass the new FRP's check, or a service did not come back. Run hashem cores-upgrade on the server to see which."},
 	// license & premium
 	"E-LIC-01": {403, "premium license required for this feature", "Activate a valid Premium license key in Settings to unlock this feature."},
 	"E-LIC-02": {400, "invalid license key format", "Check that the complete license string was pasted without extra spaces or line breaks."},
@@ -243,6 +244,29 @@ var (
 
 func errorLogPath() string { return filepath.Join(configDir, "panel-errors.log") }
 
+const (
+	errLogMaxBytes = 5 << 20 // rotate at 5 MiB
+	errLogKeep     = 1       // panel-errors.log.1
+)
+
+// rotateErrorLogLocked renames a full log to .1 (the older .1 goes). A peer
+// of a removed tunnel that keeps polling with its old secret wrote an
+// E-AUTH-01 line every few seconds, tens of megabytes over time. Caller
+// holds errMu.
+func rotateErrorLogLocked(path string) {
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() < errLogMaxBytes {
+		return
+	}
+	for i := errLogKeep; i >= 1; i-- {
+		src := path
+		if i > 1 {
+			src = path + "." + strconv.Itoa(i-1)
+		}
+		_ = os.Rename(src, path+"."+strconv.Itoa(i))
+	}
+}
+
 // writeAPIError is the single way backend handlers report failures:
 // stable JSON {error_code, error, hint} + journal entry.
 func writeAPIError(w http.ResponseWriter, r *http.Request, code, detail string) {
@@ -279,13 +303,14 @@ func recordError(code, endpoint, detail string) {
 	if len(errEvents) > 200 {
 		errEvents = errEvents[len(errEvents)-200:]
 	}
-	errMu.Unlock()
 	line, _ := json.Marshal(ev)
+	rotateErrorLogLocked(errorLogPath())
 	f, err := os.OpenFile(errorLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err == nil {
 		_, _ = f.Write(append(line, '\n'))
 		_ = f.Close()
 	}
+	errMu.Unlock()
 }
 
 // tunnelErrFamilies are the error families about the tunnel itself. The

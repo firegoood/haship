@@ -84,7 +84,7 @@ func TestNodeHelperProcess(t *testing.T) {
 	}
 	configDir = os.Getenv("NODE_HELPER_DIR")
 	nodeInfoFn = func() nodeInfo {
-		return nodeInfo{Proto: nodeProto, Version: "helper-v1", Hostname: "helper", MachineHash: getMachineHash(), CPUPct: -1,
+		return nodeInfo{Proto: nodeProto, Version: "helper-v1", Hostname: "helper", MachineHash: getMachineHash(), CPUPct: -1, Kind: nodeLocalKind(),
 			License: nodeLicense{Reported: os.Getenv("NODE_HELPER_LIC") == "1"}}
 	}
 	if os.Getenv("NODE_HELPER_FAST") == "1" {
@@ -137,7 +137,23 @@ func TestNodeHelperProcess(t *testing.T) {
 			writeJSON(w, map[string]string{"status": "ok"})
 		})))
 		m.HandleFunc("GET /x/api/access", requireAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, "secret") }))
+		nodePeerTestRoute(m, "helper")
 		return m
+	}
+	if to := os.Getenv("NODE_HELPER_ASK"); to != "" { // a Peer Link call over the channel (node_peer_test.go)
+		go func() {
+			for i := 0; i < 300; i++ {
+				nodeUp.Lock()
+				up := nodeUp.nc != nil
+				nodeUp.Unlock()
+				if up {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			st, data, ok := peerChannelCall([]string{to}, "POST", "/api/peer/echo", os.Getenv("NODE_HELPER_SECRET"), []byte(`{"n":1}`), 10*time.Second)
+			_ = os.WriteFile(filepath.Join(configDir, "ask-result"), []byte(fmt.Sprintf("%v %d %s", ok, st, data)), 0600)
+		}()
 	}
 	switch os.Getenv("NODE_HELPER_CMD") {
 	case "loop":
@@ -421,11 +437,11 @@ func TestNodeCodeAndURL(t *testing.T) {
 			t.Errorf("parseNodeCode(%q) passed", bad)
 		}
 	}
-	cmd := nodeJoinCommand(c, "it's", true)
+	cmd := nodeJoinCommand(c, "it's", true, false)
 	if !strings.HasPrefix(cmd, "bash <(curl -fsSL "+nodeInstallURL+") node-join '") || !strings.Contains(cmd, `--name 'it'\''s'`) {
 		t.Fatalf("install command: %s", cmd)
 	}
-	ssh := nodeSSHCommand("n", true)
+	ssh := nodeSSHCommand("n", true, false)
 	if !strings.HasPrefix(ssh, "sudo -n bash -c '") || !strings.Contains(ssh, "command -v hashem") ||
 		strings.Contains(ssh, "hn1.") || !strings.Contains(ssh, "node-join -") {
 		t.Fatalf("ssh command (the code goes on stdin, never in it): %s", ssh)
@@ -480,8 +496,19 @@ func TestNodeRolesAPI(t *testing.T) {
 	if w := post(`{"action":"remove","id":7}`); w.Code != http.StatusNotFound {
 		t.Fatalf("remove again: %d", w.Code)
 	}
+	// the read-only views the Nodes page refreshes with a GET
+	vw := httptest.NewRecorder()
+	handleNodesGet(vw, httptest.NewRequest("GET", "/api/nodes?view=nope", nil))
+	if vw.Code != http.StatusBadRequest {
+		t.Fatalf("unknown view: %d %s", vw.Code, vw.Body)
+	}
 	if w := post(`{"action":"leave"}`); w.Code != 200 {
 		t.Fatalf("leave: %d %s", w.Code, w.Body)
+	}
+	vw = httptest.NewRecorder()
+	handleNodesGet(vw, httptest.NewRequest("GET", "/api/nodes?view=fleet", nil))
+	if vw.Code != http.StatusConflict {
+		t.Fatalf("fleet view on a standalone panel: %d %s", vw.Code, vw.Body)
 	}
 	if s, _ := nodeSelfLoad(); s.Role != "" {
 		t.Fatalf("role after leave: %q", s.Role)
@@ -645,7 +672,7 @@ func TestNodeWriteFileAtomic(t *testing.T) {
 }
 
 func TestNodeSSHCommandChecksVersion(t *testing.T) {
-	cmd := nodeSSHCommand("n", false)
+	cmd := nodeSSHCommand("n", false, false)
 	if !strings.Contains(cmd, `hashem help 2>/dev/null | grep -q '\''node-join.*code | ->'\''`) || !strings.Contains(cmd, nodeInstallURL) {
 		t.Fatalf("an old Hashem must go through the installer: %s", cmd)
 	}
@@ -679,7 +706,7 @@ func TestNodeRelayAllowed(t *testing.T) {
 	for p, want := range map[string]bool{
 		"/api/status": true, "/api/dashboard": true, "/api/customers/export.csv": true, "/api/license": true,
 		"/api/term/ws": false, "/api/login": false, "/api/access": false, "/api/password": false, "/api/2fa/setup": false,
-		"/api/nodes": false, "/api/node/1/status": false, "/api/peer/handshake": false, "/api/session-settings": false,
+		"/api/nodes": false, "/api/autopilot": true, "/api/node/1/status": false, "/api/peer/handshake": false, "/api/session-settings": false,
 		"/api/peer/status": true, "/api/peer/config": true, "/api/peer/apply-engine": false, "/api/nv/x/status": false,
 		"/api/status/../access": false, "/api//access": false, "/api/status%2f..": false, "/status": false, "/api/tls/ip": false,
 	} {

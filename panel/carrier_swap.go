@@ -421,7 +421,7 @@ func openCarrierFirewall(port int, to carrierChoice) {
 		}
 		ports = append(ports, q)
 	}
-	allowUFWPorts(ports)
+	allowUFWTunnelPorts(ports)
 }
 
 // updatePeerRecord rewrites one peers.json record.
@@ -547,8 +547,8 @@ func switchPeerCarrier(p peerRecord, to carrierChoice) (string, error) {
 		if err := writeEngineFile(frpDir, frpSvc+".toml", frpsServerToml(p.FrpPort, token)); err != nil {
 			return out.String(), tx.rollback(err)
 		}
-		if err := writeUnitFile(unitPath, engineUnit("FRP Server Service (peer "+strconv.Itoa(id)+")", after,
-			engineBinaryPath("frps")+" -c "+conf)); err != nil {
+		if err := writeUnitFile(unitPath, frpUnitFixed(engineUnit("FRP Server Service (peer "+strconv.Itoa(id)+")", after,
+			engineBinaryPath("frps")+" -c "+conf), hostMemMB())); err != nil {
 			return out.String(), tx.rollback(err)
 		}
 	default:
@@ -615,10 +615,10 @@ kcpBindPort = %d
 quicBindPort = %d
 auth.method = "token"
 auth.token = %q
-%stransport.tcpKeepalive = 15
+%s%stransport.tcpKeepalive = 15
 transport.heartbeatTimeout = 45
 transport.maxPoolCount = %d
-`, port, port, quic, token, tcpMuxTomlLines(), maxPool)
+`, port, port, quic, token, frpLogTomlLines(), tcpMuxTomlLines(), maxPool)
 }
 
 func engineUnit(desc, after, exec string) string {
@@ -626,6 +626,7 @@ func engineUnit(desc, after, exec string) string {
 Description=%s
 After=network.target network-online.target%s
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -796,6 +797,7 @@ type tunnelLink struct {
 	LastURL    string `json:"last_url,omitempty"`
 	TLSPin     string `json:"tls_pin,omitempty"`
 	Seen       string `json:"seen,omitempty"`
+	FrpVersion string `json:"frp_version,omitempty"` // the frp that server runs, as it last said
 }
 
 func tunnelLinksPath() string { return filepath.Join(configDir, "tunnel_links.json") }
@@ -825,6 +827,49 @@ func updateTunnelLink(id int, fn func(l *tunnelLink)) {
 	m[id] = l
 	if data, err := json.MarshalIndent(m, "", "  "); err == nil {
 		_ = os.WriteFile(tunnelLinksPath(), data, 0600)
+	}
+}
+
+// pruneTunnelLinks drops the records of peers that are gone (removed, or
+// renumbered by a move), with their pinned certificate and last address. It
+// does nothing when peers.json cannot be read: that is not "no peers".
+func pruneTunnelLinks() {
+	keep := map[int]bool{}
+	data, err := os.ReadFile(peersFile())
+	if err == nil {
+		var v struct {
+			Peers []peerRecord `json:"peers"`
+		}
+		if json.Unmarshal(data, &v) != nil {
+			return
+		}
+		for _, p := range v.Peers {
+			keep[p.ID] = true
+		}
+	} else if !os.IsNotExist(err) {
+		return
+	}
+	tunnelLinksMu.Lock()
+	defer tunnelLinksMu.Unlock()
+	if _, err := os.Stat(tunnelLinksPath()); err != nil {
+		return
+	}
+	m := readTunnelLinksLocked()
+	n := len(m)
+	for id := range m {
+		if !keep[id] {
+			delete(m, id)
+		}
+	}
+	if len(m) == n {
+		return
+	}
+	if len(m) == 0 {
+		_ = os.Remove(tunnelLinksPath())
+		return
+	}
+	if out, err := json.MarshalIndent(m, "", "  "); err == nil {
+		_ = os.WriteFile(tunnelLinksPath(), out, 0600)
 	}
 }
 
@@ -884,9 +929,24 @@ func tunnelPeerCall(t swapTunnel, method, path string, payload any, timeout time
 		return nil, errNoPeerLink
 	}
 	l := loadTunnelLinks()[t.ID]
+	// the node channel first, when both servers belong to one central (node_peer.go)
+	var lastErr error
+	for _, sec := range secrets {
+		st, data, ok := peerChannel([]string{t.RemotePub, l.PublicIP}, method, path, sec, body, timeout)
+		if !ok {
+			break
+		}
+		if st >= 200 && st < 300 && json.Valid(data) {
+			return data, nil
+		}
+		lastErr = fmt.Errorf("foreign panel answered HTTP %d over the node channel: %s", st, truncateForError(data))
+		if st != http.StatusNotFound {
+			break // the secret was right; another one will not help
+		}
+	}
 	pin := l.TLSPin
 	tr := &http.Transport{
-		DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
+		DialContext: (&net.Dialer{Timeout: peerDialTimeout}).DialContext,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true, // checked against the pin below (trust on first use)
 			VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
@@ -910,9 +970,9 @@ func tunnelPeerCall(t swapTunnel, method, path string, payload any, timeout time
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Timeout: timeout, Transport: tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	var lastErr error
 	dead := map[string]bool{}
-	for _, base := range tunnelPeerBases(t, l) {
+	// an address that did not connect lately goes last (peerreach.go)
+	for _, base := range peerOrderURLs(tunnelPeerBases(t, l)) {
 		host := base
 		if i := strings.Index(base, "://"); i >= 0 {
 			host = base[i+3:]
@@ -937,8 +997,12 @@ func tunnelPeerCall(t swapTunnel, method, path string, payload any, timeout time
 				if errors.As(err, &ne) || strings.Contains(err.Error(), "refused") {
 					dead[host] = true
 				}
+				if peerConnectFailed(err) {
+					peerMarkDown(peerHostKey(base))
+				}
 				break
 			}
+			peerMarkUp(peerHostKey(base))
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			_ = resp.Body.Close()
 			cancel()
@@ -1017,11 +1081,14 @@ func tunnelHandshake(w http.ResponseWriter, id int, req PeerHandshakeRequest) {
 		if ip := CleanHost(req.PublicIP); ip != "" {
 			l.PublicIP = ip
 		}
+		if v := cleanFrpVersion(req.FrpVersion); v != "" {
+			l.FrpVersion = v
+		}
 		l.Seen = time.Now().Format(time.RFC3339)
 	})
 	writeJSON(w, map[string]any{
 		"status": "ok", "role": "master", "version": panelVersion, "timestamp": time.Now().Unix(),
-		"base_path": strings.Trim(cfg.BasePath, "/"), "panel_port": cfg.Port,
+		"base_path": strings.Trim(cfg.BasePath, "/"), "panel_port": cfg.Port, "frp_version": localFrpVersion(),
 	})
 }
 
@@ -1043,6 +1110,7 @@ type swapJob struct {
 	Error    string     `json:"error,omitempty"`
 	Note     string     `json:"note,omitempty"`
 	Bundle   string     `json:"bundle,omitempty"`
+	Back     bool       `json:"back,omitempty"` // both servers were put back on the old carrier
 	Steps    []swapStep `json:"steps"`
 	Started  string     `json:"started"`
 	Finished string     `json:"finished,omitempty"`
@@ -1288,6 +1356,9 @@ func runSwap(j *swapJob, t swapTunnel, to carrierChoice, manual bool) {
 		return
 	}
 	saveSwapState(t.ID, from.ID())
+	swapJobsMu.Lock()
+	j.Back = ferr == nil
+	swapJobsMu.Unlock()
 	if ok, _ := waitLinked(t, from, swapRevertWait, false); ok {
 		j.step("revert", "ok", "")
 		j.finish("reverted", why)

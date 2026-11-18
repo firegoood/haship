@@ -10,7 +10,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,9 +27,6 @@ import (
 	"syscall"
 	"time"
 )
-
-//go:embed index.html app.js i18n-fa.js fonts.css tokens.css base.css enterprise.css favicon.png favicon.svg apple-touch-icon.png xterm.js xterm-fit.js xterm-search.js xterm.css fonts/vazirmatn.woff2
-var panelFS embed.FS
 
 var configDir = "/etc/gre-panel"
 
@@ -91,8 +87,8 @@ func effectiveTLSPort() int {
 var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
-	// go build -ldflags "-X main.panelVersion=v3.0.0"
-	panelVersion = "v3.0.0"
+	// go build -ldflags "-X main.panelVersion=v3.0.1"
+	panelVersion = "v3.1.4"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -499,6 +495,11 @@ func cliShowInfo() int {
 		configDir = v
 	}
 	loadOrInit()
+	if nodeCore {
+		fmt.Println("This server runs the Hashem node core: it has no web panel.")
+		fmt.Println("Manage it from its central panel; `hashem node status` shows the central.")
+		return 0
+	}
 	ip := getOutboundIP()
 	fmt.Println("==================================================")
 	fmt.Println("Hashem GRE-FRP Web Panel Info")
@@ -530,7 +531,7 @@ func main() {
 			fmt.Println(panelVersion)
 			return
 		case "--help", "-h", "help":
-			fmt.Println("Usage: gre-panel [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | doctor [check|fix] | tls-proxy | pathtest | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate] | node [status|join CODE|-|leave|move]]")
+			fmt.Println("Usage: " + binName() + " [password <new-password> | info | version | tls [status|issue|renew|remove|ip|custom] | settings [show|2fa off|terminal on|off|idle N] | doctor [check|fix] | tls-proxy | pathtest | autopilot [status|on|off] | cluster [status|pool|member|join-code|add-hub|events|rules|reset] | license [status|activate|deactivate] | node [status|join CODE|-|leave|move]]")
 			return
 		case "tls-proxy":
 			os.Exit(tlsProxyCmd(os.Args[2:]))
@@ -540,6 +541,8 @@ func main() {
 			os.Exit(custBagherRelayCmd(os.Args[2:]))
 		case "pathtest":
 			os.Exit(cliPathTest(os.Args[2:]))
+		case "autopilot":
+			os.Exit(cliAutopilot(os.Args[2:]))
 		case "cluster", "mesh":
 			os.Exit(cliCluster(os.Args[2:]))
 		case "password", "pass", "set-password":
@@ -660,6 +663,8 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/metrics-token", requireAuth(handleMetricsTokenGet))
 	mux.HandleFunc("POST "+base+"/api/metrics-token", requireAuth(requireCSRF(handleMetricsTokenPost)))
 	mux.HandleFunc("GET "+base+"/api/carrier/advice", requireAuth(handleCarrierAdvice))
+	mux.HandleFunc("GET "+base+"/api/autopilot", requireAuth(handleAutopilotGet))
+	mux.HandleFunc("POST "+base+"/api/autopilot", requireAuth(requireCSRF(handleAutopilotPost)))
 	mux.HandleFunc("GET "+base+"/api/suggest", requireAuth(handleSuggest))
 	mux.HandleFunc("GET "+base+"/api/2fa", requireAuth(handle2FAStatus))
 	mux.HandleFunc("POST "+base+"/api/2fa/setup", requireAuth(requireCSRF(handle2FASetup)))
@@ -671,6 +676,7 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/setup/plan", requireAuth(handleSetupPlan))
 	mux.HandleFunc("GET "+base+"/api/version", requireAuth(handleVersion))
 	mux.HandleFunc("POST "+base+"/api/update", requireAuth(requireCSRF(handleUpdate)))
+	mux.HandleFunc("POST "+base+"/api/update/kind", requireAuth(requireCSRF(handleUpdateKind)))
 	mux.HandleFunc("GET "+base+"/api/update/channel", requireAuth(handleUpdateChannelGet))
 	mux.HandleFunc("POST "+base+"/api/update/channel", requireAuth(requireCSRF(handleUpdateChannelPost)))
 	mux.HandleFunc("GET "+base+"/api/releases", requireAuth(handleReleases))
@@ -731,6 +737,7 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/support", requireAuth(requireCSRF(handleSupport)))
 	mux.HandleFunc("GET "+base+"/api/doctor", requireAuth(handleDoctorGet))
 	mux.HandleFunc("POST "+base+"/api/doctor", requireAuth(requireCSRF(handleDoctorPost)))
+	mux.HandleFunc("GET "+base+"/api/doctor/extra", requireAuth(handleDoctorExtraGet))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -788,17 +795,20 @@ func main() {
 	mux.HandleFunc("GET "+base+"/api/peer/config", requireAuth(handlePeerConfigGet))
 	mux.HandleFunc("POST "+base+"/api/peer/config", requireAuth(requireCSRF(handlePeerConfigPost)))
 
-	// Carrier benchmark & auto-pilot
+	// Carrier benchmark
 	mux.HandleFunc("GET "+base+"/api/benchmark", requireAuth(handleBenchmarkGet))
 	mux.HandleFunc("POST "+base+"/api/benchmark/run", requireAuth(requireCSRF(handleBenchmarkRun)))
 	mux.HandleFunc("POST "+base+"/api/benchmark/apply", requireAuth(requireCSRF(handleBenchmarkApply)))
-	mux.HandleFunc("POST "+base+"/api/benchmark/autopilot", requireAuth(requireCSRF(handleBenchmarkAutoPilot)))
 	// Path test: which transports cross between the two servers, before any tunnel
 	mux.HandleFunc("GET "+base+"/api/pathtest", requireAuth(handlePathTestGet))
 	mux.HandleFunc("POST "+base+"/api/pathtest", requireAuth(requireCSRF(handlePathTestPost)))
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
-	log.Printf("gre-panel listening on %s under /%s", addr, cfg.BasePath)
+	if nodeCore {
+		log.Printf("hashem-node (node core, no web panel) on %s: server-to-server calls only", addr)
+	} else {
+		log.Printf("gre-panel listening on %s under /%s", addr, cfg.BasePath)
+	}
 	histStop := make(chan struct{})
 	loadLicenseFromDisk()
 	startHistoryPersistence(histStop)
@@ -807,8 +817,8 @@ func main() {
 	startSdWatchdog(context.Background())
 	go startHTTPSListener()
 	startTLSRenewWatcher()
-	go startAutoPilotMonitor()
 	go startPeerSyncWorker()
+	startupHousekeeping()
 	go startTrafficRecorder()
 	go startFleetSampler()
 	go startRescueMonitor()
@@ -818,6 +828,7 @@ func main() {
 	go startNodeMigrateWatch()
 	go startNodeBackups()
 	go startLimitsLoop()
+	go startDoctorScheduler()
 	go func() {
 		cc := loadCarrierConfig()
 		if strings.HasPrefix(cc.ActiveCarrier, "wss") {
@@ -850,6 +861,8 @@ func main() {
 	reportRollback()
 	go pathMTUKeeper()
 	go migrateLegacyBackhaul()
+	go upgradeOldFrp()
+	go repairHubFrpc()
 	// systemd stop sends SIGTERM: flush history, then stop serving.
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGTERM, syscall.SIGINT)

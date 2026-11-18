@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	nodeProto       = 1           // channel protocol version
+	nodeProto       = 2           // channel protocol version (2: "ask" and "peer", node_peer.go)
 	nodeLinkPath    = "/_hn/link" // fixed: a node cannot know the central's base path
 	nodeInviteTTL   = 30 * time.Minute
 	nodeInvitesMax  = 20
@@ -105,6 +105,7 @@ type nodeInfo struct {
 	Hostname    string      `json:"hostname"`
 	PublicIP    string      `json:"public_ip,omitempty"`
 	Side        string      `json:"side,omitempty"` // iran | foreign | "" (not set up)
+	Kind        string      `json:"kind,omitempty"` // core (no web panel) | panel; "" = a panel from before the core
 	Tunnels     int         `json:"tunnels"`
 	CPUPct      float64     `json:"cpu_pct"` // -1: not known yet
 	MemPct      float64     `json:"mem_pct"`

@@ -122,9 +122,9 @@ get_component_status() {
             if [[ ! -f "$bin" || ! -f "/etc/systemd/system/${svc}.service" ]]; then
                 echo "NOT_INSTALLED"; return 0
             fi
-            if systemctl is-active --quiet "$svc" 2>/dev/null; then
+            if timeout 5 systemctl is-active --quiet "$svc" 2>/dev/null; then
                 echo "RUNNING"; return 0
-            elif systemctl is-failed --quiet "$svc" 2>/dev/null; then
+            elif timeout 5 systemctl is-failed --quiet "$svc" 2>/dev/null; then
                 echo "BROKEN"; return 0
             elif [[ -f "$bin" ]]; then
                 echo "STOPPED"; return 0
@@ -452,13 +452,49 @@ perf_tcpmux_lines() {
     fi
 }
 
+# frp_log_level: what frps/frpc log. "warn" unless perf.json frp_log_level says
+# otherwise: at "info" frps writes a line for every user connection ("get a
+# user connection"), which filled the disk of a busy hub.
+frp_log_level() {
+    local v; v=$(perf_get_str frp_log_level warn)
+    case "$v" in trace|debug|info|warn|error) echo "$v" ;; *) echo warn ;; esac
+}
+
+# toml lines for a new frps/frpc config
+frp_log_lines() {
+    printf 'log.to = "console"\nlog.level = "%s"' "$(frp_log_level)"
+}
+
+# frp_log_level_apply: gives every frps/frpc toml without a log.level line one
+# and prints how many it changed. A level that is already written (the
+# operator's choice) stays. No service is restarted: a running frps keeps its
+# level until its next restart.
+frp_log_level_apply() {
+    local f lvl tmp n=0; lvl=$(frp_log_level)
+    for f in "${CONFIG_DIR}"/frps*.toml "${CONFIG_DIR}"/frpc*.toml; do
+        [[ -f "$f" ]] || continue
+        grep -Eq '^[[:space:]]*log\.level[[:space:]]*=' "$f" && continue
+        tmp=$(mktemp) || continue
+        # in the top-level part: before the first [[proxies]] table, else at the end
+        awk -v line="log.level = \"${lvl}\"" '
+            /^\[/ && !done { print line; done = 1 }
+            { print }
+            END { if (!done) print line }
+        ' "$f" > "$tmp" && cat "$tmp" > "$f" && n=$((n + 1))
+        rm -f "$tmp"
+    done
+    echo "$n"
+}
+
 # read-only: frpc logging "connect to server error: EOF" is the signature of a tcpMux mismatch
 # (hub tcpMux=true, spoke false or vice versa). Prints the hint, never changes config.
 tcpmux_eof_hint() {
     [[ -f "${CONFIG_DIR}/frpc.toml" ]] || return 1
     command -v journalctl >/dev/null 2>&1 || return 1
-    # only the NEWEST login outcome counts: an old EOF followed by "login to server success" is a recovered tunnel
-    journalctl -u frpc -n 200 --no-pager 2>/dev/null \
+    # only the NEWEST login outcome counts: an old EOF followed by "login to server success" is a recovered tunnel.
+    # At log.level warn the success line is not written, so only the last 5 minutes are read:
+    # a mismatch repeats the EOF every few seconds, a recovered tunnel goes quiet.
+    journalctl -u frpc --since "-5min" -n 200 --no-pager 2>/dev/null \
         | grep -E 'connect to server error: EOF|login to server success' | tail -n 1 \
         | grep -q 'connect to server error: EOF' || return 1
     echo "tcpMux mismatch: hub is likely tcpMux=true, run \`hashem perf tcpmux on|off\` (must match on hub and spoke)"
@@ -644,6 +680,19 @@ pool_ram_cap() {
     pool_clamp $(( ram * 8 / 5 )) "$AUTOPOOL_MAXPOOL_MIN" "$AUTOPOOL_MAXPOOL_MAX"
 }
 
+# pool_max_cap: the maxPoolCount ceiling Auto Pool works under. The RAM cap,
+# or perf.json frp_max_pool when the operator set that higher (the panel
+# takes up to 2000), so a hub sized by hand is not pulled back to 500.
+pool_max_cap() {
+    local cap want
+    cap=$(pool_ram_cap)
+    want=$(perf_get_int frp_max_pool 0)
+    [[ "$want" =~ ^[0-9]+$ ]] || want=0
+    (( want > 2000 )) && want=2000
+    (( want > cap )) && cap="$want"
+    echo "$cap"
+}
+
 # state file accessors (auto_pool.json)
 autopool_state_get() { # $1=key $2=default
     local def="${2:-}"
@@ -693,6 +742,7 @@ pool_effective_values() {
     local cap pool maxp
     cap=$(pool_ram_cap)
     if [[ "$(perf_get_auto_pool)" == "1" ]]; then
+        cap=$(pool_max_cap)
         local hi=$(( cap * 2 / 3 ))
         (( hi > AUTOPOOL_MAX )) && hi="$AUTOPOOL_MAX"
         (( hi < AUTOPOOL_MIN )) && hi="$AUTOPOOL_MIN"
@@ -772,7 +822,7 @@ autopool_tick() {
     [[ "$(perf_get_auto_pool)" == "1" ]] || return 0
     local now cap
     now=$(date +%s)
-    cap=$(pool_ram_cap)
+    cap=$(pool_max_cap)
 
     if [[ ! -f "${CONFIG_DIR}/frpc.toml" ]]; then
         local f live want need=0 f_ok=0
@@ -1250,6 +1300,17 @@ mss_clamp_set() {
     fi
     iptables -t mangle -C "$chain" -p tcp --tcp-flags SYN,RST SYN "$@" -j TCPMSS --set-mss "$mss" >/dev/null 2>&1 || \
         iptables -t mangle -A "$chain" -p tcp --tcp-flags SYN,RST SYN "$@" -j TCPMSS --set-mss "$mss" >/dev/null 2>&1 || true
+    # Copies of the rule (a saved ruleset restored at boot next to ours, or
+    # two runs at once) are removed until one is left. They are counted in
+    # the rule listing, so the last one is never deleted.
+    local line n
+    line="-A ${chain}${*:+ $*} -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss ${mss}"
+    n=$(iptables -t mangle -S "$chain" 2>/dev/null | grep -cxF -- "$line")
+    [[ "$n" =~ ^[0-9]+$ ]] || n=0
+    while (( n > 1 )); do
+        iptables -t mangle -D "$chain" -p tcp --tcp-flags SYN,RST SYN "$@" -j TCPMSS --set-mss "$mss" >/dev/null 2>&1 || break
+        n=$(( n - 1 ))
+    done
 }
 
 # mss_clamp_drop CHAIN [match...]: remove our fixed clamp, whichever size.
@@ -2284,6 +2345,141 @@ install_backhaul_binaries() {
     fi
 }
 
+# ---- FRP upgrade on servers set up by an older release ----
+# install_frp_binaries keeps any frps/frpc it finds, so a server set up by an
+# older release kept that release's FRP (0.61.1 was seen) through every update.
+# frp_upgrade moves an older FRP to DEFAULT_FRP_VERSION: never a downgrade,
+# every FRP config of a unit is checked with the new binary first, the old
+# binaries are kept as .bak, and the running FRP services are restarted onto
+# it (and put back on the old one when one of them does not come back).
+# Backhaul is not touched: its pin has not changed (v0.7.2), and a v2 core an
+# operator put in place reads another config schema.
+
+# frp_installed_version prints the version of the installed frps (or frpc).
+frp_installed_version() {
+    local b v
+    for b in frps frpc; do
+        [[ -x "${INSTALL_DIR}/$b" ]] || continue
+        v=$("${INSTALL_DIR}/$b" --version 2>/dev/null | head -n1 | tr -d 'v[:space:]')
+        [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && { echo "$v"; return 0; }
+    done
+    return 1
+}
+
+# ver_lt A B: A is an older version than B.
+ver_lt() { [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]; }
+
+# frp_units prints "unit binary config" for each unit that runs frps or frpc
+# from INSTALL_DIR (main tunnel, extra peers, hubs, Bagher); config is "-"
+# when the unit has no -c.
+frp_units() {
+    local f line bin conf
+    for f in "${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"/*.service; do
+        [[ -f "$f" ]] || continue
+        line=$(grep -m1 -E "^ExecStart=${INSTALL_DIR}/frp[sc]([[:space:]]|$)" "$f" 2>/dev/null) || continue
+        bin=$(sed -E "s#^ExecStart=${INSTALL_DIR}/(frp[sc]).*#\1#" <<<"$line")
+        conf=$(sed -nE 's#.*[[:space:]]-c[[:space:]]+([^[:space:]]+).*#\1#p' <<<"$line")
+        echo "$(basename "$f" .service) $bin ${conf:--}"
+    done
+}
+
+frp_upgrade() {
+    local WANT="$DEFAULT_FRP_VERSION" CUR
+    if [[ ! -x "${INSTALL_DIR}/frps" && ! -x "${INSTALL_DIR}/frpc" ]]; then
+        echo -e "${CYAN}[i] FRP is not installed here; nothing to upgrade.${NC}"
+        return 0
+    fi
+    if ! CUR=$(frp_installed_version); then
+        echo -e "${YELLOW}[!] Could not read the installed FRP version; it is left as it is.${NC}"
+        return 0
+    fi
+    if ! ver_lt "$CUR" "$WANT"; then
+        echo -e "${GREEN}[OK] FRP ${CUR} is up to date.${NC}"
+        return 0
+    fi
+    { exec 209>/run/hashem-frp-upgrade.lock; } 2>/dev/null || exec 209>/tmp/hashem-frp-upgrade.lock
+    if ! flock -n 209; then
+        echo -e "${YELLOW}[!] An FRP upgrade is already running.${NC}"
+        return 0
+    fi
+    echo -e "${CYAN}[*] FRP ${CUR} is older than ${WANT}; upgrading it.${NC}"
+    detect_arch
+    local TMP TAR MIRROR_REPO="${HASHEM_MIRROR_REPO:-pdnczone/hashem-frp}"
+    TMP=$(mktemp -d)
+    TAR="frp_${WANT}_linux_${FRP_ARCH}.tar.gz"
+    if ! download_with_fallback "$TMP/$TAR" "https://github.com/${MIRROR_REPO}/releases/download/v${WANT}/${TAR}" 90 &&
+        ! download_with_fallback "$TMP/$TAR" "https://github.com/fatedier/frp/releases/download/v${WANT}/${TAR}" 90; then
+        rm -rf "$TMP"
+        echo -e "${RED}[!] Could not download FRP ${WANT}; FRP ${CUR} stays.${NC}"
+        return 1
+    fi
+    if ! tar -xzf "$TMP/$TAR" -C "$TMP" 2>/dev/null; then
+        rm -rf "$TMP"
+        echo -e "${RED}[!] The FRP ${WANT} archive is damaged; FRP ${CUR} stays.${NC}"
+        return 1
+    fi
+    # Only the binaries this server has are replaced, and only by ones that
+    # run here and say they are WANT.
+    local b src BINS=()
+    for b in frps frpc; do
+        [[ -x "${INSTALL_DIR}/$b" ]] || continue
+        src=$(find "$TMP" -type f -name "$b" 2>/dev/null | head -n1)
+        if [[ -z "$src" ]] || ! chmod +x "$src" || [[ "$("$src" --version 2>/dev/null | head -n1 | tr -d 'v[:space:]')" != "$WANT" ]]; then
+            rm -rf "$TMP"
+            echo -e "${RED}[!] The downloaded ${b} does not run as FRP ${WANT} here; FRP ${CUR} stays.${NC}"
+            return 1
+        fi
+        mv -f "$src" "$TMP/new-$b"
+        BINS+=("$b")
+    done
+    # Every config the new FRP will read must pass its own check first.
+    local unit bin conf out bad=0 ACTIVE=()
+    while read -r unit bin conf; do
+        [[ -n "$unit" ]] || continue
+        if [[ "$conf" != "-" && -f "$conf" && -x "$TMP/new-$bin" ]]; then
+            if ! out=$("$TMP/new-$bin" verify -c "$conf" 2>&1); then
+                echo -e "${RED}[!] ${conf} does not pass FRP ${WANT}'s check:${NC} $(tail -n1 <<<"$out")"
+                bad=1
+            fi
+        fi
+        systemctl is-active --quiet "$unit" 2>/dev/null && ACTIVE+=("$unit")
+    done < <(frp_units)
+    if (( bad )); then
+        rm -rf "$TMP"
+        echo -e "${YELLOW}[!] FRP ${CUR} stays until the config above is fixed (then run: hashem cores-upgrade).${NC}"
+        return 1
+    fi
+    # Swap: a rename, so a running binary is never written over.
+    for b in "${BINS[@]}"; do
+        cp -f "${INSTALL_DIR}/$b" "${INSTALL_DIR}/$b.bak" 2>/dev/null || true
+        if ! install -m 0755 "$TMP/new-$b" "${INSTALL_DIR}/.$b.new" || ! mv -f "${INSTALL_DIR}/.$b.new" "${INSTALL_DIR}/$b"; then
+            rm -f "${INSTALL_DIR}/.$b.new"
+            for src in "${BINS[@]}"; do
+                [[ -f "${INSTALL_DIR}/$src.bak" ]] && mv -f "${INSTALL_DIR}/$src.bak" "${INSTALL_DIR}/$src"
+            done
+            rm -rf "$TMP"
+            echo -e "${RED}[!] Could not put FRP ${WANT} in ${INSTALL_DIR}; FRP ${CUR} stays.${NC}"
+            return 1
+        fi
+    done
+    rm -rf "$TMP"
+    (( ${#ACTIVE[@]} )) || { echo -e "${GREEN}[OK] FRP ${CUR} -> ${WANT} (no FRP service was running).${NC}"; return 0; }
+    echo -e "${CYAN}[*] Restarting ${#ACTIVE[@]} FRP service(s) on ${WANT}: ${ACTIVE[*]}${NC}"
+    for unit in "${ACTIVE[@]}"; do systemctl restart "$unit" >/dev/null 2>&1 || true; done
+    sleep 4
+    local DOWN=()
+    for unit in "${ACTIVE[@]}"; do systemctl is-active --quiet "$unit" 2>/dev/null || DOWN+=("$unit"); done
+    if (( ${#DOWN[@]} )); then
+        echo -e "${RED}[!] ${DOWN[*]} did not stay up on FRP ${WANT}; going back to ${CUR}.${NC}"
+        for b in "${BINS[@]}"; do
+            [[ -f "${INSTALL_DIR}/$b.bak" ]] && mv -f "${INSTALL_DIR}/$b.bak" "${INSTALL_DIR}/$b"
+        done
+        for unit in "${ACTIVE[@]}"; do systemctl restart "$unit" >/dev/null 2>&1 || true; done
+        return 1
+    fi
+    echo -e "${GREEN}[OK] FRP ${CUR} -> ${WANT}; ${#ACTIVE[@]} service(s) back up. Update the server(s) at the other end too.${NC}"
+}
+
 # ---- Spoof Tunnel (ParsaKSH/spoof-tunnel): IP-spoofing UDP pipe + WireGuard ----
 DEFAULT_SPOOF_VERSION="v3.0.2"
 SPOOF_REPO="ParsaKSH/spoof-tunnel"
@@ -2831,9 +3027,8 @@ UNIT
     systemctl daemon-reload
     systemctl enable "$u.service" >/dev/null 2>&1 || true
     systemctl restart "$u.service" >/dev/null 2>&1 || true
-    if [[ "$unit" == backhaul-server* ]] && command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
-        ufw allow "${port}/udp" >/dev/null 2>&1 || true
+    if [[ "$unit" == backhaul-server* ]]; then
+        hashem_ufw_allow "${port}/tcp" "${port}/udp"
     fi
     echo -e "${CYAN}[*] UDP: ${u} carries the UDP of the same ports on control port ${port}.${NC}"
 }
@@ -3828,10 +4023,151 @@ UNIT
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl enable "$SVC" >/dev/null 2>&1 || true
     systemctl restart "$SVC" >/dev/null 2>&1 || true
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw allow "${FPORT}/tcp" >/dev/null 2>&1 || true
-    fi
+    hashem_ufw_allow "${FPORT}/tcp"
     echo -e "${GREEN}[OK] WSS TLS front listening on :${FPORT} (-> frps :${CPORT})${NC}"
+}
+
+# hashem_ufw_allow RULE...: with ufw active, allows each rule ("443/tcp") and
+# records the ones it added in ufw.opened, so removing the tunnel closes them
+# again (hashem_ufw_release). A rule that was there before ("Skipping") is the
+# admin's own: it is not recorded and never deleted. The panel records the
+# same way (allowUFWTunnelPorts, setup_ports.go).
+hashem_ufw_allow() {
+    command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active" || return 0
+    local f="${PANEL_CONFIG_DIR}/ufw.opened" r out
+    for r in "$@"; do
+        out=$(ufw allow "$r" 2>&1) || continue
+        [[ "$out" == *Skipping* ]] && continue
+        mkdir -p "$PANEL_CONFIG_DIR" 2>/dev/null
+        grep -qxF "$r" "$f" 2>/dev/null || echo "$r" >> "$f"
+    done
+}
+
+# hashem_ports_needed: every port the configs still on this server use (the
+# panel, frps and Backhaul control ports, WSS fronts, the tunnels' user ports).
+hashem_ports_needed() {
+    PEERS_F="$PEERS_FILE" FRP_D="$CONFIG_DIR" BH_D="$BACKHAUL_CONFIG_DIR" PANEL_D="$PANEL_CONFIG_DIR" \
+    UNIT_D="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}" python3 - <<'PYEOF'
+import glob, json, os, re
+need = {22}
+def span(tok):
+    tok = tok.strip().split("=")[0]
+    if re.match(r"^\d+\.\d+\.\d+\.\d+:", tok):
+        tok = tok.rsplit(":", 1)[-1]
+    m = re.match(r"^(\d+)(?:-(\d+))?$", tok)
+    if m:
+        a = int(m.group(1)); b = int(m.group(2) or a)
+        if 1 <= a <= b <= 65535:
+            need.update(range(a, b + 1))
+def text(p):
+    try:
+        return open(p).read()
+    except OSError:
+        return ""
+for k in ("port", "tls_port"):
+    for m in re.finditer(r'"%s": *(\d+)' % k, text(os.path.join(os.environ["PANEL_D"], "panel.json"))):
+        need.add(int(m.group(1)))
+for f in glob.glob(os.path.join(os.environ["FRP_D"], "frps*.toml")):
+    for m in re.finditer(r"(?m)^\s*(?:bindPort|kcpBindPort|quicBindPort)\s*=\s*(\d+)", text(f)):
+        need.add(int(m.group(1)))
+bh = os.environ["BH_D"]
+for f in glob.glob(os.path.join(bh, "*.toml")) + glob.glob(os.path.join(bh, "udp", "*.toml")):
+    t = text(f)
+    for m in re.finditer(r'(?m)^\s*bind_addr\s*=\s*"[^"]*:(\d+)"', t):
+        need.add(int(m.group(1)))
+    m = re.search(r"(?ms)^\s*ports\s*=\s*\[(.*?)\]", t)
+    if m:
+        for q in re.findall(r'"([^"]*)"', m.group(1)):
+            span(q)
+for f in glob.glob(os.path.join(os.environ["UNIT_D"], "frps-wss*.service")):
+    for m in re.finditer(r"(?m)^ExecStart=.* -listen \S*:(\d+)", text(f)):
+        need.add(int(m.group(1)))
+try:
+    for p in json.load(open(os.environ["PEERS_F"])).get("peers", []):
+        for x in [p.get("frp_port")] + list(p.get("ports") or []):
+            if isinstance(x, int):
+                need.add(x)
+        raw = p.get("raw_ports") or []
+        for q in (raw.replace(",", " ").split() if isinstance(raw, str) else raw):
+            span(str(q))
+except (OSError, ValueError, AttributeError):
+    pass
+print(" ".join(str(x) for x in sorted(need)))
+PYEOF
+}
+
+# hashem_ufw_release: deletes the ufw rules Hashem added (ufw.opened) for
+# ports no remaining config uses. Called after a tunnel is removed, so its
+# ports do not stay open in the firewall.
+hashem_ufw_release() {
+    local f="${PANEL_CONFIG_DIR}/ufw.opened" need r keep=""
+    [[ -s "$f" ]] || return 0
+    command -v ufw >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 || return 0
+    need=" $(hashem_ports_needed) " || return 0
+    [[ "$need" == *" 22 "* ]] || return 0 # the list could not be built: close nothing
+    while IFS= read -r r; do
+        [[ "$r" =~ ^([0-9]+)/(tcp|udp)$ ]] || continue
+        if [[ "$need" == *" ${BASH_REMATCH[1]} "* ]]; then
+            keep+="${r}"$'\n'
+        else
+            ufw delete allow "$r" >/dev/null 2>&1 || true
+        fi
+    done < "$f"
+    if [[ -n "$keep" ]]; then printf '%s' "$keep" > "$f"; else rm -f "$f"; fi
+}
+
+# peer_add_rollback SVC GRE_IF CONF: a tunnel whose service did not start
+# leaves nothing behind. Its config used to stay on disk without a record in
+# peers.json: the panel then counted its control port as taken for good, and
+# the tunnel was in no list to remove it from.
+peer_add_rollback() {
+    local svc=$1 gif=$2 conf=$3 d="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"
+    [[ -n "$svc" && -n "$conf" ]] || return 0
+    journalctl -u "$svc" -n 5 --no-pager 2>/dev/null | sed 's/^/    /' || true
+    [[ "$svc" == backhaul-* ]] && backhaul_udp_remove "$svc"
+    [[ "$svc" == frps* ]] && frps_wss_front_remove "${svc#frps}"
+    systemctl disable --now "$svc" >/dev/null 2>&1 || true
+    rm -f "${d:?}/${svc:?}.service" "${conf:?}"
+    if [[ -n "$gif" && "$gif" != "none" ]]; then
+        systemctl disable --now "${gif}.service" >/dev/null 2>&1 || true
+        rm -f "${d:?}/${gif:?}.service"
+        ip link del "$gif" >/dev/null 2>&1 || ip tunnel del "$gif" >/dev/null 2>&1 || true
+        ip link del "$(gre6_sit_name "$gif")" >/dev/null 2>&1 || true
+    fi
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl reset-failed >/dev/null 2>&1 || true
+    hashem_ufw_release
+    reserve_service_ports
+    echo -e "${YELLOW}[*] Nothing of the failed tunnel was kept: its port is free again.${NC}"
+}
+
+# peer_sweep_orphans: removes the numbered relay configs (frps-N.toml,
+# backhaul server-N.toml) that no peers.json record has and whose unit is not
+# running: what a failed add-peer left behind before peer_add_rollback.
+peer_sweep_orphans() {
+    [[ -s "$PEERS_FILE" ]] && command -v python3 >/dev/null 2>&1 || return 0
+    local ids f n svc d="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}" swept=0
+    ids=$(PEERS_F="$PEERS_FILE" python3 -c 'import json,os; print(" ".join(["ok"]+[str(int(p["id"])) for p in json.load(open(os.environ["PEERS_F"])).get("peers",[])]))' 2>/dev/null) || return 0
+    [[ "$ids" == ok* ]] || return 0
+    for f in "${CONFIG_DIR}"/frps-*.toml "${BACKHAUL_CONFIG_DIR}"/server-*.toml; do
+        [[ -f "$f" ]] || continue
+        n=${f##*-}; n=${n%.toml}
+        [[ "$n" =~ ^[0-9]+$ ]] || continue
+        [[ " $ids " == *" $n "* ]] && continue
+        if [[ "$f" == "${CONFIG_DIR}"/* ]]; then svc="frps-${n}"; else svc="backhaul-server-${n}"; fi
+        systemctl is-active --quiet "$svc" 2>/dev/null && continue
+        [[ "$svc" == backhaul-* ]] && backhaul_udp_remove "$svc"
+        [[ "$svc" == frps-* ]] && frps_wss_front_remove "-${n}"
+        systemctl disable --now "$svc" >/dev/null 2>&1 || true
+        rm -f "${d:?}/${svc:?}.service" "${f:?}"
+        echo -e "${CYAN}[*] Removed the left-over config of a tunnel that was never added: ${f}${NC}"
+        swept=1
+    done
+    [[ "$swept" -eq 1 ]] || return 0
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl reset-failed >/dev/null 2>&1 || true
+    hashem_ufw_release
+    reserve_service_ports
 }
 
 # frps_ufw_open CONTROL_PORT [PORTS]: with ufw active, open what frps listens
@@ -3842,13 +4178,10 @@ frps_ufw_open() {
     command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active" || return 0
     local CPORT=$1 QPORT=$(($1 + 1)) p
     (( QPORT > 65535 )) && QPORT=$(($1 - 1))
-    ufw allow "${CPORT}/tcp" >/dev/null 2>&1 || true
-    ufw allow "${CPORT}/udp" >/dev/null 2>&1 || true
-    ufw allow "${QPORT}/udp" >/dev/null 2>&1 || true
+    hashem_ufw_allow "${CPORT}/tcp" "${CPORT}/udp" "${QPORT}/udp"
     for p in $(echo "${2:-}" | tr ',' ' '); do
         is_valid_port "$p" || continue
-        ufw allow "$((10#$p))/tcp" >/dev/null 2>&1 || true
-        ufw allow "$((10#$p))/udp" >/dev/null 2>&1 || true
+        hashem_ufw_allow "$((10#$p))/tcp" "$((10#$p))/udp"
     done
 }
 
@@ -3901,6 +4234,7 @@ kcpBindPort = ${BIND_PORT}
 quicBindPort = ${QUIC_PORT}
 auth.method = "token"
 auth.token = "${TOKEN}"
+$(frp_log_lines)
 $(perf_tcpmux_lines)
 transport.tcpKeepalive = 15
 transport.heartbeatTimeout = 45
@@ -3913,18 +4247,18 @@ EOF
 Description=FRP Server Service
 After=network.target network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=root
 Restart=always
 RestartSec=10s
-StartLimitIntervalSec=60s
-StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity
 CPUWeight=100
+$(frp_unit_env_lines)
 ExecStart=${INSTALL_DIR}/frps -c ${CONFIG_DIR}/frps.toml
 
 [Install]
@@ -4100,6 +4434,7 @@ serverPort = ${EFF_SERVER_PORT}
 auth.method = "token"
 auth.token = "${TOKEN}"
 loginFailExit = false
+$(frp_log_lines)
 transport.protocol = "${FRP_TRANSPORT}"
 $(perf_tcpmux_lines)
 transport.heartbeatInterval = 15
@@ -4158,18 +4493,18 @@ EOF
 Description=FRP Client Reverse Service
 After=network.target network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=root
 Restart=always
 RestartSec=10s
-StartLimitIntervalSec=60s
-StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity
 CPUWeight=100
+$(frp_unit_env_lines)
 ExecStartPre=-/bin/sh -c "if [ -x /usr/local/bin/hashem ]; then timeout 30 /usr/local/bin/hashem dial-select >/dev/null 2>&1; fi; true"
 ExecStart=${INSTALL_DIR}/frpc -c ${CONFIG_DIR}/frpc.toml
 
@@ -4304,9 +4639,7 @@ setup_backhaul_iran_server_noninteractive() {
         fi
     fi
 
-    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-        ufw allow "${BIND_PORT}/$([[ "$TRANSPORT" == udp ]] && echo udp || echo tcp)" >/dev/null 2>&1 || true
-    fi
+    hashem_ufw_allow "${BIND_PORT}/$([[ "$TRANSPORT" == udp ]] && echo udp || echo tcp)"
 
     tune_apply >/dev/null 2>&1 || true
     watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
@@ -4505,9 +4838,7 @@ setup_gre_backhaul_iran_server_noninteractive() {
         fi
     fi
 
-    if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-        ufw allow "${BIND_PORT}/$([[ "$TRANSPORT" == udp ]] && echo udp || echo tcp)" >/dev/null 2>&1 || true
-    fi
+    hashem_ufw_allow "${BIND_PORT}/$([[ "$TRANSPORT" == udp ]] && echo udp || echo tcp)"
 
     tune_apply >/dev/null 2>&1 || true
     watchdog_timer_ensure >/dev/null 2>&1 || true  # drives Auto-Pool + schedules, not just alerts
@@ -4829,6 +5160,7 @@ kcpBindPort = ${BIND_PORT}
 quicBindPort = ${QUIC_PORT}
 auth.method = "token"
 auth.token = "${TOKEN}"
+$(frp_log_lines)
 $(perf_tcpmux_lines)
 transport.tcpKeepalive = 15
 transport.heartbeatTimeout = 45
@@ -4842,18 +5174,18 @@ EOF
 Description=FRP Server Service${SUF:+ (peer${SUF#-})}
 After=network.target network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=root
 Restart=always
 RestartSec=10s
-StartLimitIntervalSec=60s
-StartLimitBurst=5
 LimitNOFILE=1048576
 LimitNPROC=512000
 TasksMax=infinity
 CPUWeight=100
+$(frp_unit_env_lines)
 ExecStart=${INSTALL_DIR}/frps -c ${CONFIG_DIR}/frps${SUF}.toml
 
 [Install]
@@ -4923,6 +5255,7 @@ cli_add_peer() {
     CLEANED=$(echo "$CLEANED" | xargs)
     [[ -n "$CLEANED" ]] || { echo -e "${RED}[!] --ports needs at least one valid port.${NC}"; return 1; }
     peer_init; peer_require_py || return 1
+    peer_sweep_orphans
     local ID
     ID=$(peer_next_id)
     [[ "$ID" -ge 1 ]] || { echo -e "${RED}[!] Peer table full (max ${MAX_PEERS} foreign servers). Remove one first.${NC}"; return 1; }
@@ -4970,6 +5303,7 @@ cli_add_peer() {
     sleep 1
     if ! systemctl is-active --quiet "$FRPS_SVC"; then
         echo -e "${RED}[!] Error: ${FRPS_SVC} failed to start. Generated configuration might be invalid.${NC}"
+        peer_add_rollback "$FRPS_SVC" "$GRE_IF" "${CONFIG_DIR}/${FRPS_SVC}.toml"
         return 1
     fi
     frps_ufw_open "$FRP_PORT" "$CLEANED"
@@ -5038,7 +5372,38 @@ cli_remove_peer() {
     fi
     [[ -f "$PEERS_FILE" ]] && PEERS_F="$PEERS_FILE" PEER_ID="$ID" python3 -c \
 'import json,os; f=os.environ["PEERS_F"]; d=json.load(open(f)); d["peers"]=[p for p in d.get("peers",[]) if p["id"]!=int(os.environ["PEER_ID"])]; json.dump(d,open(f,"w"),indent=2)'
+    # what the panel learned about that server's panel (address, pinned certificate)
+    tunnel_link_forget "$ID"
+    # its ports: out of the firewall and the kernel's reserved list again
+    peer_sweep_orphans
+    hashem_ufw_release
+    reserve_service_ports
     echo -e "${GREEN}[OK] Peer '${NAME}' (id ${ID}) removed.${NC}"
+}
+
+# tunnel_link_forget ID|all: drops a removed peer's record from the panel's
+# tunnel_links.json (where its foreign panel answers, its pinned certificate).
+tunnel_link_forget() {
+    local f="${PANEL_CONFIG_DIR}/tunnel_links.json"
+    [[ -f "$f" ]] || return 0
+    if [[ "$1" == "all" ]]; then rm -f "$f"; return 0; fi
+    command -v python3 >/dev/null 2>&1 || return 0
+    LINKS_F="$f" PEER_ID="$1" python3 -c '
+import json, os
+f = os.environ["LINKS_F"]
+try:
+    d = json.load(open(f))
+    if d.pop(os.environ["PEER_ID"], None) is not None:
+        if d:
+            tmp = f + ".tmp"
+            json.dump(d, open(tmp, "w"), indent=2)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, f)
+        else:
+            os.remove(f)
+except Exception:
+    pass
+' 2>/dev/null || true
 }
 
 cli_add_backhaul_peer() {
@@ -5096,6 +5461,7 @@ cli_add_backhaul_peer() {
     fi
     [[ -n "$TOKEN" ]] || { echo -e "${RED}[!] --token is required.${NC}"; return 1; }
     peer_init; peer_require_py || return 1
+    peer_sweep_orphans
     local ID
     ID=$(peer_next_id)
     [[ "$ID" -ge 1 ]] || { echo -e "${RED}[!] Peer table full (max ${MAX_PEERS}).${NC}"; return 1; }
@@ -5139,7 +5505,8 @@ cli_add_backhaul_peer() {
 
     sleep 1
     if ! systemctl is-active --quiet "$SVC_NAME"; then
-        echo -e "${RED}[!] Error: ${SVC_NAME} failed to start. Review config in ${CONF_FILE}.${NC}"
+        echo -e "${RED}[!] Error: ${SVC_NAME} failed to start. Its config was ${CONF_FILE}.${NC}"
+        peer_add_rollback "$SVC_NAME" "$GRE_IF" "$CONF_FILE"
         return 1
     fi
 
@@ -5323,12 +5690,9 @@ PYEOF
         # accepts them, and [[proxies]] in frps-N.toml breaks it. So the Iran
         # side just records the ports (peers.json, step 4) and opens the firewall.
         echo -e "${YELLOW}[i] Ports saved for ${CUR_SVC}. Apply them on the foreign server too (re-run its setup with the updated bundle).${NC}"
-        if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-            for p in $CLEANED; do
-                ufw allow "$p"/tcp >/dev/null 2>&1 || true
-                ufw allow "$p"/udp >/dev/null 2>&1 || true
-            done
-        fi
+        for p in $CLEANED; do
+            hashem_ufw_allow "${p}/tcp" "${p}/udp"
+        done
     fi
 
     # 4. Update peers.json
@@ -6136,6 +6500,48 @@ if dropped > 0:
     return $RET
 }
 
+# purge_hashem_units: stop, disable and delete every systemd unit Hashem
+# or its panel ever wrote, matched by name prefix or by an ExecStart/config
+# path of ours, together with their drop-in dirs and .wants/.requires links.
+# Each stop is bounded by a timeout and followed by SIGKILL, so one unit stuck
+# in "deactivating" cannot hang the uninstall. Units left behind used to keep
+# ports, nft tables or crash loops alive and blocked the next install.
+# HASHEM_SYSTEMD_DIR is overridable for tests.
+purge_hashem_units() {
+    local dir="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}" f u l
+    local -a units=()
+    local name_re='^(gre-panel|gre-[a-z0-9-]+|frps[a-z0-9-]*|frpc[a-z0-9-]*|backhaul[a-z0-9-]*|hashem-[a-z0-9-]+|hsell-[0-9]+-[0-9]+|spoof-core)\.(service|timer|socket|path)$'
+    local path_re='(/usr/local/bin/(frps|frpc|backhaul|gre-panel|hashem|spoof)([[:space:]]|$|\.sh)|/etc/gre-panel/|/etc/frp/|/etc/backhaul/|/etc/hashem/|backhaul-core/|/etc/spoof/)'
+    for f in "$dir"/*.service "$dir"/*.timer "$dir"/*.socket "$dir"/*.path; do
+        [[ -f "$f" && ! -L "$f" ]] || continue
+        u="${f##*/}"
+        case "$u" in sentinel.service|x-ui.service|xray.service|sing-box.service|wg-quick@*) continue ;; esac
+        if [[ "$u" =~ $name_re ]] || grep -Eqs "^(ExecStart|ExecStartPre|ExecStartPost|ExecStop)=.*${path_re}" "$f"; then
+            units+=("$u")
+        fi
+    done
+    # timers first so they cannot start their service again mid-purge
+    local -a ordered=()
+    for u in "${units[@]}"; do [[ "$u" == *.timer ]] && ordered+=("$u"); done
+    for u in "${units[@]}"; do [[ "$u" == gre-panel.service ]] && ordered+=("$u"); done
+    for u in "${units[@]}"; do [[ "$u" != *.timer && "$u" != gre-panel.service ]] && ordered+=("$u"); done
+    for u in "${ordered[@]}"; do
+        timeout 15 systemctl stop "$u" >/dev/null 2>&1 || systemctl kill -s KILL "$u" >/dev/null 2>&1 || true
+        timeout 15 systemctl disable "$u" >/dev/null 2>&1 || true
+        rm -rf "${dir:?}/$u" "${dir:?}/$u.d"
+        rm -f "$dir"/*.wants/"$u" "$dir"/*.requires/"$u"
+    done
+    # links whose target is gone (unit file removed earlier without disable)
+    for l in "$dir"/*.wants/* "$dir"/*.requires/*; do
+        [[ -L "$l" && ! -e "$l" ]] || continue
+        u="${l##*/}"
+        [[ "$u" =~ $name_re ]] && rm -f "$l"
+    done
+    timeout 30 systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl reset-failed >/dev/null 2>&1 || true
+    return 0
+}
+
 uninstall_all() {
     echo -e "\n${RED}=== Uninstalling EVERYTHING (tunnel + panel + hashem command) ===${NC}"
     read -p "Are you sure? This removes GRE & FRP, the web panel AND the 'hashem' command. (y/N): " CONFIRM
@@ -6152,16 +6558,16 @@ uninstall_all() {
 # `hashem` stops working.
 uninstall_all_force() {
         echo -e "${CYAN}[*] Performing complete uninstallation of Hashem...${NC}"
-        # 1. Stop & disable all services & timers
-        systemctl stop 'frps-wss*' >/dev/null 2>&1 || true
-        systemctl stop frps frpc "${TUNNEL_NAME}.service" gre-panel hashem-watchdog.timer hashem-watchdog.service backhaul-server backhaul-client backhaul >/dev/null 2>&1 || true
-        systemctl stop 'frps*' 'frpc*' 'backhaul*' 'gre-t*' 'gre-h*' >/dev/null 2>&1 || true
-        systemctl disable frps frpc "${TUNNEL_NAME}.service" gre-panel hashem-watchdog.timer hashem-watchdog.service backhaul-server backhaul-client backhaul >/dev/null 2>&1 || true
-        systemctl disable 'frps*' 'frpc*' 'backhaul*' 'gre-t*' 'gre-h*' hashem-lb-net >/dev/null 2>&1 || true
+        # 1. Stop & disable all services & timers (bounded: a stuck unit is killed)
+        timeout 15 systemctl stop hashem-watchdog.timer gre-panel >/dev/null 2>&1 || systemctl kill -s KILL gre-panel >/dev/null 2>&1 || true
         purge_legacy_obfuscation
         # sold customer tunnels (panel Customers tab), stopped before the panel
         # binary goes so it cannot restart them
         customers_teardown
+        purge_hashem_units
+        nft delete table inet hashem_rescue >/dev/null 2>&1 || true
+        nft delete table inet hashem_dnat >/dev/null 2>&1 || true
+        nft delete table inet hashem_spoof >/dev/null 2>&1 || true
 
         # 2. Terminate any leftover processes
         pkill -9 -f "${INSTALL_DIR}/frps" >/dev/null 2>&1 || true
@@ -6169,6 +6575,7 @@ uninstall_all_force() {
         pkill -9 -f "${INSTALL_DIR}/backhaul" >/dev/null 2>&1 || true
         pkill -9 -f "backhaul-core/backhaul_premium" >/dev/null 2>&1 || true
         pkill -9 -f "${INSTALL_DIR}/gre-panel" >/dev/null 2>&1 || true
+        pkill -9 -f "${INSTALL_DIR}/spoof" >/dev/null 2>&1 || true
 
         # 3. Remove all systemd files
         rm -f /etc/systemd/system/frps*.service /etc/systemd/system/frpc*.service \
@@ -6200,7 +6607,12 @@ uninstall_all_force() {
 
         # 6. Revert network tuning
         tune_restore >/dev/null 2>&1 || true
-        rm -f /etc/sysctl.d/99-hashem.conf /etc/sysctl.d/99-gre-panel.conf
+        rm -f /etc/sysctl.d/99-hashem.conf /etc/sysctl.d/99-gre-panel.conf "$TUNE_SYSCTL" "$TUNE_SYSCTL_OLD"
+        net_queues_remove >/dev/null 2>&1 || true
+        if [[ -f /etc/systemd/journald.conf.d/99-hashem.conf ]]; then
+            rm -f /etc/systemd/journald.conf.d/99-hashem.conf
+            systemctl restart systemd-journald >/dev/null 2>&1 || true
+        fi
         command -v sysctl >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1 || true
 
         # 6b. Bagher: the SSH carriers (one per foreign server), frps or frpc
@@ -6292,6 +6704,9 @@ remove_tunnel_force() {
         rm -rf "$CONFIG_DIR" "$BACKHAUL_CONFIG_DIR" "$BACKHAUL_LEGACY_DIR"
         rm -f /usr/local/bin/hashem-backhaul.sh
         rm -f "$PEERS_FILE"
+        tunnel_link_forget all
+        hashem_ufw_release
+        reserve_service_ports
 
         echo -e "${GREEN}[OK] Tunnel removed — GRE interface, FRP/Backhaul services, binaries and configs gone. Panel still running.${NC}"
 }
@@ -6326,6 +6741,8 @@ remove_base_tunnel() {
     rm -f "${CONFIG_DIR}/frps.toml" "${CONFIG_DIR}/frpc.toml" \
           "${BACKHAUL_CONFIG_DIR}/config.toml" "${BACKHAUL_CONFIG_DIR}/server.toml" "${BACKHAUL_CONFIG_DIR}/client.toml" \
           "${PANEL_CONFIG_DIR}/server.toml" "${PANEL_CONFIG_DIR}/client.toml"
+    hashem_ufw_release
+    reserve_service_ports
     echo -e "${GREEN}[OK] First tunnel removed. The other tunnels are untouched.${NC}"
 }
 
@@ -6337,6 +6754,84 @@ PANEL_BIN="/usr/local/bin/gre-panel"
 # Backup lives in /etc/gre-panel/tune.bak (key=value snapshot), restored by
 # tune_restore(). Idempotent — safe to run twice.
 TUNE_BACKUP="/etc/gre-panel/tune.bak"
+TUNE_SYSCTL="/etc/sysctl.d/99-zz-hashem-perf.conf"
+TUNE_SYSCTL_OLD="/etc/sysctl.d/99-gre-tune.conf"
+
+# ---- packet steering (RPS/RFS) and the transmit queue ----
+# A GRE or TCP tunnel's packets all arrive on one receive queue, so one CPU
+# does all the softirq work (time_squeeze in /proc/net/softnet_stat) while
+# the others idle. RPS spreads them over every CPU.
+net_default_iface() {
+    ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}'
+}
+
+# rps_cpu_mask N: the rps_cpus mask for N CPUs (32 bits per comma group)
+rps_cpu_mask() {
+    local n="${1:-1}" out="" i
+    [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )) || n=1
+    (( n % 32 > 0 )) && out=$(printf '%x' $(( (1 << (n % 32)) - 1 )))
+    for ((i = 0; i < n / 32; i++)); do out="${out:+${out},}ffffffff"; done
+    echo "$out"
+}
+
+# net_queues_apply [IFACE]: txqueuelen 10000 and RPS/RFS on the default
+# interface. With one CPU there is nothing to spread, so only the queue
+# length is set. Sets NETQ_MSG. HASHEM_SYS_NET is overridable for tests.
+net_queues_apply() {
+    local ifc="${1:-$(net_default_iface)}" sys="${HASHEM_SYS_NET:-/sys/class/net}" ncpu q mask
+    NETQ_MSG=""
+    [[ -n "$ifc" && -d "$sys/$ifc" ]] || return 1
+    ip link set dev "$ifc" txqueuelen 10000 >/dev/null 2>&1 || true
+    ncpu=$(nproc 2>/dev/null || echo 1)
+    [[ "$ncpu" =~ ^[0-9]+$ ]] || ncpu=1
+    NETQ_MSG="${ifc}: txqueuelen 10000"
+    (( ncpu > 1 )) || return 0
+    mask=$(rps_cpu_mask "$ncpu")
+    for q in "$sys/$ifc"/queues/rx-*; do
+        [[ -d "$q" ]] || continue
+        echo "$mask" > "$q/rps_cpus" 2>/dev/null || true
+        echo 4096 > "$q/rps_flow_cnt" 2>/dev/null || true
+    done
+    NETQ_MSG="${ifc}: txqueuelen 10000, RPS/RFS over ${ncpu} CPUs (rps_cpus=${mask})"
+}
+
+# net_queues_persist: a oneshot that runs net_queues_apply at every boot
+# (rps_cpus and txqueuelen are not sysctls and reset with the interface).
+net_queues_persist() {
+    local dir="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"
+    cat > "$dir/hashem-netq.service" <<EOF
+[Unit]
+Description=Hashem packet steering (RPS/RFS) and transmit queue
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${HASHEM_BIN:-/usr/local/bin/hashem} net-queues
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable hashem-netq.service >/dev/null 2>&1 || true
+}
+
+net_queues_remove() {
+    local dir="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}" ifc sys="${HASHEM_SYS_NET:-/sys/class/net}" q
+    [[ -f "$dir/hashem-netq.service" ]] || return 0
+    systemctl disable hashem-netq.service >/dev/null 2>&1 || true
+    rm -f "$dir/hashem-netq.service"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    ifc=$(net_default_iface)
+    [[ -n "$ifc" ]] || return 0
+    ip link set dev "$ifc" txqueuelen 1000 >/dev/null 2>&1 || true
+    for q in "$sys/$ifc"/queues/rx-*; do
+        [[ -d "$q" ]] || continue
+        echo 0 > "$q/rps_cpus" 2>/dev/null || true
+        echo 0 > "$q/rps_flow_cnt" 2>/dev/null || true
+    done
+}
 
 tune_backup_once() {
     if [[ -f "$TUNE_BACKUP" ]]; then return 0; fi
@@ -6350,7 +6845,8 @@ tune_backup_once() {
              net.ipv4.tcp_keepalive_time net.ipv4.tcp_keepalive_intvl net.ipv4.tcp_keepalive_probes \
              net.core.default_qdisc net.ipv4.tcp_congestion_control \
              net.ipv4.tcp_fastopen net.ipv4.ip_local_port_range \
-             net.ipv4.tcp_max_tw_buckets net.ipv4.tcp_max_orphans \
+             net.ipv4.tcp_max_tw_buckets net.ipv4.tcp_max_orphans net.ipv4.tcp_mem \
+             net.core.rps_sock_flow_entries net.core.netdev_budget net.core.netdev_budget_usecs \
              net.netfilter.nf_conntrack_max net.netfilter.nf_conntrack_tcp_timeout_established; do
         v=$(sysctl -n "$k" 2>/dev/null) || v=""
         echo "$k=$v" >> "$TUNE_BACKUP"
@@ -6374,8 +6870,14 @@ tune_scale_values() {
     [[ "$mem_mb" =~ ^[0-9]+$ ]] && (( mem_mb > 0 )) || mem_mb=1024
     TUNE_MEM_MB="$mem_mb"
     TUNE_RMEM_DEFAULT=262144
-    TUNE_TCP_RMEM="4096 131072 16777216"
-    TUNE_TCP_WMEM="4096 131072 16777216"
+    # largest socket buffer: 16MB up to 4GB of RAM, 32MB up to 12GB, 64MB above
+    TUNE_BUF_MAX=16777216
+    (( mem_mb > 4500 )) && TUNE_BUF_MAX=33554432
+    (( mem_mb > 12500 )) && TUNE_BUF_MAX=67108864
+    TUNE_TCP_RMEM="4096 131072 ${TUNE_BUF_MAX}"
+    TUNE_TCP_WMEM="4096 131072 ${TUNE_BUF_MAX}"
+    # all TCP buffers together, in 4K pages: pressure at 15% of RAM, hard stop at 20%
+    TUNE_TCP_MEM="$(( mem_mb * 256 / 10 )) $(( mem_mb * 256 * 15 / 100 )) $(( mem_mb * 256 / 5 ))"
     TUNE_CT_MAX=$(( mem_mb * 128 ))
     (( TUNE_CT_MAX < 65536 )) && TUNE_CT_MAX=65536
     (( TUNE_CT_MAX > 1048576 )) && TUNE_CT_MAX=1048576
@@ -6427,7 +6929,14 @@ print(" ".join(str(x) for p in d.get("peers",[]) for x in [p.get("frp_port")]+li
     local list
     list=$(printf '%s
 ' $ports | grep -E '^[0-9]+$' | awk '$1 >= 1024 && $1 <= 65535' | sort -n -u | paste -sd, -)
-    [[ -n "$list" ]] || return 0
+    if [[ -z "$list" ]]; then
+        # nothing left to reserve: clear what an earlier run set
+        if [[ -f /etc/sysctl.d/99-hashem-reserved-ports.conf ]]; then
+            sysctl -w net.ipv4.ip_local_reserved_ports="" >/dev/null 2>&1 || true
+            rm -f /etc/sysctl.d/99-hashem-reserved-ports.conf
+        fi
+        return 0
+    fi
     sysctl -w net.ipv4.ip_local_reserved_ports="$list" >/dev/null 2>&1 || return 0
     printf '# hashem: service ports kept out of the ephemeral range (rewritten automatically)
 net.ipv4.ip_local_reserved_ports = %s
@@ -6448,21 +6957,30 @@ tune_apply() {
         echo -e "${YELLOW}[!] bbr unavailable — keeping current CC.${NC}"
     fi
 
-    # 2. Bigger socket buffers (16MB) and full TCP window scaling
-    sysctl -w net.core.rmem_max=16777216 >/dev/null 2>&1
-    sysctl -w net.core.wmem_max=16777216 >/dev/null 2>&1
+    # 2. Bigger socket buffers (16/32/64MB by RAM) and full TCP window scaling
+    sysctl -w net.core.rmem_max="$TUNE_BUF_MAX" >/dev/null 2>&1
+    sysctl -w net.core.wmem_max="$TUNE_BUF_MAX" >/dev/null 2>&1
+    sysctl -w net.ipv4.tcp_mem="$TUNE_TCP_MEM" >/dev/null 2>&1
     sysctl -w net.core.rmem_default="$TUNE_RMEM_DEFAULT" >/dev/null 2>&1
     sysctl -w net.core.wmem_default="$TUNE_RMEM_DEFAULT" >/dev/null 2>&1
     sysctl -w net.ipv4.tcp_rmem="$TUNE_TCP_RMEM" >/dev/null 2>&1
     sysctl -w net.ipv4.tcp_wmem="$TUNE_TCP_WMEM" >/dev/null 2>&1
     sysctl -w net.ipv4.tcp_window_scaling=1 >/dev/null 2>&1
-    echo -e "${GREEN}[OK] Socket buffers → max 16MB, default ${TUNE_RMEM_DEFAULT}/tcp 131072 (RAM ${TUNE_MEM_MB}MB)${NC}"
+    echo -e "${GREEN}[OK] Socket buffers → max $(( TUNE_BUF_MAX / 1048576 ))MB, default ${TUNE_RMEM_DEFAULT}/tcp 131072 (RAM ${TUNE_MEM_MB}MB)${NC}"
 
     # 3. Deeper NIC queue and high connection backlog
     sysctl -w net.core.netdev_max_backlog=65535 >/dev/null 2>&1
     sysctl -w net.core.somaxconn=65535 >/dev/null 2>&1
     sysctl -w net.ipv4.tcp_max_syn_backlog=65535 >/dev/null 2>&1
     echo -e "${GREEN}[OK] Network backlog → 65535 / 65535${NC}"
+
+    # 3b. Spread packet processing over every CPU (RPS/RFS) and a longer
+    # transmit queue on the default interface, kept across reboots
+    sysctl -w net.core.rps_sock_flow_entries=65536 >/dev/null 2>&1 || true
+    sysctl -w net.core.netdev_budget=600 >/dev/null 2>&1 || true
+    sysctl -w net.core.netdev_budget_usecs=8000 >/dev/null 2>&1 || true
+    net_queues_apply && echo -e "${GREEN}[OK] ${NETQ_MSG}${NC}"
+    net_queues_persist
 
     # 4. Anti-stall, keepalive, TIME_WAIT reuse, and fast connection tuning
     sysctl -w net.ipv4.tcp_slow_start_after_idle=0 >/dev/null 2>&1
@@ -6536,13 +7054,20 @@ EOF
     echo -e "${GREEN}[OK] TCP MSS clamp → $(gre_mss) (POSTROUTING + FORWARD per GRE iface)${NC}"
 
     # 7. Persist across reboots
+    # The name sorts after every other 99-*.conf, so another tool's file
+    # (99-securebox-..., 99-sysctl.conf) cannot put smaller values back at boot.
     mkdir -p /etc/sysctl.d
-    cat > /etc/sysctl.d/99-gre-tune.conf <<EOF
+    rm -f "$TUNE_SYSCTL_OLD"
+    cat > "$TUNE_SYSCTL" <<EOF
 # Hashem tunnel optimization (applied by Optimize button / tune command)
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
-net.core.rmem_max = 16777216
-net.core.wmem_max = 16777216
+net.core.rmem_max = ${TUNE_BUF_MAX}
+net.core.wmem_max = ${TUNE_BUF_MAX}
+net.ipv4.tcp_mem = ${TUNE_TCP_MEM}
+net.core.rps_sock_flow_entries = 65536
+net.core.netdev_budget = 600
+net.core.netdev_budget_usecs = 8000
 net.core.rmem_default = ${TUNE_RMEM_DEFAULT}
 net.core.wmem_default = ${TUNE_RMEM_DEFAULT}
 net.ipv4.tcp_rmem = ${TUNE_TCP_RMEM}
@@ -6571,7 +7096,11 @@ net.netfilter.nf_conntrack_tcp_timeout_close_wait = 60
 net.netfilter.nf_conntrack_tcp_timeout_fin_wait = 60
 net.netfilter.nf_conntrack_tcp_timeout_time_wait = 60
 EOF
-    echo -e "${GREEN}[OK] Settings persisted in /etc/sysctl.d/99-gre-tune.conf${NC}"
+    echo -e "${GREEN}[OK] Settings persisted in ${TUNE_SYSCTL}${NC}"
+    journald_cap_apply
+    frp_units_refresh
+    local _lvl_n; _lvl_n=$(frp_log_level_apply 2>/dev/null)
+    [[ "$_lvl_n" =~ ^[1-9] ]] && echo -e "${GREEN}[OK] FRP log level → $(frp_log_level) in ${_lvl_n} config(s); it applies when that service next restarts${NC}"
     echo -e "${GREEN}[OK] Optimization done — run Restore if anything feels worse.${NC}"
 }
 
@@ -6603,7 +7132,8 @@ tune_restore() {
                 fi ;;
         esac
     done < "$TUNE_BACKUP"
-    rm -f /etc/sysctl.d/99-gre-tune.conf
+    rm -f "$TUNE_SYSCTL" "$TUNE_SYSCTL_OLD"
+    net_queues_remove
     echo -e "${GREEN}[OK] Restored — backup kept at ${TUNE_BACKUP} (deleted on next optimize run).${NC}"
     rm -f "$TUNE_BACKUP"
 }
@@ -6628,7 +7158,32 @@ tune_status() {
         echo "MSS clamp: off"
     fi
     if [[ -f "$TUNE_BACKUP" ]]; then echo "Backup:    $TUNE_BACKUP (restore available)"; else echo "Backup:    none"; fi
-    [[ -f /etc/sysctl.d/99-gre-tune.conf ]] && echo "Persisted: yes (/etc/sysctl.d/99-gre-tune.conf)" || echo "Persisted: no"
+    local _nq; _nq=$(net_default_iface)
+    [[ -n "$_nq" ]] && echo "RPS:       ${_nq} rps_cpus=$(cat "${HASHEM_SYS_NET:-/sys/class/net}/${_nq}/queues/rx-0/rps_cpus" 2>/dev/null || echo ?) txqueuelen=$(cat "${HASHEM_SYS_NET:-/sys/class/net}/${_nq}/tx_queue_len" 2>/dev/null || echo ?)"
+    if [[ -f "$TUNE_SYSCTL" ]]; then echo "Persisted: yes (${TUNE_SYSCTL})"
+    elif [[ -f "$TUNE_SYSCTL_OLD" ]]; then echo "Persisted: yes (${TUNE_SYSCTL_OLD}, an older name: run optimize again)"
+    else echo "Persisted: no"; fi
+}
+
+# journald_cap_apply [SYSTEM_MAX RUNTIME_MAX]: caps the journal with a drop-in
+# (default 500M on disk, 200M in /run). A log storm from one service filled a
+# disk through the journal before. The smaller cap that `hashem free-ram`
+# wrote is kept. HASHEM_JOURNALD_DIR is overridable for tests.
+journald_cap_apply() {
+    local d="${HASHEM_JOURNALD_DIR:-/etc/systemd/journald.conf.d}" sys="${1:-}" run="${2:-}" note="hashem"
+    local f="$d/99-hashem.conf"
+    if [[ -z "$sys" ]]; then
+        grep -q '^# hashem free-ram' "$f" 2>/dev/null && return 0
+        sys=500M; run=200M
+    else
+        note="hashem free-ram"
+    fi
+    local want
+    want=$(printf '# %s: journal size cap (rewritten automatically)\n[Journal]\nSystemMaxUse=%s\nRuntimeMaxUse=%s' "$note" "$sys" "$run")
+    [[ "$(cat "$f" 2>/dev/null)" == "$want" ]] && return 0
+    mkdir -p "$d" 2>/dev/null || return 0
+    printf '%s\n' "$want" > "$f" 2>/dev/null || return 0
+    systemctl restart systemd-journald >/dev/null 2>&1 || true
 }
 
 # free_ram: drop page caches + compact memory + journald cap + ensure 1G swap.
@@ -6645,6 +7200,7 @@ free_ram() {
         grep -q '^SystemMaxUse=32M' /etc/systemd/journald.conf || echo 'SystemMaxUse=32M' >> /etc/systemd/journald.conf
         grep -q '^RuntimeMaxUse=16M' /etc/systemd/journald.conf || echo 'RuntimeMaxUse=16M' >> /etc/systemd/journald.conf
         journalctl --vacuum-size=16M >/dev/null 2>&1
+        journald_cap_apply 32M 16M   # the drop-in wins over journald.conf: keep both the same
         systemctl restart systemd-journald >/dev/null 2>&1
         echo -e "${GREEN}[OK] journald capped at 16M (was the main RAM eater)${NC}"
     fi
@@ -6876,6 +7432,78 @@ unit_set_directive() { # $1=file $2=key $3=value
     fi
 }
 
+# unit_start_limit_fix FILE: StartLimitIntervalSec belongs in [Unit]. In
+# [Service] systemd ignores it ("Unknown key name 'StartLimitIntervalSec' in
+# section 'Service'") and its default limit applied instead. Every copy goes
+# and [Unit] gets StartLimitIntervalSec=0: these services never give up
+# restarting, which is what the ignored lines left them doing.
+unit_start_limit_fix() { # $1=unit file
+    local f="$1" tmp
+    [[ -f "$f" ]] || return 1
+    tmp=$(mktemp) || return 1
+    awk '
+        /^StartLimit(IntervalSec|Interval|Burst)=/ { next }
+        { print }
+        /^\[Unit\]/ && !done { print "StartLimitIntervalSec=0"; done = 1 }
+    ' "$f" > "$tmp" && cat "$tmp" > "$f"
+    rm -f "$tmp"
+}
+
+# unit_env_default FILE VAR VALUE: adds Environment=VAR=VALUE under [Service]
+# unless the unit already sets VAR (a value the operator wrote stays).
+unit_env_default() {
+    local f="$1" var="$2" val="$3" tmp
+    [[ -f "$f" ]] || return 1
+    grep -Eq "^Environment=(.*[[:space:]\"])?${var}=" "$f" && return 0
+    tmp=$(mktemp) || return 1
+    awk -v line="Environment=${var}=${val}" '
+        { print }
+        /^\[Service\]/ && !done { print line; done = 1 }
+    ' "$f" > "$tmp" && cat "$tmp" > "$f"
+    rm -f "$tmp"
+}
+
+# frp_go_mem_for_ram [MB]: "GOMEMLIMIT GOGC" for one frps/frpc by total RAM.
+# Without a limit the Go heap of a busy frpc grows until the kernel OOM-kills
+# it; with one the collector works harder near the limit instead.
+frp_go_mem_for_ram() {
+    local mem="${1:-}"
+    [[ "$mem" =~ ^[0-9]+$ && "$mem" -gt 0 ]] || mem=$(awk '/^MemTotal:/ {printf "%d", $2 / 1024}' /proc/meminfo 2>/dev/null)
+    [[ "$mem" =~ ^[0-9]+$ && "$mem" -gt 0 ]] || mem=1024
+    if   (( mem <= 1250 ));  then echo "300MiB 40"
+    elif (( mem <= 2560 ));  then echo "500MiB 40"
+    elif (( mem <= 4200 ));  then echo "900MiB 40"
+    elif (( mem <= 6400 ));  then echo "1400MiB 45"
+    elif (( mem <= 8400 ));  then echo "1800MiB 50"
+    elif (( mem <= 16500 )); then echo "2500MiB 50"
+    else echo "4000MiB 50"
+    fi
+}
+
+# [Service] lines for a new frps/frpc unit
+frp_unit_env_lines() {
+    local lim gc
+    read -r lim gc <<< "$(frp_go_mem_for_ram)"
+    printf 'Environment=GOMEMLIMIT=%s\nEnvironment=GOGC=%s' "$lim" "$gc"
+}
+
+# frp_units_refresh: brings the frps*/frpc* units of an older install up to
+# date (StartLimit in [Unit], Go memory limit). Nothing is restarted: the
+# memory limit applies from each service's next start.
+frp_units_refresh() {
+    local dir="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}" f lim gc n=0
+    read -r lim gc <<< "$(frp_go_mem_for_ram)"
+    for f in "$dir"/frps*.service "$dir"/frpc*.service; do
+        [[ -f "$f" ]] || continue
+        unit_start_limit_fix "$f"
+        unit_env_default "$f" GOMEMLIMIT "$lim"
+        unit_env_default "$f" GOGC "$gc"
+        n=$((n + 1))
+    done
+    (( n > 0 )) && { systemctl daemon-reload >/dev/null 2>&1 || true; }
+    return 0
+}
+
 # Apply panel isolation limits to a unit file (no daemon-reload, no restart:
 # callers do that once). $2 = "HIGH MAX" from panel_limits_for_ram.
 apply_panel_unit_limits() { # $1=unit file [$2="HIGH MAX"]
@@ -6884,10 +7512,10 @@ apply_panel_unit_limits() { # $1=unit file [$2="HIGH MAX"]
     [[ -f "$f" ]] || return 1
     for kv in "OOMScoreAdjust=-900" "Nice=-5" "CPUWeight=200" "Restart=always" \
               "RestartSec=3" "LimitNOFILE=1048576" "LimitNPROC=512000" \
-              "TasksMax=4096" "MemoryHigh=${high}" "MemoryMax=${max}" \
-              "StartLimitIntervalSec=0"; do
+              "TasksMax=4096" "MemoryHigh=${high}" "MemoryMax=${max}"; do
         unit_set_directive "$f" "${kv%%=*}" "${kv#*=}"
     done
+    unit_start_limit_fix "$f"
     # WatchdogSec makes systemd KILL a service that does not send WATCHDOG=1.
     # Only a panel binary that implements sd_notify may run under it; an older
     # binary (script updated before the panel) would be killed every 30 s.
@@ -7017,14 +7645,32 @@ release_verify() {
     return 1
 }
 
+# panel_is_core: 0 when this server runs (or is being given) the node core,
+# the panel's build without the web page. HASHEM_NODE_CORE=1 / 0 decides for
+# a new install or a change; otherwise the installed binary says.
+panel_is_core() {
+    case "${HASHEM_NODE_CORE:-}" in
+        1) return 0 ;;
+        0) return 1 ;;
+    esac
+    [[ -x "$PANEL_BIN" ]] || return 1
+    "$PANEL_BIN" --help 2>/dev/null | grep -q '^Usage: hashem-node '
+}
+
 install_panel() {
     echo -e "${CYAN}[*] Installing Hashem web panel...${NC}"
     ensure_doctor_tools
 
+    # a node core stays a core: same path and unit, the build without the web page
+    local PANEL_BASE="gre-panel" PANEL_TAGS=""
+    if panel_is_core; then
+        PANEL_BASE="hashem-node"; PANEL_TAGS="nodecore"
+        echo -e "${CYAN}[*] This server is a node core (no web panel): installing hashem-node.${NC}"
+    fi
     ARCH=$(uname -m)
     case "$ARCH" in
-        x86_64)  PANEL_ASSET="gre-panel-linux-amd64" ;;
-        aarch64|arm64) PANEL_ASSET="gre-panel-linux-arm64" ;;
+        x86_64)  PANEL_ASSET="${PANEL_BASE}-linux-amd64" ;;
+        aarch64|arm64) PANEL_ASSET="${PANEL_BASE}-linux-arm64" ;;
         *) echo -e "${RED}[!] Unsupported arch for panel: $ARCH${NC}"; return 1 ;;
     esac
 
@@ -7152,7 +7798,7 @@ install_panel() {
             rm -rf "$TMP_PANEL"
             return 1
         fi
-        (cd "$SRC" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$TMP_PANEL/gre-panel" .)
+        (cd "$SRC" && CGO_ENABLED=0 go build -trimpath -tags "$PANEL_TAGS" -ldflags "-s -w" -o "$TMP_PANEL/gre-panel" .)
         if [[ -f "$SRC/grepanel" ]]; then
             cp "$SRC/grepanel" /usr/local/bin/grepanel
             chmod +x /usr/local/bin/grepanel
@@ -7212,6 +7858,10 @@ ExecStart=${PANEL_BIN}
 WantedBy=multi-user.target
 EOF
     apply_panel_unit_limits /etc/systemd/system/gre-panel.service
+    # older installs: frp units and configs, and a cap on the journal
+    frp_units_refresh
+    frp_log_level_apply >/dev/null 2>&1 || true
+    journald_cap_apply
 
     ensure_panel_pass
     systemctl daemon-reload
@@ -7219,7 +7869,9 @@ EOF
     systemctl restart gre-panel
     sleep 2
 
-    if systemctl is-active --quiet gre-panel; then
+    if systemctl is-active --quiet gre-panel && [[ "$PANEL_BASE" == "hashem-node" ]]; then
+        echo -e "${GREEN}[OK] Node core installed and running (no web panel on this server).${NC}"
+    elif systemctl is-active --quiet gre-panel; then
         echo -e "${GREEN}[OK] Panel installed and running.${NC}"
         # full credentials right here — no need to open another menu
         echo ""
@@ -7719,10 +8371,10 @@ watchdog_check() {
     init_watchdog_json
     local PEER_GRE
     PEER_GRE=$(watchdog_get_peer_gre)
-    local GRE_OK=0
+    local GRE_OK=0 GRE_ICMP=0
     if [[ -n "$PEER_GRE" ]]; then
         if ping -c 1 -W 2 "$PEER_GRE" >/dev/null 2>&1; then
-            GRE_OK=1
+            GRE_OK=1; GRE_ICMP=1
         elif ss -tn state established 2>/dev/null | grep -q "$PEER_GRE"; then
             GRE_OK=1
         elif nc -z -w 2 "$PEER_GRE" 22 >/dev/null 2>&1 || nc -z -w 2 "$PEER_GRE" 7777 >/dev/null 2>&1 || nc -z -w 2 "$PEER_GRE" 5201 >/dev/null 2>&1; then
@@ -7787,6 +8439,24 @@ watchdog_check() {
         fi
     fi
 
+    # Iran hub: the same rule for frps. A client that holds a session on the
+    # control port, over GRE or over the public IP, is the proof the link works;
+    # an unanswered ping alone (ICMP dropped inside GRE) must not read as down.
+    if [[ $GRE_OK -eq 0 && "$FRP_NAME" == "frps" && $FRP_OK -eq 1 ]]; then
+        local _bp
+        _bp=$(autopool_live_toml_int "${CONFIG_DIR}/frps.toml" bindPort 2>/dev/null)
+        if [[ "$_bp" =~ ^[0-9]+$ ]] && [[ -n "$(ss -Htn state established "( sport = :${_bp} )" 2>/dev/null)" ]]; then
+            GRE_OK=1
+        fi
+    fi
+
+    # Any side: a GRE interface that is receiving packets is carrying traffic
+    # (TCP passes inside GRE while ICMP is dropped), the same test the restart
+    # path uses before it would touch the interface.
+    if [[ $GRE_OK -eq 0 && -n "$PEER_GRE" ]] && gre_if_healthy "$TUNNEL_NAME"; then
+        GRE_OK=1
+    fi
+
     local FAILS=0
     if [[ -f "$WATCHDOG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
         FAILS=$(python3 -c '
@@ -7806,7 +8476,11 @@ except Exception:
         if [[ "$FRP_NAME" == backhaul-* ]]; then
             DETAIL="Backhaul ${FRP_NAME} session up"
         else
-            DETAIL="GRE ping OK ($PEER_GRE), ${FRP_NAME:-FRP} active"
+            if [[ $GRE_ICMP -eq 1 ]]; then
+                DETAIL="GRE ping OK ($PEER_GRE), ${FRP_NAME:-FRP} active"
+            else
+                DETAIL="GRE carries traffic (ping filtered), ${FRP_NAME:-FRP} active"
+            fi
         fi
     else
         local ERR_PARTS=()
@@ -7859,7 +8533,8 @@ except Exception:
     HOST="$(hostname 2>/dev/null || echo 'server')"
     local FULL_MSG="[Hashem ${HOST}] ${TEXT}"
 
-    local CURL_ARGS=(-sS -f)
+    # no -f: for a 4xx Telegram's reason ("Unauthorized", "chat not found") is in the body
+    local CURL_ARGS=(-sS)
     if [[ "$TG_ROUTE" == "tunnel" ]]; then
         if [[ -z "$TG_PORT" || "$TG_PORT" -le 0 ]]; then
             echo -e "${RED}[!] Telegram route is set to tunnel but tunnel port is not configured.${NC}" >&2
@@ -7880,6 +8555,12 @@ except Exception:
         echo -e "${RED}[!] Telegram send failed: ${REDACTED_ERR}${NC}" >&2
         return 1
     fi
+    if ! grep -Eq '"ok" *: *true' <<<"$CURL_OUT"; then
+        local WHY
+        WHY=$(sed -n 's/.*"description" *: *"\([^"]*\)".*/\1/p' <<<"$CURL_OUT" | head -n1)
+        echo -e "${RED}[!] Telegram said: ${WHY:-$CURL_OUT}${NC}" >&2
+        return 1
+    fi
     return 0
 }
 
@@ -7894,29 +8575,79 @@ watchdog_test() {
     fi
 }
 
+# gre_if_peer IF: the other end of the tunnel's inner /30 (or its "peer" address)
+gre_if_peer() {
+    local line inner a b c d
+    line=$(ip -4 -o addr show dev "$1" 2>/dev/null | head -n1)
+    [[ -n "$line" ]] || return 1
+    if [[ "$line" =~ peer[[:space:]]+([0-9.]+) ]]; then echo "${BASH_REMATCH[1]}"; return 0; fi
+    inner=$(awk '{for (i = 1; i < NF; i++) if ($i == "inet") {print $(i + 1); exit}}' <<< "$line" | cut -d/ -f1)
+    IFS=. read -r a b c d <<< "$inner"
+    [[ "$d" =~ ^[0-9]+$ ]] || return 1
+    if (( d % 2 == 0 )); then echo "$a.$b.$c.$((d - 1))"; else echo "$a.$b.$c.$((d + 1))"; fi
+}
+
+# gre_if_healthy IF: 0 when the tunnel on IF works: its other end answers a
+# ping, or (ICMP filtered) packets are arriving on it right now. Restarting
+# its unit deletes and rebuilds the interface, which drops every connection
+# bound to it, so a working one is left alone.
+gre_if_healthy() {
+    local ifc="$1" sys="${HASHEM_SYS_NET:-/sys/class/net}" peer rx1 rx2
+    ip link show "$ifc" >/dev/null 2>&1 || return 1
+    peer=$(gre_if_peer "$ifc")
+    [[ -n "$peer" ]] && ping -c 1 -W 2 "$peer" >/dev/null 2>&1 && return 0
+    rx1=$(cat "$sys/$ifc/statistics/rx_packets" 2>/dev/null) || return 1
+    sleep "${GRE_HEALTH_WAIT:-1}"
+    rx2=$(cat "$sys/$ifc/statistics/rx_packets" 2>/dev/null) || return 1
+    [[ "$rx1" =~ ^[0-9]+$ && "$rx2" =~ ^[0-9]+$ ]] && (( rx2 > rx1 ))
+}
+
+# restart_all_lite [--broken-only]
+# Without a flag (the Restart Tunnel Now button, `hashem restart-lite`): the
+# GRE interfaces, and on a foreign server its engine too.
+# --broken-only (the Watchdog: tunnel down, or the restart schedule): a GRE
+# interface that works is not touched, on either side; on the Iran server an
+# engine is restarted only when its unit has failed. A foreign server's
+# engine is still restarted, which is what the schedule is for.
 restart_all_lite() {
-    local u
+    local u ifc broken=0
+    [[ "${1:-}" == "--broken-only" ]] && broken=1
+    local dir="${HASHEM_SYSTEMD_DIR:-/etc/systemd/system}"
     # On Iran Hub (frps services exist and frpc does not):
     # NEVER blindly restart listening frps server daemons! Listening frps instances
     # do not recover broken client routes by restarting; restarting frps severs all
     # active client/user sessions across ALL other healthy connected spokes simultaneously.
     # Only restart GRE tunnel interfaces on the hub.
-    if [[ -f /etc/frp/frps.toml ]] || systemctl list-unit-files 2>/dev/null | grep -q "^frps\.service"; then
-        for u in /etc/systemd/system/gre-t*.service /etc/systemd/system/gre-tunnel.service; do
+    if [[ -f "${CONFIG_DIR:-/etc/frp}/frps.toml" ]] || systemctl list-unit-files 2>/dev/null | grep -q "^frps\.service"; then
+        for u in "$dir"/gre-t*.service; do   # gre-tunnel.service too: listing it again restarted it twice
             [[ -f "$u" ]] || continue
-            systemctl restart "$(basename "$u")" >/dev/null 2>&1
+            ifc=$(basename "$u" .service)
+            if (( broken )) && gre_if_healthy "$ifc"; then
+                echo "watchdog: ${ifc} is carrying traffic, not restarted"
+                continue
+            fi
+            systemctl restart "${ifc}.service" >/dev/null 2>&1
         done
+        if (( broken )); then
+            for u in "$dir"/frps*.service "$dir"/backhaul-server*.service; do
+                [[ -f "$u" ]] || continue
+                systemctl is-failed --quiet "$(basename "$u")" 2>/dev/null && systemctl restart "$(basename "$u")" >/dev/null 2>&1
+            done
+        fi
         return 0
     fi
 
     # On foreign node (frpc client):
     local list=()
-    for u in /etc/systemd/system/gre-tunnel.service /etc/systemd/system/frpc.service /etc/systemd/system/backhaul-client.service; do
+    for u in "$dir"/gre-tunnel.service "$dir"/frpc.service "$dir"/backhaul-client.service; do
         [[ -f "$u" ]] || continue
+        if (( broken )) && [[ "$(basename "$u")" == gre-tunnel.service ]] && gre_if_healthy gre-tunnel; then
+            echo "watchdog: gre-tunnel is carrying traffic, not restarted"
+            continue
+        fi
         list+=("$(basename "$u")")
     done
-    local unique_units=($(echo "${list[@]}" | tr " " "\n" | sort -u))
-    for u in "${unique_units[@]}"; do
+    for u in "${list[@]}"; do
         systemctl restart "$u" >/dev/null 2>&1
     done
 }
@@ -8041,7 +8772,7 @@ print(action)
                 fi
             fi
             if [[ "$DO_RESTART" == "True" || "$DO_RESTART" == "true" ]]; then
-                restart_all_lite
+                restart_all_lite --broken-only
             fi
         elif [[ "$DECISION" == RECOVERED* ]]; then
             local DMIN
@@ -8071,7 +8802,7 @@ except Exception:
     fi
 
     if [[ "$DO_RESTART_SCHED" == "True" || "$DO_RESTART_SCHED" == "true" ]]; then
-        restart_all_lite >/dev/null 2>&1 || true
+        restart_all_lite --broken-only >/dev/null 2>&1 || true
         python3 -c '
 import json, time
 path = "'"$WATCHDOG_FILE"'"
@@ -8735,6 +9466,22 @@ except Exception:
     done
 }
 
+# hashem autopilot [status | on [-down N] [-cooldown N] [-per-day N] [-no-path-test] | off]
+# Autopilot lives in the panel (autopilot.go): this only sets it. Turning it
+# on is Hashem Pro, as in the panel; status and off never ask.
+cli_autopilot() {
+    local SUB="${1:-status}"
+    shift || true
+    local bin="${PANEL_BIN:-/usr/local/bin/gre-panel}"
+    [[ -x "$bin" ]] || { echo -e "${RED}[!] The panel is not installed: Autopilot is part of it.${NC}"; return 1; }
+    case "$SUB" in
+        on|enable) pro_ok autopilot Autopilot || return 1; "$bin" autopilot on "$@" ;;
+        off|disable) "$bin" autopilot off ;;
+        status) "$bin" autopilot status ;;
+        *) echo "Usage: hashem autopilot [status | on [-down 5] [-cooldown 30] [-per-day 6] [-no-path-test] | off]"; return 2 ;;
+    esac
+}
+
 cli_watchdog() {
     local SUB="$1"
     shift || true
@@ -8934,6 +9681,7 @@ update_all() {
         echo -e "${GREEN}[OK] New hashem.sh downloaded and syntax-checked.${NC}"
     fi
     remove_legacy_units
+    peer_sweep_orphans # a failed add-peer of an older release: its port is free again
     # 2. reinstall panel binary from latest release (downloads prebuilt, restarts service)
     echo -e "${CYAN}[*] Updating panel binary...${NC}"
     # backup panel config so a failed update can be rolled back
@@ -8978,6 +9726,9 @@ update_all() {
     if [[ -x "${INSTALL_DIR}/spoof" ]]; then
         "$HASHEM_BIN" spoof install </dev/null >/dev/null 2>&1 || true
     fi
+    # FRP from an older release moves to the pinned version (the new script's
+    # frp_upgrade checks the configs and restarts the FRP services).
+    "$HASHEM_BIN" cores-upgrade </dev/null || true
     # The timer runs whether or not alerts are on: scheduled backups,
     # restarts and Auto-Pool depend on it (M6).
     watchdog_timer_ensure >/dev/null 2>&1 || true
@@ -9439,19 +10190,21 @@ ui_status_refresh() {
     if tunnel_present 2>/dev/null; then
         local up=0 u
         for u in frps frpc backhaul-server backhaul-client gre-tunnel; do
-            systemctl is-active --quiet "$u" 2>/dev/null && up=1
+            timeout 3 systemctl is-active --quiet "$u" 2>/dev/null && { up=1; break; }
         done
         if (( up )); then UI_TUN="${GREEN}up${NC}"; else UI_TUN="${RED}down${NC}"; fi
     fi
     UI_PANEL="${RED}stopped${NC}"
     UI_URL=""
-    if systemctl is-active --quiet gre-panel 2>/dev/null; then
+    if timeout 3 systemctl is-active --quiet gre-panel 2>/dev/null; then
         UI_PANEL="${GREEN}running${NC}"
         UI_URL=$(panel_address)
     fi
     UI_LIC="Free"
-    [[ -x "$PANEL_BIN" ]] && "$PANEL_BIN" license check performance >/dev/null 2>&1 && UI_LIC="${GREEN}Pro${NC}"
-    UI_VER=$("$PANEL_BIN" --version 2>/dev/null | head -n1)
+    # bounded: a panel binary or systemd that does not answer must not hang
+    # the menu before it is drawn (a timeout reads as Free, never as Pro)
+    [[ -x "$PANEL_BIN" ]] && timeout 5 "$PANEL_BIN" license check performance </dev/null >/dev/null 2>&1 && UI_LIC="${GREEN}Pro${NC}"
+    UI_VER=$(timeout 5 "$PANEL_BIN" --version </dev/null 2>/dev/null | head -n1)
 }
 
 # ui_header TITLE [BREADCRUMB]: clears the screen and draws the app bar.
@@ -10074,7 +10827,7 @@ menu_update() {
         ui_menu c "Update" "Channel: $(update_get_channel)   Panel: ${UI_VER:-not installed}" \
             "1|Update now|Latest hashem and panel from the current channel (configs are backed up first)." \
             "2|Update channel|stable, or dev for test builds." \
-            "3|Download core binaries|FRP and Backhaul, checked and cached." \
+            "3|Download core binaries|FRP and Backhaul; an older FRP is upgraded (its services restart)." \
             "4|Refresh system packages|The tools Hashem needs (iproute2, curl, ...)." \
             "5|Load kernel modules|ip_gre and fou."
         case "$c" in
@@ -10097,6 +10850,7 @@ menu_update() {
             3)
                 ui_page "Core binaries"
                 install_frp_binaries "both" || true
+                frp_upgrade || true
                 install_backhaul_binaries "both" || true
                 echo -e "${GREEN}[OK] Core binaries are ready.${NC}"
                 ui_pause
@@ -10305,6 +11059,7 @@ menu_uninstall() {
 # ------------------------------------------------------------- Main menu ----
 menu_loop() {
     ui_init
+    echo -e "${CYAN}[*] Opening the Hashem menu...${NC}"
     trap 'ui_cleanup; echo; exit 0' INT TERM
     trap ui_cleanup EXIT
     local c
@@ -10376,7 +11131,8 @@ Usage:
   hashem settings [show | 2fa off | terminal on|off | terminal-allow [IP ...] | idle MIN]  # panel settings
   hashem license [status | activate KEY | machine-id | deactivate]
   hashem cluster [status | pool add PORT [--mode M] | pool rm|mode ... | member add|rm|drain|resume PORT LINK | join-code | add-hub CODE | events | rules]
-  hashem node-join <hn1.code | -> [--name N] | node [status | leave | move]   # this server as a node of a central panel (move: look for the Iran panel's move offer again)
+  hashem panel [status | install | remove]   # this server with the web panel, or as a node core (no panel, managed by its central)
+  hashem node-join <hn1.code | -> [--name N] [--core] | node [status | leave | move]   # this server as a node of a central panel (move: look for the Iran panel's move offer again)
   hashem join-hub --bundle hsh1_...|bh1_...|gh1_... | leave-hub --id N | hubs   # foreign side: serve several Iran hubs
   hashem optimize | restore | tune-status
   hashem carrier [status|mode auto|direct|fou:P|wss:P|set direct|fou:P|wss:P|next] # multi-carrier failover
@@ -10385,13 +11141,15 @@ Usage:
   hashem perf status|apply|reset|enc on|off|comp on|off|tcpmux on|off|autopool on|off
   hashem perf proxy-protocol off|v1|v2 | bandwidth MB | health-check on|off | backhaul-pool N
   hashem watchdog on|off|status|test|tick      # tunnel watchdog monitoring & alerts
+  hashem autopilot [status|on|off]             # Pro: move a tunnel that stays down to a carrier that gets through
   hashem backup now [--keep N] | restore <f> | schedule ... | status | key
   hashem tgsend "msg"                          # send Telegram alert manually
   hashem doctor [server|stop-server|fix]       # latency, jitter, MTU & speed; fix = the panel's Quick Repair
   hashem stress-test [host] [port] [conns]     # high-concurrency connection stress test (verify zero drops)
   hashem update | update-all                   # update script + panel to the latest release of the update channel
   hashem update-channel [stable|dev]           # show / set update channel (default stable; dev = test builds)
-  hashem download-cores                        # download & pre-cache FRP and Backhaul core binaries
+  hashem download-cores                        # download FRP and Backhaul if missing; upgrade an older FRP
+  hashem cores-upgrade                         # move an FRP from an older release to the pinned version (restarts FRP services)
   hashem backhaul                              # Backhaul menu: setup, status, logs, bundle
   hashem backhaul-migrate                      # move tunnels from the old Modified Backhaul script into Hashem
   hashem free-ram                              # cap journald + drop cache + 1GB swap
@@ -10956,6 +11714,7 @@ bindAddr = "127.0.0.1"
 bindPort = ${FRP_PORT}
 proxyBindAddr = "0.0.0.0"
 auth.token = "hashem-bagher-sec"
+log.level = "warn"
 transport.tcpMux = false
 EOF
                 chmod 600 /etc/gre-panel/bagher/frps.toml 2>/dev/null || true  # holds the auth token
@@ -11011,6 +11770,7 @@ mkdir -p /etc/gre-panel/bagher && cat > /etc/gre-panel/bagher/frpc.toml <<'EOF_F
 serverAddr = "127.0.0.1"
 serverPort = ${FRP_PORT}
 auth.token = "hashem-bagher-sec"
+log.level = "warn"
 transport.tcpMux = false
 transport.tls.enable = false
 transport.poolCount = ${POOL_COUNT}
@@ -11182,6 +11942,7 @@ EOF
 serverAddr = "127.0.0.1"
 serverPort = ${FRP_PORT}
 auth.token = "hashem-bagher-sec"
+log.level = "warn"
 transport.tcpMux = false
 transport.tls.enable = false
 transport.poolCount = ${POOL_COUNT}
@@ -11421,14 +12182,15 @@ cli_node() {
 # node-join CODE [--name N]: install the panel if it is missing (or too old
 # for nodes), then join the central that made CODE. Tunnels are not touched.
 cli_node_join() {
-    local code="" name="" a
+    local code="" name="" a core=0
     while [[ $# -gt 0 ]]; do
         a="$1"
         case "$a" in
             --name)
                 [[ $# -ge 2 ]] || { echo -e "${RED}[!] --name needs a value${NC}"; return 1; }
                 name="$2"; shift 2 ;;
-            -h|--help) echo "Usage: hashem node-join <hn1.code | -> [--name NAME]   (-: the code on stdin)"; return 0 ;;
+            --core) core=1; shift ;;
+            -h|--help) echo "Usage: hashem node-join <hn1.code | -> [--name NAME] [--core]   (-: the code on stdin; --core: a server without Hashem gets the node core, no web panel)"; return 0 ;;
             *) [[ -z "$code" ]] && code="$a"; shift ;;
         esac
     done
@@ -11443,8 +12205,14 @@ cli_node_join() {
         return 1
     fi
     if [[ ! -x "$PANEL_BIN" ]]; then
-        echo -e "${CYAN}[*] Installing the Hashem panel on this server...${NC}"
-        install_panel_smart || return 1
+        if [[ "$core" -eq 1 ]]; then
+            # --core after the code: a hashem.sh from before the core ignores it
+            echo -e "${CYAN}[*] Installing the Hashem node core on this server (no web panel)...${NC}"
+            HASHEM_NODE_CORE=1 install_panel || return 1
+        else
+            echo -e "${CYAN}[*] Installing the Hashem panel on this server...${NC}"
+            install_panel_smart || return 1
+        fi
     elif ! panel_supports "node \\["; then
         echo -e "${CYAN}[*] Updating the panel: this version has no node support...${NC}"
         install_panel || return 1
@@ -11452,6 +12220,9 @@ cli_node_join() {
     if ! panel_supports "node \\["; then
         echo -e "${RED}[!] The installed panel has no node support (is the update channel on a release that has it?).${NC}"
         return 1
+    fi
+    if [[ "$core" -eq 1 ]] && ! panel_is_core; then
+        echo -e "${CYAN}[*] This server already has the web panel: it keeps it. \`hashem panel remove\` makes it a node core.${NC}"
     fi
     local -a nm=()
     [[ -n "$name" ]] && nm=(--name "$name")
@@ -11461,6 +12232,37 @@ cli_node_join() {
     else
         "$PANEL_BIN" node join "$code" "${nm[@]}"  # a first node build: no stdin yet
     fi
+}
+
+# panel [status | install | remove]: this server as a web panel or as a node
+# core (the same program without the page; its files and unit stay). remove
+# only on a node: a core is managed by its central.
+cli_panel_kind() {
+    case "${1:-status}" in
+        status)
+            if [[ ! -x "$PANEL_BIN" ]]; then echo "not installed"
+            elif panel_is_core; then echo "node core (no web panel): managed by its central"
+            else echo "web panel: $(panel_address)"; fi ;;
+        install)
+            if [[ -x "$PANEL_BIN" ]] && ! panel_is_core; then
+                echo -e "${GREEN}[OK] The web panel is already installed.${NC}"; return 0
+            fi
+            HASHEM_NODE_CORE=0 install_panel ;;
+        remove)
+            if [[ ! -x "$PANEL_BIN" ]]; then
+                echo -e "${RED}[!] Hashem is not installed on this server.${NC}"; return 1
+            fi
+            if panel_is_core; then
+                echo -e "${GREEN}[OK] This server is already a node core.${NC}"; return 0
+            fi
+            if ! grep -q '"role": *"node"' "${PANEL_CONFIG_DIR}/node.json" 2>/dev/null; then
+                echo -e "${RED}[!] This server is not a node of a central. Without its panel nothing could manage it: join a central first (its Nodes page gives the line).${NC}"
+                return 1
+            fi
+            echo -e "${CYAN}[*] Removing the web panel: this server becomes a node core. Tunnels are not touched.${NC}"
+            HASHEM_NODE_CORE=1 install_panel ;;
+        *) echo "Usage: hashem panel [status | install | remove]   (remove: keep only the node core, managed by the central)"; return 1 ;;
+    esac
 }
 
 cli_cluster() {
@@ -11509,7 +12311,7 @@ hub_write_frpc() {
     {
         printf 'serverAddr = "%s"\nserverPort = %s\nauth.method = "token"\nauth.token = "%s"\nloginFailExit = false\n' "$addr" "$port" "$tok"
         printf 'transport.protocol = "%s"\n' "$tr"
-        perf_tcpmux_lines
+        perf_tcpmux_lines; echo  # it ends without a newline
         printf 'transport.heartbeatInterval = 15\ntransport.heartbeatTimeout = 45\ntransport.dialServerTimeout = 10\ntransport.dialServerKeepalive = 15\ntransport.poolCount = %s\n\n' "$pool"
         for p in $ports; do
             printf '[[proxies]]\nname = "tcp_%s"\ntype = "tcp"\nlocalIP = "%s"\nlocalPort = %s\nremotePort = %s\n' "$p" "$relay" "$p" "$p"
@@ -11716,6 +12518,7 @@ if [[ $# -gt 0 ]]; then
         restart-lite|tunnel-restart-lite) restart_all_lite; echo -e "${GREEN}[OK] Tunnel services restarted successfully.${NC}" ;;
         perf) shift; cli_perf "$@" ;;
         watchdog) shift; cli_watchdog "$@" ;;
+        autopilot) shift; cli_autopilot "$@" ;;
         backup) shift; cli_backup "$@" ;;
         tgsend) shift; watchdog_send "$1" ;;
         update|update-all) shift; update_all "$@" ;;
@@ -11757,6 +12560,7 @@ if [[ $# -gt 0 ]]; then
         join-hub) shift; cli_join_hub "$@" ;;
         node) shift; cli_node "$@" ;;
         node-join) shift; cli_node_join "$@" ;;
+        panel) shift; cli_panel_kind "$@" ;;
         leave-hub) shift; cli_leave_hub "$@" ;;
         hubs) cli_hubs ;;
         carrier-kernel-init) carrier_init_kernel ;;
@@ -11765,15 +12569,18 @@ if [[ $# -gt 0 ]]; then
         backhaul-udp-conf) shift; backhaul_udp_conf "$@"; exit $? ;;  # ExecCondition of a backhaul-udp-* unit
         carrier-apply-active) shift; carrier_apply_active "$1" ;;
         optimize) tune_apply ;;
+        net-queues) net_queues_apply && echo "$NETQ_MSG" ;;
         restore) tune_restore ;;
         tune-status) tune_status ;;
         free-ram|optimize-ram) free_ram ;;
         download-cores|cores)
             echo -e "${CYAN}[*] Downloading and verifying core binaries from pdnczone repository...${NC}"
             install_frp_binaries "all" || { echo -e "${RED}[!] Failed to install FRP binaries.${NC}"; exit 1; }
+            frp_upgrade || true
             install_backhaul_binaries || { echo -e "${RED}[!] Failed to install Backhaul binary.${NC}"; exit 1; }
             echo -e "${GREEN}[OK] All core binaries (frps, frpc, backhaul) are cached in ${INSTALL_DIR}.${NC}"
             ;;
+        cores-upgrade) frp_upgrade ;;
         backhaul|bh|modified-backhaul|backhaul-premium|mbh)
             menu_backhaul ;;
         backhaul-migrate) cli_backhaul_migrate ;;

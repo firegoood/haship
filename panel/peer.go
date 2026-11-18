@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,22 +22,21 @@ import (
 )
 
 type PeerConfig struct {
-	Role               string  `json:"role"`          // "master" (Iran) or "worker" (Kharej)
-	PeerSecret         string  `json:"peer_secret"`   // Shared secret token for inter-panel authentication
-	PeerURL            string  `json:"peer_url"`      // Public URL of peer, e.g. "http://5.6.7.8:8080"
-	InternalIP         string  `json:"internal_ip"`   // Tunnel internal IP, e.g. "10.10.10.1"
-	InternalPort       int     `json:"internal_port"` // Panel port on internal IP (default 8080)
-	LastSync           string  `json:"last_sync"`     // Timestamp of last successful handshake/sync
-	IsConnected        bool    `json:"is_connected"`
-	LatencyMs          float64 `json:"latency_ms"`
-	AutoPilotEnabled   bool    `json:"autopilot_enabled"`
-	AutoPilotExplicit  bool    `json:"autopilot_explicit,omitempty"`
-	AutoPilotThreshold float64 `json:"autopilot_threshold"`       // Packet loss percentage threshold (e.g. 20.0)
-	TLSFingerprint     string  `json:"tls_fingerprint,omitempty"` // Pinned SHA-256 (hex) of the peer's leaf TLS cert (TOFU)
+	Role           string  `json:"role"`          // "master" (Iran) or "worker" (Kharej)
+	PeerSecret     string  `json:"peer_secret"`   // Shared secret token for inter-panel authentication
+	PeerURL        string  `json:"peer_url"`      // Public URL of peer, e.g. "http://5.6.7.8:8080"
+	InternalIP     string  `json:"internal_ip"`   // Tunnel internal IP, e.g. "10.10.10.1"
+	InternalPort   int     `json:"internal_port"` // Panel port on internal IP (default 8080)
+	LastSync       string  `json:"last_sync"`     // Timestamp of last successful handshake/sync
+	IsConnected    bool    `json:"is_connected"`
+	LatencyMs      float64 `json:"latency_ms"`
+	TLSFingerprint string  `json:"tls_fingerprint,omitempty"` // Pinned SHA-256 (hex) of the peer's leaf TLS cert (TOFU)
 	// PeerBasePath is the peer panel's own random base path (each panel has a
 	// different one), learned from the handshake or from a pasted panel URL.
 	// Only needed to reach peers that predate the fixed peerRoutePrefix.
 	PeerBasePath string `json:"peer_base_path,omitempty"`
+	// PeerFrpVersion is the frp the peer runs, as it last said (handshake or ping).
+	PeerFrpVersion string `json:"peer_frp_version,omitempty"`
 }
 
 type PeerHandshakeRequest struct {
@@ -45,6 +45,7 @@ type PeerHandshakeRequest struct {
 	PanelPort  int    `json:"panel_port"`
 	InternalIP string `json:"internal_ip"`
 	BasePath   string `json:"base_path,omitempty"`
+	FrpVersion string `json:"frp_version,omitempty"` // the sender's installed frp, for the version check in Diagnostics
 }
 
 // peerRoutePrefix serves the peer API at a fixed path, independent of each
@@ -66,13 +67,11 @@ type PeerApplyEngineRequest struct {
 }
 
 type PeerConfigUpdateRequest struct {
-	Action             string  `json:"action,omitempty"` // "save", "test"
-	PeerURL            string  `json:"peer_url,omitempty"`
-	PeerSecret         string  `json:"peer_secret,omitempty"`
-	InternalIP         string  `json:"internal_ip,omitempty"`
-	Role               string  `json:"role,omitempty"`
-	AutoPilotEnabled   *bool   `json:"autopilot_enabled,omitempty"`
-	AutoPilotThreshold float64 `json:"autopilot_threshold,omitempty"`
+	Action     string `json:"action,omitempty"` // "save", "test"
+	PeerURL    string `json:"peer_url,omitempty"`
+	PeerSecret string `json:"peer_secret,omitempty"`
+	InternalIP string `json:"internal_ip,omitempty"`
+	Role       string `json:"role,omitempty"`
 }
 
 var (
@@ -102,17 +101,14 @@ func defaultPeerConfig() PeerConfig {
 	}
 
 	return PeerConfig{
-		Role:               role,
-		PeerSecret:         secret,
-		PeerURL:            "",
-		InternalIP:         internalIP,
-		InternalPort:       cfg.Port,
-		LastSync:           "",
-		IsConnected:        false,
-		LatencyMs:          0,
-		AutoPilotEnabled:   false,
-		AutoPilotExplicit:  true,
-		AutoPilotThreshold: 20.0,
+		Role:         role,
+		PeerSecret:   secret,
+		PeerURL:      "",
+		InternalIP:   internalIP,
+		InternalPort: cfg.Port,
+		LastSync:     "",
+		IsConnected:  false,
+		LatencyMs:    0,
 	}
 }
 
@@ -148,19 +144,7 @@ func readPeerConfig() (PeerConfig, bool) {
 	if c.InternalPort <= 0 {
 		c.InternalPort = cfg.Port
 	}
-	if c.AutoPilotThreshold <= 0 {
-		c.AutoPilotThreshold = 20.0
-	}
-
-	needsSave := false
-	// Migration: disable AutoPilot on existing configs so tunnels do not switch automatically.
-	// AutoPilot was previously true by default, causing unwanted tunnel flap/switching.
-	if !c.AutoPilotExplicit {
-		c.AutoPilotEnabled = false
-		c.AutoPilotExplicit = true
-		needsSave = true
-	}
-	return c, needsSave
+	return c, false
 }
 
 func savePeerConfig(c PeerConfig) error {
@@ -272,6 +256,7 @@ func mountPeerRoutes(mux *http.ServeMux, base string) {
 		{"GET", "/api/peer/node-offer", handlePeerNodeOffer}, // nodes N5 (node_migrate.go)
 		{"POST", "/api/peer/swap-carrier", handlePeerSwapCarrier},
 		{"GET", "/api/peer/swap-status", handlePeerSwapStatus},
+		{"POST", "/api/peer/pathtest-join", handlePeerPathTestJoin}, // autopilot.go
 		{"GET", "/api/peer/swap-request", handlePeerSwapRequestGet},
 		{"POST", "/api/peer/swap-request", handlePeerSwapRequest},
 		{"GET", "/api/peer/wrap-request", handlePeerWrapStatus},
@@ -330,6 +315,9 @@ func handlePeerHandshake(w http.ResponseWriter, r *http.Request) {
 		if bp := strings.Trim(req.BasePath, "/"); bp != "" {
 			c.PeerBasePath = bp
 		}
+		if v := cleanFrpVersion(req.FrpVersion); v != "" {
+			c.PeerFrpVersion = v
+		}
 		role = c.Role
 	})
 
@@ -341,8 +329,9 @@ func handlePeerHandshake(w http.ResponseWriter, r *http.Request) {
 		"version":        panelVersion,
 		"timestamp":      time.Now().Unix(),
 		// Lets the caller reach this panel directly next time.
-		"base_path":  strings.Trim(cfg.BasePath, "/"),
-		"panel_port": cfg.Port,
+		"base_path":   strings.Trim(cfg.BasePath, "/"),
+		"panel_port":  cfg.Port,
+		"frp_version": localFrpVersion(),
 	})
 }
 
@@ -355,13 +344,15 @@ func peerHandshake(role, internalIP string) error {
 		PanelPort:  cfg.Port,
 		InternalIP: internalIP,
 		BasePath:   strings.Trim(cfg.BasePath, "/"),
+		FrpVersion: localFrpVersion(),
 	})
 	if err != nil {
 		return err
 	}
 	var hs struct {
-		BasePath  string `json:"base_path"`
-		PanelPort int    `json:"panel_port"`
+		BasePath   string `json:"base_path"`
+		PanelPort  int    `json:"panel_port"`
+		FrpVersion string `json:"frp_version"`
 	}
 	if json.Unmarshal(resp, &hs) == nil {
 		_ = updatePeerConfig(func(c *PeerConfig) {
@@ -370,6 +361,9 @@ func peerHandshake(role, internalIP string) error {
 			}
 			if hs.PanelPort > 0 && hs.PanelPort <= 65535 {
 				c.InternalPort = hs.PanelPort
+			}
+			if v := cleanFrpVersion(hs.FrpVersion); v != "" {
+				c.PeerFrpVersion = v
 			}
 		})
 	}
@@ -460,12 +454,27 @@ func markPeerSeen() {
 
 // POST /api/peer/ping
 func handlePeerPing(w http.ResponseWriter, r *http.Request) {
+	// the caller's frp version rides along, so an upgrade on the other server is seen
+	var req struct {
+		FrpVersion string `json:"frp_version"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
+	if v := cleanFrpVersion(req.FrpVersion); v != "" {
+		if id, _ := r.Context().Value(tunnelCtxKey{}).(int); id > 0 {
+			if loadTunnelLinks()[id].FrpVersion != v {
+				updateTunnelLink(id, func(l *tunnelLink) { l.FrpVersion = v })
+			}
+		} else if loadPeerConfig().PeerFrpVersion != v {
+			_ = updatePeerConfig(func(c *PeerConfig) { c.PeerFrpVersion = v })
+		}
+	}
 	carrierCfg := loadCarrierConfig()
 	writeJSON(w, map[string]any{
 		"status":         "pong",
 		"active_carrier": carrierCfg.ActiveCarrier,
 		"version":        panelVersion,
 		"time":           time.Now().UnixNano(),
+		"frp_version":    localFrpVersion(),
 	})
 }
 
@@ -484,8 +493,6 @@ func handlePeerStatus(w http.ResponseWriter, r *http.Request) {
 		"last_sync":      c.LastSync,
 		"active_carrier": carrierCfg.ActiveCarrier,
 		"tunnel_name":    st.Gre.Name,
-		"autopilot":      c.AutoPilotEnabled,
-		"threshold":      c.AutoPilotThreshold,
 	})
 }
 
@@ -551,13 +558,6 @@ func handlePeerConfigPost(w http.ResponseWriter, r *http.Request) {
 		if role == "master" || role == "worker" {
 			c.Role = role
 		}
-	}
-	if req.AutoPilotEnabled != nil {
-		c.AutoPilotEnabled = *req.AutoPilotEnabled
-		c.AutoPilotExplicit = true
-	}
-	if req.AutoPilotThreshold > 0 {
-		c.AutoPilotThreshold = req.AutoPilotThreshold
 	}
 
 	if err := savePeerConfig(c); err != nil {
@@ -626,12 +626,28 @@ func sendToPeerTimeout(path string, method string, payload any, timeout time.Dur
 		}
 	}
 
-	targetURLs := peerTargetURLs(c, path)
+	// The node channel first, when both servers belong to one central: it
+	// gets through when this server cannot reach the peer's port (node_peer.go).
+	var lastErr error
+	if st, data, ok := peerChannel(peerPublicIPs(c), method, "/"+strings.TrimLeft(path, "/"), c.PeerSecret, bodyBytes, timeout); ok {
+		if st >= 200 && st < 300 && json.Valid(data) {
+			markPeerSeen()
+			return data, nil
+		}
+		lastErr = fmt.Errorf("peer returned HTTP %d over the node channel: %s", st, truncateForError(data))
+	}
+
+	// an address that did not connect lately goes last (peerreach.go)
+	targetURLs := peerOrderURLs(peerTargetURLs(c, path))
 	if len(targetURLs) == 0 {
+		if lastErr != nil {
+			return nil, lastErr
+		}
 		return nil, fmt.Errorf("no peer address configured (both InternalIP and PeerURL are empty)")
 	}
 
 	tr := &http.Transport{
+		DialContext:     (&net.Dialer{Timeout: peerDialTimeout}).DialContext,
 		TLSClientConfig: peerTLSConfig(&c),
 	}
 	defer tr.CloseIdleConnections()
@@ -643,7 +659,6 @@ func sendToPeerTimeout(path string, method string, payload any, timeout time.Dur
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
-	var lastErr error
 	deadHosts := map[string]bool{} // scheme://host:port that failed to connect
 	for _, target := range targetURLs {
 		pu, _ := url.Parse(target)
@@ -669,8 +684,12 @@ func sendToPeerTimeout(path string, method string, payload any, timeout time.Dur
 		if err != nil {
 			lastErr = err
 			deadHosts[hostKey] = true
+			if peerConnectFailed(err) {
+				peerMarkDown(peerHostKey(target))
+			}
 			continue
 		}
+		peerMarkUp(peerHostKey(target))
 
 		respBytes, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
@@ -691,6 +710,36 @@ func sendToPeerTimeout(path string, method string, payload any, timeout time.Dur
 
 	_ = updatePeerConfig(func(p *PeerConfig) { p.IsConnected = false })
 	return nil, lastErr
+}
+
+// forgetPeerLink ends the Peer Link after the last tunnel is removed: a new
+// secret (the old server's no longer opens this panel's peer API) and no
+// address to call, so this server stops asking a panel that now rejects it.
+func forgetPeerLink() {
+	_ = updatePeerConfig(func(c *PeerConfig) {
+		if c.PeerSecret != "" {
+			c.PeerSecret = randomToken(32)
+		}
+		c.PeerURL, c.PeerBasePath, c.TLSFingerprint, c.PeerFrpVersion = "", "", "", ""
+		c.IsConnected, c.LatencyMs, c.LastSync = false, 0, ""
+	})
+}
+
+// peerPublicIPs: the peer's public address, as the node channel knows servers.
+func peerPublicIPs(c PeerConfig) []string {
+	var out []string
+	if u := strings.TrimSpace(c.PeerURL); u != "" {
+		if !strings.Contains(u, "://") {
+			u = "http://" + u
+		}
+		if parsed, err := url.Parse(u); err == nil && parsed.Hostname() != "" {
+			out = append(out, parsed.Hostname())
+		}
+	}
+	if st := currentLocal(); st.RemotePub != "" {
+		out = append(out, st.RemotePub)
+	}
+	return out
 }
 
 func truncateForError(b []byte) string {
@@ -760,8 +809,16 @@ func peerTargetURLs(c PeerConfig, path string) []string {
 // testPeerLink measures HTTP ping round-trip time to peer and updates status.
 func testPeerLink() (bool, float64, error) {
 	start := time.Now()
-	_, err := sendToPeer("/api/peer/ping", "POST", map[string]string{"action": "ping"})
+	resp, err := sendToPeer("/api/peer/ping", "POST", map[string]string{"action": "ping", "frp_version": localFrpVersion()})
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
+	var pong struct {
+		FrpVersion string `json:"frp_version"`
+	}
+	if err == nil && json.Unmarshal(resp, &pong) == nil {
+		if v := cleanFrpVersion(pong.FrpVersion); v != "" && v != loadPeerConfig().PeerFrpVersion {
+			_ = updatePeerConfig(func(c *PeerConfig) { c.PeerFrpVersion = v })
+		}
+	}
 
 	if err != nil {
 		_ = updatePeerConfig(func(c *PeerConfig) {

@@ -68,14 +68,33 @@
   .app-layout { display:flex; min-height:100dvh; width:100%; background:var(--bg); }
   .sidebar { width:236px; background:var(--sidebar-bg); border-right:1px solid var(--ln);
     display:flex; flex-direction:column; position:sticky; top:0; height:100dvh; z-index:50; flex-shrink:0; }
-  .sidebar-brand { padding:20px 16px 14px; display:flex; flex-direction:column; align-items:center;
-    gap:8px; border-bottom:1px solid var(--ln); flex-shrink:0; }
-  .sidebar-brand .brand-name { font-size:var(--fs-h4); font-weight:700; letter-spacing:.05em; color:var(--tx); }
-  .brand-mustache { display:block; transition:transform .28s cubic-bezier(.16,1,.3,1); }
-  .sidebar-brand:hover .brand-mustache { transform:scale(1.03); }
-  /* Premium: a gold hairline on the logo tile also marks the tier when the sidebar is collapsed. */
-  .sidebar-brand.is-premium .brand-mustache rect { stroke:var(--gold-line); }
-  .sidebar-brand .brand-tier { margin-top:-2px; }
+  /* Brand: the mark over the name (its own face, .brand-font in fonts.css) and
+     one quiet line, the edition or the Premium tag. A fixed height keeps the
+     collapse button on the bottom line either way. The gradients live in
+     .brand-defs, which is never hidden, so the phone drawer keeps them too. */
+  .brand-defs { position:absolute; width:0; height:0; overflow:hidden; }
+  .sidebar-brand { box-sizing:border-box; height:156px; padding:22px 16px 16px; display:flex; flex-direction:column;
+    align-items:center; border-bottom:1px solid var(--ln); flex-shrink:0;
+    background:radial-gradient(150px 96px at 50% 0, var(--ac-b22), transparent 72%); }
+  .brand-mark { display:block; flex:none; stroke:none; border-radius:24%; box-shadow:0 8px 22px -8px var(--ac-b30);
+    transition:transform .28s cubic-bezier(.16,1,.3,1), box-shadow .28s; }
+  .sidebar-brand:hover .brand-mark { transform:translateY(-1px) scale(1.02); }
+  .brand-text { display:flex; flex-direction:column; align-items:center; min-width:0; }
+  .brand-name { font-family:'Hashem Brand', var(--font-sans); font-weight:800; color:var(--tx); line-height:1.15; }
+  .sidebar-brand .brand-name { margin-top:12px; font-size:22px; letter-spacing:.015em; }
+  .drawer-head .brand-name { font-size:18px; letter-spacing:.015em; }
+  html[lang="fa"] .brand-name { letter-spacing:0; }
+  .brand-sub { margin-top:7px; font-size:12px; font-weight:600; line-height:20px; letter-spacing:.16em; text-transform:uppercase; color:var(--mu); white-space:nowrap; }
+  html[lang="fa"] .brand-sub { letter-spacing:0; font-weight:500; }
+  .sidebar-brand .brand-tier { margin-top:7px; }
+  .drawer-head .brand-text { align-items:flex-start; }
+  .drawer-head .brand-sub, .drawer-head .brand-tier { margin-top:3px; }
+  /* Premium: the tag takes the edition line, the mark is ringed in gold (it
+     still shows the tier when the sidebar is collapsed) and the halo warms. */
+  [data-brand].is-premium .brand-sub { display:none; }
+  [data-brand].is-premium .bm-ring { stroke:var(--gold); stroke-opacity:.75; }
+  [data-brand].is-premium .brand-mark { box-shadow:0 8px 22px -8px var(--gold-line); }
+  .sidebar-brand.is-premium { background:radial-gradient(150px 96px at 50% 0, var(--gold-soft), transparent 72%); }
   .sidebar-nav { padding:12px; display:flex; flex-direction:column; gap:4px; flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scroll-behavior:smooth; }
   .nav-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
     border:0; background:transparent; color:var(--mu); font-size:var(--fs-body); font-weight:600;
@@ -97,17 +116,72 @@
   }
   .topbar h1 { font-size:var(--fs-h2); margin:0; }
   .topbar .sub { color:var(--mu); font-size:var(--fs-small); }
-  /* Signature: the link strip under the title. One quiet line, one live dot. */
-  .topbar #roleLine { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
+  /* Signature: the title with the page shown, and under it the link itself:
+     this server, a live wire, the other side, then the engine and latency. */
+  .tb-id { display:grid; gap:5px; min-width:0; flex:1 1 auto; }
+  .topbar .acts { flex:none; }
+  .tb-title { display:flex; align-items:center; gap:12px; min-width:0; }
+  .topbar h1.tb-page { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* this server: its name and public IP; a click copies the IP */
+  .tb-host { display:inline-flex; align-items:center; gap:7px; min-width:0; max-width:340px; height:28px; padding:0 11px; border:1px solid var(--ln); border-radius:999px;
+    background:var(--s2); color:var(--tx2); font:inherit; font-size:12px; font-weight:600; font-variant-numeric:tabular-nums; cursor:pointer; transition:border-color .15s ease, color .15s ease; }
+  .tb-host[hidden] { display:none; }
+  .tb-host:hover { border-color:var(--ac); color:var(--tx); }
+  .tb-host:focus-visible { outline:2px solid var(--ac); outline-offset:2px; }
+  .tb-host svg { width:14px; height:14px; flex:none; fill:none; stroke:var(--ac); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .tb-host bdi { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .topbar #roleLine { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-variant-numeric:tabular-nums; min-width:0; }
   #roleLine bdi { color:var(--tx2); font-weight:500; }
+  .ls-link { display:inline-flex; align-items:center; gap:8px; padding:3px 10px 3px 8px; border:1px solid var(--ln2); border-radius:999px; background:var(--sunk); min-width:0; max-width:100%; overflow:hidden; }
+  html[dir="rtl"] .ls-link { padding:3px 8px 3px 10px; }
+  .ls-end { display:inline-flex; align-items:center; gap:6px; min-width:0; white-space:nowrap; }
+  .ls-end svg { width:13px; height:13px; fill:none; stroke:var(--mu); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  .ls-end.there bdi { overflow:hidden; text-overflow:ellipsis; }
+  .ls-end.there.ip bdi { font-family:var(--font-mono); font-size:var(--fs-caption); }
+  .ls-end.there { flex:0 1 auto; }
   .ls-dot { width:7px; height:7px; border-radius:50%; background:var(--dim); flex:none; }
   .ls-dot.ok { background:var(--ok); animation:lsBeat 2.4s ease-in-out infinite; }
   .ls-dot.warn { background:var(--wr); }
   .ls-dot.err { background:var(--er); }
-  .ls-arrow { color:var(--ac); font-weight:600; }
-  .ls-sep { color:var(--dim); }
+  .ls-wire { position:relative; width:42px; height:2px; flex:none; border-radius:2px; background:repeating-linear-gradient(90deg, var(--dim) 0 4px, transparent 4px 8px); }
+  .ls-wire.ok { background:repeating-linear-gradient(90deg, var(--ok) 0 6px, transparent 6px 10px); animation:lsFlow 1.1s linear infinite; }
+  .ls-wire.warn { background:repeating-linear-gradient(90deg, var(--wr) 0 6px, transparent 6px 10px); }
+  .ls-wire.err { background:repeating-linear-gradient(90deg, var(--er) 0 2px, transparent 2px 7px); }
+  .ls-wire::before, .ls-wire::after { content:""; position:absolute; top:-2px; width:6px; height:6px; border-radius:50%; background:var(--s1); border:1.5px solid var(--dim); box-sizing:border-box; }
+  .ls-wire::before { inset-inline-start:-3px; } .ls-wire::after { inset-inline-end:-3px; }
+  .ls-wire.ok::before, .ls-wire.ok::after { border-color:var(--ok); }
+  .ls-wire.warn::before, .ls-wire.warn::after { border-color:var(--wr); }
+  .ls-wire.err::before, .ls-wire.err::after { border-color:var(--er); }
+  html[dir="rtl"] .ls-wire.ok { animation-direction:reverse; }
+  @keyframes lsFlow { to { background-position:20px 0; } }
+  .ls-chip { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; border:1px solid var(--ac-b22); background:var(--ac-soft); color:var(--ac); font-size:var(--fs-caption); font-weight:600; white-space:nowrap; }
+  .ls-chip.ms { border-color:var(--ln2); background:var(--sunk); color:var(--tx2); font-family:var(--font-mono); }
+  .ls-chip.ms.slow { color:var(--wr); border-color:var(--wr-b40); }
+  .ls-chip svg { width:12px; height:12px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .tb-pick { position:relative; display:inline-flex; align-items:center; }
+  .tb-pick[hidden] { display:none; }
+  .tb-pick svg { position:absolute; inset-inline-start:11px; width:15px; height:15px; fill:none; stroke:var(--mu); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+  .tb-pick .node-pick { padding-inline-start:33px; border-radius:999px; }
+  .tb-refresh { gap:7px; }
+  .tb-refresh svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  .tb-refresh.spin svg { animation:tbSpin .8s linear infinite; }
+  @keyframes tbSpin { to { transform:rotate(360deg); } }
   @keyframes lsBeat { 0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--ok) 45%, transparent); } 50% { box-shadow:0 0 0 4px transparent; } }
-  @media (prefers-reduced-motion: reduce) { .ls-dot.ok { animation:none; } }
+  /* phones: title and buttons on the first row, the link line on its own row under them */
+  @media (max-width:640px) {
+    .topbar { display:grid; grid-template-columns:auto minmax(0,1fr) auto; row-gap:8px; }
+    .tb-id { display:contents; }
+    .topbar .tb-title { grid-column:2; grid-row:1; align-self:center; }
+    .topbar #roleLine { grid-column:1 / -1; grid-row:2; }
+    .topbar .acts { grid-column:3; grid-row:1; }
+    .tb-host { display:none; }
+    .tb-pick .node-pick { max-width:104px; }
+    .topbar .tb-title { overflow:hidden; } .topbar h1 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .ls-end.there svg { display:none; } .ls-link { gap:6px; }
+    .tb-refresh { width:40px; padding:0; justify-content:center; } .tb-refresh-t { display:none; }
+    .ls-wire { width:30px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .ls-dot.ok, .ls-wire.ok, .tb-refresh.spin svg { animation:none; } }
   .topbar .acts { margin-inline-start:auto; display:flex; gap:8px; }
   .page { max-width:1120px; margin:0 auto; padding:20px; width:100%; display:grid; grid-template-columns:minmax(0,1fr); gap:16px; padding-bottom:72px; }
   .tunnel-card, .qs { background:var(--s1); border:1px solid var(--ln); border-radius:var(--r-lg);
@@ -431,10 +505,6 @@
   /* Update tab */
   .ver-big { font-size:28px; font-weight:700; color:var(--tx); letter-spacing:-.02em;
     font-variant-numeric:tabular-nums; }
-  .ver-row { display:flex; align-items:center; justify-content:space-between; gap:10px;
-    padding:10px 0; border-bottom:1px solid var(--ln); font-size:var(--fs-body); }
-  .ver-row:last-child { border:0; }
-  .ver-row .k { color:var(--mu); }
   /* ---- Apple-grade micro-polish ---- */
   .tunnel-card, .qs { box-shadow:var(--lift-sm), inset 0 1px 0 rgba(255,255,255,.045); }
   body[data-t="light"] .tunnel-card, body[data-t="light"] .qs {
@@ -469,7 +539,6 @@
     background:color-mix(in srgb, var(--s2) 88%, transparent); box-shadow:var(--lift);
     font-size:var(--fs-body); font-weight:500; }
   .topbar h1 { letter-spacing:-.02em; }
-  .sidebar-brand .brand-name { letter-spacing:.04em; }
   .chart-filters button { min-height:32px; }
   .nav-item, .drawer-nav .nav-item { min-height:40px; }
   .sysbar { height:8px; border-radius:99px; background:var(--sunk); overflow:hidden;
@@ -568,7 +637,6 @@
   html[dir="rtl"] .drawer { transform:translateX(102%); }
   html[dir="rtl"] .drawer.open { transform:none; }
   .drawer-head { display:flex; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--ln); }
-  .drawer-head .brand-name { font-weight:700; letter-spacing:.05em; color:var(--tx); }
   .drawer-x { margin-inline-start:auto; border:0; background:transparent; color:var(--mu); font-size:22px; cursor:pointer; padding:4px 8px; }
   .drawer-nav { padding:12px; display:flex; flex-direction:column; gap:4px; flex:1; overflow-y:auto; }
   .drawer-nav .nav-sec { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
@@ -635,8 +703,131 @@
   #login .foot b { color:var(--tx2); font-weight:600; }
   .hidden { display:none !important; }
   /* Update tab */
-  .upd-hero { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-top:4px; }
-  .upd-to { display:flex; align-items:flex-end; gap:16px; }
+  /* Update tab: the installed version as a hero with a state icon, the facts as
+     tiles, the channel as two option cards. */
+  .upd-hero { --upd-c:var(--ac); display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-top:6px; padding:18px;
+    border:1px solid var(--ln); border-radius:var(--r-lg);
+    background:linear-gradient(135deg, color-mix(in srgb, var(--upd-c) 9%, transparent), transparent 60%), var(--s2); }
+  .upd-hero[data-st="ok"] { --upd-c:var(--ok); }
+  .upd-hero[data-st="fail"] { --upd-c:var(--wr); }
+  .upd-ic { flex:none; width:52px; height:52px; border-radius:16px; display:grid; place-items:center; color:var(--upd-c);
+    background:color-mix(in srgb, var(--upd-c) 14%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--upd-c) 30%, transparent); }
+  .upd-ic svg { width:26px; height:26px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .upd-cur { min-width:0; }
+  .upd-hero .ver-big { line-height:1.1; margin-top:2px; overflow-wrap:anywhere; }
+  .upd-to { display:flex; align-items:center; gap:16px; }
+  .upd-pill { padding:5px 12px 5px 10px; border-radius:999px; border:1px solid var(--ln); background:var(--s2); }
+  .upd-pill.ok { color:var(--ok); background:var(--ok-soft); border-color:var(--ok-b40); }
+  .upd-pill.warn { color:var(--wr); background:var(--wr-soft); border-color:var(--wr-b40); }
+  .upd-pill.warn .dot { background:var(--wr); }
+  .upd-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-top:12px; }
+  @media (max-width:640px) { #updPeerRow { grid-column:1 / -1; } .upd-hero { padding:14px; } .upd-hero .ver-big { font-size:24px; } }
+  .upd-stat { display:flex; flex-direction:column; align-items:flex-start; gap:6px; min-width:0; padding:12px 14px;
+    border:1px solid var(--ln); border-radius:var(--r-md); background:var(--s2); }
+  .upd-stat[hidden] { display:none; }
+  .upd-stat .k { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; color:var(--mu); }
+  .upd-stat .k svg { width:14px; height:14px; flex:none; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .upd-stat .v { font-size:15px; font-weight:600; color:var(--tx); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+  .upd-stat .v.dim { font-size:13px; font-weight:500; color:var(--mu); }
+  .upd-stat .badge { font-size:12px; }
+  /* Settings tab: the cards in labelled groups (two columns where there is
+     room), each card with an icon, and chips above that jump to a group. */
+  #tab-settings:not([hidden]) { display:flex; flex-direction:column; gap:28px; }
+  .set-nav { display:flex; flex-wrap:wrap; gap:6px; padding:6px; border:1px solid var(--ln); border-radius:var(--r-lg); background:var(--s1); box-shadow:var(--lift-sm); }
+  .set-nav button { display:inline-flex; align-items:center; gap:8px; min-height:38px; padding:0 14px; border:1px solid transparent; border-radius:10px;
+    background:transparent; color:var(--tx2); font:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:background .15s ease, color .15s ease, border-color .15s ease; }
+  .set-nav button:hover { background:var(--s2); border-color:var(--ln); color:var(--tx); }
+  .set-nav button:focus-visible { outline:2px solid var(--ac); outline-offset:2px; }
+  .set-nav svg { width:16px; height:16px; flex:none; fill:none; stroke:var(--ac); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .set-group { display:flex; flex-direction:column; gap:14px; scroll-margin-top:120px; } /* clears the sticky topbar, 99px on phones */
+  .set-gh { display:flex; flex-direction:column; gap:4px; padding-inline:2px; }
+  .set-gt { display:flex; align-items:center; gap:12px; margin:0; font-size:12px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--tx2); }
+  .set-gt::after { content:""; flex:1; height:1px; background:linear-gradient(90deg, color-mix(in srgb, var(--ac) 45%, var(--ln2)), transparent 85%); }
+  [dir="rtl"] .set-gt::after { background:linear-gradient(270deg, color-mix(in srgb, var(--ac) 45%, var(--ln2)), transparent 85%); }
+  html[lang="fa"] .set-gt { font-size:14px; letter-spacing:0; }
+  .set-gd { margin:0; font-size:13px; color:var(--mu); }
+  .set-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap:16px; align-items:stretch; }
+  .set-grid > .set-wide { grid-column:1 / -1; }
+  .set-grid > .tunnel-card { padding:20px; gap:14px; }
+  .tc-header > .set-h { display:flex; flex-wrap:nowrap; align-items:center; gap:12px; min-width:0; }
+  .set-h .tc-title { min-width:0; font-size:15px; font-weight:650; line-height:1.35; }
+  .set-ic { --ic:var(--ac); flex:none; width:38px; height:38px; border-radius:12px; display:grid; place-items:center; color:var(--ic);
+    background:linear-gradient(145deg, color-mix(in srgb, var(--ic) 20%, transparent), color-mix(in srgb, var(--ic) 7%, transparent));
+    box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--ic) 28%, transparent); }
+  .set-ic.gold { --ic:var(--gold); }
+  .set-ic svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .set-acts { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:auto; padding-top:14px; border-top:1px solid var(--ln); }
+  .set-fields { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap:0 12px; }
+  .set-now { padding:10px 12px; border-radius:var(--r-md); background:var(--sunk); border:1px solid var(--ln); color:var(--tx2); line-height:1.6; overflow-wrap:anywhere; }
+  .set-pill { padding:5px 12px 5px 10px; border-radius:999px; border:1px solid var(--ln); background:var(--s2); color:var(--mu); }
+  .set-pill.active { color:var(--ok); background:var(--ok-soft); border-color:var(--ok-b40); }
+  .set-pill.active .dot { background:var(--ok); box-shadow:0 0 8px color-mix(in srgb, var(--ok) 60%, transparent); }
+  .set-pill:not(.active):not(.offline) .dot { background:var(--mu); }
+  .set-pill.offline { color:var(--wr); background:var(--wr-soft); border-color:var(--wr-b40); }
+  .set-pill.offline .dot { background:var(--wr); }
+  .set-lic-on { display:grid; gap:4px; padding:12px 14px; border-radius:var(--r-md); background:var(--ok-soft); border:1px solid var(--ok-b40); }
+  .set-pro { background:linear-gradient(145deg, color-mix(in srgb, var(--gold) 9%, var(--s1)), var(--s1) 70%) !important; border-color:color-mix(in srgb, var(--gold) 30%, var(--ln)) !important; }
+  #passStrengthMeter:empty { display:none; }
+  #twofaSetupBox, #twofaDisableBox { display:flex; flex-direction:column; gap:12px; }
+  .set-chart { padding:10px 12px; border:1px solid var(--ln); border-radius:var(--r-md); background:var(--sunk); color:var(--ac); }
+  #histSvg rect { stroke:none; }
+  #tab-settings textarea.hashem-input { height:auto; min-height:84px; padding-block:10px; line-height:1.5; }
+  .set-subs { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap:14px; margin-top:4px; }
+  .set-term { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:14px; }
+  .set-sub { display:flex; flex-direction:column; gap:10px; min-width:0; padding:16px; border:1px solid var(--ln); border-radius:var(--r-md); background:var(--s2); }
+  .set-sub .qs-actions { margin-top:auto; }
+  .set-subh { display:flex; align-items:center; gap:8px; color:var(--tx); font-size:14px; }
+  .set-subh svg { width:18px; height:18px; flex:none; fill:none; stroke:var(--ac); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .set-files { display:flex; flex-wrap:wrap; gap:8px; }
+  .set-files input { min-width:0; max-width:100%; font-size:13px; color:var(--mu); }
+  .set-files input::file-selector-button { margin-inline-end:10px; padding:7px 12px; border:1px solid var(--ln2); border-radius:8px;
+    background:var(--s3); color:var(--tx); font:inherit; font-weight:600; cursor:pointer; }
+  .set-files input::file-selector-button:hover { border-color:var(--ac); }
+  .set-sws { display:flex; flex-direction:column; padding:2px 14px; border:1px solid var(--ln); border-radius:var(--r-md); background:var(--sunk); }
+  .set-sw { display:flex; align-items:center; gap:12px; min-height:46px; font-size:14px; color:var(--tx2); cursor:pointer; }
+  .set-sw + .set-sw { border-top:1px solid var(--ln); }
+  .set-sw input, .perf-sw input { appearance:none; -webkit-appearance:none; position:relative; flex:none; width:40px; min-width:40px; height:24px; min-height:24px; margin:0;
+    border-radius:999px; border:1px solid var(--ln2); background:var(--s3); cursor:pointer; transition:background .2s ease, border-color .2s ease; }
+  .set-sw input::before, .perf-sw input::before { content:""; position:absolute; top:2px; inset-inline-start:2px; width:18px; height:18px; border-radius:50%;
+    background:var(--mu); transition:transform .2s var(--spring), background .2s ease; }
+  .set-sw input:checked, .perf-sw input:checked { background:var(--ac-fill); border-color:var(--ac-fill); }
+  .set-sw input:checked::before, .perf-sw input:checked::before { transform:translateX(16px); background:var(--ac-on); }
+  [dir="rtl"] .set-sw input:checked::before, [dir="rtl"] .perf-sw input:checked::before { transform:translateX(-16px); }
+  .perf-sw input:disabled { opacity:.55; cursor:not-allowed; }
+  .set-sw input:focus-visible, .perf-sw input:focus-visible { outline:2px solid var(--ac); outline-offset:2px; }
+  .set-sw:has(#alTgNote:not(:empty)) { flex-wrap:wrap; row-gap:2px; padding-block:10px; }
+  #alTgNote { font-size:12px; color:var(--mu); }
+  #alTgNote:not(:empty) { flex-basis:100%; padding-inline-start:52px; }
+  @media (prefers-reduced-motion: reduce) { .set-sw input, .set-sw input::before, .perf-sw input, .perf-sw input::before { transition:none; } }
+  @media (max-width:640px) { #tab-settings:not([hidden]) { gap:22px; } .set-grid > .tunnel-card { padding:16px; } .set-sub { padding:14px; } }
+  .upd-stat.warn { border-color:var(--wr-b40); background:linear-gradient(180deg, var(--wr-soft), transparent 70%), var(--s2); }
+  .upd-stat.ok { border-color:var(--ok-b40); }
+  fieldset.upd-ch { border:0; margin:0; padding:0; min-width:0; }
+  .upd-ch legend { padding:0; margin-bottom:8px; font-size:var(--fs-small); font-weight:600; color:var(--tx2); }
+  .upd-ch-opts { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+  .upd-opt { position:relative; display:block; cursor:pointer; }
+  .upd-opt input { position:absolute; opacity:0; width:1px; height:1px; pointer-events:none; }
+  .upd-opt-box { display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--ln); border-radius:var(--r-md);
+    background:var(--s2); transition:border-color .15s, background .15s, box-shadow .15s; }
+  .upd-opt:hover .upd-opt-box { border-color:var(--ac-b35-ln2); }
+  .upd-opt-ic { flex:none; width:36px; height:36px; border-radius:11px; display:grid; place-items:center; color:var(--mu); background:var(--sunk); }
+  .upd-opt-ic svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+  .upd-opt-t { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .upd-opt-t b { font-size:var(--fs-body); font-weight:600; color:var(--tx); }
+  .upd-opt-t small { font-size:12px; color:var(--mu); }
+  .upd-opt input:checked + .upd-opt-box { border-color:var(--ac); background:linear-gradient(135deg, var(--ac-soft), transparent 70%), var(--s2); box-shadow:0 0 0 3px var(--ac-soft); }
+  .upd-opt input:checked + .upd-opt-box .upd-opt-ic { color:var(--ac); background:var(--ac-soft); }
+  .upd-opt.dev input:checked + .upd-opt-box { border-color:var(--wr); background:linear-gradient(135deg, var(--wr-soft), transparent 70%), var(--s2); box-shadow:0 0 0 3px var(--wr-soft); }
+  .upd-opt.dev input:checked + .upd-opt-box .upd-opt-ic { color:var(--wr); background:var(--wr-soft); }
+  .upd-opt input:focus-visible + .upd-opt-box { outline:2px solid var(--ac); outline-offset:2px; }
+  .upd-opt input:disabled + .upd-opt-box { opacity:.6; cursor:not-allowed; }
+  #updChannelWarn { margin-top:10px; }
+  details.upd-adv summary { list-style:none; display:flex; align-items:center; gap:10px; }
+  details.upd-adv summary::-webkit-details-marker { display:none; }
+  details.upd-adv summary::before { content:""; flex:none; width:7px; height:7px; border:solid currentColor; border-width:0 2px 2px 0;
+    transform:rotate(-45deg); transition:transform .2s; margin-inline:2px 2px; }
+  [dir="rtl"] details.upd-adv summary::before { transform:rotate(135deg); }
+  details.upd-adv[open] summary::before { transform:rotate(45deg); }
   .upd-to[hidden] { display:none; }
   .upd-arrow svg { width:22px; height:22px; fill:none; stroke:var(--dim); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; margin-bottom:8px; }
   [dir="rtl"] .upd-arrow svg { transform:scaleX(-1); }
@@ -661,42 +852,118 @@
   .upd-md ul { margin:4px 0; padding-inline-start:18px; }
   .upd-md li { margin:3px 0; }
   .upd-md code { font-family:var(--font-mono); font-size:12px; background:var(--sunk); padding:1px 5px; border-radius:4px; }
-  /* Performance tab */
+  /* Performance tab: the look of the Settings and Update pages. What runs now
+     as three tiles, the FRP options as switch rows in two columns, the kernel
+     values as tiles with a state icon. */
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
-  .perf-fs { border:0; margin:0; padding:0; min-width:0; }
-  .perf-fs:disabled { opacity:.5; }
-  #tab-perf .wd-radio-opt:has(input:disabled) { opacity:.5; cursor:not-allowed; }
-  .perf-fs:disabled .wd-radio-opt:has(input:disabled) { opacity:1; }
-  .perf-key { font-family:var(--font-mono); font-weight:500; font-size:12px; color:var(--dim); margin-inline-start:6px; }
-  .perf-note { margin-top:12px; padding:10px 12px; border-radius:var(--r-md); border:1px solid var(--info-badge-b); background:var(--info-soft); color:var(--tx2); font-size:13px; line-height:1.5; }
-  .perf-err { color:var(--er); }
-  #tab-perf .tc-header:has(> div > .qs-hint) { flex-wrap:nowrap; align-items:flex-start; }
-  #tab-perf .tc-header > div:has(> .qs-hint) { flex:1; min-width:0; }
+  #tab-perf:not([hidden]) { display:flex; flex-direction:column; gap:16px; }
+  #tab-perf [hidden] { display:none !important; }
+  .perf-fs { display:flex; flex-direction:column; gap:12px; border:0; margin:0; padding:0; min-width:0; }
+  .perf-note { padding:10px 12px; border-radius:var(--r-md); border:1px solid var(--info-badge-b); background:var(--info-soft); color:var(--tx2); font-size:13px; line-height:1.5; }
+  .perf-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap:12px; }
+  .perf-tile { --pc:var(--ac); display:flex; align-items:flex-start; gap:12px; min-width:0; padding:14px; border:1px solid var(--ln); border-radius:var(--r-md);
+    background:linear-gradient(135deg, color-mix(in srgb, var(--pc) 9%, transparent), transparent 65%), var(--s2); }
+  .perf-tile[data-st="ok"] { --pc:var(--ok); }
+  .perf-tile[data-st="warn"] { --pc:var(--wr); border-color:var(--wr-b40); }
+  .perf-tile[data-st="off"] { --pc:var(--mu); }
+  .perf-tile-ic { flex:none; width:40px; height:40px; border-radius:12px; display:grid; place-items:center; color:var(--pc);
+    background:color-mix(in srgb, var(--pc) 14%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--pc) 28%, transparent); }
+  .perf-tile-ic svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .perf-tile-t { display:flex; flex-direction:column; gap:3px; flex:1; min-width:0; }
+  .perf-tile-k { font-size:12px; font-weight:600; color:var(--mu); }
+  .perf-tile-v { font-size:20px; font-weight:700; line-height:1.3; color:var(--tx); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+  .perf-tile-s { font-size:12px; line-height:1.5; color:var(--mu); overflow-wrap:anywhere; }
+  .perf-meter { display:block; height:6px; margin-top:6px; border-radius:999px; background:var(--sunk); box-shadow:inset 0 0 0 1px var(--ln); overflow:hidden; }
+  .perf-meter i { display:block; width:var(--pct, 0%); height:100%; border-radius:inherit; background:var(--pc); transition:width .4s ease; }
+  .perf-cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap:16px; }
+  .perf-col { display:flex; flex-direction:column; gap:8px; min-width:0; }
+  .perf-sec { margin:0; padding-inline:2px; font-size:12px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--tx2); }
+  html[lang="fa"] .perf-sec { font-size:13px; letter-spacing:0; }
+  .perf-list { display:flex; flex-direction:column; padding:0 14px; border:1px solid var(--ln); border-radius:var(--r-md); background:var(--sunk); }
+  .perf-list > * + * { border-top:1px solid var(--ln); }
+  .perf-sw { display:flex; align-items:flex-start; gap:14px; min-width:0; padding:13px 0; cursor:pointer; }
+  .perf-sw input { margin-top:2px; }
+  .perf-sw-t, .perf-field { display:flex; flex-direction:column; gap:5px; min-width:0; }
+  .perf-sw-t { flex:1; }
+  .perf-field { padding:13px 0; }
+  .perf-field > label { display:flex; flex-direction:column; align-items:flex-start; gap:5px; }
+  .perf-sw-t b, .perf-field b { font-size:14px; font-weight:600; color:var(--tx); }
+  .perf-sw-t > .perf-key { align-self:flex-start; }
+  .perf-key { font-family:var(--font-mono); font-size:12px; color:var(--mu); padding:1px 7px; border-radius:6px; border:1px solid var(--ln); background:var(--s2); direction:ltr; unicode-bidi:isolate; }
+  .perf-field select { max-width:260px; }
+  .perf-unit { display:flex; align-items:center; gap:8px; }
+  .perf-unit .hashem-input { max-width:140px; }
+  .perf-unit span { font-size:13px; color:var(--mu); }
+  .perf-live { font-weight:500; color:var(--tx2); }
+  .perf-sw:has(input:disabled) { cursor:not-allowed; }
+  .perf-sw:has(input:disabled) .perf-sw-t, .perf-field:has(:disabled) { opacity:.55; }
+  .qs-hint.perf-err, .tc-sub.perf-err, .perf-err { color:var(--er); }
+  .perf-facts { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap:10px; }
+  .perf-fact { display:flex; flex-direction:column; gap:4px; min-width:0; padding:12px; border:1px solid var(--ln); border-radius:var(--r-md); background:var(--s2); }
+  .perf-fact-v { font-size:17px; font-weight:700; color:var(--tx); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+  .perf-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap:16px; }
+  .perf-grid > .tunnel-card { min-width:0; }
   #autoPoolCard .hashem-input[readonly] { color:var(--mu); cursor:default; }
+  @media (max-width:640px) { .perf-tile-v { font-size:18px; } .perf-field select { max-width:none; } }
   .status-indicator.ok { color:var(--tx2); }
   .status-indicator.ok .dot { background:var(--ok); }
   .status-indicator.warn { color:var(--wr); }
   .status-indicator.warn .dot { background:var(--wr); }
-  .ns-list { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:8px 12px; }
-  .ns-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; padding:10px 12px;
-    background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); min-width:0; }
-  .ns-dot { width:8px; height:8px; border-radius:50%; background:var(--dim); }
-  .ns-row[data-lvl="ok"] .ns-dot { background:var(--ok); }
-  .ns-row[data-lvl="warn"] .ns-dot { background:var(--wr); }
-  .ns-row[data-lvl="err"] .ns-dot { background:var(--er); }
-  .ns-k { color:var(--tx2); font-size:13px; font-weight:500; }
-  .ns-sub { display:block; color:var(--dim); font-size:12px; margin-top:2px; }
-  .ns-v { font-family:var(--font-mono); font-size:12px; color:var(--tx); text-align:end; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .ns-list { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap:8px; }
+  .ns-row { --nc:var(--dim); display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px; min-width:0; padding:11px 12px;
+    background:var(--s2); border:1px solid var(--ln); border-radius:var(--r-md); }
+  .ns-row[data-lvl="ok"] { --nc:var(--ok); }
+  .ns-row[data-lvl="warn"] { --nc:var(--wr); border-color:var(--wr-b40); background:linear-gradient(135deg, var(--wr-soft), transparent 70%), var(--s2); }
+  .ns-row[data-lvl="err"] { --nc:var(--er); border-color:var(--er-badge-b); background:linear-gradient(135deg, var(--er-soft), transparent 70%), var(--s2); }
+  .ns-ic { width:28px; height:28px; border-radius:50%; display:grid; place-items:center; color:var(--nc); background:color-mix(in srgb, var(--nc) 15%, transparent); }
+  .ns-ic svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
+  .ns-k { min-width:0; color:var(--tx); font-size:13px; font-weight:600; }
+  .ns-sub { display:block; margin-top:2px; color:var(--mu); font-size:12px; font-weight:400; }
+  .ns-v { font-family:var(--font-mono); font-size:12px; color:var(--tx); padding:3px 8px; border-radius:6px; border:1px solid var(--ln); background:var(--sunk);
+    text-align:end; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .ns-empty { color:var(--dim); font-size:13px; padding:8px 0; }
+  @media (max-width:480px) { .ns-row { grid-template-columns:auto minmax(0,1fr); } .ns-v { grid-column:2; justify-self:start; } }
   /* Watchdog & Backup styles */
-  .wd-hero-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:8px; }
-  .wd-stat-box { background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); padding:12px; display:flex; flex-direction:column; gap:4px; }
+  /* Watchdog: a status hero, then paired cards. Colour comes from the hero's data-state. */
+  #tab-watchdog:not([hidden]) { display:flex; flex-direction:column; gap:14px; }
+  .wd-hero-card { --wd-c:var(--dim); --wd-soft:var(--s3); position:relative; overflow:hidden; }
+  .wd-hero-card::before { content:""; position:absolute; inset-inline-start:0; top:0; bottom:0; width:3px; background:var(--wd-c); }
+  .wd-hero-card[data-state="ok"] { --wd-c:var(--ok); --wd-soft:var(--ok-soft); }
+  .wd-hero-card[data-state="bad"] { --wd-c:var(--er); --wd-soft:var(--er-soft); }
+  .wd-hero-top { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  .wd-shield { width:52px; height:52px; border-radius:16px; display:grid; place-items:center; flex:none; background:var(--wd-soft); color:var(--wd-c); border:1px solid color-mix(in srgb, var(--wd-c) 30%, transparent); }
+  .wd-shield svg { width:26px; height:26px; }
+  .wd-hero-card[data-state="ok"] .wd-shield { animation:wdBreathe 3s ease-in-out infinite; }
+  @keyframes wdBreathe { 0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--wd-c) 35%, transparent); } 50% { box-shadow:0 0 0 8px transparent; } }
+  @media (prefers-reduced-motion:reduce) { .wd-hero-card[data-state="ok"] .wd-shield { animation:none; } }
+  .wd-hero-txt { flex:1; min-width:200px; display:flex; flex-direction:column; gap:3px; }
+  .wd-hero-state { font-size:var(--fs-h3); font-weight:700; color:var(--wd-c); line-height:1.25; }
+  .wd-hero-card[data-state="off"] .wd-hero-state { color:var(--tx2); }
+  .wd-hero-act { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .wd-hero-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-top:4px; }
+  .wd-stat-box { background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); padding:14px; display:flex; flex-direction:column; gap:6px; }
   .wd-stat-label { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); font-weight:600; }
-  .wd-stat-val { font-size:18px; font-weight:700; color:var(--tx); }
+  .wd-stat-val { font-size:20px; font-weight:700; color:var(--tx); font-variant-numeric:tabular-nums; }
   .wd-stat-sub { font-size:var(--fs-small); color:var(--mu); }
-  .wd-radio-group { display:flex; gap:16px; flex-wrap:wrap; margin-top:6px; }
-  .wd-radio-opt { display:inline-flex; align-items:center; gap:8px; cursor:pointer; font-size:var(--fs-body); color:var(--tx2); }
-  .wd-radio-opt input { cursor:pointer; }
+  .wd-dot-off { background:var(--dim); }
+  #wdLastCheckVal { font-size:16px; }
+  .wd-pips { display:flex; gap:4px; }
+  .wd-pips i { flex:1; height:6px; border-radius:3px; background:var(--s3); }
+  .wd-pips i.on { background:var(--wr); }
+  .wd-pips i.full { background:var(--er); }
+  .wd-opt { border-top:1px solid var(--ln); border-bottom:0; padding:14px 0 0; margin-top:4px; }
+  .wd-cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap:14px; align-items:start; }
+  .wd-cols > .tunnel-card { min-width:0; }
+  .wd-lbl { display:block; font-size:var(--fs-small); font-weight:600; color:var(--tx2); margin-bottom:6px; }
+  .wd-seg { display:inline-flex; flex-wrap:wrap; gap:4px; padding:4px; border-radius:12px; border:1px solid var(--ln); background:var(--s2); max-width:100%; }
+  .wd-seg label { position:relative; cursor:pointer; display:block; }
+  .wd-seg input { position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
+  .wd-seg span { display:block; padding:8px 14px; border-radius:8px; color:var(--mu); font-size:var(--fs-body); font-weight:600; transition:background .18s ease, color .18s ease; }
+  .wd-seg label:hover span { color:var(--tx2); }
+  .wd-seg input:checked + span { background:var(--ac-soft); color:var(--ac); box-shadow:inset 0 0 0 1px var(--ac-b30); }
+  .wd-seg input:focus-visible + span { outline:2px solid var(--ac); outline-offset:2px; }
+  .wd-sub { margin-top:6px; padding-top:16px; border-top:1px solid var(--ln); }
+  .wd-sub-h { font-weight:600; color:var(--tx); font-size:var(--fs-h4); margin-bottom:8px; }
   .wd-backup-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
   .wd-backup-item { display:flex; justify-content:space-between; align-items:center; background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-md); padding:10px 14px; gap:10px; flex-wrap:wrap; }
   .wd-backup-meta { display:flex; flex-direction:column; gap:2px; min-width:0; }
@@ -704,7 +971,10 @@
   .wd-backup-info { font-size:var(--fs-small); color:var(--mu); }
   .wd-backup-acts { display:flex; gap:6px; flex-wrap:wrap; }
   .wd-event-log { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
-  .wd-event-item { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-radius:var(--r-md); background:var(--sunk); border:1px solid var(--ln); font-size:var(--fs-small); }
+  .wd-event-item { display:flex; gap:10px; align-items:flex-start; position:relative; padding-block:8px; padding-inline:24px 12px; border-radius:var(--r-md); background:var(--sunk); border:1px solid var(--ln); font-size:var(--fs-small); }
+  .wd-event-item::before { content:""; position:absolute; inset-inline-start:10px; top:14px; width:7px; height:7px; border-radius:50%; background:var(--dim); }
+  .wd-event-item.ok::before { background:var(--ok); }
+  .wd-event-item.err::before { background:var(--er); }
   .wd-event-time { color:var(--mu); font-family:var(--font-mono); font-size:12px; flex:none; white-space:nowrap; }
   .wd-event-detail { color:var(--tx2); flex:1; word-break:break-word; }
   @media (max-width:480px) {
@@ -772,6 +1042,77 @@
      global plaintext rule would turn them LTR; values inside are <bdi>. */
   html[dir="rtl"] #tab-doctor :is(.doc-summary, .doc-find-title, .doc-find-fix, .doc-notes span, .doc-stat-sub, .doc-tun-reason, .trow .k, .doc-box-foot .qs-hint) { unicode-bidi:isolate; }
   .doc-meta b { unicode-bidi:isolate; }
+  /* second half: reachability, clocks, route, stability, ports, history */
+  .doc-reach-verdict { font-size:var(--fs-h4); font-weight:600; color:var(--tx); line-height:1.4; }
+  .doc-reach-verdict.ok { color:var(--ok); } .doc-reach-verdict.warn { color:var(--wr); } .doc-reach-verdict.err { color:var(--er); }
+  .doc-ctl { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-top:4px; }
+  .doc-ctl .fg { flex:1 1 200px; min-width:0; }
+  .doc-ctl > .hashem-btn { flex:none; }
+  .doc-seg button { padding:7px 10px; }
+  .doc-job:empty { display:none; }
+  .doc-job { margin-top:14px; display:flex; flex-direction:column; gap:12px; }
+  .doc-progress { height:6px; border-radius:999px; background:var(--sunk); overflow:hidden; }
+  .doc-progress i { display:block; height:100%; width:var(--p,0%); background:var(--ac-fill); border-radius:inherit; transition:width .4s ease; }
+  .doc-verdict { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:var(--r-sm); border:1px solid var(--ln); background:var(--sunk); color:var(--tx); font-size:var(--fs-body); line-height:1.5; }
+  .doc-verdict.ok { border-color:color-mix(in srgb, var(--ok) 35%, var(--ln)); }
+  .doc-verdict.warn { border-color:color-mix(in srgb, var(--wr) 45%, var(--ln)); }
+  .doc-verdict.err { border-color:color-mix(in srgb, var(--er) 45%, var(--ln)); }
+  .doc-verdict .badge { flex:none; }
+  .doc-hops { width:100%; border-collapse:collapse; font-size:var(--fs-small); font-variant-numeric:tabular-nums; }
+  .doc-hops th { text-align:start; font-weight:600; color:var(--mu); padding:6px 8px; border-bottom:1px solid var(--ln); white-space:nowrap; }
+  .doc-hops td { padding:7px 8px; border-bottom:1px solid var(--ln); color:var(--tx2); white-space:nowrap; }
+  .doc-hops tr:last-child td { border-bottom:0; }
+  .doc-hops td.addr { color:var(--tx); font-family:var(--font-mono); width:100%; white-space:normal; overflow-wrap:anywhere; }
+  .doc-hops tr.lossy td { background:color-mix(in srgb, var(--er) 7%, transparent); }
+  .doc-hops tr.silent td { color:var(--mu); }
+  .doc-hops .doc-noans { font-family:var(--font-sans); }
+  .doc-hops .tag { margin-inline-start:6px; font-family:var(--font-sans, inherit); }
+  .doc-loss { display:inline-flex; align-items:center; gap:6px; }
+  .doc-loss b { font-weight:600; }
+  .doc-loss.bad b { color:var(--er); } .doc-loss.some b { color:var(--wr); }
+  .doc-hops-wrap { overflow-x:auto; border:1px solid var(--ln); border-radius:var(--r-sm); }
+  .doc-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px; }
+  .doc-stat { background:var(--sunk); border:1px solid var(--ln); border-radius:var(--r-sm); padding:8px 10px; display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .doc-stat span { font-size:var(--fs-caption); color:var(--mu); }
+  .doc-stat b { font-size:var(--fs-h4); color:var(--tx); font-family:var(--font-mono); font-weight:600; }
+  .doc-stat.bad b { color:var(--er); } .doc-stat.warn b { color:var(--wr); }
+  .doc-chart { width:100%; height:120px; display:block; border:1px solid var(--ln); border-radius:var(--r-sm); background:var(--sunk); }
+  .doc-chart .ln { fill:none; stroke:var(--ac); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+  .doc-chart .lost { fill:var(--er); opacity:.55; stroke:none; }
+  .doc-chart .grid { stroke:var(--ln); stroke-width:1; vector-effect:non-scaling-stroke; stroke-dasharray:3 4; }
+  .doc-chart-axis { display:flex; justify-content:space-between; gap:8px; direction:ltr; font-size:var(--fs-caption); color:var(--mu); font-variant-numeric:tabular-nums; }
+  .doc-chart-axis span { unicode-bidi:plaintext; } /* the chart runs left to right in both languages */
+  .doc-ports { display:flex; flex-direction:column; margin-top:8px; }
+  .doc-pgroup { padding:10px 0; border-bottom:1px solid var(--ln); display:flex; flex-direction:column; gap:8px; }
+  .doc-pgroup:last-child { border-bottom:0; }
+  .doc-pgroup-head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; font-weight:600; color:var(--tx); }
+  .doc-pgroup-head small { color:var(--mu); font-weight:400; font-size:var(--fs-small); }
+  .doc-prow { display:grid; grid-template-columns:72px auto minmax(0,1fr) auto; gap:4px 10px; align-items:center; font-size:var(--fs-small); }
+  .doc-prow .pn { font-family:var(--font-mono); color:var(--tx); font-weight:600; }
+  .doc-prow .pd { color:var(--tx2); overflow-wrap:anywhere; }
+  .doc-prow .pm { color:var(--tx2); font-variant-numeric:tabular-nums; }
+  .doc-hist-chart { display:block; width:100%; height:96px; }
+  .doc-hist-chart rect { stroke:none; }
+  .doc-hist-chart .r-excellent { fill:var(--ok); } .doc-hist-chart .r-good { fill:var(--ac); }
+  .doc-hist-chart .r-warning { fill:var(--wr); } .doc-hist-chart .r-critical { fill:var(--er); }
+  .doc-hist-list { display:flex; flex-direction:column; margin-top:10px; }
+  .doc-hrow { display:grid; grid-template-columns:minmax(110px,auto) 52px minmax(0,1fr) auto; gap:4px 12px; align-items:center; padding:8px 0; border-bottom:1px solid var(--ln); font-size:var(--fs-small); color:var(--tx2); }
+  .doc-hrow:last-child { border-bottom:0; }
+  .doc-hrow .hs { font-family:var(--font-mono); font-weight:700; }
+  .doc-hrow .hs.excellent { color:var(--ok); } .doc-hrow .hs.good { color:var(--ac); } .doc-hrow .hs.warning { color:var(--wr); } .doc-hrow .hs.critical { color:var(--er); }
+  .doc-hrow .ht { overflow-wrap:anywhere; }
+  .doc-hrow .hm { color:var(--mu); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .doc-sched { display:flex; flex-wrap:wrap; gap:6px 18px; align-items:flex-end; margin-top:14px; padding-top:14px; border-top:1px solid var(--ln); }
+  .doc-sched .fg { flex:0 1 240px; }
+  .doc-sched .set-sw { flex:1 1 260px; }
+  .doc-sched .qs-hint { flex-basis:100%; }
+  @media (max-width:640px) {
+    .doc-prow { grid-template-columns:64px auto minmax(0,1fr); }
+    .doc-prow .pm { grid-column:3; }
+    .doc-hrow { grid-template-columns:auto 44px minmax(0,1fr); }
+    .doc-hrow .hm { grid-column:1 / -1; }
+  }
+  html[dir="rtl"] #tab-doctor :is(.doc-reach-verdict, .doc-verdict, .doc-hrow .ht, .doc-prow .pd) { unicode-bidi:isolate; }
   .doc-pulse { animation:docPulseAnim 1.4s infinite ease-in-out; }
   @keyframes docPulseAnim { 0%, 100% { opacity:1; } 50% { opacity:0.5; } }
   @media (max-width:768px) {
@@ -1014,121 +1355,130 @@
     justify-content: flex-start;
   }
 
-  /* Benchmark Tab & Table Spacing Enhancements */
-  .bench-hero-card {
-    padding: 24px !important;
-    border-radius: 16px !important;
-    min-width: 0;
-    max-width: 100%;
+  /* Benchmark tab: the look of the Performance page. Cards with an icon
+     header, four state tiles, the winner with its score as a ring, and the
+     carriers as rows that wrap their numbers under the name on a phone. */
+  #tab-benchmark { min-width:0; max-width:100%; }
+  #tab-benchmark:not([hidden]) { display:flex; flex-direction:column; gap:16px; }
+  .bench-card { display:flex; flex-direction:column; gap:16px; min-width:0; padding:20px; }
+  .bench-card > .tc-header { margin:0; align-items:flex-start; flex-wrap:wrap; gap:12px; }
+  .bench-card > .tc-header > .set-h { flex:1 1 320px; align-items:flex-start; }
+  .bench-h-t { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .bench-h-t .tc-title { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .bench-h-t .qs-hint { margin:0; }
+  .bench-target { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap:14px 16px; padding:16px;
+    border:1px solid var(--ln); border-radius:var(--r-md); background:var(--sunk); }
+  .bench-field { display:flex; flex-direction:column; gap:8px; min-width:0; }
+  .bench-field .qs-label, .bench-ports .qs-label { margin:0; }
+  .bench-field .qs-hint { margin:0; }
+  .bench-field .qs-seg { margin:0; }
+  .bench-field .hashem-input { width:100%; max-width:none; }
+  .bench-lbl { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .bench-adv { grid-column:1 / -1; border-top:1px solid var(--ln); padding-top:12px; }
+  .bench-adv-t { display:flex; align-items:center; gap:8px; width:100%; padding:4px 0; border:0; background:none; color:var(--ac); font:inherit; font-size:13px; font-weight:600; cursor:pointer; text-align:start; }
+  .bench-adv-t svg { width:16px; height:16px; flex:none; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+  .bench-adv-t .bench-chev { margin-inline-start:auto; color:var(--mu); transition:transform .2s ease; }
+  .bench-adv-t[aria-expanded="true"] .bench-chev { transform:rotate(180deg); }
+  .bench-adv-t:focus-visible { outline:2px solid var(--ac); outline-offset:2px; border-radius:6px; }
+  .bench-ports { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap:12px; margin-top:10px; }
+  .bench-ports > div { display:flex; flex-direction:column; gap:6px; }
+  .bench-win { --pc:var(--ok); display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:18px; padding:18px;
+    border:1px solid color-mix(in srgb, var(--pc) 35%, var(--ln)); border-radius:var(--r-md);
+    background:linear-gradient(120deg, color-mix(in srgb, var(--pc) 12%, transparent), transparent 60%), var(--s2); }
+  .bench-win[data-st="off"] { --pc:var(--mu); border-color:var(--ln); }
+  .bench-win-t { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .bench-win-t h3 { margin:0; font-size:20px; font-weight:700; line-height:1.3; color:var(--tx); overflow-wrap:anywhere; }
+  .bench-win-t .qs-hint { margin:0; }
+  .bench-ring { --v:0; flex:none; width:84px; height:84px; border-radius:50%; display:grid; place-items:center;
+    background:conic-gradient(var(--pc) calc(var(--v) * 1%), color-mix(in srgb, var(--pc) 14%, var(--sunk)) 0); }
+  .bench-ring > div { width:68px; height:68px; border-radius:50%; background:var(--s2); display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.1; }
+  .bench-ring b { font-size:24px; font-weight:750; color:var(--tx); font-variant-numeric:tabular-nums; }
+  .bench-ring small { font-size:12px; color:var(--mu); direction:ltr; }
+  .perf-tile[data-st="info"] { --pc:var(--info); }
+  .perf-tile[data-st="err"] { --pc:var(--er); border-color:var(--er-badge-b); }
+  .bench-list { container-type:inline-size; border:1px solid var(--ln); border-radius:var(--r-md); overflow:hidden; background:var(--sunk); }
+  .bench-head, .bench-row { display:grid; grid-template-columns:30px minmax(200px,1.7fr) 104px 96px 80px minmax(120px,1fr) 104px 116px; align-items:center; gap:12px; padding:0 16px; }
+  .bench-head { min-height:40px; font-size:12px; font-weight:700; color:var(--mu); letter-spacing:.06em; text-transform:uppercase; border-bottom:1px solid var(--ln); background:var(--s2); }
+  html[lang="fa"] .bench-head { letter-spacing:0; }
+  .bench-head > span { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bench-head > span:first-child { text-align:center; }
+  .bench-row { --sc:var(--dim); position:relative; padding-block:14px; border-top:1px solid var(--ln); background:var(--s2); transition:background .15s ease; }
+  #benchTableBody > .bench-row:first-child { border-top:0; }
+  .bench-row::before { content:""; position:absolute; inset-block:10px; inset-inline-start:0; width:3px; border-radius:0 3px 3px 0; background:var(--sc); opacity:.85; }
+  [dir="rtl"] .bench-row::before { border-radius:3px 0 0 3px; }
+  .bench-row[data-st="ok"] { --sc:var(--ok); }
+  .bench-row[data-st="info"] { --sc:var(--info); }
+  .bench-row[data-st="warn"] { --sc:var(--wr); }
+  .bench-row[data-st="err"] { --sc:var(--er); }
+  .bench-row:hover { background:color-mix(in srgb, var(--tx) 3%, var(--s2)); }
+  .bench-row[data-win] { background:linear-gradient(90deg, color-mix(in srgb, var(--ok) 9%, transparent), transparent 55%), var(--s2); }
+  .bench-row[data-active] { background:linear-gradient(90deg, color-mix(in srgb, var(--info) 10%, transparent), transparent 55%), var(--s2); }
+  [dir="rtl"] .bench-row[data-win] { background:linear-gradient(270deg, color-mix(in srgb, var(--ok) 9%, transparent), transparent 55%), var(--s2); }
+  [dir="rtl"] .bench-row[data-active] { background:linear-gradient(270deg, color-mix(in srgb, var(--info) 10%, transparent), transparent 55%), var(--s2); }
+  .bench-rank { width:28px; height:28px; border-radius:8px; display:grid; place-items:center; font-family:var(--font-mono); font-size:12px; font-weight:700;
+    color:var(--mu); background:var(--sunk); box-shadow:inset 0 0 0 1px var(--ln); }
+  .bench-rank.top { color:var(--gold, var(--wr)); background:color-mix(in srgb, var(--gold, var(--wr)) 14%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--gold, var(--wr)) 35%, transparent); }
+  .bench-name { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .bench-name-t { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; }
+  .bench-name-t b { font-size:14px; font-weight:650; color:var(--tx); }
+  .bench-name-s { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px; color:var(--mu); }
+  .bench-proto-pill, .bench-port { display:inline-flex; align-items:center; padding:2px 7px; border-radius:6px; font-family:var(--font-mono); font-size:12px; font-weight:600;
+    letter-spacing:.03em; background:var(--sunk); border:1px solid var(--ln); color:var(--tx2); direction:ltr; unicode-bidi:isolate; }
+  .bench-port { font-weight:500; color:var(--mu); }
+  .bench-m { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .bench-m-k { display:none; font-size:12px; color:var(--mu); }
+  .bench-m-v { font-family:var(--font-mono); font-size:13px; font-weight:650; color:var(--tx); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .bench-m-v small { font-size:12px; font-weight:500; color:var(--mu); margin-inline-start:2px; }
+  .bench-m-v.dim { color:var(--dim); font-weight:500; }
+  .bench-m-v.ok { color:var(--ok); } .bench-m-v.warn { color:var(--wr); } .bench-m-v.err { color:var(--er); }
+  .bench-score { display:flex; align-items:center; gap:10px; min-width:0; }
+  .bench-bar { flex:1; height:8px; border-radius:999px; background:var(--sunk); box-shadow:inset 0 0 0 1px var(--ln); overflow:hidden; }
+  .bench-bar i { display:block; height:100%; width:var(--w, 0%); border-radius:inherit; background:var(--bc, var(--ok)); transition:width .5s ease; }
+  .bench-score b { min-width:24px; font-family:var(--font-mono); font-size:13px; color:var(--tx); text-align:end; font-variant-numeric:tabular-nums; }
+  .bench-act { display:flex; justify-content:flex-end; }
+  .bench-act .hashem-btn { white-space:nowrap; }
+  .bench-row[data-st="err"] .bench-name-t b { color:var(--tx2); }
+  .bench-empty { padding:20px 16px; background:var(--s2); text-align:center; }
+  @container (max-width: 820px) {
+    .bench-head { display:none; }
+    .bench-row { grid-template-columns:28px repeat(3, minmax(0,1fr)); grid-template-areas:"rk nm nm st" ". rt ls jt" ". sc sc ac"; gap:12px 10px; padding-inline:14px 12px; }
+    .bench-row > .bench-rank { grid-area:rk; align-self:start; }
+    .bench-row > .bench-name { grid-area:nm; }
+    .bench-row > .bench-rtt { grid-area:rt; }
+    .bench-row > .bench-loss { grid-area:ls; }
+    .bench-row > .bench-jit { grid-area:jt; }
+    .bench-row > .bench-score { grid-area:sc; }
+    .bench-row > .bench-st { grid-area:st; align-self:start; justify-self:end; }
+    .bench-row > .bench-act { grid-area:ac; }
+    .bench-row > .bench-score { padding-inline-end:4px; }
+    .bench-m { padding:8px 10px; border-radius:8px; background:var(--sunk); box-shadow:inset 0 0 0 1px var(--ln); }
+    .bench-m-k { display:block; }
   }
-  #tab-benchmark { min-width: 0; max-width: 100%; }
-  .bench-table-wrap { max-width: 100%; }
-  @media (max-width: 480px) { .bench-hero-card { padding: 16px !important; } }
-  .bench-stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 14px;
-    margin-bottom: 22px;
+  @media (max-width:640px) {
+    .bench-card .perf-tiles { grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+    .bench-card .perf-tile { flex-direction:column; gap:8px; padding:12px; }
+    .bench-card .perf-tile-ic { width:32px; height:32px; border-radius:10px; }
+    .bench-card .perf-tile-ic svg { width:17px; height:17px; }
+    .bench-card .perf-tile-v { font-size:16px; }
   }
-  .bench-stat-card {
-    background: var(--sunk);
-    border: 1px solid color-mix(in srgb, var(--tx) 7%, transparent);
-    border-radius: 12px;
-    padding: 16px 18px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
-  }
-  .bench-stat-card:hover {
-    border-color: color-mix(in srgb, var(--info) 30%, transparent);
-    background: var(--sunk);
-  }
-  .bench-table-wrap {
-    border-radius: 12px;
-    border: 1px solid color-mix(in srgb, var(--tx) 8%, transparent);
-    background: color-mix(in srgb, var(--bg) 60%, transparent);
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  #benchTable {
-    width: 100%;
-    min-width: 860px;
-    border-collapse: separate;
-    border-spacing: 0;
-    margin: 0;
-  }
-  #benchTable th, #ptTable th {
-    padding: 14px 18px;
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--mu);
-    background: var(--sunk);
-    border-bottom: 1px solid color-mix(in srgb, var(--tx) 8%, transparent);
-    white-space: nowrap;
-    text-align: left;
-  }
-  html[dir="rtl"] #benchTable th, html[dir="rtl"] #ptTable th {
-    text-align: right;
-  }
-  #benchTable td, #ptTable td {
-    padding: 16px 18px;
-    vertical-align: middle;
-    border-bottom: 1px solid color-mix(in srgb, var(--tx) 5%, transparent);
-    white-space: nowrap;
-    font-size: 13px;
-  }
-  #benchTable tr:last-child td, #ptTable tr:last-child td {
-    border-bottom: none;
-  }
-  #benchTable tbody tr, #ptTable tbody tr {
-    transition: background 0.15s ease;
-  }
-  #benchTable tbody tr:hover, #ptTable tbody tr:hover {
-    background: var(--sunk) !important;
-  }
-  #ptTable { width: 100%; min-width: 640px; border-collapse: separate; border-spacing: 0; margin: 0; }
-  #ptTable td { padding: 12px 16px; }
-  #ptTable td .qs-hint { white-space: normal; max-width: 280px; }
+  @media (max-width:640px) { .bench-card { padding:16px; } .bench-win { grid-template-columns:auto minmax(0,1fr); padding:14px; gap:14px; } .bench-win > .hashem-btn { grid-column:1 / -1; } .bench-ring { width:72px; height:72px; } .bench-ring > div { width:58px; height:58px; } .bench-ring b { font-size:20px; } .bench-win-t h3 { font-size:17px; } }
+  @media (prefers-reduced-motion: reduce) { .bench-bar i, .bench-adv-t .bench-chev { transition:none; } }
+  /* Path test table */
+  .bench-table-wrap { max-width:100%; border-radius:var(--r-md); border:1px solid var(--ln); background:var(--s2); overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  #ptTable { width:100%; min-width:640px; border-collapse:separate; border-spacing:0; margin:0; }
+  #ptTable th { padding:12px 16px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--mu); background:var(--sunk);
+    border-bottom:1px solid var(--ln); white-space:nowrap; text-align:start; }
+  html[lang="fa"] #ptTable th { letter-spacing:0; }
+  #ptTable td { padding:12px 16px; vertical-align:middle; border-bottom:1px solid color-mix(in srgb, var(--tx) 5%, transparent); white-space:nowrap; font-size:13px; }
+  #ptTable tr:last-child td { border-bottom:none; }
+  #ptTable tbody tr { transition:background 0.15s ease; }
+  #ptTable tbody tr:hover { background:var(--sunk) !important; }
+  #ptTable td .qs-hint { white-space:normal; max-width:280px; }
   @media (max-width: 640px) {
-    #ptTable { min-width: 0; }
-    #ptTable th, #ptTable td { padding: 10px 8px; white-space: normal; }
-    #ptTable td:nth-child(-n+2) { white-space: nowrap; }
-    #ptTable th:last-child, #ptTable td:last-child { display: none; } /* port */
-  }
-  .bench-rank-num {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 6px;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--mu);
-    background: var(--sunk);
-    border: 1px solid color-mix(in srgb, var(--tx) 7%, transparent);
-  }
-  .bench-rank-1 {
-    color: var(--info);
-    background: color-mix(in srgb, var(--info) 12%, transparent);
-    border-color: color-mix(in srgb, var(--info) 35%, transparent);
-  }
-  .bench-proto-pill {
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    font-family: var(--font-mono);
-    background: var(--sunk);
-    border: 1px solid var(--ln2);
-    color: var(--tx2);
+    #ptTable { min-width:0; }
+    #ptTable th, #ptTable td { padding:10px 8px; white-space:normal; }
+    #ptTable td:nth-child(-n+2) { white-space:nowrap; }
+    #ptTable th:last-child, #ptTable td:last-child { display:none; } /* port */
   }
   /* Utilities: one declaration each, values on the design scale (spacing 4/8, type ramp,
      radius scale, tokens). Declared last so they win ties; !important except on properties
@@ -1360,15 +1710,30 @@
 </div>
 
 <div id="app" class="hidden">
+<svg class="brand-defs" width="0" height="0" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="bmTile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#172036"/><stop offset="1" stop-color="#070a12"/></linearGradient>
+    <radialGradient id="bmGlow" cx=".5" cy=".62" r=".6"><stop offset="0" stop-color="#38bdf8" stop-opacity=".32"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
+    <linearGradient id="bmMus" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e0f2fe"/><stop offset=".45" stop-color="#38bdf8"/><stop offset="1" stop-color="#0369a1"/></linearGradient>
+    <linearGradient id="bmEdge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".28"/><stop offset="1" stop-color="#ffffff" stop-opacity=".04"/></linearGradient>
+    <path id="bmPath" d="M50 48 C42 38 26 32 12 42 C4 48 1 56 3 62 C6 60 12 54 20 55 C32 56 42 60 50 52 C58 60 68 56 80 55 C88 54 94 60 97 62 C99 56 96 48 88 42 C74 32 58 38 50 48 Z"/>
+  </defs>
+</svg>
 <div class="app-layout">
   <aside class="sidebar">
-    <div class="sidebar-brand">
-      <svg class="brand-mustache" width="52" height="52" viewBox="0 0 100 100" fill="none">
-        <rect width="100" height="100" rx="22" fill="#090d16" stroke="rgba(56,189,248,0.25)" stroke-width="1.5"/>
-        <path d="M50 48 C42 38 26 32 12 42 C4 48 1 56 3 62 C6 60 12 54 20 55 C32 56 42 60 50 52 C58 60 68 56 80 55 C88 54 94 60 97 62 C99 56 96 48 88 42 C74 32 58 38 50 48 Z" fill="#38bdf8"/>
+    <div class="sidebar-brand" data-brand>
+      <svg class="brand-mark" width="56" height="56" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+        <rect width="100" height="100" rx="24" fill="url(#bmTile)"/>
+        <rect width="100" height="100" rx="24" fill="url(#bmGlow)"/>
+        <use href="#bmPath" transform="translate(12 17) scale(.76)" fill="#000000" fill-opacity=".45"/>
+        <use href="#bmPath" transform="translate(12 14) scale(.76)" fill="url(#bmMus)"/>
+        <rect class="bm-ring" x=".75" y=".75" width="98.5" height="98.5" rx="23.25" stroke="url(#bmEdge)" stroke-width="1.5"/>
       </svg>
-      <span class="brand-name">Hashem</span>
-      <span class="brand-premium-badge brand-tier hidden" data-brand-tier><svg class="bp-gem" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l4 6-9 12L3 9z"/><path class="bp-facet" d="M3 9h18M9 3l3 6 3-6M12 9v12"/></svg><span class="bp-label">Premium</span></span>
+      <span class="brand-text">
+        <span class="brand-name">Hashem</span>
+        <span class="brand-sub">Tunnel panel</span>
+        <span class="brand-premium-badge brand-tier hidden" data-brand-tier><svg class="bp-gem" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l4 6-9 12L3 9z"/><path class="bp-facet" d="M3 9h18M9 3l3 6 3-6M12 9v12"/></svg><span class="bp-label">Premium</span></span>
+      </span>
     </div>
     <button type="button" class="sb-toggle" id="sbToggle" aria-label="Collapse sidebar" data-i18n-aria="sb_collapse" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
     <nav class="sidebar-nav" id="sideNav" role="tablist" aria-orientation="vertical" aria-label="Main navigation" data-i18n-aria="aria_main_nav">
@@ -1381,6 +1746,7 @@
       <button role="tab" aria-selected="false" aria-controls="tab-nodes" tabindex="-1" class="nav-item" data-tab="nodes" id="nodesNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="2.5" width="6" height="5" rx="1"/><rect x="2.5" y="16.5" width="6" height="5" rx="1"/><rect x="15.5" y="16.5" width="6" height="5" rx="1"/><path d="M12 7.5v4.5M5.5 16.5V12h13v4.5"/></svg><span data-i18n="nav_nodes">Nodes</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-setup" tabindex="-1" class="nav-item" data-tab="setup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span data-i18n="nav_setup">Setup</span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-xray" tabindex="-1" class="nav-item" data-tab="xray" id="xrayNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 5l7 7-7 7"/><path d="M20 5l-7 7 7 7"/></svg><span data-i18n="nav_xray">Xray</span><span class="nav-lock hidden" id="navXrayPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
+      <button role="tab" aria-selected="false" aria-controls="tab-autopilot" tabindex="-1" class="nav-item" data-tab="autopilot" id="autopilotNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 14.6 9l6.9 2.2-6.9 2.2L12 20l-2.6-6.6L2.5 11.2 9.4 9z"/></svg><span data-i18n="nav_autopilot">Autopilot</span><span class="nav-lock hidden" id="navAutopilotPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-customers" tabindex="-1" class="nav-item" data-tab="customers" id="customersNav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></svg><span data-i18n="nav_customers">Customers</span><span class="nav-lock hidden" id="navCustomersPro" role="img" title="Hashem Pro" aria-label="Hashem Pro"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></span></button>
       <button role="tab" aria-selected="false" aria-controls="tab-logs" tabindex="-1" class="nav-item" data-tab="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span data-i18n="nav_logs">Logs</span></button>
       <div class="nav-sec" role="presentation" data-i18n="sec_system">System</div>
@@ -1402,16 +1768,19 @@
   <div class="main">
     <header class="topbar">
       <button class="menu-btn" id="menuBtn" aria-label="Menu" data-i18n-aria="aria_menu">☰</button>
-      <div><h1>Hashem</h1><div class="sub" id="roleLine">—</div></div>
+      <div class="tb-id">
+        <div class="tb-title"><h1 class="tb-page" id="tbPage" aria-live="polite">Dashboard</h1><button type="button" class="tb-host" id="tbHost" hidden title="Copy this server's IP"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><bdi id="tbHostTxt"></bdi></button></div>
+        <div class="sub" id="roleLine">—</div>
+      </div>
       <div class="acts">
-        <select class="hashem-input node-pick hidden" id="nodePick" aria-label="Server shown" data-i18n-aria="node_pick"></select>
+        <span class="tb-pick" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><select class="hashem-input node-pick hidden" id="nodePick" aria-label="Server shown" data-i18n-aria="node_pick"></select></span>
         <button type="button" class="hashem-btn hashem-btn-secondary pal-btn" id="palBtn" aria-haspopup="dialog" aria-label="Search and commands" data-i18n-aria="pal_open"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span class="pal-txt" data-i18n="pal_search">Search</span><kbd id="palKbd">Ctrl K</kbd></button>
-        <button class="hashem-btn hashem-btn-secondary" id="refreshBtn">Refresh</button>
+        <button class="hashem-btn hashem-btn-secondary tb-refresh" id="refreshBtn" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18.5 2v4h-4M5.5 22v-4h4"/></svg><span class="tb-refresh-t">Refresh</span></button>
       </div>
     </header>
   <div class="drawer-ov" id="drawerOv"></div>
   <aside class="drawer" id="drawer" aria-label="Menu">
-    <div class="drawer-head"><span class="brand-name">Hashem</span><span class="brand-premium-badge brand-tier hidden" data-brand-tier><svg class="bp-gem" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l4 6-9 12L3 9z"/><path class="bp-facet" d="M3 9h18M9 3l3 6 3-6M12 9v12"/></svg><span class="bp-label">Premium</span></span><button class="drawer-x" id="drawerX" aria-label="Close" data-i18n-aria="aria_close">×</button></div>
+    <div class="drawer-head" data-brand><svg class="brand-mark" width="36" height="36" viewBox="0 0 100 100" fill="none" aria-hidden="true"><rect width="100" height="100" rx="24" fill="url(#bmTile)"/><rect width="100" height="100" rx="24" fill="url(#bmGlow)"/><use href="#bmPath" transform="translate(12 17) scale(.76)" fill="#000000" fill-opacity=".45"/><use href="#bmPath" transform="translate(12 14) scale(.76)" fill="url(#bmMus)"/><rect class="bm-ring" x=".75" y=".75" width="98.5" height="98.5" rx="23.25" stroke="url(#bmEdge)" stroke-width="1.5"/></svg><span class="brand-text"><span class="brand-name">Hashem</span><span class="brand-sub">Tunnel panel</span><span class="brand-premium-badge brand-tier hidden" data-brand-tier><svg class="bp-gem" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l4 6-9 12L3 9z"/><path class="bp-facet" d="M3 9h18M9 3l3 6 3-6M12 9v12"/></svg><span class="bp-label">Premium</span></span></span><button class="drawer-x" id="drawerX" aria-label="Close" data-i18n-aria="aria_close">×</button></div>
     <nav class="drawer-nav" id="drawerNav" role="tablist" aria-orientation="vertical" aria-label="Main navigation" data-i18n-aria="aria_main_nav"></nav>
     <div class="drawer-foot">
       <button class="hashem-btn hashem-btn-secondary u-flex-1" id="themeBtnM" >Theme</button>
@@ -1653,7 +2022,7 @@
             <div class="tun-out-head"><span id="actOutTitle">Output</span><button type="button" class="hashem-btn hashem-btn-ghost u-btn-xs" id="actOutClose">Close</button></div>
             <pre id="actOut" class="logs"></pre>
           </div>
-          <div class="qs-hint hidden" id="tuneHint">Optimize Network: FQ + BBR, 16 MB TCP buffers, GRE MTU 1380, MSS clamp 1340 and keepalive. The current settings are saved first, so Restore can bring them back.</div>
+          <div class="qs-hint hidden" id="tuneHint">Optimize Network: FQ + BBR, TCP buffers sized for the RAM (16 to 64 MB), packet steering over every CPU (RPS/RFS), GRE MTU 1380, MSS clamp 1340 and keepalive. The current settings are saved first, so Restore can bring them back.</div>
         </div>
 
         <div class="tunnel-card" id="usageCard">
@@ -1937,6 +2306,14 @@
         </div>
       </section>
       <section id="tab-setup" role="tabpanel" hidden>
+        <div class="tunnel-card u-mb-20" id="setupNodeCard" hidden>
+          <div class="tc-header"><div>
+            <span class="tc-title u-fs-18 u-fw-700">Recommended: connect your servers as nodes</span>
+            <div class="qs-hint u-mt-4">Add your other server to this panel once, then make the tunnel from here: both ends are set up for you, with no token to copy. The new server gets only the node core, and you manage it from this panel.</div>
+          </div></div>
+          <div id="setupNodeBody"></div>
+        </div>
+        <div class="qs-hint u-mb-8" id="setupManualNote" hidden>Manual setup: answer on each server yourself and carry the token between them.</div>
         <div class="qs" id="setupCard">
           <div class="qs-head">
             <span class="qs-bolt"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg></span>
@@ -2226,32 +2603,42 @@
         </div>
       </section>
       <section id="tab-perf" role="tabpanel" hidden>
-        <!-- Overview -->
-        <div class="tunnel-card wd-hero-card">
+        <!-- Overview: what runs now, as three tiles -->
+        <div class="tunnel-card">
           <div class="tc-header">
-            <p class="tc-title">Performance</p>
+            <div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.5 18a9 9 0 1 1 17 0"/><path d="m12 14 4.5-5"/><circle cx="12" cy="14" r="1.6"/></svg></span><p class="tc-title">Performance</p></div>
             <div class="u-flex-center-gap10">
-              <span class="status-indicator" id="perfSyncInd"><span class="dot"></span><span id="perfSyncTxt">—</span></span>
+              <span class="status-indicator upd-pill" id="perfSyncInd"><span class="dot"></span><span id="perfSyncTxt">—</span></span>
               <button class="hashem-btn hashem-btn-primary" id="perfApplyTopBtn" hidden>Apply Now</button>
             </div>
           </div>
           <div class="qs-hint">Speed settings for the tunnel engine and the server's network stack. The defaults suit traffic that is already encrypted, such as VLESS, Reality and Trojan.</div>
           <div class="perf-note" id="perfEngineNote" role="status" hidden></div>
-          <div class="wd-hero-grid">
-            <div class="wd-stat-box">
-              <span class="wd-stat-label" id="perfEngLabel">FRP transport</span>
-              <div class="wd-stat-val" id="perfCryptoVal">—</div>
-              <span class="wd-stat-sub" id="perfCryptoSub">—</span>
+          <div class="perf-tiles">
+            <div class="perf-tile" id="perfTileEng">
+              <span class="perf-tile-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H12L11 22l8.5-11.5H12z"/></svg></span>
+              <div class="perf-tile-t">
+                <span class="perf-tile-k" id="perfEngLabel">FRP transport</span>
+                <div class="perf-tile-v" id="perfCryptoVal">—</div>
+                <span class="perf-tile-s" id="perfCryptoSub">—</span>
+              </div>
             </div>
-            <div class="wd-stat-box">
-              <span class="wd-stat-label" id="perfPoolLabel">Work-conn pool (frpc / frps)</span>
-              <div class="wd-stat-val" id="perfPoolVal">—</div>
-              <span class="wd-stat-sub" id="perfPoolSub">—</span>
+            <div class="perf-tile" id="perfTilePool">
+              <span class="perf-tile-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg></span>
+              <div class="perf-tile-t">
+                <span class="perf-tile-k" id="perfPoolLabel">Work-conn pool (frpc / frps)</span>
+                <div class="perf-tile-v" id="perfPoolVal">—</div>
+                <span class="perf-tile-s" id="perfPoolSub">—</span>
+              </div>
             </div>
-            <div class="wd-stat-box">
-              <span class="wd-stat-label">Network stack</span>
-              <div class="wd-stat-val" id="perfNetVal">—</div>
-              <span class="wd-stat-sub" id="perfNetSub">—</span>
+            <div class="perf-tile" id="perfTileNet">
+              <span class="perf-tile-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2.5"/><path d="M9 9h6v6H9zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></span>
+              <div class="perf-tile-t">
+                <span class="perf-tile-k">Network stack</span>
+                <div class="perf-tile-v" id="perfNetVal">—</div>
+                <span class="perf-tile-s" id="perfNetSub">—</span>
+                <span class="perf-meter" id="perfNetMeter" aria-hidden="true" hidden><i></i></span>
+              </div>
             </div>
           </div>
         </div>
@@ -2259,60 +2646,74 @@
         <!-- FRP encryption, compression and multiplexing -->
         <div class="tunnel-card" id="perfFrpCard">
           <div class="tc-header">
-            <p class="tc-title">FRP Transport</p>
+            <div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8h13M13 4l4 4-4 4"/><path d="M20 16H7M11 12l-4 4 4 4"/></svg></span><p class="tc-title">FRP Transport</p></div>
             <span class="badge" id="perfRoleBadge">—</span>
           </div>
           <div class="qs-hint">The FRP options of this tunnel. Encryption, compression and multiplexing only cost CPU and speed for VLESS, Reality and Trojan, whose traffic is already encrypted: leave them off unless a service needs them.</div>
           <fieldset class="perf-fs" id="perfFrpSet">
             <legend class="sr-only">FRP transport options</legend>
-            <div class="u-flex-col-gap14 u-mt-12">
-              <label class="wd-radio-opt u-items-start">
-                <input type="checkbox" id="perfEncCheck" class="u-checkbox-ac">
-                <div>
-                  <b class="u-color-tx">Proxy Encryption <span class="perf-key" data-no-i18n>transport.useEncryption</span></b>
-                  <div class="qs-hint u-mt-2">Encrypts traffic between frpc and frps with AES-128. Only worth it for plain, unencrypted services.</div>
+            <div class="perf-cols">
+              <div class="perf-col">
+                <h3 class="perf-sec">Speed</h3>
+                <div class="perf-list">
+                  <label class="perf-sw">
+                    <span class="perf-sw-t">
+                      <b>Proxy Encryption</b>
+                      <code class="perf-key" data-no-i18n>transport.useEncryption</code>
+                      <span class="qs-hint">Encrypts traffic between frpc and frps with AES-128. Only worth it for plain, unencrypted services.</span>
+                    </span>
+                    <input type="checkbox" id="perfEncCheck">
+                  </label>
+                  <label class="perf-sw" id="perfCompRow">
+                    <span class="perf-sw-t">
+                      <b>Proxy Compression</b>
+                      <code class="perf-key" data-no-i18n>transport.useCompression</code>
+                      <span class="qs-hint">Snappy compression per proxy. Helps plain text services; encrypted traffic does not compress, so for VPN traffic it only uses CPU.</span>
+                    </span>
+                    <input type="checkbox" id="perfCompCheck">
+                  </label>
+                  <label class="perf-sw">
+                    <span class="perf-sw-t">
+                      <b>TCP Multiplexing</b>
+                      <code class="perf-key" data-no-i18n>transport.tcpMux</code>
+                      <span class="qs-hint">Carries every user connection inside one TCP connection. Over GRE this roughly halves throughput (measured 460 against 1010 Mbit). It must be the same on the Iran server and every foreign server, or frpc cannot log in.</span>
+                      <span class="qs-hint perf-live" id="perfMuxLive">—</span>
+                    </span>
+                    <input type="checkbox" id="perfMuxCheck">
+                  </label>
                 </div>
-              </label>
-              <label class="wd-radio-opt u-items-start" id="perfCompRow">
-                <input type="checkbox" id="perfCompCheck" class="u-checkbox-ac">
-                <div>
-                  <b class="u-color-tx">Proxy Compression <span class="perf-key" data-no-i18n>transport.useCompression</span></b>
-                  <div class="qs-hint u-mt-2">Snappy compression per proxy. Helps plain text services; encrypted traffic does not compress, so for VPN traffic it only uses CPU.</div>
-                </div>
-              </label>
-              <label class="wd-radio-opt u-items-start">
-                <input type="checkbox" id="perfMuxCheck" class="u-checkbox-ac">
-                <div>
-                  <b class="u-color-tx">TCP Multiplexing <span class="perf-key" data-no-i18n>transport.tcpMux</span></b>
-                  <div class="qs-hint u-mt-2">Carries every user connection inside one TCP connection. Over GRE this roughly halves throughput (measured 460 against 1010 Mbit). It must be the same on the Iran server and every foreign server, or frpc cannot log in.</div>
-                  <div class="qs-hint u-mt-2" id="perfMuxLive">—</div>
-                </div>
-              </label>
-              <div class="fg">
-                <label for="perfPPSelect"><b class="u-color-tx">PROXY Protocol <span class="perf-key" data-no-i18n>transport.proxyProtocolVersion</span></b></label>
-                <select class="hashem-input u-max-w-260" id="perfPPSelect">
-                  <option value="off">Off</option>
-                  <option value="v2">v2 (Xray, 3x-ui)</option>
-                  <option value="v1">v1</option>
-                </select>
-                <div class="qs-hint u-mt-2">Sends each user's real IP to the service on this server, so Xray logs, limits and IP checks see real users instead of 127.0.0.1. Turn on Proxy Protocol (acceptProxyProtocol) in the Xray inbound first: without it every connection fails.</div>
-                <div class="qs-hint u-mt-2" id="perfPPLive" hidden></div>
               </div>
-              <div class="fg">
-                <label for="perfBwInput"><b class="u-color-tx">Bandwidth Limit per Port <span class="perf-key" data-no-i18n>transport.bandwidthLimit</span></b></label>
-                <div class="u-flex-center-gap8"><input type="number" class="hashem-input u-max-w-140" id="perfBwInput" min="0" max="10000" step="1" value="0" inputmode="numeric"><span class="qs-hint">MB/s</span></div>
-                <div class="qs-hint u-mt-2">A cap on each forwarded port, for all its users together (megabytes per second). 0 means no limit.</div>
-              </div>
-              <label class="wd-radio-opt u-items-start">
-                <input type="checkbox" id="perfHcCheck" class="u-checkbox-ac">
-                <div>
-                  <b class="u-color-tx">Health Check <span class="perf-key" data-no-i18n>healthCheck</span></b>
-                  <div class="qs-hint u-mt-2">frpc checks the service on this server every 10 seconds and closes its port on the Iran server while it is down, so users fail at once instead of hanging.</div>
+              <div class="perf-col">
+                <h3 class="perf-sec">Services</h3>
+                <div class="perf-list">
+                  <div class="perf-field">
+                    <label for="perfPPSelect"><b>PROXY Protocol</b><code class="perf-key" data-no-i18n>transport.proxyProtocolVersion</code></label>
+                    <select class="hashem-input" id="perfPPSelect">
+                      <option value="off">Off</option>
+                      <option value="v2">v2 (Xray, 3x-ui)</option>
+                      <option value="v1">v1</option>
+                    </select>
+                    <span class="qs-hint">Sends each user's real IP to the service on this server, so Xray logs, limits and IP checks see real users instead of 127.0.0.1. Turn on Proxy Protocol (acceptProxyProtocol) in the Xray inbound first: without it every connection fails.</span>
+                    <span class="qs-hint perf-live" id="perfPPLive" hidden></span>
+                  </div>
+                  <div class="perf-field">
+                    <label for="perfBwInput"><b>Bandwidth Limit per Port</b><code class="perf-key" data-no-i18n>transport.bandwidthLimit</code></label>
+                    <div class="perf-unit"><input type="number" class="hashem-input" id="perfBwInput" min="0" max="10000" step="1" value="0" inputmode="numeric"><span>MB/s</span></div>
+                    <span class="qs-hint">A cap on each forwarded port, for all its users together (megabytes per second). 0 means no limit.</span>
+                  </div>
+                  <label class="perf-sw">
+                    <span class="perf-sw-t">
+                      <b>Health Check</b>
+                      <code class="perf-key" data-no-i18n>healthCheck</code>
+                      <span class="qs-hint">frpc checks the service on this server every 10 seconds and closes its port on the Iran server while it is down, so users fail at once instead of hanging.</span>
+                    </span>
+                    <input type="checkbox" id="perfHcCheck">
+                  </label>
                 </div>
-              </label>
+              </div>
             </div>
-            <div class="qs-hint u-mt-12" id="perfRoleHint" hidden></div>
-            <div class="qs-actions u-mt-16 u-ai-c">
+            <div class="perf-note" id="perfRoleHint" hidden></div>
+            <div class="set-acts">
               <button class="hashem-btn hashem-btn-primary" id="perfApplyBtn">Apply &amp; Restart Tunnels</button>
               <button class="hashem-btn hashem-btn-danger" id="perfResetBtn">Reset to Defaults</button>
               <span class="badge warn" id="perfDirty" hidden>Unsaved changes</span>
@@ -2321,45 +2722,44 @@
           </fieldset>
         </div>
 
+        <div class="perf-grid">
         <!-- Auto Pool -->
         <div class="tunnel-card" id="autoPoolCard">
           <div class="tc-header">
-            <div>
-              <p class="tc-title" data-i18n="perf_ap_title">Auto Pool (FRP work connections)</p>
-              <div class="qs-hint" data-i18n="perf_ap_sub">Sizes frpc poolCount and frps maxPoolCount from pool-full errors, active connections, CPU and free RAM. Scales up fast, scales down slowly, restarts only frpc and only when few users are connected.</div>
-            </div>
+            <div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg></span><p class="tc-title" data-i18n="perf_ap_title">Auto Pool (FRP work connections)</p></div>
             <span class="badge ok" id="perfAutoPoolBadge">Auto</span>
           </div>
+          <div class="qs-hint" data-i18n="perf_ap_sub">Sizes frpc poolCount and frps maxPoolCount from pool-full errors, active connections, CPU and free RAM. Scales up fast, scales down slowly, restarts only frpc and only when few users are connected.</div>
           <fieldset class="perf-fs" id="perfPoolSet">
             <legend class="sr-only">Auto Pool</legend>
-            <div class="u-flex-col-gap14 u-mt-12">
-              <label class="wd-radio-opt u-items-start">
-                <input type="checkbox" id="perfAutoPool" class="u-checkbox-ac" checked>
-                <div>
-                  <b class="u-color-tx" data-i18n="perf_ap_toggle">Auto Pool (recommended)</b>
-                  <div class="qs-hint u-mt-2" data-i18n="perf_ap_toggle_hint">When off, the manual values below are written to frpc.toml / frps.toml as typed.</div>
-                </div>
+            <div class="perf-list">
+              <label class="perf-sw">
+                <span class="perf-sw-t">
+                  <b data-i18n="perf_ap_toggle">Auto Pool (recommended)</b>
+                  <span class="qs-hint" data-i18n="perf_ap_toggle_hint">When off, the manual values below are written to frpc.toml / frps.toml as typed.</span>
+                </span>
+                <input type="checkbox" id="perfAutoPool" checked>
               </label>
             </div>
-            <div class="wd-hero-grid u-mt-12">
-              <div class="wd-stat-box">
-                <span class="wd-stat-label" data-i18n="perf_ap_last_decision">Last decision</span>
-                <div class="wd-stat-val u-fs-18" id="perfApDecision">—</div>
-                <span class="wd-stat-sub" id="perfApReason">—</span>
+            <div class="perf-facts">
+              <div class="perf-fact">
+                <span class="perf-tile-k" data-i18n="perf_ap_last_decision">Last decision</span>
+                <div class="perf-fact-v" id="perfApDecision">—</div>
+                <span class="perf-tile-s" id="perfApReason">—</span>
               </div>
-              <div class="wd-stat-box">
-                <span class="wd-stat-label" data-i18n="perf_ap_errors">Pool-full errors (last tick)</span>
-                <div class="wd-stat-val u-fs-18" id="perfApErrors">—</div>
-                <span class="wd-stat-sub" id="perfApConns">—</span>
+              <div class="perf-fact">
+                <span class="perf-tile-k" data-i18n="perf_ap_errors">Pool-full errors (last tick)</span>
+                <div class="perf-fact-v" id="perfApErrors">—</div>
+                <span class="perf-tile-s" id="perfApConns">—</span>
               </div>
-              <div class="wd-stat-box">
-                <span class="wd-stat-label" data-i18n="perf_ap_last_restart">Last frpc restart</span>
-                <div class="wd-stat-val u-fs-18" id="perfApRestart">—</div>
-                <span class="wd-stat-sub" id="perfApQuiet">—</span>
+              <div class="perf-fact">
+                <span class="perf-tile-k" data-i18n="perf_ap_last_restart">Last frpc restart</span>
+                <div class="perf-fact-v" id="perfApRestart">—</div>
+                <span class="perf-tile-s" id="perfApQuiet">—</span>
               </div>
             </div>
-            <div class="qs-hint u-mt-8" id="perfApFrpsNote" hidden data-i18n="perf_ap_frps_note">maxPoolCount was raised in frps.toml; restart frps during a quiet period to apply it.</div>
-            <div class="qs-row u-mt-12">
+            <div class="perf-note" id="perfApFrpsNote" hidden data-i18n="perf_ap_frps_note">maxPoolCount was raised in frps.toml; restart frps during a quiet period to apply it.</div>
+            <div class="set-fields">
               <div class="fg">
                 <label for="perfPoolCount" data-i18n="perf_pool_count">Client Pool Count (frpc)</label>
                 <input type="number" id="perfPoolCount" class="hashem-input" min="2" max="1000" step="1" value="20" inputmode="numeric" aria-describedby="perfPoolHint">
@@ -2371,8 +2771,8 @@
                 <div class="tc-sub" id="perfMaxHint" data-i18n="perf_max_sub">Server-side maximum work connection headroom (always at least 1.5 × poolCount).</div>
               </div>
             </div>
-            <div class="qs-hint u-mt-8" id="perfPoolErr" aria-live="polite" hidden></div>
-            <div class="qs-actions u-mt-12 u-ai-c">
+            <div class="qs-hint" id="perfPoolErr" aria-live="polite" hidden></div>
+            <div class="set-acts">
               <button class="hashem-btn hashem-btn-primary" id="perfSaveTuningBtn" type="button" data-i18n="perf_save_tuning">Save &amp; Apply Capacity</button>
               <span class="u-hint-12" id="perfTuningStatus" aria-live="polite"></span>
             </div>
@@ -2382,20 +2782,18 @@
         <!-- Backhaul connection pool -->
         <div class="tunnel-card" id="perfBhCard" hidden>
           <div class="tc-header">
-            <div>
-              <p class="tc-title">Backhaul Connection Pool</p>
-              <div class="qs-hint">Connections the foreign server keeps open to the Iran server, ready for new users. Raise it when many users connect at once and new connections are slow to start; lower it to keep fewer idle connections. Applying restarts backhaul-client, so connections drop for a few seconds.</div>
-            </div>
+            <div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg></span><p class="tc-title">Backhaul Connection Pool</p></div>
             <span class="badge" id="perfBhBadge">—</span>
           </div>
-          <div class="qs-row u-mt-12">
+          <div class="qs-hint">Connections the foreign server keeps open to the Iran server, ready for new users. Raise it when many users connect at once and new connections are slow to start; lower it to keep fewer idle connections. Applying restarts backhaul-client, so connections drop for a few seconds.</div>
+          <div class="set-fields">
             <div class="fg">
               <label for="perfBhPool">Connection Pool</label>
               <input type="number" id="perfBhPool" class="hashem-input" min="1" max="64" step="1" value="8" inputmode="numeric" aria-describedby="perfBhHint">
               <div class="tc-sub" id="perfBhHint">From 1 to 64. The default is 8.</div>
             </div>
           </div>
-          <div class="qs-actions u-mt-12 u-ai-c">
+          <div class="set-acts">
             <button class="hashem-btn hashem-btn-primary" id="perfBhSaveBtn" type="button">Save &amp; Apply Pool</button>
             <span class="u-hint-12" id="perfBhStatus" aria-live="polite"></span>
           </div>
@@ -2404,46 +2802,45 @@
         <!-- Kernel network stack -->
         <div class="tunnel-card" id="netStackCard">
           <div class="tc-header">
-            <div>
-              <p class="tc-title">Network Stack</p>
-              <div class="qs-hint">Kernel settings that decide speed on long, lossy links. Optimize Network sets all of them and saves the current values first, so Restore can bring them back.</div>
-            </div>
+            <div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2.5"/><path d="M9 9h6v6H9zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></span><p class="tc-title">Network Stack</p></div>
             <span class="badge" id="netStackBadge">—</span>
           </div>
-          <div class="ns-list u-mt-8" id="netStackList"></div>
-          <div class="qs-actions u-mt-12">
+          <div class="qs-hint">Kernel settings that decide speed on long, lossy links. Optimize Network sets all of them and saves the current values first, so Restore can bring them back.</div>
+          <div class="ns-list" id="netStackList"></div>
+          <div class="set-acts">
             <button class="hashem-btn hashem-btn-primary" id="perfOptimizeBtn">Optimize Network</button>
             <button class="hashem-btn hashem-btn-secondary" id="perfRestoreBtn" hidden>Restore Previous Settings</button>
           </div>
         </div>
+        </div>
 
       </section>
       <section id="tab-watchdog" role="tabpanel" hidden>
-        <!-- Status hero card -->
-        <div class="tunnel-card wd-hero-card">
-          <div class="tc-header">
-            <p class="tc-title">Tunnel Watchdog</p>
-            <div class="u-flex-center-gap10">
+        <!-- Status hero: what the Watchdog sees right now -->
+        <div class="tunnel-card wd-hero-card" id="wdHero" data-state="off">
+          <div class="wd-hero-top">
+            <span class="wd-shield" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 4.5 3.2 8 8 9 4.8-1 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
+            <div class="wd-hero-txt">
+              <p class="tc-title">Tunnel Watchdog</p>
+              <div class="wd-hero-state" id="wdHeroState" aria-live="polite">The Watchdog is off</div>
+              <div class="wd-stat-sub" id="wdHealthDetail">Not checked yet</div>
+            </div>
+            <div class="wd-hero-act">
               <span class="status-indicator" id="wdStatusInd"><span class="dot"></span><span id="wdStatusTxt">—</span></span>
               <button class="hashem-btn hashem-btn-secondary" id="wdToggleBtn">Enable</button>
             </div>
           </div>
-          <div class="qs-hint">Checks the tunnel every minute: the GRE link and the FRP service, or for Backhaul its control session. Sends Telegram alerts and, if you turn it on, restarts the tunnel after consecutive failures.</div>
-          <div class="u-m-12x0x16x0">
-            <label class="u-flex u-ai-c u-gap-8 u-cursor-pointer u-fs-13">
-              <input type="checkbox" id="wdAutoRestart">
-              <span><b>Auto-Restart on Failure</b> (Disabled by default to prevent CPU spike storms; alerts only)</span>
-            </label>
-          </div>
+          <div class="qs-hint">Checks the tunnel every minute: the GRE link and the FRP service, or for Backhaul its control session. A link that answers no ping but carries traffic counts as working. Sends Telegram alerts and, if you turn it on, restarts the tunnel after consecutive failures.</div>
           <div class="wd-hero-grid">
             <div class="wd-stat-box">
               <span class="wd-stat-label">Tunnel Health</span>
               <div class="wd-stat-val" id="wdHealthVal">—</div>
-              <span class="wd-stat-sub" id="wdHealthDetail">Not checked yet</span>
+              <span class="wd-stat-sub">Seen at the last check</span>
             </div>
             <div class="wd-stat-box">
               <span class="wd-stat-label">Consecutive Fails</span>
               <div class="wd-stat-val mono" id="wdFailsVal">0 / 2</div>
+              <div class="wd-pips" id="wdPips" aria-hidden="true"></div>
               <span class="wd-stat-sub">Alert threshold: 2</span>
             </div>
             <div class="wd-stat-box">
@@ -2452,8 +2849,13 @@
               <span class="wd-stat-sub">Runs every 1 min</span>
             </div>
           </div>
+          <label class="ap-opt wd-opt">
+            <span><b>Auto-Restart on Failure</b><small>Off by default to prevent restart storms: it only sends alerts until you turn it on.</small></span>
+            <span class="ap-switch"><input type="checkbox" id="wdAutoRestart"><i></i></span>
+          </label>
         </div>
 
+        <div class="wd-cols">
         <!-- Telegram alerts card -->
         <div class="tunnel-card">
           <div class="tc-header">
@@ -2473,13 +2875,13 @@
             <input class="hashem-input" id="wdChatId" placeholder="e.g. 123456789 or -100123456789" autocomplete="off" spellcheck="false">
           </div>
           <div class="fg">
-            <label>Telegram Route</label>
-            <div class="wd-radio-group">
-              <label class="wd-radio-opt">
+            <span class="wd-lbl" id="wdRouteLbl">Telegram Route</span>
+            <div class="wd-seg" role="radiogroup" aria-labelledby="wdRouteLbl">
+              <label>
                 <input type="radio" name="wdRoute" value="direct" id="wdRouteDirect" checked>
                 <span>Direct (standard HTTPS)</span>
               </label>
-              <label class="wd-radio-opt">
+              <label>
                 <input type="radio" name="wdRoute" value="tunnel" id="wdRouteTunnel">
                 <span>Via Tunnel (SOCKS5 through tunnel port)</span>
               </label>
@@ -2497,7 +2899,7 @@
             <button class="hashem-btn hashem-btn-primary" id="wdSaveTgBtn">Save Telegram Settings</button>
             <button class="hashem-btn hashem-btn-secondary" id="wdTestTgBtn">Test Alert</button>
           </div>
-          <div class="qs-hint" id="wdTgMsg"></div>
+          <div class="qs-hint" id="wdTgMsg" aria-live="polite"></div>
         </div>
 
         <!-- Tunnel Auto-Restart Scheduler Card -->
@@ -2506,7 +2908,8 @@
             <p class="tc-title" data-i18n="wd_restart_title">Tunnel Auto-Restart Schedule</p>
             <span class="badge" id="wdRestartBadge">Disabled</span>
           </div>
-          <div class="qs-hint" data-i18n="wd_restart_hint">Periodically refreshes the tunnel interfaces and restarts FRP/Backhaul relay services gracefully without interrupting the web panel or losing configuration.</div>
+          <div class="qs-hint" data-i18n="wd_restart_hint">On a schedule, the Watchdog restarts what is not working. On the Iran server that is a tunnel interface that does not answer and carries no traffic, and an engine whose service failed; interfaces that carry traffic are not touched. On a foreign server the engine (frpc or Backhaul) is restarted every time.</div>
+          <div class="qs-hint u-hint-accent hidden" id="wdRestartWarn" role="alert" data-i18n="wd_restart_warn">This schedule is on. Every run on a foreign server restarts its engine, which drops the connections passing through that server for a few seconds. Turn it off unless a tunnel really needs a regular restart.</div>
           <div class="fg">
             <label for="wdRestartHoursSelect" data-i18n="wd_restart_interval">Restart Interval</label>
             <div class="u-flex-center-wrap10">
@@ -2520,11 +2923,14 @@
                 <option value="custom">Custom Hours…</option>
               </select>
               <input type="number" class="hashem-input u-max-w-140 hidden" id="wdRestartCustomHours" aria-label="Restart interval in hours" min="1" max="720" placeholder="Hours (e.g. 4)">
-              <button class="hashem-btn hashem-btn-primary" id="wdSaveRestartSchedBtn" data-i18n="wd_restart_save">Save Schedule</button>
-              <button class="hashem-btn hashem-btn-secondary" id="wdRestartTunnelNowBtn" data-i18n="wd_restart_now">Restart Tunnel Now</button>
             </div>
           </div>
-          <div class="wd-stat-sub u-mt-8" id="wdRestartStatusSub">Next restart: Not scheduled</div>
+          <div class="qs-actions">
+            <button class="hashem-btn hashem-btn-primary" id="wdSaveRestartSchedBtn" data-i18n="wd_restart_save">Save Schedule</button>
+            <button class="hashem-btn hashem-btn-secondary" id="wdRestartTunnelNowBtn" data-i18n="wd_restart_now">Restart Tunnel Now</button>
+          </div>
+          <div class="wd-stat-sub" id="wdRestartStatusSub">Next restart: Not scheduled</div>
+        </div>
         </div>
 
         <!-- Encrypted Backups card -->
@@ -2539,17 +2945,17 @@
             <span class="qs-hint" id="wdBackupNowMsg"></span>
           </div>
           <div class="fg u-mt-12" >
-            <label>Backup Schedule</label>
-            <div class="wd-radio-group">
-              <label class="wd-radio-opt">
+            <span class="wd-lbl" id="wdSchedLbl">Backup Schedule</span>
+            <div class="wd-seg" role="radiogroup" aria-labelledby="wdSchedLbl">
+              <label>
                 <input type="radio" name="wdSchedMode" value="off" id="wdSchedOff" checked>
                 <span>Disabled</span>
               </label>
-              <label class="wd-radio-opt">
+              <label>
                 <input type="radio" name="wdSchedMode" value="interval" id="wdSchedInterval">
                 <span>Every N hours</span>
               </label>
-              <label class="wd-radio-opt">
+              <label>
                 <input type="radio" name="wdSchedMode" value="daily" id="wdSchedDaily">
                 <span>Daily at HH:MM</span>
               </label>
@@ -2568,15 +2974,15 @@
           </div>
 
           <!-- Stored Backups -->
-          <div class="u-mt-16">
-            <div class="u-fw-600 u-color-tx u-fs-14 u-mb-8">Stored Backups (/var/backups/hashem)</div>
+          <div class="wd-sub">
+            <div class="wd-sub-h">Stored Backups (/var/backups/hashem)</div>
             <div id="wdBackupList" class="wd-backup-list">
               <div class="qs-hint">No backups yet.</div>
             </div>
           </div>
           <!-- Backup key export: backups only open with this server's key -->
-          <div class="u-mt-16">
-            <div class="u-fw-600 u-color-tx u-fs-14 u-mb-8">Backup encryption key</div>
+          <div class="wd-sub">
+            <div class="wd-sub-h">Backup encryption key</div>
             <div class="qs-hint u-mb-8">Backups are encrypted with a key stored only on this server. Keep a copy elsewhere, or a downloaded backup cannot be opened if the server is lost.</div>
             <div class="u-flex-center-gap8">
               <input class="hashem-input u-max-w-180" id="wdKeyPass" aria-label="Panel password" type="password" autocomplete="current-password" placeholder="Panel password">
@@ -2744,16 +3150,134 @@
               <div class="trow"><span class="k">Engine open-files limit</span><span class="v mono" id="docNofileVal">—</span></div>
             </div>
           </div>
+
+          <!-- Reachability: TCP to the other server's ports -->
+          <div class="doc-card">
+            <div class="doc-card-head">
+              <span class="doc-card-title">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg>
+                Reachability
+              </span>
+              <span class="badge dim" id="docReachBadge">—</span>
+            </div>
+            <div class="doc-reach-verdict" id="docReachVal">—</div>
+            <div class="doc-stat-sub" id="docReachSub">TCP from this server to the other server's ports</div>
+            <div id="docReachBox"></div>
+          </div>
+
+          <!-- Clocks -->
+          <div class="doc-card">
+            <div class="doc-card-head">
+              <span class="doc-card-title">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>
+                Clocks
+              </span>
+              <span class="badge dim" id="docClockBadge">—</span>
+            </div>
+            <div class="doc-stat-val" id="docClockVal">—</div>
+            <div class="doc-stat-sub" id="docClockSub">The other server's clock, compared with this one</div>
+            <div>
+              <div class="trow"><span class="k">Time sync (NTP) here</span><span class="v" id="docNtpVal">—</span></div>
+              <div class="trow"><span class="k">Measured within</span><span class="v mono" id="docClockErrVal">—</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Route, hop by hop (mtr) -->
+        <div class="tunnel-card u-mt-14" id="docTraceCard">
+          <div class="tc-header">
+            <p class="tc-title u-flex-center-gap8">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 6H15a3.5 3.5 0 0 1 0 7H9a3.5 3.5 0 0 0 0 7h7.5"/></svg>
+              <span>Route, hop by hop</span>
+            </p>
+            <span class="qs-hint" id="docTraceMeta">Where on the way packets are lost</span>
+          </div>
+          <div class="doc-ctl">
+            <div class="fg"><label for="docTraceTarget">Server</label><select class="hashem-input" id="docTraceTarget"></select></div>
+            <div class="fg"><label for="docTraceMode">Probe with</label>
+              <select class="hashem-input" id="docTraceMode">
+                <option value="icmp">Ping (ICMP)</option>
+                <option value="tcp">TCP, to the port that should answer</option>
+              </select>
+            </div>
+            <button type="button" class="hashem-btn hashem-btn-primary" id="docTraceBtn"><span>Trace Route</span></button>
+          </div>
+          <div class="doc-job" id="docTraceBox" aria-live="polite"></div>
+        </div>
+
+        <!-- Stability: a long ping -->
+        <div class="tunnel-card u-mt-14" id="docStabCard">
+          <div class="tc-header">
+            <p class="tc-title u-flex-center-gap8">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l2-5 4 10 2-5h8"/></svg>
+              <span>Stability Test</span>
+            </p>
+            <span class="qs-hint">Short drops and spikes a quick ping misses</span>
+          </div>
+          <div class="doc-ctl">
+            <div class="fg"><label for="docStabTarget">Server</label><select class="hashem-input" id="docStabTarget"></select></div>
+            <div class="fg"><span id="docStabLenLbl">Duration</span>
+              <div class="qs-seg doc-seg" role="group" aria-labelledby="docStabLenLbl" id="docStabLen">
+                <button type="button" data-s="60" aria-pressed="true">1 min</button>
+                <button type="button" data-s="180" aria-pressed="false">3 min</button>
+                <button type="button" data-s="300" aria-pressed="false">5 min</button>
+              </div>
+            </div>
+            <button type="button" class="hashem-btn hashem-btn-primary" id="docStabBtn"><span>Start Test</span></button>
+          </div>
+          <div class="doc-job" id="docStabBox" aria-live="polite"></div>
+        </div>
+
+        <!-- Every forwarded port, end to end -->
+        <div class="tunnel-card u-mt-14 hidden" id="docPortsCard">
+          <div class="tc-header">
+            <p class="tc-title u-flex-center-gap8">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h2M7 13h2M7 17h2M12 9h5M12 13h5M12 17h5"/></svg>
+              <span>Forwarded Ports</span>
+            </p>
+            <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="docPortsBtn"><span>Test All Ports</span></button>
+          </div>
+          <div class="qs-hint">Connects to each port the way a user does, and checks the service behind it answers.</div>
+          <div class="doc-ports" id="docPortsBox"></div>
+        </div>
+
+        <!-- History and schedule -->
+        <div class="tunnel-card u-mt-14" id="docHistCard">
+          <div class="tc-header">
+            <p class="tc-title u-flex-center-gap8">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-6"/></svg>
+              <span>History</span>
+            </p>
+            <span class="qs-hint" id="docHistMeta"></span>
+          </div>
+          <div id="docHistBox"></div>
+          <div class="doc-sched">
+            <div class="fg"><label for="docSchedSel">Run automatically</label>
+              <select class="hashem-input" id="docSchedSel">
+                <option value="0">Off</option>
+                <option value="1">Every hour</option>
+                <option value="3">Every 3 hours</option>
+                <option value="6">Every 6 hours</option>
+                <option value="12">Every 12 hours</option>
+                <option value="24">Once a day</option>
+              </select>
+            </div>
+            <label class="set-sw" for="docSchedAlert"><input type="checkbox" id="docSchedAlert"><span>Alert me when the rating changes</span></label>
+            <div class="qs-hint" id="docSchedHint">Scheduled runs skip iPerf3. Alerts go to the Telegram bot and webhook set in Settings, Alerts.</div>
+          </div>
         </div>
       </section>
-      <!-- Tab: Carrier Benchmark & Auto-Pilot -->
+      <!-- Tab: Carrier Benchmark -->
       <section id="tab-benchmark" role="tabpanel" hidden>
         <!-- Path test: which transports cross between the two servers, before any tunnel -->
-        <div class="tunnel-card u-mb-20" id="ptCard">
-          <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
-            <div>
-              <span class="tc-title u-fs-18 u-fw-700" data-i18n="pt_title">Path Test Before Any Tunnel</span> <span class="eng-pro hidden" id="ptPro" data-no-i18n>PRO</span>
-              <div class="qs-hint u-mt-4" data-i18n="pt_sub">Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed. Safe next to a running tunnel: the test uses its own free ports and its own GRE interface and never touches the tunnel.</div>
+        <div class="tunnel-card bench-card" id="ptCard">
+          <div class="tc-header">
+            <div class="set-h">
+              <span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M6 16.5V11a4 4 0 0 1 4-4h5.5"/><path d="m13 4.5 2.5 2.5L13 9.5"/></svg></span>
+              <div class="bench-h-t">
+              <p class="tc-title"><span data-i18n="pt_title">Path Test Before Any Tunnel</span> <span class="eng-pro hidden" id="ptPro" data-no-i18n>PRO</span></p>
+              <div class="qs-hint" data-i18n="pt_sub">Finds which transports get through between your Iran and foreign servers, with the real FRP and Backhaul cores. Nothing is set up for good: temporary servers run for a few minutes and are removed. Safe next to a running tunnel: the test uses its own free ports and its own GRE interface and never touches the tunnel.</div>
+              </div>
             </div>
             <span class="badge dim" id="ptBadge" data-i18n="pt_idle">Not running</span>
           </div>
@@ -2832,169 +3356,147 @@
             </div>
           </div>
         </div>
-        <!-- Pre-connection Target & Role Configuration Card -->
-        <div class="tunnel-card u-bd-info u-bg-s1 u-lift u-mb-20" style="backdrop-filter:blur(16px);">
-          <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
-            <div>
-              <div class="u-flex-center-gap10">
-                <span class="tc-title u-fs-18 u-fw-700 u-flex u-ai-c u-gap-8" data-i18n="bench_leaderboard_title">
-                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#38bdf8" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                  Smart Multi-Protocol Carrier Benchmark
-                </span>
-                <span class="badge ok" id="benchStatusPill">Ready</span>
+        <!-- Carrier benchmark: where to test, the winner, four tiles and the ranked carriers -->
+        <div class="tunnel-card bench-card">
+          <div class="tc-header">
+            <div class="set-h">
+              <span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H12L11 22l8.5-11.5H12z"/></svg></span>
+              <div class="bench-h-t">
+                <p class="tc-title"><span data-i18n="bench_leaderboard_title">Smart Multi-Protocol Carrier Benchmark</span> <span class="badge ok" id="benchStatusPill">Ready</span></p>
+                <div class="qs-hint" id="benchMetaSub">Independent end-to-end benchmark across all 7 Hashem protocols before establishing tunnel</div>
               </div>
-              <div class="qs-hint u-mt-4" id="benchMetaSub">Independent end-to-end benchmark across all 7 Hashem protocols before establishing tunnel</div>
             </div>
-            <div class="qs-actions">
-              <button class="hashem-btn hashem-btn-primary u-flex u-ai-c u-gap-8" id="benchRunBtn">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span id="benchRunBtnTxt" data-i18n="bench_run_btn">Run Smart Benchmark</span>
-              </button>
-            </div>
+            <button class="hashem-btn hashem-btn-primary u-flex u-ai-c u-gap-8" id="benchRunBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span id="benchRunBtnTxt" data-i18n="bench_run_btn">Run Smart Benchmark</span>
+            </button>
           </div>
 
-          <!-- Pre-connection Target Configuration Form -->
-          <div class="u-grid-2 u-gap-16 u-mb-16 u-bg-sunk u-p-16 u-r-10 u-bd-ln">
-            <div>
-              <label class="qs-label u-mb-8 u-fs-13 u-fw-600 u-flex u-ai-c u-gap-8">
-                <span>Current Server Role</span>
-                <span class="badge info">Role</span>
-              </label>
-              <div class="qs-seg u-mb-8" role="group" aria-label="Server Role Selection">
-                <button type="button" id="benchRoleIranBtn" class="active u-fw-600" aria-pressed="true">Iran Server</button>
-                <button type="button" id="benchRoleForeignBtn" aria-pressed="false" class="u-fw-600">Foreign Server</button>
+          <!-- Where to test -->
+          <div class="bench-target">
+            <div class="bench-field">
+              <span class="qs-label">Current Server Role</span>
+              <div class="qs-seg" role="group" aria-label="Server Role Selection">
+                <button type="button" id="benchRoleIranBtn" class="active" aria-pressed="true">Iran Server</button>
+                <button type="button" id="benchRoleForeignBtn" aria-pressed="false">Foreign Server</button>
               </div>
               <input type="hidden" id="benchTargetRole" value="iran">
               <div class="qs-hint" id="benchRoleHint">On Iran server, enter foreign server address to probe all 7 protocols outwards.</div>
             </div>
-
-            <div>
-              <label class="qs-label u-mb-8 u-fs-13 u-fw-600 u-flex u-ai-c u-jc-sb" for="benchTargetHost">
+            <div class="bench-field">
+              <label class="qs-label bench-lbl" for="benchTargetHost">
                 <span>Foreign Server Public IP or Domain (Destination)</span>
                 <span class="badge dim u-none" id="benchAutoDetectBadge">Auto Detect</span>
               </label>
-              <input class="hashem-input u-ltr u-text-start u-mono u-fs-14 u-p-8x12" id="benchTargetHost" placeholder="e.g. 198.51.100.10 or foreign.mydomain.com" inputmode="decimal">
-              <div class="qs-hint u-mt-4" id="benchTargetHint">Enter destination host to benchmark and discover the best protocol for lowest packet loss.</div>
+              <input class="hashem-input u-ltr u-text-start u-mono" id="benchTargetHost" placeholder="e.g. 198.51.100.10 or foreign.mydomain.com" inputmode="decimal">
+              <div class="qs-hint" id="benchTargetHint">Enter destination host to benchmark and discover the best protocol for lowest packet loss.</div>
             </div>
-          </div>
-
-          <!-- Advanced Custom Ports Accordion (Optional) -->
-          <div class="u-mb-16">
-            <div class="u-flex u-ai-c u-jc-sb u-cursor-pointer u-p-8x4" id="benchAdvToggle">
-              <span class="u-fs-13 u-c-ac u-fw-600 u-flex u-ai-c u-gap-8">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <div class="bench-adv">
+              <button type="button" class="bench-adv-t" id="benchAdvToggle" aria-expanded="false" aria-controls="benchAdvWrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
                 <span>Custom Benchmark Ports (Optional)</span>
-              </span>
-              <span class="u-fs-12 u-c-mu" id="benchAdvChevron">▼ Expand</span>
-            </div>
-            <div id="benchAdvWrap" class="hidden u-grid-4 u-gap-12 u-mt-8 u-bg-inset u-p-12 u-r-8 u-bd-ln">
-              <div>
-                <label for="benchFrpPort" class="u-fs-12 u-c-mu u-block u-mb-4">FRP Port (TCP/KCP/QUIC)</label>
-                <input class="hashem-input u-p-8x12 u-fs-12 u-mono" id="benchFrpPort" type="number" value="7000">
-              </div>
-              <div>
-                <label for="benchWssPort" class="u-fs-12 u-c-mu u-block u-mb-4">WSS TLS Port</label>
-                <input class="hashem-input u-p-8x12 u-fs-12 u-mono" id="benchWssPort" type="number" value="8443">
-              </div>
-              <div>
-                <label for="benchBackhaulPort" class="u-fs-12 u-c-mu u-block u-mb-4">Backhaul Port</label>
-                <input class="hashem-input u-p-8x12 u-fs-12 u-mono" id="benchBackhaulPort" type="number" value="3080">
-              </div>
-              <div>
-                <label for="benchBagherPort" class="u-fs-12 u-c-mu u-block u-mb-4">Bagher SSH Port</label>
-                <input class="hashem-input u-p-8x12 u-fs-12 u-mono" id="benchBagherPort" type="number" value="22">
-              </div>
-            </div>
-          </div>
-
-          <!-- Top Winner Recommendation Showcase Banner -->
-          <div id="benchWinnerBanner" class="hidden u-bd-ok u-bg-s1 u-r-12 u-p-20x20 u-mb-20 u-noglow">
-            <div class="u-flex u-ai-c u-jc-sb u-wrap u-gap-16">
-              <div>
-                <div class="u-flex u-ai-c u-gap-8">
-                  <span class="badge ok" id="benchRecBadge">Recommended Protocol</span>
-                  <span class="badge info" id="benchWinnerBadge">Highest Stability</span>
+                <svg class="bench-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+              <div id="benchAdvWrap" class="hidden bench-ports">
+                <div>
+                  <label for="benchFrpPort" class="qs-label">FRP Port (TCP/KCP/QUIC)</label>
+                  <input class="hashem-input u-mono" id="benchFrpPort" type="number" value="7000">
                 </div>
-                <h3 id="benchWinnerTitle" class="u-m-8x0x4x0 u-fs-20 u-fw-700 u-c-tx u-flex u-ai-c u-gap-8">—</h3>
-                <div id="benchWinnerDesc" class="u-fs-13 u-c-mu">Based on live probe metrics, this carrier offers maximum throughput with lowest drop rate.</div>
-              </div>
-              <div class="u-flex u-ai-c u-gap-12">
-                <div class="u-text-end u-bg-inset u-p-8x16 u-r-8 u-bd-ln">
-                  <div class="u-fs-12 u-c-mu">Quality Score</div>
-                  <div id="benchWinnerScore" class="u-fs-18 u-fw-700 u-c-ok u-mono">— / 100</div>
+                <div>
+                  <label for="benchWssPort" class="qs-label">WSS TLS Port</label>
+                  <input class="hashem-input u-mono" id="benchWssPort" type="number" value="8443">
                 </div>
-                <button class="hashem-btn hashem-btn-primary" id="benchApplyWinnerBtn">
-                  Apply This Protocol
-                </button>
+                <div>
+                  <label for="benchBackhaulPort" class="qs-label">Backhaul Port</label>
+                  <input class="hashem-input u-mono" id="benchBackhaulPort" type="number" value="3080">
+                </div>
+                <div>
+                  <label for="benchBagherPort" class="qs-label">Bagher SSH Port</label>
+                  <input class="hashem-input u-mono" id="benchBagherPort" type="number" value="22">
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Quick Telemetry Stats Grid -->
-          <div class="bench-stats-grid">
-            <div class="bench-stat-card">
-              <span class="wd-stat-label u-stat-label">
-                Best Protocol
-              </span>
-              <div class="wd-stat-val u-stat-val-ok" id="benchStatWinner">—</div>
-              <span class="wd-stat-sub u-hint-12" id="benchStatWinnerSub">Top Recommendation</span>
+          <!-- The winner, with its score as a ring -->
+          <div id="benchWinnerBanner" class="hidden bench-win" data-st="ok">
+            <div class="bench-ring" id="benchWinnerRing" aria-hidden="true">
+              <div><b id="benchWinnerScore">—</b><small>/ 100</small></div>
             </div>
-            <div class="bench-stat-card">
-              <span class="wd-stat-label u-stat-label">
-                Active Tunnel Carrier
-              </span>
-              <div class="wd-stat-val u-fs-18 u-fw-700 u-c-info u-m-8x0x4x0" id="benchStatActive">—</div>
-              <span class="wd-stat-sub u-hint-12" id="benchStatActiveSub">Running Carrier</span>
+            <div class="bench-win-t">
+              <div class="u-flex u-ai-c u-gap-8 u-wrap">
+                <span class="badge ok" id="benchRecBadge">Recommended Protocol</span>
+                <span class="badge info" id="benchWinnerBadge">Highest Stability</span>
+              </div>
+              <h3 id="benchWinnerTitle">—</h3>
+              <div id="benchWinnerDesc" class="qs-hint">Based on live probe metrics, this carrier offers maximum throughput with lowest drop rate.</div>
             </div>
-            <div class="bench-stat-card">
-              <span class="wd-stat-label u-stat-label">
-                Lowest RTT Latency
-              </span>
-              <div class="wd-stat-val u-fs-18 u-fw-700 u-c-tx u-m-8x0x4x0" id="benchStatMinRtt">—</div>
-              <span class="wd-stat-sub u-hint-12" id="benchStatMinRttSub">Round-Trip Time</span>
+            <button class="hashem-btn hashem-btn-primary" id="benchApplyWinnerBtn">Apply This Protocol</button>
+          </div>
+
+          <!-- Four tiles -->
+          <div class="perf-tiles">
+            <div class="perf-tile" id="benchTileWinner">
+              <span class="perf-tile-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg></span>
+              <div class="perf-tile-t">
+                <span class="perf-tile-k">Best Protocol</span>
+                <div class="perf-tile-v" id="benchStatWinner">—</div>
+                <span class="perf-tile-s" id="benchStatWinnerSub">Top Recommendation</span>
+              </div>
             </div>
-            <div class="bench-stat-card">
-              <span class="wd-stat-label u-stat-label">
-                Packet Loss Rate
-              </span>
-              <div class="wd-stat-val u-stat-val-ok" id="benchStatLoss">0%</div>
-              <span class="wd-stat-sub u-hint-12" id="benchStatLossSub">Dropped Packets</span>
+            <div class="perf-tile" id="benchTileActive" data-st="info">
+              <span class="perf-tile-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/></svg></span>
+              <div class="perf-tile-t">
+                <span class="perf-tile-k">Active Tunnel Carrier</span>
+                <div class="perf-tile-v" id="benchStatActive">—</div>
+                <span class="perf-tile-s" id="benchStatActiveSub">Running Carrier</span>
+              </div>
+            </div>
+            <div class="perf-tile" id="benchTileRtt">
+              <span class="perf-tile-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M10 2h4"/></svg></span>
+              <div class="perf-tile-t">
+                <span class="perf-tile-k">Lowest RTT Latency</span>
+                <div class="perf-tile-v" id="benchStatMinRtt">—</div>
+                <span class="perf-tile-s" id="benchStatMinRttSub">Round-Trip Time</span>
+              </div>
+            </div>
+            <div class="perf-tile" id="benchTileLoss">
+              <span class="perf-tile-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span>
+              <div class="perf-tile-t">
+                <span class="perf-tile-k">Packet Loss Rate</span>
+                <div class="perf-tile-v" id="benchStatLoss">—</div>
+                <span class="perf-tile-s" id="benchStatLossSub">Dropped Packets</span>
+              </div>
             </div>
           </div>
 
-          <!-- Leaderboard Table Wrap -->
-          <div class="bench-table-wrap">
-            <table class="hashem-table" id="benchTable">
-              <thead>
-                <tr>
-                  <th class="u-w-44 u-text-center">#</th>
-                  <th data-i18n="bench_tbl_rank">Protocol & Carrier</th>
-                  <th data-i18n="bench_tbl_trans">Transport Core</th>
-                  <th data-i18n="bench_tbl_port">Destination Port</th>
-                  <th data-i18n="bench_tbl_rtt">RTT Latency</th>
-                  <th data-i18n="bench_tbl_loss">Packet Loss</th>
-                  <th data-i18n="bench_tbl_jitter">Jitter</th>
-                  <th data-i18n="bench_tbl_score">Quality Score</th>
-                  <th data-i18n="bench_tbl_status">Status</th>
-                  <th data-i18n="bench_tbl_action">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="benchTableBody">
-                <tr><td colspan="10"><div class="ent-skel u-h-14"></div></td></tr>
-              </tbody>
-            </table>
+          <!-- Ranked carriers: a row each; on a narrow screen the numbers wrap under the name -->
+          <div class="bench-list" role="table" aria-label="Carrier benchmark results">
+            <div class="bench-head" role="row">
+              <span role="columnheader">#</span>
+              <span role="columnheader" data-i18n="bench_tbl_rank">Protocol & Carrier</span>
+              <span role="columnheader" data-i18n="bench_tbl_rtt">RTT Latency</span>
+              <span role="columnheader" data-i18n="bench_tbl_loss">Packet Loss</span>
+              <span role="columnheader" data-i18n="bench_tbl_jitter">Jitter</span>
+              <span role="columnheader" data-i18n="bench_tbl_score">Quality Score</span>
+              <span role="columnheader" data-i18n="bench_tbl_status">Status</span>
+              <span role="columnheader" data-i18n="bench_tbl_action">Actions</span>
+            </div>
+            <div role="rowgroup" id="benchTableBody">
+              <div class="bench-empty"><div class="ent-skel u-h-14"></div></div>
+            </div>
           </div>
         </div>
 
-        <!-- Secondary Controls Grid: Peer Link & Automatic Failover -->
-        <div class="u-grid-2 u-gap-16 u-mt-16">
+        <!-- Peer Link -->
+        <div>
           <!-- Card 1: Peer Link Status -->
-          <div class="tunnel-card u-card-tint">
+          <div class="tunnel-card bench-card">
             <div class="tc-header">
-              <span class="tc-title u-flex-center-gap8">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                <span data-i18n="bench_peer_link_title">Inter-Panel Link</span>
-              </span>
+              <div class="set-h">
+                <span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+                <p class="tc-title" data-i18n="bench_peer_link_title">Inter-Panel Link</p>
+              </div>
               <span class="badge dim" id="peerLinkBadge">Probing...</span>
             </div>
             <div class="qs-hint" id="peerLinkSub" data-i18n="bench_peer_link_sub">Real-time telemetry and state synchronization with peer panel.</div>
@@ -3024,39 +3526,6 @@
             </div>
           </div>
 
-          <!-- Card 2: Automatic Failover Settings -->
-          <div class="tunnel-card u-card-tint" id="failoverCard">
-            <div class="tc-header">
-              <span class="tc-title u-flex-center-gap8">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                <span data-i18n="bench_failover_title">Automatic Failover</span>
-              </span>
-              <span class="badge dim" id="autoPilotBadge">[ OFF ] Manual Mode</span>
-            </div>
-            <div class="qs-hint" data-i18n="bench_failover_sub">Default: <b>OFF</b>. When enabled, watchdog automatically promotes the healthiest backup carrier upon packet loss spike.</div>
-            <div class="fg u-mt-12">
-              <label class="u-flex-center-wrap10">
-                <input type="checkbox" id="autoPilotToggle">
-                <span class="u-fw-600" data-i18n="bench_failover_toggle">Enable Carrier Auto-Failover</span>
-              </label>
-            </div>
-            <div class="fg u-mt-8">
-              <label for="autoPilotThresholdInput" data-i18n="bench_failover_threshold">Packet Loss Trigger Threshold (%)</label>
-              <input class="hashem-input u-maxw-140" id="autoPilotThresholdInput" type="number" min="5" max="90" value="20">
-              <span class="ent-help">If the current carrier packet loss exceeds this threshold, the tunnel seamlessly switches to the best candidate.</span>
-            </div>
-            <div class="trow u-mt-4">
-              <span class="k">Last Auto Failover</span>
-              <span class="v" id="autoPilotLastVal">—</span>
-            </div>
-            <div class="trow">
-              <span class="k">Switch Counter</span>
-              <span class="v" id="autoPilotCountVal">0</span>
-            </div>
-            <div class="qs-actions u-mt-12">
-              <button class="hashem-btn hashem-btn-primary u-btn-xs" id="autoPilotSaveBtn" data-i18n="bench_failover_save">Save Failover Policy</button>
-            </div>
-          </div>
         </div>
 
         <!-- Modal / Inline Panel for Peer Configuration -->
@@ -3129,6 +3598,7 @@
             <div class="lm-acts" id="nodeActs"></div>
           </div>
           <div class="xr-err hidden" id="nodeErr" role="alert"></div>
+          <div class="nm-wrap" id="nodeMap" hidden></div>
           <div id="nodeBody"><div class="ent-skel u-h-14"></div></div>
         </div>
         <div class="tunnel-card u-mb-20" id="nodeFleetCard" hidden>
@@ -3154,6 +3624,7 @@
             </div>
             <div class="lm-acts">
               <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="_ntLinks = null; loadNodeTunnels()">Refresh</button>
+              <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openNodeProbe()">Test between servers</button>
               <button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="openNodeTunnel()">New tunnel</button>
             </div>
           </div>
@@ -3161,6 +3632,88 @@
         </div>
       </section>
       <!-- Customers: tunnels sold to customers (customers.go; loadCustomers in app.js) -->
+      <section id="tab-autopilot" role="tabpanel" hidden>
+        <div class="tunnel-card u-mb-20" id="apFleetCard" hidden>
+          <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
+            <div>
+              <span class="tc-title u-fs-18 u-fw-700">Autopilot on every server</span>
+              <div class="qs-hint u-mt-4">Each Iran server watches its own tunnels and moves them. Turn it on or off for a server or one tunnel from here; its rules and history open on that server.</div>
+            </div>
+            <div class="lm-acts"><button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="apFleetLoad()">Refresh</button></div>
+          </div>
+          <div id="apFleetBody"><div class="ent-skel u-h-14"></div></div>
+        </div>
+        <div class="tunnel-card ap-hero u-mb-20">
+          <div class="ap-hero-top">
+            <div class="ap-hero-id">
+              <span class="ap-logo"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 14.6 9l6.9 2.2-6.9 2.2L12 20l-2.6-6.6L2.5 11.2 9.4 9z"/></svg></span>
+              <div>
+                <span class="tc-title u-fs-18 u-fw-700">Autopilot</span> <span class="eng-pro hidden" id="apPro" data-no-i18n>PRO</span>
+                <div class="qs-hint u-mt-4">A tunnel that stays down is tested and moved to a carrier that gets through, on both servers, by itself. When the new carrier does not connect, both servers go back.</div>
+              </div>
+            </div>
+            <div class="ap-hero-ctl">
+              <span class="badge dim" id="apPill"><span class="dot"></span><span id="apPillTxt">Off</span></span>
+              <label class="ap-switch" title="Turn Autopilot on"><input type="checkbox" id="apEnabled" aria-label="Turn Autopilot on"><i></i></label>
+            </div>
+          </div>
+          <ol class="ap-flow" id="apFlow">
+            <li class="ap-step" data-step="0"><span class="ap-node"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 15 5.5 18.5a3 3 0 0 1-4.2-4.2L4.8 10.8"/><path d="M15 9l3.5-3.5a3 3 0 0 1 4.2 4.2l-3.5 3.5"/><path d="M8 3v3M3 8h3M16 21v-3M21 16h-3"/></svg></span><b>Tunnel down</b><small id="apFlowDown">5 min</small></li>
+            <li class="ap-step" data-step="1"><span class="ap-node"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span><b>Reach the foreign panel</b><small>Does it answer?</small></li>
+            <li class="ap-step" data-step="2"><span class="ap-node"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span><b>Test the path</b><small id="apFlowTest">Every transport, measured</small></li>
+            <li class="ap-step" data-step="3"><span class="ap-node"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="M17 20l4-4-4-4"/><path d="M21 16H7"/></svg></span><b>Swap the carrier</b><small>Both servers, with rollback</small></li>
+            <li class="ap-step" data-step="4"><span class="ap-node"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3 10 14"/><path d="M21 3l-7 18-4-7-7-4z"/></svg></span><b>Tell you</b><small id="apFlowTell">Webhook and Telegram</small></li>
+          </ol>
+          <div class="ap-note hidden" id="apNote"></div>
+          <div class="cl-kpis" id="apKpis"></div>
+        </div>
+
+        <div class="ap-grid">
+          <div class="tunnel-card">
+            <div class="tc-header"><span class="tc-title">Tunnels</span><span class="qs-hint u-m-0">Switch a tunnel off to leave it alone.</span></div>
+            <div class="ap-tuns" id="apTunnels"></div>
+          </div>
+
+          <div class="tunnel-card">
+            <div class="tc-header"><span class="tc-title">Rules</span><span class="badge warn hidden" id="apDirty">Not saved</span></div>
+            <div class="ap-rule">
+              <div class="ap-rule-h"><label for="apDown">Act after the tunnel was down for</label><output id="apDownOut">5 min</output></div>
+              <input type="range" class="ap-range" id="apDown" min="2" max="60" step="1" value="5">
+            </div>
+            <div class="ap-rule">
+              <div class="ap-rule-h"><label for="apCool">Pause between two runs for one tunnel</label><output id="apCoolOut">30 min</output></div>
+              <input type="range" class="ap-range" id="apCool" min="10" max="240" step="5" value="30">
+            </div>
+            <div class="ap-rule">
+              <div class="ap-rule-h"><label for="apPerDay">Runs for one tunnel in 24 hours</label><output id="apPerDayOut">6</output></div>
+              <input type="range" class="ap-range" id="apPerDay" min="1" max="24" step="1" value="6">
+            </div>
+            <div class="ap-rule">
+              <div class="ap-rule-h"><span class="ap-lbl">Quiet hours (server time): no switching</span><output id="apQuietOut">None</output></div>
+              <div class="ap-hours" id="apHours" role="group" aria-label="Quiet hours"></div>
+              <div class="qs-hint u-m-0">Click the first hour, then the last one. Click <button type="button" class="ap-link" id="apQuietClear">Clear</button> for none.</div>
+            </div>
+            <label class="ap-opt"><span><b>Test the path first</b><small>Measure every transport and take the fastest one that gets through. Off: try the carriers in order.</small></span><span class="ap-switch sm"><input type="checkbox" id="apPathTest"><i></i></span></label>
+            <label class="ap-opt"><span><b>Send a message</b><small id="apNotifyNote">To the webhook of External alerts and the Telegram bot of the Watchdog.</small></span><span class="ap-switch sm"><input type="checkbox" id="apNotify"><i></i></span></label>
+          </div>
+        </div>
+
+        <div class="tunnel-card u-mt-16">
+          <div class="tc-header"><span class="tc-title">Carriers Autopilot may choose</span>
+            <span class="lm-acts"><button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" id="apCarAll">All</button></span></div>
+          <div class="ap-cars" id="apCars"></div>
+          <div class="ap-save">
+            <span class="qs-hint u-m-0">A tunnel that is down on GRE is moved off GRE first. A tunnel without GRE addresses is never moved onto GRE.</span>
+            <button type="button" class="hashem-btn hashem-btn-primary" id="apSave">Save rules</button>
+          </div>
+        </div>
+
+        <div class="tunnel-card u-mt-16">
+          <div class="tc-header"><span class="tc-title">History</span><button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" id="apRefresh">Refresh</button></div>
+          <ol class="ap-tl" id="apEvents"></ol>
+        </div>
+      </section>
+
       <section id="tab-customers" role="tabpanel" hidden>
         <div class="tunnel-card u-mb-20">
           <div class="tc-header u-bb-ln u-pb-16 u-mb-16">
@@ -3183,16 +3736,17 @@
       </section>
       <section id="tab-update" role="tabpanel" hidden>
         <div class="tunnel-card">
-          <div class="tc-header"><p class="tc-title">Panel Update <span class="badge info hidden" id="updDevBadge" data-i18n="upd_dev_badge">DEV</span></p><span class="status-indicator" id="updDot"><span class="dot"></span><span id="updDotTxt">—</span></span></div>
-          <div class="upd-hero">
-            <div><div class="qs-hint">Installed version</div><div class="ver-big" id="verCurrent" data-no-i18n>—</div></div>
+          <div class="tc-header"><p class="tc-title">Panel Update <span class="badge info hidden" id="updDevBadge" data-i18n="upd_dev_badge">DEV</span></p><span class="status-indicator upd-pill" id="updDot"><span class="dot"></span><span id="updDotTxt">—</span></span></div>
+          <div class="upd-hero" id="updHero">
+            <span class="upd-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 7.5 12 3 3 7.5 12 12z"/><path d="M3 7.5v9L12 21l9-4.5v-9"/><path d="M12 12v9"/></svg></span>
+            <div class="upd-cur"><div class="qs-hint">Installed version</div><div class="ver-big" id="verCurrent" data-no-i18n>—</div></div>
             <div class="upd-to" id="updTo" hidden>
               <span class="upd-arrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
               <div><div class="qs-hint">Available</div><div class="ver-big upd-new" id="verLatest" data-no-i18n>—</div></div>
             </div>
           </div>
           <div class="warnbox u-mt-8" id="updRollback" hidden></div>
-          <div id="verRowsUpd" class="u-grid-gap-0 u-mt-8"></div>
+          <div id="verRowsUpd" class="upd-stats"></div>
           <div class="qs-actions u-mt-12">
             <button class="hashem-btn hashem-btn-primary" id="updateBtn" hidden>Update</button>
             <button class="hashem-btn hashem-btn-secondary" id="updCheckBtn">Check Now</button>
@@ -3212,11 +3766,15 @@
 
         <div class="tunnel-card">
           <div class="tc-header"><p class="tc-title">Channel &amp; Versions</p></div>
-          <div class="fg"><label for="updChannel" data-i18n="upd_channel">Update channel</label>
-            <select class="hashem-input u-max-w-260" id="updChannel"><option value="stable" data-i18n="upd_channel_stable">Stable</option><option value="dev" data-i18n="upd_channel_dev">Dev</option></select>
-          </div>
+          <fieldset class="upd-ch" id="updChannel">
+            <legend data-i18n="upd_channel">Update channel</legend>
+            <div class="upd-ch-opts">
+              <label class="upd-opt"><input type="radio" name="updCh" value="stable"><span class="upd-opt-box"><span class="upd-opt-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span><span class="upd-opt-t"><b data-i18n="upd_channel_stable">Stable</b><small>Tested releases, for running tunnels</small></span></span></label>
+              <label class="upd-opt dev"><input type="radio" name="updCh" value="dev"><span class="upd-opt-box"><span class="upd-opt-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7 15h10"/></svg></span><span class="upd-opt-t"><b data-i18n="upd_channel_dev">Dev</b><small>Every new build, first</small></span></span></label>
+            </div>
+          </fieldset>
           <div class="warnbox hidden" id="updChannelWarn" data-i18n="upd_dev_warn">Dev channel: test builds, may break. Not for production tunnels.</div>
-          <details class="qs-adv u-mt-12">
+          <details class="qs-adv upd-adv u-mt-12">
             <summary>Install a specific version</summary>
             <div class="qs-hint u-my-8">For going back to an older release. Install the same version on the other server too.</div>
             <div class="u-flex-center-wrap10">
@@ -3227,210 +3785,264 @@
         </div>
       </section>
       <section id="tab-settings" role="tabpanel" hidden>
-        <div class="warnbox u-mb-12" id="settingsNodeNote" hidden data-i18n="settings_node_note">This node's login, HTTPS, 2FA and terminal settings are on its own panel, not here. Its license and Telegram alerts are shown here.</div>
-        <div class="tunnel-card" id="licenseCard">
-          <div class="tc-header u-flex u-jc-sb u-ai-c">
-            <p class="tc-title">License &amp; Premium Features</p>
-            <span id="licBadge" class="badge dim">FREE EDITION</span>
-          </div>
-          <div class="fg">
-            <label for="licMachineHash">Server Hardware Fingerprint (Machine Hash)</label>
-            <div class="u-flex u-gap-8">
-              <input class="hashem-input u-mono u-fs-13 u-w-full" id="licMachineHash" readonly placeholder="Calculating…">
-              <button class="hashem-btn" id="licCopyMachineBtn" onclick="copyMachineHashClick()">Copy</button>
+        <div class="warnbox" id="settingsNodeNote" hidden data-i18n="settings_node_note">This node's login, HTTPS, 2FA and terminal settings are on its own panel, not here. Its license and Telegram alerts are shown here.</div>
+        <nav class="set-nav" id="setNav" aria-label="Settings sections">
+          <button type="button" data-set="setLic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14 9l2 2"/></svg>License</button>
+          <button type="button" data-set="setSec" class="nv-off"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Security</button>
+          <button type="button" data-set="setWeb" class="nv-off"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>HTTPS &amp; terminal</button>
+          <button type="button" data-set="setMon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Monitoring</button>
+          <button type="button" data-set="setLook" class="nv-off"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.15-.75-.4-1-.25-.3-.4-.65-.4-1 0-.85.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/></svg>Appearance</button>
+        </nav>
+
+        <div class="set-group" id="setLic">
+          <div class="set-gh"><h2 class="set-gt">License &amp; add-ons</h2><p class="set-gd">Your Pro license, this server's fingerprint and the Sentinel monitor.</p></div>
+          <div class="set-grid">
+            <div class="tunnel-card set-wide" id="licenseCard">
+              <div class="tc-header">
+                <div class="set-h"><span class="set-ic gold" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14 9l2 2"/></svg></span><p class="tc-title">License &amp; Premium Features</p></div>
+                <span id="licBadge" class="badge dim">FREE EDITION</span>
+              </div>
+              <div class="fg">
+                <label for="licMachineHash">Server Hardware Fingerprint (Machine Hash)</label>
+                <div class="u-flex u-gap-8">
+                  <input class="hashem-input u-mono u-fs-13 u-w-full" id="licMachineHash" readonly placeholder="Calculating…">
+                  <button class="hashem-btn" id="licCopyMachineBtn" onclick="copyMachineHashClick()">Copy</button>
+                </div>
+                <div class="ent-help">Provide this fingerprint to your provider to issue or renew a hardware-locked license.</div>
+              </div>
+              <div id="licActiveDetails" class="hidden set-lic-on">
+                <div class="u-fs-13 u-fw-600 u-c-ok u-mb-4">Active Premium License</div>
+                <div class="u-fs-12" id="licCustomerRow">Customer: -</div>
+                <div class="u-fs-12" id="licExpiresRow">Expires: -</div>
+                <div class="u-fs-12" id="licFeaturesRow">Unlocked Features: -</div>
+              </div>
+              <div class="fg">
+                <label for="licKeyInput">License Key</label>
+                <textarea class="hashem-input u-mono u-fs-12 u-resize-none" id="licKeyInput" rows="3" placeholder="Paste your license token here (payload.signature)…"></textarea>
+              </div>
+              <div class="set-acts">
+                <button class="hashem-btn hashem-btn-primary" id="licActivateBtn" onclick="activateLicenseClick()">Activate License</button>
+                <button class="hashem-btn hashem-btn-secondary hidden" id="licDeactivateBtn" onclick="deactivateLicenseClick()">Deactivate</button>
+                <a class="hashem-btn hashem-btn-secondary" id="licBuyBtn" href="https://pdnczone.com" target="_blank" rel="noopener noreferrer">Buy License</a>
+              </div>
             </div>
-            <div class="ent-help">Provide this fingerprint to your provider to issue or renew a hardware-locked license.</div>
-          </div>
-          <div id="licActiveDetails" class="hidden u-tint-ok u-bd-ok u-p-12 u-r-8 u-mb-12">
-            <div class="u-fs-13 u-fw-600 u-c-ok u-mb-4">Active Premium License</div>
-            <div class="u-fs-12" id="licCustomerRow">Customer: -</div>
-            <div class="u-fs-12" id="licExpiresRow">Expires: -</div>
-            <div class="u-fs-12" id="licFeaturesRow">Unlocked Features: -</div>
-          </div>
-          <div class="fg">
-            <label for="licKeyInput">License Key</label>
-            <textarea class="hashem-input u-mono u-fs-12 u-resize-none" id="licKeyInput" rows="3" placeholder="Paste your license token here (payload.signature)…"></textarea>
-          </div>
-          <div class="u-flex u-gap-8">
-            <button class="hashem-btn hashem-btn-primary" id="licActivateBtn" onclick="activateLicenseClick()">Activate License</button>
-            <button class="hashem-btn hashem-btn-secondary hidden" id="licDeactivateBtn" onclick="deactivateLicenseClick()">Deactivate</button>
-            <a class="hashem-btn hashem-btn-secondary" id="licBuyBtn" href="https://pdnczone.com" target="_blank" rel="noopener noreferrer">Buy License</a>
-          </div>
-        </div>
-        <div class="tunnel-card u-mt-16" id="sentinelAddonCard">
-          <div class="tc-header u-flex u-jc-sb u-ai-c">
-            <div class="u-flex u-ai-c u-gap-8">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                <path d="m9 12 2 2 4-4"/>
-              </svg>
-              <p class="tc-title u-m-0">Sentinel — Infrastructure &amp; Node Health Monitor</p>
+            <div class="tunnel-card" id="sentinelAddonCard">
+              <div class="tc-header">
+                <div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span><p class="tc-title">Sentinel — Infrastructure &amp; Node Health Monitor</p></div>
+                <div class="u-flex u-gap-8" id="sentinelHeaderBadges">
+                  <span id="sentinelLicBadge" class="badge dim">CHECKING</span>
+                  <span id="sentinelRegionBadge" class="badge dim">REGION</span>
+                </div>
+              </div>
+              <div class="ent-help">Multi-protocol health monitor, dynamic subscription feeds, and 24h SLA tracker. Restricted to verified Iran servers with a licensed key.</div>
+              <div id="sentinelBodySection">
+                <div class="u-c-mu u-fs-12">Loading Sentinel state…</div>
+              </div>
             </div>
-            <div class="u-flex u-gap-8" id="sentinelHeaderBadges">
-              <span id="sentinelLicBadge" class="badge dim">CHECKING</span>
-              <span id="sentinelRegionBadge" class="badge dim">REGION</span>
-            </div>
-          </div>
-          <div class="ent-help u-mb-12">Multi-protocol health monitor, dynamic subscription feeds, and 24h SLA tracker. Restricted to verified Iran servers with a licensed key.</div>
-          <div id="sentinelBodySection">
-            <div class="u-c-mu u-fs-12">Loading Sentinel state…</div>
-          </div>
-        </div>
-        <div class="tunnel-card">
-          <div class="tc-header"><p class="tc-title">Settings</p></div>
-          <div class="fg"><label for="curPass">Current panel password</label><input class="hashem-input" id="curPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>
-          <div class="fg"><label for="newPass">New panel password</label><input class="hashem-input" id="newPass" type="password" autocomplete="new-password" minlength="12" placeholder="••••••••••••"></div>
-          <div class="ent-help">Minimum 12 characters, uppercase, lowercase, numbers, and symbols (NIST 800-63B). Changing it invalidates all other sessions.</div>
-          <div id="passStrengthMeter" class="u-fs-12 u-mt-8 u-mb-8 u-c-mu"></div>
-          <div><button class="hashem-btn hashem-btn-primary" id="savePass">Change Password</button></div>
-        </div>
-        <div class="tunnel-card" id="advisorCard">
-          <div class="tc-header"><p class="tc-title">Carrier advisor</p></div>
-          <div class="ent-help" id="advMsg">Collecting data…</div>
-          <div class="ent-help" id="advStats"></div>
-          <div class="ent-help">Advice only — the panel never switches the carrier by itself. Suggestions for a new port / SNI:</div>
-          <div class="ent-help" id="advSuggest"></div>
-          <div><button class="hashem-btn hashem-btn-secondary" id="advRefresh">Refresh</button></div>
-        </div>
-        <div class="tunnel-card" id="historyCard">
-          <div class="tc-header"><p class="tc-title">Link history (last hours)</p></div>
-          <div class="fg"><label for="histLink">Link</label><select class="hashem-input" id="histLink"></select></div>
-          <div class="fg"><label for="histHours">Window</label><select class="hashem-input" id="histHours"><option value="1">1 hour</option><option value="6">6 hours</option><option value="24">24 hours</option></select></div>
-          <svg id="histSvg" viewBox="0 0 300 60" preserveAspectRatio="none" class="u-w-full u-h-80 u-bg-none u-r-8" role="img" aria-label="Latency history"></svg>
-          <div class="ent-help" id="histSum">Sampled every 30 s, kept in memory for 24 h (cleared on panel restart).</div>
-        </div>
-        <div class="tunnel-card" id="metricsCard">
-          <div class="tc-header"><p class="tc-title">Prometheus metrics</p></div>
-          <div class="ent-help" id="metricsState">Disabled. Rotate a token to enable <code>GET …/metrics</code> for your scraper (header <code>Authorization: Bearer &lt;token&gt;</code>). The token is shown once.</div>
-          <pre class="ent-help hidden u-select-all" id="metricsTok"></pre>
-          <div>
-            <button class="hashem-btn hashem-btn-primary" id="metricsRotate">Generate / Rotate Token</button>
-            <button class="hashem-btn hashem-btn-secondary" id="metricsOff">Disable</button>
-          </div>
-        </div>
-        <div class="tunnel-card" id="alertsCard">
-          <div class="tc-header"><p class="tc-title">External alerts</p></div>
-          <div class="ent-help">Get a message when a tunnel goes down or recovers. Only state changes are sent (never every refresh), with a minimum gap per link so a flapping tunnel cannot spam you. The first reading after a restart is only a baseline.</div>
-          <label class="ent-help"><input type="checkbox" id="alEnabled"> Enable alerts</label>
-          <div class="fg"><label for="alWebhook">Webhook URL (Slack/Discord/ntfy/any JSON endpoint)</label><input class="hashem-input" id="alWebhook" placeholder="https://hooks.example.com/…" autocomplete="off"></div>
-          <label class="ent-help"><input type="checkbox" id="alTelegram"> Also send to Telegram <span id="alTgNote"></span></label>
-          <label class="ent-help"><input type="checkbox" id="alDegraded"> Also alert on degraded ⇄ healthy</label>
-          <div class="fg"><label for="alGap">Minimum seconds between alerts per link</label><input class="hashem-input" id="alGap" type="number" min="10" max="86400" value="120"></div>
-          <div>
-            <button class="hashem-btn hashem-btn-primary" id="alSave">Save</button>
-            <button class="hashem-btn hashem-btn-secondary" id="alTest">Send Test</button>
-          </div>
-        </div>
-        <div class="tunnel-card" id="accessCard">
-          <div class="tc-header"><p class="tc-title" data-i18n="acc_title">Panel access (port / login / address)</p></div>
-          <div class="ent-help" data-i18n="acc_hint">Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.</div>
-          <div class="fg"><label for="accUser" data-i18n="acc_user">Login username</label><input class="hashem-input" id="accUser" autocomplete="off" spellcheck="false" placeholder="admin"></div>
-          <div class="fg"><label for="accPort" data-i18n="acc_port">HTTP port (1–65535)</label><input class="hashem-input" id="accPort" type="number" min="1" max="65535" placeholder="7777"></div>
-          <div class="fg"><label for="accBase" data-i18n="acc_base">Address path (after IP:port/…)</label><input class="hashem-input" id="accBase" autocomplete="off" spellcheck="false" placeholder="a1b2c3d4e5f6"></div>
-          <div class="ent-help" id="accCurrent">—</div>
-          <div class="fg"><label for="accPass" data-i18n="acc_pass">Current password (confirm)</label><input class="hashem-input" id="accPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>
-          <div><button class="hashem-btn hashem-btn-primary" id="accSave" data-i18n="acc_save">Save & Restart Panel</button></div>
-        </div>
-        <div class="tunnel-card" id="idleCard">
-          <div class="tc-header"><p class="tc-title">Session idle timeout</p></div>
-          <div class="ent-help">Sign out automatically after this many minutes without clicks or key presses. Background refresh does not count as activity. 0 = off.</div>
-          <div class="fg"><label for="idleMin">Minutes (0, or 5–1440)</label><input class="hashem-input" id="idleMin" type="number" min="0" max="1440" value="0"></div>
-          <div><button class="hashem-btn hashem-btn-primary" id="idleSave">Save</button></div>
-        </div>
-        <div class="tunnel-card" id="twofaCard">
-          <div class="tc-header"><p class="tc-title">Two-factor authentication (TOTP)</p></div>
-          <div class="ent-help" id="twofaState">Loading…</div>
-          <div id="twofaSetupBox" class="hidden">
-            <div class="ent-help">Add this secret to your authenticator app (or open the link on your phone), then enter the 6-digit code to confirm.</div>
-            <div class="fg"><label for="twofaSecret">Secret</label><input class="hashem-input" id="twofaSecret" readonly></div>
-            <div class="fg"><label for="twofaUri">otpauth link</label><input class="hashem-input" id="twofaUri" readonly></div>
-            <div class="fg"><label for="twofaConfirm">Code</label><input class="hashem-input" id="twofaConfirm" inputmode="numeric" maxlength="6" placeholder="123456"></div>
-          </div>
-          <div id="twofaDisableBox" class="hidden">
-            <div class="fg"><label for="twofaPass">Password</label><input class="hashem-input" id="twofaPass" type="password" autocomplete="current-password"></div>
-            <div class="fg"><label for="twofaDisCode">Code or recovery code</label><input class="hashem-input" id="twofaDisCode" maxlength="16"></div>
-          </div>
-          <pre class="ent-help hidden u-select-all" id="twofaCodes"></pre>
-          <div>
-            <button class="hashem-btn hashem-btn-primary" id="twofaBtn">Enable 2FA</button>
-            <button class="hashem-btn hashem-btn-secondary hidden" id="twofaCancel">Cancel</button>
-          </div>
-        </div>
-        <div class="tunnel-card" id="appearanceCard">
-          <div class="tc-header"><p class="tc-title" data-i18n="appear_title">Appearance</p></div>
-          <div class="qs-hint" data-i18n="appear_hint">Pick an accent colour. Every preset is contrast-checked for both dark and light themes.</div>
-          <div class="acc-grid" id="accGrid" role="radiogroup" aria-label="Accent colour" data-i18n-aria="appear_aria"></div>
-          <div class="ent-sec-label u-mt-6" data-i18n="dens_title">Table density</div>
-          <div class="qs-seg" role="group" aria-label="Table density" data-i18n-aria="dens_title" id="densSeg">
-            <button type="button" data-dens="comfortable" aria-pressed="true" data-i18n="dens_comfy">Comfortable</button>
-            <button type="button" data-dens="compact" aria-pressed="false" data-i18n="dens_compact">Compact</button>
-          </div>
-        </div>
-        <div class="tunnel-card">
-          <div class="tc-header"><p class="tc-title" data-i18n="sup_card_title">Hashem Pro License</p></div>
-          <div class="qs-hint" data-i18n="sup_card_hint">One license unlocks every Pro feature: Bagher, Backhaul, Performance, Watchdog, Benchmark, Diagnostics and the path test.</div>
-          <div class="qs-actions"><a class="hashem-btn hashem-btn-secondary" id="supSettingsLink" href="https://pdnczone.com" target="_blank" rel="noopener noreferrer" data-i18n="sup_buy">Buy License</a></div>
-        </div>
-        <div class="tunnel-card">
-          <div class="tc-header"><p class="tc-title">Interactive terminal</p><span class="status-indicator" id="termFlagDot"><span class="dot"></span><span id="termFlagTxt">—</span></span></div>
-          <div class="qs-hint">Root shell in the browser over WebSocket + PTY — same login session, single shell at a time, auto-killed after 10 idle minutes (30 min cap). Enable only after testing; toggle is the rollback switch.</div>
-          <div class="qs-actions"><button class="hashem-btn hashem-btn-secondary" id="termToggleBtn">Enable Terminal</button></div>
-          <div class="qs-hint" id="termFlagMsg">Terminal tab is hidden until enabled.</div>
-          <div class="fg"><label for="termAllow">Allowed IPs / CIDRs (one per line, empty = any)</label><textarea class="hashem-input" id="termAllow" rows="3" placeholder="203.0.113.7&#10;198.51.100.0/24"></textarea></div>
-          <div class="qs-actions"><button class="hashem-btn hashem-btn-secondary" id="termAllowSave">Save Allowlist</button></div>
-          <div class="qs-hint" id="termAllowMsg"></div>
-        </div>
-        <div class="tunnel-card">
-          <div class="tc-header">
-            <p class="tc-title">Domain & HTTPS (Decoupled Web Layer)</p>
-            <span class="status-indicator" id="tlsDot"><span class="dot"></span><span id="tlsDotTxt">—</span></span>
-          </div>
-          <div class="qs-hint">Configure a custom domain for Web Panel access. <b>Tunnel infrastructure (FRP / Backhaul / GRE) is 100% independent and will never be restarted or disconnected.</b></div>
-          <div class="fg"><label for="tlsDomain">Panel domain</label><input class="hashem-input" id="tlsDomain" placeholder="panel.example.com" autocomplete="off" spellcheck="false"></div>
-          <div class="fg"><label for="tlsEmail">Email for expiry notices (optional)</label><input class="hashem-input" id="tlsEmail" placeholder="you@example.com" autocomplete="off" spellcheck="false"></div>
-          <div id="tlsInfo" class="qs-hint">Not checked yet.</div>
-          <div class="qs-actions u-flex u-wrap u-gap-8">
-            <button class="hashem-btn hashem-btn-primary" id="tlsIssueBtn">Get Certificate</button>
-            <button class="hashem-btn hashem-btn-secondary" id="tlsRenewBtn">Renew Now</button>
-            <button class="hashem-btn hashem-btn-danger u-none" id="tlsRemoveBtn">Remove Domain</button>
-            <button class="hashem-btn hashem-btn-secondary" id="tlsProxyConfBtn">Reverse Proxy Config</button>
-          </div>
-          <div class="qs-hint" id="tlsMsg">HTTPS serves on dedicated port 7443 alongside HTTP on port 7777.</div>
-          <div class="u-mt-12 u-pt-12 u-bt-ln">
-            <b data-i18n="tls_ip_title">HTTPS on this server's IP (self-signed)</b>
-            <div class="qs-hint" data-i18n="tls_ip_hint">No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.</div>
-            <div class="fg"><label for="tlsIP">Server IP</label><input class="hashem-input" id="tlsIP" placeholder="1.2.3.4" autocomplete="off" spellcheck="false"></div>
-            <div class="qs-actions u-flex u-wrap u-gap-8">
-              <button class="hashem-btn hashem-btn-secondary" id="tlsIPBtn">Issue IP Certificate</button>
-              <button class="hashem-btn hashem-btn-secondary" id="tlsIPRegenBtn">Regenerate</button>
-              <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (Install Once)</button>
+            <div class="tunnel-card set-pro">
+              <div class="tc-header"><div class="set-h"><span class="set-ic gold" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 7 4.5 4L12 4l4.5 7L21 7l-2 12H5z"/></svg></span><p class="tc-title" data-i18n="sup_card_title">Hashem Pro License</p></div></div>
+              <div class="qs-hint" data-i18n="sup_card_hint">One license unlocks every Pro feature: Bagher, Backhaul, Performance, Watchdog, Benchmark, Diagnostics and the path test.</div>
+              <div class="set-acts"><a class="hashem-btn hashem-btn-secondary" id="supSettingsLink" href="https://pdnczone.com" target="_blank" rel="noopener noreferrer" data-i18n="sup_buy">Buy License</a></div>
             </div>
           </div>
-          <div class="u-mt-12 u-pt-12 u-bt-ln">
-            <b data-i18n="tls_custom_title">Use your own certificate</b>
-            <div class="qs-hint" data-i18n="tls_custom_hint">Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.</div>
-            <div class="fg"><label for="tlsCustomCert">Certificate (PEM)</label><textarea class="hashem-input" id="tlsCustomCert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" autocomplete="off" spellcheck="false"></textarea></div>
-            <div class="fg"><label for="tlsCustomKey">Private key (PEM)</label><textarea class="hashem-input" id="tlsCustomKey" rows="4" placeholder="-----BEGIN PRIVATE KEY-----" autocomplete="off" spellcheck="false"></textarea></div>
-            <div class="fg"><label for="tlsCustomCertFile">…or upload files</label><input type="file" id="tlsCustomCertFile" accept=".crt,.pem,.cert" aria-label="Certificate file"> <input type="file" id="tlsCustomKeyFile" accept=".key,.pem" aria-label="Private key file"></div>
-            <div class="fg"><label for="tlsCustomCertPath">…or server paths</label><input class="hashem-input" id="tlsCustomCertPath" placeholder="/etc/ssl/my.crt" autocomplete="off" spellcheck="false"></div>
-            <div class="fg"><label for="tlsCustomKeyPath">Key path</label><input class="hashem-input" id="tlsCustomKeyPath" placeholder="/etc/ssl/my.key" autocomplete="off" spellcheck="false"></div>
-            <div class="qs-actions u-flex u-wrap u-gap-8">
-              <button class="hashem-btn hashem-btn-secondary" id="tlsCustomBtn">Install Custom Certificate</button>
+        </div>
+
+        <div class="set-group nv-off" id="setSec">
+          <div class="set-gh"><h2 class="set-gt">Sign-in &amp; security</h2><p class="set-gd">Password, two-step sign-in, idle sign-out and the panel's address.</p></div>
+          <div class="set-grid">
+            <div class="tunnel-card">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14.5v2"/></svg></span><p class="tc-title">Panel password</p></div></div>
+              <div class="fg"><label for="curPass">Current panel password</label><input class="hashem-input" id="curPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>
+              <div class="fg"><label for="newPass">New panel password</label><input class="hashem-input" id="newPass" type="password" autocomplete="new-password" minlength="12" placeholder="••••••••••••"></div>
+              <div class="ent-help">Minimum 12 characters, uppercase, lowercase, numbers, and symbols (NIST 800-63B). Changing it invalidates all other sessions.</div>
+              <div id="passStrengthMeter" class="u-fs-12 u-c-mu"></div>
+              <div class="set-acts"><button class="hashem-btn hashem-btn-primary" id="savePass">Change Password</button></div>
+            </div>
+            <div class="tunnel-card" id="twofaCard">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="m9.5 12 2 2 3.5-3.5M11 18.5h2"/></svg></span><p class="tc-title">Two-factor authentication (TOTP)</p></div></div>
+              <div class="ent-help set-now" id="twofaState">Loading…</div>
+              <div id="twofaSetupBox" class="hidden">
+                <div class="ent-help">Add this secret to your authenticator app (or open the link on your phone), then enter the 6-digit code to confirm.</div>
+                <div class="fg"><label for="twofaSecret">Secret</label><input class="hashem-input" id="twofaSecret" readonly></div>
+                <div class="fg"><label for="twofaUri">otpauth link</label><input class="hashem-input" id="twofaUri" readonly></div>
+                <div class="fg"><label for="twofaConfirm">Code</label><input class="hashem-input" id="twofaConfirm" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+              </div>
+              <div id="twofaDisableBox" class="hidden">
+                <div class="fg"><label for="twofaPass">Password</label><input class="hashem-input" id="twofaPass" type="password" autocomplete="current-password"></div>
+                <div class="fg"><label for="twofaDisCode">Code or recovery code</label><input class="hashem-input" id="twofaDisCode" maxlength="16"></div>
+              </div>
+              <pre class="ent-help hidden u-select-all" id="twofaCodes"></pre>
+              <div class="set-acts">
+                <button class="hashem-btn hashem-btn-primary" id="twofaBtn">Enable 2FA</button>
+                <button class="hashem-btn hashem-btn-secondary hidden" id="twofaCancel">Cancel</button>
+              </div>
+            </div>
+            <div class="tunnel-card" id="accessCard">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5M10 17l5-5-5-5M15 12H3"/></svg></span><p class="tc-title" data-i18n="acc_title">Panel access (port / login / address)</p></div></div>
+              <div class="ent-help" data-i18n="acc_hint">Changing any of these restarts only the panel web service — tunnels keep running. After saving, reopen the panel at the new address shown.</div>
+              <div class="set-fields">
+                <div class="fg"><label for="accUser" data-i18n="acc_user">Login username</label><input class="hashem-input" id="accUser" autocomplete="off" spellcheck="false" placeholder="admin"></div>
+                <div class="fg"><label for="accPort" data-i18n="acc_port">HTTP port (1–65535)</label><input class="hashem-input" id="accPort" type="number" min="1" max="65535" placeholder="7777"></div>
+              </div>
+              <div class="fg"><label for="accBase" data-i18n="acc_base">Address path (after IP:port/…)</label><input class="hashem-input" id="accBase" autocomplete="off" spellcheck="false" placeholder="a1b2c3d4e5f6"></div>
+              <div class="ent-help set-now" id="accCurrent">—</div>
+              <div class="fg"><label for="accPass" data-i18n="acc_pass">Current password (confirm)</label><input class="hashem-input" id="accPass" type="password" autocomplete="current-password" placeholder="••••••••••••"></div>
+              <div class="set-acts"><button class="hashem-btn hashem-btn-primary" id="accSave" data-i18n="acc_save">Save & Restart Panel</button></div>
+            </div>
+            <div class="tunnel-card" id="idleCard">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5"/></svg></span><p class="tc-title">Session idle timeout</p></div></div>
+              <div class="ent-help">Sign out automatically after this many minutes without clicks or key presses. Background refresh does not count as activity. 0 = off.</div>
+              <div class="fg"><label for="idleMin">Minutes (0, or 5–1440)</label><input class="hashem-input" id="idleMin" type="number" min="0" max="1440" value="0"></div>
+              <div class="set-acts"><button class="hashem-btn hashem-btn-primary" id="idleSave">Save</button></div>
             </div>
           </div>
-          <div id="tlsProxyBox" class="u-none u-mt-12 u-p-12 u-bd-ln u-r-8 u-bg-field">
-            <div class="u-flex u-jc-sb u-ai-c u-mb-8">
-              <b>Reverse Proxy Configuration (Nginx & Caddy)</b>
-              <button class="hashem-btn hashem-btn-ghost u-btn-30" id="tlsProxyCloseBtn" aria-label="Close proxy configuration" data-i18n-aria="aria_close_proxy">×</button>
+        </div>
+
+        <div class="set-group nv-off" id="setWeb">
+          <div class="set-gh"><h2 class="set-gt">Domain, HTTPS &amp; terminal</h2><p class="set-gd">How the panel is reached over HTTPS, and the root shell in the browser.</p></div>
+          <div class="set-grid">
+            <div class="tunnel-card set-wide">
+              <div class="tc-header">
+                <div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span><p class="tc-title">Domain & HTTPS (Decoupled Web Layer)</p></div>
+                <span class="status-indicator set-pill" id="tlsDot"><span class="dot"></span><span id="tlsDotTxt">—</span></span>
+              </div>
+              <div class="qs-hint">Configure a custom domain for Web Panel access. <b>Tunnel infrastructure (FRP / Backhaul / GRE) is 100% independent and will never be restarted or disconnected.</b></div>
+              <div class="set-fields">
+                <div class="fg"><label for="tlsDomain">Panel domain</label><input class="hashem-input" id="tlsDomain" placeholder="panel.example.com" autocomplete="off" spellcheck="false"></div>
+                <div class="fg"><label for="tlsEmail">Email for expiry notices (optional)</label><input class="hashem-input" id="tlsEmail" placeholder="you@example.com" autocomplete="off" spellcheck="false"></div>
+              </div>
+              <div id="tlsInfo" class="qs-hint set-now">Not checked yet.</div>
+              <div class="qs-actions u-flex u-wrap u-gap-8">
+                <button class="hashem-btn hashem-btn-primary" id="tlsIssueBtn">Get Certificate</button>
+                <button class="hashem-btn hashem-btn-secondary" id="tlsRenewBtn">Renew Now</button>
+                <button class="hashem-btn hashem-btn-danger u-none" id="tlsRemoveBtn">Remove Domain</button>
+                <button class="hashem-btn hashem-btn-secondary" id="tlsProxyConfBtn">Reverse Proxy Config</button>
+              </div>
+              <div class="qs-hint" id="tlsMsg">HTTPS serves on dedicated port 7443 alongside HTTP on port 7777.</div>
+              <div id="tlsProxyBox" class="u-none u-p-12 u-bd-ln u-r-8 u-bg-field">
+                <div class="u-flex u-jc-sb u-ai-c u-mb-8">
+                  <b>Reverse Proxy Configuration (Nginx & Caddy)</b>
+                  <button class="hashem-btn hashem-btn-ghost u-btn-30" id="tlsProxyCloseBtn" aria-label="Close proxy configuration" data-i18n-aria="aria_close_proxy">×</button>
+                </div>
+                <div class="qs-hint u-mb-8">Copy and paste into your Nginx or Caddy server on this machine. Real client IPs and WebSocket upgrades are automatically supported.</div>
+                <div class="u-mb-8">
+                  <b>Nginx:</b>
+                  <pre id="tlsNginxCode" class="u-fs-12 u-maxh-160 u-scroll-y u-bg-s1 u-p-8 u-r-4 u-select-all"></pre>
+                </div>
+                <div>
+                  <b>Caddy:</b>
+                  <pre id="tlsCaddyCode" class="u-fs-12 u-maxh-100 u-scroll-y u-bg-s1 u-p-8 u-r-4 u-select-all"></pre>
+                </div>
+              </div>
+              <div class="set-subs">
+                <div class="set-sub">
+                  <div class="set-subh"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><b data-i18n="tls_ip_title">HTTPS on this server's IP (self-signed)</b></div>
+                  <div class="qs-hint" data-i18n="tls_ip_hint">No domain needed. The panel creates its own authority, signs a certificate for the IP (825 days), and serves HTTPS. Install the CA file below in your browser/OS once — afterwards the IP page shows no warning. Regenerate rotates only the server certificate; the CA stays trusted.</div>
+                  <div class="fg"><label for="tlsIP">Server IP</label><input class="hashem-input" id="tlsIP" placeholder="1.2.3.4" autocomplete="off" spellcheck="false"></div>
+                  <div class="qs-actions u-flex u-wrap u-gap-8">
+                    <button class="hashem-btn hashem-btn-secondary" id="tlsIPBtn">Issue IP Certificate</button>
+                    <button class="hashem-btn hashem-btn-secondary" id="tlsIPRegenBtn">Regenerate</button>
+                    <button class="hashem-btn hashem-btn-secondary" id="tlsCABtn">Download CA (Install Once)</button>
+                  </div>
+                </div>
+                <div class="set-sub">
+                  <div class="set-subh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9.5 14.5l2 2 3.5-3.5"/></svg><b data-i18n="tls_custom_title">Use your own certificate</b></div>
+                  <div class="qs-hint" data-i18n="tls_custom_hint">Paste a matching certificate + key, upload both files, or point at files already on this server. Validated before install; the previous certificate is kept as backup.</div>
+                  <div class="set-fields">
+                    <div class="fg"><label for="tlsCustomCert">Certificate (PEM)</label><textarea class="hashem-input" id="tlsCustomCert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" autocomplete="off" spellcheck="false"></textarea></div>
+                    <div class="fg"><label for="tlsCustomKey">Private key (PEM)</label><textarea class="hashem-input" id="tlsCustomKey" rows="4" placeholder="-----BEGIN PRIVATE KEY-----" autocomplete="off" spellcheck="false"></textarea></div>
+                  </div>
+                  <div class="fg"><label for="tlsCustomCertFile">…or upload files</label><div class="set-files"><input type="file" id="tlsCustomCertFile" accept=".crt,.pem,.cert" aria-label="Certificate file"><input type="file" id="tlsCustomKeyFile" accept=".key,.pem" aria-label="Private key file"></div></div>
+                  <div class="set-fields">
+                    <div class="fg"><label for="tlsCustomCertPath">…or server paths</label><input class="hashem-input" id="tlsCustomCertPath" placeholder="/etc/ssl/my.crt" autocomplete="off" spellcheck="false"></div>
+                    <div class="fg"><label for="tlsCustomKeyPath">Key path</label><input class="hashem-input" id="tlsCustomKeyPath" placeholder="/etc/ssl/my.key" autocomplete="off" spellcheck="false"></div>
+                  </div>
+                  <div class="qs-actions u-flex u-wrap u-gap-8">
+                    <button class="hashem-btn hashem-btn-secondary" id="tlsCustomBtn">Install Custom Certificate</button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="qs-hint u-mb-8">Copy and paste into your Nginx or Caddy server on this machine. Real client IPs and WebSocket upgrades are automatically supported.</div>
-            <div class="u-mb-8">
-              <b>Nginx:</b>
-              <pre id="tlsNginxCode" class="u-fs-12 u-maxh-160 u-scroll-y u-bg-s1 u-p-8 u-r-4 u-select-all"></pre>
+            <div class="tunnel-card set-wide">
+              <div class="tc-header">
+                <div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span><p class="tc-title">Interactive terminal</p></div>
+                <span class="status-indicator set-pill" id="termFlagDot"><span class="dot"></span><span id="termFlagTxt">—</span></span>
+              </div>
+              <div class="qs-hint">Root shell in the browser over WebSocket + PTY — same login session, single shell at a time, auto-killed after 10 idle minutes (30 min cap). Enable only after testing; toggle is the rollback switch.</div>
+              <div class="set-term">
+                <div class="set-sub">
+                  <div class="qs-hint" id="termFlagMsg">Terminal tab is hidden until enabled.</div>
+                  <div class="qs-actions"><button class="hashem-btn hashem-btn-secondary" id="termToggleBtn">Enable Terminal</button></div>
+                </div>
+                <div class="set-sub">
+                  <div class="fg"><label for="termAllow">Allowed IPs / CIDRs (one per line, empty = any)</label><textarea class="hashem-input" id="termAllow" rows="3" placeholder="203.0.113.7&#10;198.51.100.0/24"></textarea></div>
+                  <div class="qs-actions"><button class="hashem-btn hashem-btn-secondary" id="termAllowSave">Save Allowlist</button></div>
+                  <div class="qs-hint" id="termAllowMsg"></div>
+                </div>
+              </div>
             </div>
-            <div>
-              <b>Caddy:</b>
-              <pre id="tlsCaddyCode" class="u-fs-12 u-maxh-100 u-scroll-y u-bg-s1 u-p-8 u-r-4 u-select-all"></pre>
+          </div>
+        </div>
+
+        <div class="set-group" id="setMon">
+          <div class="set-gh"><h2 class="set-gt">Alerts &amp; monitoring</h2><p class="set-gd">A message when a tunnel goes down, each link's history, and metrics for your scraper.</p></div>
+          <div class="set-grid">
+            <div class="tunnel-card" id="alertsCard">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span><p class="tc-title">External alerts</p></div></div>
+              <div class="ent-help">Get a message when a tunnel goes down or recovers. Only state changes are sent (never every refresh), with a minimum gap per link so a flapping tunnel cannot spam you. The first reading after a restart is only a baseline.</div>
+              <div class="set-sws">
+                <label class="set-sw"><input type="checkbox" id="alEnabled"> Enable alerts</label>
+                <label class="set-sw"><input type="checkbox" id="alTelegram"> Also send to Telegram <span id="alTgNote"></span></label>
+                <label class="set-sw"><input type="checkbox" id="alDegraded"> Also alert on degraded ⇄ healthy</label>
+              </div>
+              <div class="fg"><label for="alWebhook">Webhook URL (Slack/Discord/ntfy/any JSON endpoint)</label><input class="hashem-input" id="alWebhook" placeholder="https://hooks.example.com/…" autocomplete="off"></div>
+              <div class="fg"><label for="alGap">Minimum seconds between alerts per link</label><input class="hashem-input" id="alGap" type="number" min="10" max="86400" value="120"></div>
+              <div class="set-acts">
+                <button class="hashem-btn hashem-btn-primary" id="alSave">Save</button>
+                <button class="hashem-btn hashem-btn-secondary" id="alTest">Send Test</button>
+              </div>
+            </div>
+            <div class="tunnel-card" id="historyCard">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span><p class="tc-title">Link history (last hours)</p></div></div>
+              <div class="set-fields">
+                <div class="fg"><label for="histLink">Link</label><select class="hashem-input" id="histLink"></select></div>
+                <div class="fg"><label for="histHours">Window</label><select class="hashem-input" id="histHours"><option value="1">1 hour</option><option value="6">6 hours</option><option value="24">24 hours</option></select></div>
+              </div>
+              <div class="set-chart"><svg id="histSvg" viewBox="0 0 300 60" preserveAspectRatio="none" class="u-w-full u-h-80 u-bg-none" role="img" aria-label="Latency history"></svg></div>
+              <div class="ent-help" id="histSum">Sampled every 30 s, kept in memory for 24 h (cleared on panel restart).</div>
+            </div>
+            <div class="tunnel-card" id="advisorCard">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V17h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg></span><p class="tc-title">Carrier advisor</p></div></div>
+              <div class="ent-help set-now" id="advMsg">Collecting data…</div>
+              <div class="ent-help" id="advStats"></div>
+              <div class="ent-help">Advice only. The Autopilot tab switches by itself when a tunnel stays down. Suggestions for a new port / SNI:</div>
+              <div class="ent-help u-mono" id="advSuggest"></div>
+              <div class="set-acts"><button class="hashem-btn hashem-btn-secondary" id="advRefresh">Refresh</button></div>
+            </div>
+            <div class="tunnel-card" id="metricsCard">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></span><p class="tc-title">Prometheus metrics</p></div></div>
+              <div class="ent-help" id="metricsState">Disabled. Rotate a token to enable <code>GET …/metrics</code> for your scraper (header <code>Authorization: Bearer &lt;token&gt;</code>). The token is shown once.</div>
+              <pre class="ent-help hidden u-select-all" id="metricsTok"></pre>
+              <div class="set-acts">
+                <button class="hashem-btn hashem-btn-primary" id="metricsRotate">Generate / Rotate Token</button>
+                <button class="hashem-btn hashem-btn-secondary" id="metricsOff">Disable</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="set-group nv-off" id="setLook">
+          <div class="set-gh"><h2 class="set-gt">Appearance</h2><p class="set-gd">The accent colour and the table density of this browser.</p></div>
+          <div class="set-grid">
+            <div class="tunnel-card set-wide" id="appearanceCard">
+              <div class="tc-header"><div class="set-h"><span class="set-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.15-.75-.4-1-.25-.3-.4-.65-.4-1 0-.85.7-1.5 1.5-1.5H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="14.5" cy="7.5" r="1"/></svg></span><p class="tc-title" data-i18n="appear_title">Appearance</p></div></div>
+              <div class="qs-hint" data-i18n="appear_hint">Pick an accent colour. Every preset is contrast-checked for both dark and light themes.</div>
+              <div class="acc-grid" id="accGrid" role="radiogroup" aria-label="Accent colour" data-i18n-aria="appear_aria"></div>
+              <div class="ent-sec-label u-mt-6" data-i18n="dens_title">Table density</div>
+              <div class="qs-seg" role="group" aria-label="Table density" data-i18n-aria="dens_title" id="densSeg">
+                <button type="button" data-dens="comfortable" aria-pressed="true" data-i18n="dens_comfy">Comfortable</button>
+                <button type="button" data-dens="compact" aria-pressed="false" data-i18n="dens_compact">Compact</button>
+              </div>
             </div>
           </div>
         </div>

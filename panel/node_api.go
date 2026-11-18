@@ -56,6 +56,39 @@ func handleNodesGet(w http.ResponseWriter, r *http.Request) {
 	if pub, err := nodePub(); err == nil {
 		out["key_fp"] = nodeFingerprint(pub)
 	}
+	// ?view=fleet|tunnels: the read-only views the Nodes page refreshes on
+	// its own while it is open. A GET, so that refresh writes no audit line
+	// (every POST does); the same answers as the fleet and tunnel-list actions.
+	if v := r.URL.Query().Get("view"); v != "" {
+		if self.Role != nodeRoleCentral {
+			writeAPIError(w, r, "E-NODE-02", "this panel is not a central")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), nodeTunPlanTO)
+		defer cancel()
+		switch v {
+		case "fleet":
+			writeJSON(w, nodeFleetOverview(ctx))
+		case "tunnels":
+			links, errs := nodeTunLinksLive(ctx)
+			writeJSON(w, map[string]any{"links": links, "errors": errs})
+		case "pathtest": // &server=N: the path test as that Iran server sees it (node_probe.go)
+			id, aerr := strconv.Atoi(r.URL.Query().Get("server"))
+			if aerr != nil || id < 0 {
+				writeAPIError(w, r, "E-NODE-01", "server is missing")
+				return
+			}
+			pv, perr := nodePathTestView(ctx, id)
+			if perr != nil {
+				writeAPIError(w, r, "E-NODE-04", perr.Error())
+				return
+			}
+			writeJSON(w, pv)
+		default:
+			writeAPIError(w, r, "E-NODE-01", "unknown view")
+		}
+		return
+	}
 	switch self.Role {
 	case nodeRoleCentral:
 		out["role"] = nodeRoleCentral
@@ -115,12 +148,19 @@ type nodeRequest struct {
 	Password string `json:"password"`
 	SSHKey   string `json:"ssh_key"`
 	HostKey  string `json:"host_key"`
+	// invite, ssh: a server without Hashem gets the web panel too, not only
+	// the node core (the default)
+	Panel bool   `json:"panel"`
+	Kind  string `json:"kind"` // kind: core | panel
 	// tunnels between servers (node_tunnel.go)
 	nodeTunReq
 	PeerID int   `json:"peer_id"`
 	Hub    int   `json:"hub"`
 	Left   int   `json:"left"`
 	IDs    []int `json:"ids"` // fleet-update: the nodes, in order
+	// autopilot-set (node_manage.go): on server ID, the whole of it or one tunnel
+	On     bool `json:"on"`
+	Tunnel *int `json:"tunnel"`
 }
 
 func handleNodesPost(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +194,8 @@ func handleNodesPost(w http.ResponseWriter, r *http.Request) {
 		}
 		LogSecurityAudit("node_invite", cfg.Username, ClientIP(r), "name="+iv.Name)
 		writeJSON(w, map[string]any{"code": code.String(), "url": code.URL, "expires": iv.Expires,
-			"command": nodeJoinCommand(code, iv.Name, false), "install_command": nodeJoinCommand(code, iv.Name, true)})
+			"command": nodeJoinCommand(code, iv.Name, false, !req.Panel), "install_command": nodeJoinCommand(code, iv.Name, true, !req.Panel),
+			"core": !req.Panel})
 		return
 	case "cancel-invites":
 		if !isCentral() {
@@ -305,14 +346,92 @@ func handleNodesPost(w http.ResponseWriter, r *http.Request) {
 		LogSecurityAudit("node_tunnel_create", cfg.Username, ClientIP(r), fmt.Sprintf("server=%d client=%d engine=%s ports=%s", q.Server, q.Client, q.Engine, q.Ports))
 		writeJSON(w, map[string]any{"status": "ok", "job": id})
 		return
+	case "pathtest-start", "pathtest-stop", "benchmark-run": // between two servers, from here (node_probe.go)
+		if !isCentral() {
+			return
+		}
+		q := req.nodeTunReq
+		switch req.Action {
+		case "pathtest-start":
+			ctx, cancel := context.WithTimeout(r.Context(), nodeProbeTO)
+			v, perr := nodePathTestStart(ctx, q.Server, q.Client)
+			cancel()
+			if perr != nil {
+				writeAPIError(w, r, "E-NODE-04", perr.Error())
+				return
+			}
+			LogSecurityAudit("node_pathtest", cfg.Username, ClientIP(r), fmt.Sprintf("server=%d client=%d", q.Server, q.Client))
+			writeJSON(w, v)
+		case "pathtest-stop":
+			ctx, cancel := context.WithTimeout(r.Context(), nodeProbeTO)
+			nodePathTestStop(ctx, q.Server, q.Client)
+			cancel()
+			writeJSON(w, map[string]any{"status": "ok"})
+		default:
+			rep, berr := nodeBenchRun(r.Context(), q.Server, q.Client, req.PeerID)
+			if berr != nil {
+				writeAPIError(w, r, "E-NODE-04", berr.Error())
+				return
+			}
+			writeJSON(w, rep)
+		}
+		return
 	case "tunnel-list":
 		if !isCentral() {
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), nodeTunPlanTO)
-		links, errs := nodeTunLinks(ctx)
+		links, errs := nodeTunLinksLive(ctx)
 		cancel()
 		writeJSON(w, map[string]any{"links": links, "errors": errs})
+		return
+	case "tunnel-restart": // both ends of a tunnel between two servers (node_manage.go)
+		if !isCentral() {
+			return
+		}
+		q := nodeTunRemoveReq{Server: req.Server, Client: req.Client, PeerID: req.PeerID, Hub: req.Hub}
+		if q.Server == q.Client || q.Server < 0 || q.Client < 0 || q.PeerID < 0 || q.Hub < 1 {
+			writeAPIError(w, r, "E-NODE-01", "bad tunnel")
+			return
+		}
+		id, jerr := nodeTunStart("restart", q.Server, q.Client, func(j *nodeTunJob) error { return nodeTunRestart(context.Background(), j, q) })
+		if jerr != nil {
+			writeAPIError(w, r, nodeErrCode(jerr), jerr.Error())
+			return
+		}
+		LogSecurityAudit("node_tunnel_restart", cfg.Username, ClientIP(r), fmt.Sprintf("server=%d client=%d peer=%d hub=%d", q.Server, q.Client, q.PeerID, q.Hub))
+		writeJSON(w, map[string]any{"status": "ok", "job": id})
+		return
+	case "autopilot", "autopilot-set": // Autopilot on every Iran server (node_manage.go)
+		if !isCentral() {
+			return
+		}
+		if req.Action == "autopilot-set" {
+			if req.ID < 0 || (req.Tunnel != nil && *req.Tunnel < 0) {
+				writeAPIError(w, r, "E-NODE-01", "bad server or tunnel")
+				return
+			}
+			sctx, cancel := context.WithTimeout(r.Context(), nodeTunPlanTO)
+			serr := nodeApSet(sctx, req.ID, req.Tunnel, req.On)
+			cancel()
+			if serr != nil {
+				writeAPIError(w, r, nodeErrCode(serr), serr.Error())
+				return
+			}
+			what := "all"
+			if req.Tunnel != nil {
+				what = fmt.Sprintf("tunnel %d", *req.Tunnel)
+			}
+			LogSecurityAudit("node_autopilot", cfg.Username, ClientIP(r), fmt.Sprintf("server=%d %s on=%v", req.ID, what, req.On))
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), nodeTunPlanTO)
+		var links []nodeTunLink
+		done := make(chan struct{})
+		go func() { defer close(done); links, _ = nodeTunLinks(ctx) }()
+		views, errs := nodeApViews(ctx)
+		<-done
+		cancel()
+		writeJSON(w, map[string]any{"servers": nodeApFleet(views, links), "errors": errs})
 		return
 	case "tunnel-remove":
 		if !isCentral() {
@@ -432,6 +551,40 @@ func handleNodesPost(w http.ResponseWriter, r *http.Request) {
 		LogSecurityAudit("node_fleet_update", cfg.Username, ClientIP(r), fmt.Sprintf("ids=%v", ids))
 		writeJSON(w, map[string]any{"status": "ok", "job": jid})
 		return
+	case "kind": // a node between the core and the panel (handleUpdateKind on it)
+		if !isCentral() {
+			return
+		}
+		if req.Kind != nodeKindCore && req.Kind != "panel" {
+			writeAPIError(w, r, "E-NODE-01", "kind: core or panel")
+			return
+		}
+		nodesMu.Lock()
+		nodesLoadLocked()
+		rec := nodeFindLocked(req.ID)
+		known, held := rec != nil, rec != nil && rec.Held
+		nodesMu.Unlock()
+		if !known {
+			err = errNodeUnknown(req.ID)
+			break
+		}
+		if held {
+			err = nodeErr{"E-NODE-01", fmt.Sprintf("node %d is not approved yet", req.ID)}
+			break
+		}
+		kctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+		var res struct {
+			Detail string `json:"detail"`
+		}
+		err = nodeAPIJSON(kctx, req.ID, http.MethodPost, "/api/update/kind", map[string]any{"kind": req.Kind}, &res)
+		cancel()
+		if err != nil {
+			writeAPIError(w, r, "E-NODE-01", err.Error())
+			return
+		}
+		LogSecurityAudit("node_kind", cfg.Username, ClientIP(r), fmt.Sprintf("id=%d kind=%s", req.ID, req.Kind))
+		writeJSON(w, map[string]any{"status": "ok", "detail": res.Detail})
+		return
 	case "tunnel-forget": // a left-over server end removed by hand on its server
 		if !isCentral() {
 			return
@@ -544,16 +697,21 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 // nodeJoinCommand is the line a new node runs: hashem node-join on a server
 // that has Hashem, or the installer (which installs it and joins) on one
 // that has not.
-func nodeJoinCommand(c nodeCode, name string, install bool) string {
-	return nodeJoinCommandArg(shellQuote(c.String()), name, install)
+func nodeJoinCommand(c nodeCode, name string, install, core bool) string {
+	return nodeJoinCommandArg(shellQuote(c.String()), name, install, core)
 }
 
 // nodeJoinCommandArg is nodeJoinCommand with the code argument as given
-// ("-": read it from stdin).
-func nodeJoinCommandArg(code, name string, install bool) string {
+// ("-": read it from stdin). core: a server without Hashem gets the node
+// core, not the panel; the flag comes after the code, where a hashem.sh from
+// before the core ignores it.
+func nodeJoinCommandArg(code, name string, install, core bool) string {
 	args := "node-join " + code
 	if name != "" {
 		args += " --name " + shellQuote(name)
+	}
+	if core {
+		args += " --core"
 	}
 	if install {
 		return "bash <(curl -fsSL " + nodeInstallURL + ") " + args
@@ -712,7 +870,7 @@ func nodeSSHStart(self nodeSelf, req nodeRequest) (nodeSSHResult, error) {
 		nodeSSH.jobs = append([]*nodeSSHJob(nil), nodeSSH.jobs[n:]...)
 	}
 	nodeSSH.Unlock()
-	cmd := nodeSSHCommand(name, req.User != "root")
+	cmd := nodeSSHCommand(name, req.User != "root", !req.Panel)
 	go nodeSSHRun(job, addr, cc, cmd, code.String())
 	return nodeSSHResult{Job: job.ID}, nil
 }
@@ -720,11 +878,11 @@ func nodeSSHStart(self nodeSelf, req nodeRequest) (nodeSSHResult, error) {
 // nodeSSHCommand: hashem node-join when Hashem is there, else the installer.
 // The code goes on stdin ("-"), not in the command line, where other users
 // of the server (ps, the sudo log) could read it.
-func nodeSSHCommand(name string, sudo bool) string {
+func nodeSSHCommand(name string, sudo, core bool) string {
 	// a Hashem older than nodes has no node-join: the installer brings the
 	// current one (and keeps the tunnels)
-	script := "set -e; if command -v hashem >/dev/null 2>&1 && hashem help 2>/dev/null | grep -q 'node-join.*code | ->'; then " + nodeJoinCommandArg("-", name, false) +
-		"; else " + nodeJoinCommandArg("-", name, true) + "; fi"
+	script := "set -e; if command -v hashem >/dev/null 2>&1 && hashem help 2>/dev/null | grep -q 'node-join.*code | ->'; then " + nodeJoinCommandArg("-", name, false, core) +
+		"; else " + nodeJoinCommandArg("-", name, true, core) + "; fi"
 	cmd := "bash -c " + shellQuote(script)
 	if sudo {
 		cmd = "sudo -n " + cmd

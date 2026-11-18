@@ -186,11 +186,26 @@ func sendTelegram(wd watchdogConfig, text string) error {
 		return redactErr(err, wd.TGBotToken)
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode >= 300 {
+		// Telegram says what is wrong in the body ("Unauthorized" for a bad
+		// token, "chat not found" for a bad chat id): pass it on.
+		var r struct {
+			Description string `json:"description"`
+		}
+		if json.Unmarshal(body, &r) == nil && r.Description != "" {
+			return fmt.Errorf("telegram said: %s (HTTP %d)", redactText(r.Description, wd.TGBotToken), resp.StatusCode)
+		}
 		return fmt.Errorf("telegram returned HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func redactText(s, secret string) string {
+	if secret == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, secret, "***")
 }
 
 // redactErr keeps secrets out of error strings (net/url errors embed the URL).
@@ -255,6 +270,9 @@ func alertLinks(s *HubSnapshot, now time.Time, t *alertTracker) []linkSnap {
 			name = fmt.Sprintf("peer-%d", l.ID)
 		}
 		links = append(links, linkSnap{Name: name, State: l.HealthState, Why: reasonsText(l.Reasons)})
+	}
+	if d, ok := doctorAlertLink(); ok { // scheduled Diagnostics (doctor_more.go)
+		links = append(links, d)
 	}
 	return append(links, hostResourceLinks(now, alertHostReaders, t.lastState)...)
 }

@@ -358,6 +358,7 @@ const PRO_TXT = {
   spoof: ['pro_t_spoof', 'Spoof Tunnel — Hashem Pro', 'pro_b_spoof', 'The Spoof Tunnel is a Hashem Pro feature, on both servers: an IP-spoofing pipe wrapped with WireGuard to cross whitelist-based Layer-3 firewalls.'],
   xray: ['pro_t_xray', 'Xray Tunnel — Hashem Pro', 'pro_b_xray', 'The Xray Tunnel is a Hashem Pro feature, on both servers: Reality, XHTTP, gRPC or mKCP, direct or reverse, next to any Xray panel.'],
   limits: ['pro_t_limits', 'Speed and volume limits — Hashem Pro', 'pro_b_limits', 'Limiting the speed and volume of each foreign server is a Hashem Pro feature. Limits already set keep working without it, and can always be removed.'],
+  autopilot: ['pro_t_autopilot', 'Autopilot — Hashem Pro', 'pro_b_autopilot', 'Autopilot is a Hashem Pro feature: a tunnel that stays down is tested and moved to a carrier that gets through, by itself. Turn it on on the Iran server.'],
   customers: ['pro_t_customers', 'Customers — Hashem Pro', 'pro_b_customers', 'Selling tunnels to customers is a Hashem Pro feature. Customers already set up keep running without it, and can always be paused or removed.'],
 };
 function isSentinelLicensed() {
@@ -380,9 +381,11 @@ function proSync() {
   tag('limitsPro', 'limits');
   tag('navCustomersPro', 'customers');
   tag('custPro', 'customers');
+  tag('apPro', 'autopilot');
+  tag('navAutopilotPro', 'autopilot');
   if ($('navClusterPro')) $('navClusterPro').classList.toggle('hidden', clLicensed());
   if ($('navSentinelPro')) $('navSentinelPro').classList.toggle('hidden', isSentinelLicensed());
-  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navSpoofPro', 'navXrayPro', 'navCustomersPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
+  ['navPerfPro', 'navWatchdogPro', 'navBenchmarkPro', 'navSpoofPro', 'navXrayPro', 'navCustomersPro', 'navAutopilotPro', 'navClusterPro', 'navDoctorPro', 'navSentinelPro'].forEach(id => {
     const el = $(id); if (!el) return;
     const t = id === 'navSentinelPro' ? tr('pro_addon', 'Add-on license') : 'Hashem Pro';
     el.title = t; el.setAttribute('aria-label', t);
@@ -419,7 +422,7 @@ function goTab(name) {
     openBagherLicModal('cluster');
     return;
   }
-  ['dashboard','tunnel','cluster','nodes','setup','xray','customers','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
+  ['dashboard','tunnel','cluster','nodes','setup','xray','customers','autopilot','logs','perf','watchdog','doctor','benchmark','spoof','update','settings','terminal'].forEach(t => { const el = $('tab-'+t); if (el) el.hidden = t !== name; });
   const markTab = b => {
     const on = b.dataset.tab === name;
     b.classList.toggle('on', on);
@@ -427,9 +430,13 @@ function goTab(name) {
     b.setAttribute('tabindex', on ? '0' : '-1');
   };
   document.querySelectorAll('.sidebar-nav [data-tab]').forEach(markTab);
+  // the page shown, next to the title
+  const nav = document.querySelector(`.sidebar-nav [data-tab="${name}"] span`), pg = $('tbPage');
+  if (pg && nav) pg.textContent = nav.textContent.trim(); // the page's name is the title
   const dr = $('drawerNav');
   if (dr) dr.querySelectorAll('[data-tab]').forEach(markTab);
   if (name === 'setup' || name === 'tunnel') loadSSHFwd();
+  if (name === 'setup' && !NV) loadNodes();
   if (name === 'cluster') {
     loadClusterStatus();
   }
@@ -441,6 +448,7 @@ function goTab(name) {
   if (name === 'spoof') loadSpoof();
   if (name === 'xray') loadXray();
   if (name === 'customers') loadCustomers();
+  if (name === 'autopilot') autopilotRefresh(true);
   if (name === 'nodes') { _ntLinks = null; loadNodes().then(() => { loadNodeTunnels(); nodeFleetLoad(); }); }
   if (name === 'update') loadVersion();
   if (name === 'logs') { refreshLogPeers(); loadLogs(); loadErrors(); armLogFollow(); }
@@ -569,6 +577,7 @@ const I18N = {
     spoof_idle: "Not configured",
     nav_xray: "Xray",
     nav_customers: "Customers",
+    nav_autopilot: "Autopilot",
     nav_nodes: "Nodes",
     node_bar: "You are managing node",
     node_bar_sub: "Changes apply to that server; a password asked here is that server's.",
@@ -757,7 +766,8 @@ const I18N = {
     wd_fails: "Consecutive Fails",
     wd_last_check: "Last Check",
     wd_restart_title: "Tunnel Auto-Restart Schedule",
-    wd_restart_hint: "Periodically refreshes the tunnel interfaces and restarts FRP/Backhaul relay services gracefully without interrupting the web panel or losing configuration.",
+    wd_restart_hint: "On a schedule, the Watchdog restarts what is not working. On the Iran server that is a tunnel interface that does not answer and carries no traffic, and an engine whose service failed; interfaces that carry traffic are not touched. On a foreign server the engine (frpc or Backhaul) is restarted every time.",
+    wd_restart_warn: "This schedule is on. Every run on a foreign server restarts its engine, which drops the connections passing through that server for a few seconds. Turn it off unless a tunnel really needs a regular restart.",
     wd_restart_interval: "Restart Interval",
     wd_restart_save: "Save Schedule",
     wd_restart_now: "Restart Tunnel Now",
@@ -776,16 +786,11 @@ const I18N = {
     wd_events_title: "Watchdog Event Log",
 
     // Benchmark Tab
-    bench_title: "Carrier Benchmark & Auto-Pilot",
+    bench_title: "Carrier Benchmark",
     bench_peer_link_title: "Inter-Panel Link (Peer)",
     bench_peer_link_sub: "Master/Worker dual-path synchronization with remote panel.",
     bench_peer_test_btn: "Test Connection",
     bench_peer_cfg_btn: "Configure Link",
-    bench_failover_title: "Automatic Failover",
-    bench_failover_sub: "Strictly OFF by default. When OFF, the tunnel never switches automatically.",
-    bench_failover_toggle: "Enable Automatic Failover (Auto-Switching)",
-    bench_failover_threshold: "Packet Loss Trigger Threshold (%)",
-    bench_failover_save: "Save Failover Policy",
     bench_leaderboard_title: "Carrier Performance Leaderboard",
     bench_run_btn: "Run Carrier Benchmark",
     pro_t_wd: "Watchdog — Hashem Pro",
@@ -984,13 +989,9 @@ const I18N = {
     close: "Close",
     x002: "Iran",
     x003: "Foreign",
-    x004: "Automatic",
-    x005: "Manual",
     x006: "No recent errors",
     x007: "Engine",
-    x008: "Carrier & Failover",
     x009: "Active Carrier",
-    x010: "Failover Policy",
     x011: "Diagnostics",
     x012: "tunnel up",
     x013: "Open full card in Tunnel tab",
@@ -1599,6 +1600,21 @@ function peerRemoveClick(peerId, name) {
 // Signature: the topbar names the link itself: this server ⇄ the other side · engine ·
 // latency, with one live dot. Values sit in <bdi> so they keep their order in Persian.
 const LS_ENGINE = { frp: 'GRE + FRP', backhaul: 'Backhaul (no GRE)', 'gre-backhaul': 'Backhaul (with GRE)', bagher: 'Bagher' };
+// The topbar names this server (hostname and public IP): with several
+// servers open it tells them apart. A click copies the IP.
+function tbHostSet(sv) {
+  const b = $('tbHost');
+  if (!b) return;
+  const ip = (sv && sv.public_ip) || '', host = (sv && sv.hostname) || '';
+  b.hidden = !ip && !host;
+  $('tbHostTxt').textContent = [host, ip].filter(Boolean).join(' · ');
+  b.dataset.ip = ip;
+  b.disabled = !ip;
+}
+(function initTbHost() {
+  const b = $('tbHost');
+  if (b) b.onclick = () => copyTextSafe(b.dataset.ip, tr('', 'Copied'), b.dataset.ip);
+})();
 function linkStrip(s) {
   const el = $('roleLine');
   if (!el || !s) return;
@@ -1610,18 +1626,31 @@ function linkStrip(s) {
   }
   const iran = /iran/i.test(L.role || '') || L.frp_svc === 'frps' || peers.length > 0;
   const here = iran ? tr('x002', 'Iran') : tr('x003', 'Foreign');
-  const there = peers.length > 1 ? peers.length + ' ' + tr('ls_servers', 'servers')
+  // the main tunnel is a server too: it sits beside the peers, not among them
+  const nSrv = peers.length + (peers.length && hasBaseTunnel(L) ? 1 : 0);
+  const there = nSrv > 1 ? nSrv + ' ' + tr('ls_servers', 'servers')
     : (peers[0] && (peers[0].name || peers[0].remote_pub)) || L.remote_pub || L.gre_peer || (iran ? tr('x003', 'Foreign') : tr('x002', 'Iran'));
   const eng = LS_ENGINE[L.engine || L.tunnel_engine] || '';
   const up = !!(L.frp_up || (L.gre && L.gre.exists) || peers.some(p => p.frp_up || p.gre_up));
-  const pinged = L.ping_ok || peers.some(p => p.ping_ok);
-  const ms = L.ping_ok && parseFloat(L.ping_ms) > 0 ? Math.round(parseFloat(L.ping_ms)) + ' ms' : '';
+  // a live session is healthy even unpinged: the server pings only links
+  // without one (snapshot.go), so ping_ok alone would show a working tunnel weak
+  const good = o => o.ping_ok || o.health_state === 'healthy';
+  const pinged = good(L) || peers.some(good);
+  const lat = L.ping_ok && parseFloat(L.ping_ms) > 0 ? parseFloat(L.ping_ms)
+    : (L.health_state === 'healthy' && L.latency_ms > 0 ? L.latency_ms : 0);
+  const ms = lat ? Math.round(lat) + ' ms' : '';
   const state = up ? (pinged ? 'ok' : 'warn') : 'err';
-  const sep = ' <span class="ls-sep" aria-hidden="true">·</span> ';
-  el.innerHTML = '<span class="ls-dot ' + state + '" aria-hidden="true"></span><bdi>' + esc(here) + '</bdi>' +
-    '<span class="ls-arrow" aria-hidden="true">⇄</span><bdi>' + esc(there) + '</bdi>' +
-    (eng ? sep + '<bdi>' + esc(eng) + '</bdi>' : '') + (ms ? sep + '<bdi>' + esc(ms) + '</bdi>' : '');
-  el.title = up ? tr('ls_up', 'Tunnel up') : tr('ls_down', 'Tunnel down');
+  const globe = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
+  const bolt = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>';
+  const slow = lat > 150;
+  const stateTxt = up ? tr('ls_up', 'Tunnel up') : tr('ls_down', 'Tunnel down');
+  // this server, the wire (its state), the other side; then the engine and latency
+  el.innerHTML = '<span class="ls-link"><span class="ls-end here"><span class="ls-dot ' + state + '" aria-hidden="true"></span><bdi>' + esc(here) + '</bdi></span>' +
+    '<span class="ls-wire ' + state + '" role="img" aria-label="' + esc(stateTxt) + '"></span>' +
+    '<span class="ls-end there' + (/^[0-9a-f.:]+$/i.test(there) ? ' ip' : '') + '">' + globe + '<bdi>' + esc(there) + '</bdi></span></span>' +
+    (eng ? '<span class="ls-chip eng"><bdi>' + esc(eng) + '</bdi></span>' : '') +
+    (ms ? '<span class="ls-chip ms' + (slow ? ' slow' : '') + '">' + bolt + '<bdi>' + esc(ms) + '</bdi></span>' : '');
+  el.title = stateTxt;
 }
 // The base tunnel exists. A peer's backhaul-server-N alone is not one: the
 // status names that unit when no base unit runs, for the role of a hub that
@@ -1802,6 +1831,7 @@ async function refresh() {
     if (typeof supObserve === 'function') supObserve(s);
     if (typeof uiObserve === 'function') uiObserve(s);
     linkStrip(s);
+    tbHostSet(s.server);
     if (s.local) {
       const isForeign = /foreign/i.test(s.local.role || '') || (s.local.frp_svc === 'frpc');
       const ap = $('setupAddPeerStep');
@@ -2480,7 +2510,12 @@ async function refreshDash() {
     const role = String(d.role || '').toLowerCase();
     const iran = /iran|master/.test(role), foreign = /foreign/.test(role);
     const engine = engLabel(d.active_engine);
-    const upPeers = peers.filter(p => p.gre_up || p.frp_up).length;
+    // The main tunnel is one more server next to the peers (the map draws it
+    // too), so "3 servers" must count it: peers alone said 2 for a hub with
+    // the main tunnel and two peers.
+    const hasMain = multi && !!(g.exists || f.up || f.svc);
+    const nSrv = nPeers + (hasMain ? 1 : 0);
+    const upPeers = peers.filter(p => p.gre_up || p.frp_up).length + (hasMain && (g.exists || f.up) ? 1 : 0);
 
     // Hero: overall state, the link between the two servers, latency.
     const hero = $('dashHero');
@@ -2489,13 +2524,13 @@ async function refreshDash() {
     const reasons = d.reasons || [];
     set('kpiStatusSub', state === 'unset' ? tr('', 'Run Setup to create the tunnel')
       : (state !== 'ok' && reasons.length) ? reasons[0]
-      : multi ? upPeers + ' / ' + nPeers + ' ' + tr('', 'tunnels up')
+      : multi ? upPeers + ' / ' + nSrv + ' ' + tr('', 'tunnels up')
       : state === 'ok' ? tr('', 'All links are working') : tr('', 'No link is answering'));
     set('heroLocalName', tr('', iran ? 'Iran server' : foreign ? 'Foreign server' : 'This server'));
     set('heroLocalIp', d.local_pub || '—');
     let remName, remIp;
     if (unset) { remName = 'Not linked yet'; remIp = '—'; }
-    else if (multi && nPeers > 1) { remName = nPeers + ' ' + tr('', 'foreign servers'); remIp = upPeers + ' / ' + nPeers + ' ' + tr('', 'up'); }
+    else if (multi && nSrv > 1) { remName = nSrv + ' ' + tr('', 'foreign servers'); remIp = upPeers + ' / ' + nSrv + ' ' + tr('', 'up'); }
     else if (multi) { remName = peers[0].name || 'Foreign server'; remIp = peers[0].remote_pub || '—'; }
     else {
       remName = d.main_name || (bagherUp && !(d.gre || {}).exists && bObj.name) || (iran ? 'Foreign server' : foreign ? 'Iran server' : 'Other server');
@@ -2506,8 +2541,8 @@ async function refreshDash() {
     const chips = [];
     const engName = engine && engine !== 'Bagher' ? engine : 'FRP';
     if (multi) {
-      const greUp = peers.filter(p => p.gre_up).length, frpUp = peers.filter(p => p.frp_up).length;
-      chips.push(chip('GRE ' + greUp + '/' + nPeers, greUp ? 'ok' : 'err'), chip(engName + ' ' + frpUp + '/' + nPeers, frpUp ? 'ok' : 'err'));
+      const greUp = peers.filter(p => p.gre_up).length + (hasMain && g.exists ? 1 : 0), frpUp = peers.filter(p => p.frp_up).length + (hasMain && f.up ? 1 : 0);
+      chips.push(chip('GRE ' + greUp + '/' + nSrv, greUp ? 'ok' : 'err'), chip(engName + ' ' + frpUp + '/' + nSrv, frpUp ? 'ok' : 'err'));
     } else if (!unset) {
       // Backhaul and Bagher run without GRE: a missing GRE there is not a fault.
       if (g.exists || (!/backhaul/.test(role) && !(bagherUp && !f.up))) chips.push(chip('GRE', g.exists ? 'ok' : 'err'));
@@ -2788,7 +2823,7 @@ async function refreshDash() {
       det = serverCard + `<div class="det-empty">${esc(tr('', 'Tunnel, engine and carrier details appear here after Setup.'))}</div>`;
     } else {
       const engCell = f.up ? dbadge(tr('status_running', 'Running'), 'ok') : dbadge(tr('', 'Stopped'), 'err');
-      const failCell = d.auto_failover ? dbadge(tr('x004', 'Automatic'), 'ok') : dbadge(tr('x005', 'Manual'), '');
+      const failCell = d.auto_failover ? dbadge(tr('', 'On'), 'ok') : dbadge(tr('', 'Off'), '');
       const diagCell = d.last_error
         ? `<span class="badge err" title="${esc(d.last_error.detail || '')}"><span class="dot"></span>${esc(d.last_error.code || 'ERR')} (${esc(String(d.last_error.time || '').slice(11, 19))})</span>`
         : dbadge(tr('x006', 'No recent errors'), on ? 'ok' : '');
@@ -2797,7 +2832,7 @@ async function refreshDash() {
         + ((f.svc || f.up || f.port) ? detCard(ICO_FRP, tr('card_frp_title', 'Tunnel Engine'), detRow(tr('x007', 'Engine'), dval(engine || f.svc || '—')) + detRow(tr('lbl_frp_status', 'Status'), engCell) + detRow(portLabel, bindPort ? dmono(bindPort) : dval('—'))
           + (proxyPorts.length ? detRow(tr('lbl_tunnel_ports', 'Tunnel Ports'), `<span class="det-v det-ports">${proxyPorts.map(p => `<span class="det-v mono">${esc(String(p))}</span>`).join('')}</span>`) : '')
           + (u.frp_since ? detRow(tr('lbl_uptime_since', 'Since'), dval(u.frp_since)) : '')) : '')
-        + detCard(ICO_BOLT, tr('x008', 'Carrier & Failover'), detRow(tr('x009', 'Active Carrier'), dmono(String(d.active_carrier || 'direct'))) + detRow(tr('x010', 'Failover Policy'), failCell) + detRow(tr('x011', 'Diagnostics'), diagCell));
+        + detCard(ICO_BOLT, tr('', 'Carrier'), detRow(tr('x009', 'Active Carrier'), dmono(String(d.active_carrier || 'direct'))) + detRow(tr('', 'Autopilot'), failCell) + detRow(tr('x011', 'Diagnostics'), diagCell));
     }
     setHTML('dashDetails', det);
     // one-click copy for IP/port pills
@@ -3890,7 +3925,11 @@ $('toggle').addEventListener('click', () => {
   })(0);
 })();
 $('logoutBtn').onclick = async () => { try { await api('/api/logout', {}); } catch(e){ /* logout best-effort: always fall through to login screen */ } showLogin(); };
-$('refreshBtn').onclick = refresh;
+$('refreshBtn').onclick = async () => {
+  const b = $('refreshBtn');
+  b.classList.add('spin');
+  try { await refresh(); } finally { b.classList.remove('spin'); }
+};
 $('removeTunnelBtn').onclick = async () => {
   // peers other than the first tunnel itself (peer 1 on the legacy names)
   const others = (tunPeerCache || []).filter(p => !p.legacy && p.gre_if !== 'gre-tunnel').length;
@@ -4073,8 +4112,19 @@ function updAgo(ts) {
   if (d < 3600) return docTpl('{0} min ago', [Math.round(d / 60)]);
   return docTpl('{0} h ago', [Math.round(d / 3600)]);
 }
-function updRow(k, vHTML) { return '<div class="ver-row"><span class="k">' + esc(k) + '</span><span>' + vHTML + '</span></div>'; }
-function updDot(cls, txt) { $('updDot').className = 'status-indicator ' + cls; $('updDotTxt').textContent = txt; }
+// The facts under the installed version are tiles: an icon and a label over
+// the value, and a state (ok/warn) when the value is a verdict.
+const UPD_IC = {
+  tag: '<path d="M3 12V4h8l9 9-8 8z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+};
+function updTileHTML(icon, k, vHTML) {
+  return '<span class="k"><svg viewBox="0 0 24 24" aria-hidden="true">' + UPD_IC[icon] + '</svg>' + esc(k) + '</span>' + vHTML;
+}
+function updRow(icon, k, vHTML) { return '<div class="upd-stat">' + updTileHTML(icon, k, vHTML) + '</div>'; }
+function updDot(cls, txt) { $('updDot').className = 'status-indicator upd-pill ' + cls; $('updDotTxt').textContent = txt; }
+function updChannelSet(ch) { document.querySelectorAll('#updChannel input[name="updCh"]').forEach(r => { r.checked = r.value === ch; }); }
 
 async function loadVersion(force) {
   const chk = $('updCheckBtn');
@@ -4084,7 +4134,7 @@ async function loadVersion(force) {
     updState.current = v.current || ''; updState.latest = v.latest || ''; updState.avail = !!v.update_available;
     $('verCurrent').textContent = v.current || '—';
     const isDev = v.channel === 'dev';
-    $('updChannel').value = isDev ? 'dev' : 'stable';
+    updChannelSet(isDev ? 'dev' : 'stable');
     $('updDevBadge').classList.toggle('hidden', !isDev);
     $('updChannelWarn').classList.toggle('hidden', !isDev);
     const badge = $('updBadge'); if (badge) badge.classList.toggle('hidden', !v.update_available);
@@ -4093,12 +4143,15 @@ async function loadVersion(force) {
     const failed = !v.latest || v.latest === 'unknown';
     $('updTo').hidden = !v.update_available;
     $('verLatest').textContent = v.latest || '—';
+    $('updHero').dataset.st = failed ? 'fail' : v.update_available ? 'new' : 'ok';
     if (failed) updDot('warn', tr('', 'Check failed'));
     else updDot(v.update_available ? 'warn' : 'ok', tr('', v.update_available ? 'Update available' : 'Up to date'));
 
-    let rows = updRow(tr('', 'Latest release'), failed ? esc(tr('', 'Unknown: GitHub could not be reached')) : '<bdi dir="ltr">' + esc(v.latest) + '</bdi>');
-    rows += updRow(tr('', 'Last checked'), esc(updAgo(v.checked_at)));
-    rows += '<div class="ver-row" id="updPeerRow" hidden></div>';
+    let rows = updRow('tag', tr('', 'Latest release'), failed
+      ? '<span class="v dim">' + esc(tr('', 'Unknown: GitHub could not be reached')) + '</span>'
+      : '<bdi class="v" dir="ltr">' + esc(v.latest) + '</bdi>');
+    rows += updRow('clock', tr('', 'Last checked'), '<span class="v">' + esc(updAgo(v.checked_at)) + '</span>');
+    rows += '<div class="upd-stat" id="updPeerRow" hidden></div>';
     $('verRowsUpd').innerHTML = rows;
 
     const rb = $('updRollback');
@@ -4134,12 +4187,14 @@ async function loadPeerVersion() {
   try { p = await api('/api/update/peer'); } catch (_) { return; }
   const row = $('updPeerRow');
   if (!row || !p.configured) return;
-  let v;
-  if (!p.reachable) v = '<span class="qs-hint">' + esc(tr('', 'Not reachable')) + '</span>';
+  let v, st = 'warn';
+  const ver = () => '<bdi class="v" dir="ltr">' + esc(p.version) + '</bdi>';
+  if (!p.reachable) { v = '<span class="v dim">' + esc(tr('', 'Not reachable')) + '</span>'; st = ''; }
   else if (!p.version) v = '<span class="badge warn">' + esc(tr('', 'Older version: update it too')) + '</span>';
-  else if (p.same) v = '<bdi dir="ltr">' + esc(p.version) + '</bdi> <span class="badge ok">' + esc(tr('', 'Same')) + '</span>';
-  else v = '<bdi dir="ltr">' + esc(p.version) + '</bdi> <span class="badge warn">' + esc(tr('', 'Different: update both servers')) + '</span>';
-  row.innerHTML = '<span class="k">' + esc(tr('', 'Other server')) + '</span><span>' + v + '</span>';
+  else if (p.same) { v = ver() + '<span class="badge ok">' + esc(tr('', 'Same')) + '</span>'; st = 'ok'; }
+  else v = ver() + '<span class="badge warn">' + esc(tr('', 'Different: update both servers')) + '</span>';
+  row.className = 'upd-stat' + (st ? ' ' + st : '');
+  row.innerHTML = updTileHTML('server', tr('', 'Other server'), v);
   row.hidden = false;
 }
 
@@ -4246,11 +4301,12 @@ $('rbBtn').onclick = async () => {
     tr('', 'Install'))) return;
   runUpdate(tag);
 };
-$('updChannel').onchange = async () => {
-  const sel = $('updChannel');
+$('updChannel').onchange = async e => {
+  const ch = e.target.value;
+  if (ch !== 'dev' && ch !== 'stable') return;
   try {
-    await api('/api/update/channel', {channel: sel.value});
-    toastOk(tr('upd_channel', 'Update channel'), sel.value === 'dev' ? tr('upd_channel_dev', 'Dev') : tr('upd_channel_stable', 'Stable'));
+    await api('/api/update/channel', {channel: ch});
+    toastOk(tr('upd_channel', 'Update channel'), ch === 'dev' ? tr('upd_channel_dev', 'Dev') : tr('upd_channel_stable', 'Stable'));
   } catch (e) { toastErr(tr('', 'Could not change the channel'), e.message); }
   loadVersion(true);
 };
@@ -4308,6 +4364,248 @@ async function advisorRefresh() {
   } catch(e) {}
 }
 $('advRefresh').onclick = advisorRefresh;
+// Settings: the chips above the groups scroll to one of them.
+(function initSetNav() {
+  const nav = $('setNav');
+  if (!nav) return;
+  nav.onclick = e => {
+    const b = e.target.closest('button[data-set]');
+    const g = b && $(b.dataset.set);
+    if (!g) return;
+    const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    g.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+  };
+})();
+// ---- Autopilot tab (autopilot.go): a down tunnel is moved to a carrier that gets through ----
+let _apData = null, _apDirty = false, _apQ = {from: 0, to: 0}, _apPick = -1, _apCars = null, _apTimer = null, _apBusy = false;
+const AP_GROUPS = [
+  ['backhaul', 'Backhaul', 'Without GRE'],
+  ['frp', 'GRE + FRP', 'Inside the GRE link'],
+  ['gre-backhaul', 'GRE + Backhaul', 'Inside the GRE link'],
+];
+function apMin(n) { return n + ' ' + tr('', 'min'); }
+function apSetDirty(d) { _apDirty = d; $('apDirty').classList.toggle('hidden', !d); }
+function apQuietHas(h) {
+  const q = _apQ; if (q.from === q.to) return false;
+  return q.from < q.to ? (h >= q.from && h < q.to) : (h >= q.from || h < q.to);
+}
+function apPad(h) { return String(h).padStart(2, '0') + ':00'; }
+function apRenderHours() {
+  $('apHours').innerHTML = Array.from({length: 24}, (_, h) =>
+    `<button type="button" class="ap-hr${apQuietHas(h) ? ' h-q' : ''}${_apPick === h ? ' h-pick' : ''}" data-h="${h}" aria-pressed="${apQuietHas(h)}" title="${apPad(h)}">${h}</button>`).join('');
+  $('apQuietOut').textContent = _apPick >= 0 ? apPad(_apPick) + ' → …'
+    : (_apQ.from === _apQ.to ? tr('', 'None') : apPad(_apQ.from) + ' → ' + apPad(_apQ.to));
+}
+function apRenderCars() {
+  const all = (_apData && _apData.carriers) || [];
+  $('apCars').innerHTML = AP_GROUPS.map(([eng, name, sub]) => {
+    const list = all.filter(c => c.split(':')[0] === eng);
+    if (!list.length) return '';
+    return `<div class="ap-car-row"><span>${esc(tr('', name))}<small>${esc(tr('', sub))}</small></span><div class="ap-car-chips">` +
+      list.map(c => `<button type="button" class="ap-cchip${_apCars.has(c) ? ' on' : ''}" data-c="${esc(c)}" aria-pressed="${_apCars.has(c)}">${esc(c.split(':')[1])}</button>`).join('') + '</div></div>';
+  }).join('');
+}
+function apRenderRules() {
+  const c = _apData.config || {};
+  const set = (id, v) => { const el = $(id); if (v > +el.max) el.max = v; el.value = v; };
+  set('apDown', c.down_minutes || 5); set('apCool', c.cooldown_minutes || 30); set('apPerDay', c.max_per_day || 6);
+  $('apPathTest').checked = !!c.path_test; $('apNotify').checked = !!c.notify;
+  _apQ = {from: c.quiet_from || 0, to: c.quiet_to || 0}; _apPick = -1;
+  const all = _apData.carriers || [];
+  _apCars = new Set((c.carriers || []).length ? c.carriers : all);
+  apRenderOuts(); apRenderHours(); apRenderCars(); apSetDirty(false);
+}
+function apRenderOuts() {
+  $('apDownOut').textContent = apMin($('apDown').value);
+  $('apCoolOut').textContent = apMin($('apCool').value);
+  $('apPerDayOut').textContent = $('apPerDay').value;
+  $('apFlowDown').textContent = apMin($('apDown').value);
+}
+// apWait puts the server's reason for waiting into the page's language.
+function apWait(w) {
+  let m;
+  if (!w || /^down for /.test(w)) return ''; // the bar shows it
+  if ((m = /^next run in (\d+) minutes$/.exec(w))) return tr('', 'Next run in') + ' ' + m[1] + ' ' + tr('', 'min');
+  if ((m = /^quiet hours \((.+)\)$/.exec(w))) return tr('', 'Quiet hours') + ' ' + m[1];
+  if (/runs in the last 24 hours: the limit$/.test(w)) return tr('', 'The limit of runs in 24 hours is reached');
+  return tr('', w);
+}
+function apTunHTML(t, cfg) {
+  const need = (cfg.down_minutes || 5) * 60;
+  let dot = 'mu', cls = '', sub = tr('', t.state || 'unknown'), bar = '';
+  if (t.running) { dot = 'ac'; cls = 't-run'; sub = tr('', 'Autopilot is working') + (t.progress ? ': ' + tr('', t.progress) : ''); }
+  else if (t.state === 'down') {
+    dot = 'er'; cls = 't-down';
+    sub = tr('', 'Down') + (t.down_sec ? ' ' + Math.floor(t.down_sec / 60) + ' ' + tr('', 'min') : '') + (apWait(t.waiting) ? ' · ' + apWait(t.waiting) : '');
+    if (t.down_sec && t.down_sec < need && cfg.enabled) bar = `<div class="ap-bar"><i style="width:${Math.min(100, Math.round(t.down_sec / need * 100))}%"></i></div>`;
+  } else if (t.state === 'healthy') { dot = 'ok'; sub = tr('', 'Healthy'); }
+  else if (t.state === 'degraded') { dot = 'wr'; sub = tr('', 'Degraded'); }
+  if (!t.can_swap) sub += ' · ' + tr('', 'no carrier to swap');
+  else if (!t.seen_up && cfg.enabled) sub += ' · ' + tr('', 'not seen up yet');
+  if (t.runs_day) sub += ' · ' + tr('', 'Runs in 24 hours') + ': ' + t.runs_day;
+  const on = t.can_swap && !t.skipped;
+  return `<div class="ap-tun ${cls}${on ? '' : ' t-left'}"><span class="ap-dot ${dot}"></span>` +
+    `<div><div class="ap-tun-h"><b>${esc(t.name)}</b>${t.carrier ? `<span class="ap-chip">${esc(t.carrier)}</span>` : ''}</div>` +
+    `<div class="ap-tun-sub">${esc(sub)}</div>${bar}</div>` +
+    `<label class="ap-switch sm" title="${esc(tr('', 'Autopilot watches this tunnel'))}"><input type="checkbox" class="ap-tun-on" value="${t.id}" ${on ? 'checked' : ''} ${t.can_swap ? '' : 'disabled'} aria-label="${esc(t.name)}"><i></i></label></div>`;
+}
+function apRenderStatus() {
+  const r = _apData, c = r.config || {};
+  const tuns = r.tunnels || [];
+  const live = !!(c.enabled && r.licensed && r.iran);
+  $('apEnabled').checked = !!c.enabled;
+  const pill = $('apPill');
+  let cls = 'dim', txt = 'Off';
+  if (c.enabled && !r.licensed) { cls = 'warn'; txt = 'Needs a license'; }
+  else if (c.enabled && !r.iran) { cls = 'warn'; txt = 'Iran server only'; }
+  else if (live) { cls = 'ok'; txt = 'On'; }
+  const run = tuns.find(t => t.running);
+  if (run) { cls = 'warn'; txt = 'Working'; }
+  pill.className = 'badge ' + cls; $('apPillTxt').textContent = tr('', txt);
+  // the flow: armed when on, lit step by step during a run
+  const flow = $('apFlow');
+  flow.classList.toggle('armed', live);
+  const downNow = tuns.filter(t => t.state === 'down' && t.can_swap && !t.skipped).length;
+  flow.querySelectorAll('.ap-step').forEach(li => {
+    const i = +li.dataset.step;
+    li.classList.remove('s-run', 's-done', 's-alert', 's-off');
+    if (run) { if (i < run.step) li.classList.add('s-done'); else if (i === run.step) li.classList.add('s-run'); }
+    else if (i === 0 && live && downNow) li.classList.add('s-alert');
+    if (i === 2 && !c.path_test) li.classList.add('s-off');
+    if (i === 4 && !c.notify) li.classList.add('s-off');
+  });
+  let note = '', warn = false;
+  if (!r.iran) note = 'Autopilot runs on the Iran server: it switches the foreign server too. Turn it on there.';
+  else if (!r.licensed) { note = 'Autopilot is a Hashem Pro feature. Without a license it does nothing.'; warn = true; }
+  else if (c.enabled && c.path_test && !r.path_test_licensed) note = 'This license does not include the path test: the carriers are tried in order instead.';
+  else if (c.enabled) note = 'With the tunnel down, the foreign server is told over the central\'s node channel (both servers under one central), or else on its panel\'s public address, which must answer.';
+  const n = $('apNote'); n.textContent = tr('', note); n.classList.toggle('hidden', !note); n.classList.toggle('warn', warn);
+  const watched = tuns.filter(t => t.can_swap && !t.skipped).length;
+  const kpi = (l, v, k) => `<div class="cl-kpi ${k || ''}"><span>${esc(tr('', l))}</span><b>${esc(String(v))}</b></div>`;
+  $('apKpis').innerHTML = kpi('Tunnels watched', watched + ' / ' + tuns.length) + kpi('Down now', downNow, downNow ? 'warn' : '') +
+    kpi('Switched in 24 hours', r.switched_day || 0, r.switched_day ? 'ok' : '') + kpi('Runs without a way through', r.failed_day || 0, r.failed_day ? 'warn' : '');
+  $('apNotifyNote').textContent = r.notify_ready ? tr('', 'To the webhook of External alerts and the Telegram bot of the Watchdog.')
+    : tr('', 'Nothing to send to yet: set a webhook in External alerts or a Telegram bot in the Watchdog tab.');
+  $('apTunnels').innerHTML = tuns.map(t => apTunHTML(t, c)).join('') || `<div class="ap-empty">${esc(tr('', 'No tunnels yet.'))}</div>`;
+  const ev = r.events || [];
+  $('apEvents').innerHTML = ev.length ? ev.map(e => `<li class="ap-ev ev-${esc(e.kind)}"><span class="ap-ev-dot"></span><div>` +
+    `<div class="ap-ev-h"><b>${esc(e.name || ('#' + e.tunnel))}</b><span class="badge ${{switched: 'ok', failed: 'err', recovered: 'u-pill-sky'}[e.kind] || 'dim'}">${esc(tr('', e.kind))}</span>` +
+    (e.to ? `<span class="ap-chip">${esc(e.from)}</span><span class="ap-arrow">→</span><span class="ap-chip">${esc(e.to)}</span>` : (e.from ? `<span class="ap-chip">${esc(e.from)}</span>` : '')) +
+    `<time>${esc((e.at || '').replace('T', ' ').slice(0, 16))}</time></div><div class="ap-ev-t">${esc(e.text || '')}</div></div></li>`).join('')
+    : `<li class="ap-empty">${esc(tr('', 'Nothing yet: Autopilot has not had to act.'))}</li>`;
+}
+function apRender(rules) {
+  if (!_apData) return;
+  apRenderStatus();
+  if (rules || !_apDirty) apRenderRules();
+}
+async function autopilotRefresh(rules) {
+  if (!$('tab-autopilot')) return;
+  apFleetLoad();
+  try { _apData = await api('/api/autopilot'); apRender(!!rules); } catch (e) {}
+  if (!_apTimer) {
+    let n = 0;
+    _apTimer = setInterval(() => {
+      if ($('tab-autopilot').hidden || document.hidden || _apBusy) return;
+      api('/api/autopilot').then(r => { _apData = r; apRender(false); }).catch(() => {});
+      if (++n % 3 === 0) apFleetLoad(); // every server is asked: less often
+    }, 5000);
+  }
+}
+// ---- Autopilot on every server of a central (node_manage.go) ----
+// Each Iran server runs its own Autopilot; this card shows them together.
+let _apFleet = null, _apFleetBusy = false;
+const apFleetOn = () => { try { return !NV && _nodePickList.length > 0; } catch (_) { return false; } }; // the list is declared further down
+async function apFleetLoad() {
+  const card = $('apFleetCard');
+  if (!card) return;
+  card.hidden = !apFleetOn();
+  if (card.hidden || _apFleetBusy) return;
+  try { _apFleet = await api('/api/nodes', { action: 'autopilot' }); } catch (e) { _apFleet = { servers: [], errors: [e.message] }; }
+  apFleetRender();
+}
+function apFleetRender() {
+  const body = $('apFleetBody'), f = _apFleet;
+  if (!body || !f) return;
+  const open = s => s.id ? `openNodeHere(${Number(s.id)}, 'autopilot')` : `$('apFlow').scrollIntoView({behavior: 'smooth'})`;
+  const rows = (f.servers || []).map(s => {
+    const st = !s.licensed ? ['warn', tr('', 'Needs a license')] : s.enabled ? ['ok', tr('', 'On')] : ['dim', tr('', 'Off')];
+    const tuns = (s.tunnels || []).map(t => {
+      const v = Object.assign({}, t, { name: (t.name || '') + (t.client >= 0 ? ' → ' + ntName(t.client) : '') });
+      return apTunHTML(v, { enabled: s.enabled }).replace('class="ap-tun-on"', `class="ap-tun-on" data-s="${Number(s.id)}"`);
+    }).join('') || `<div class="ap-empty">${esc(tr('', 'No tunnels yet.'))}</div>`;
+    const ev = (s.events || []).slice(0, 3).map(e => `<div class="qs-hint lm-num">${esc((e.at || '').replace('T', ' ').slice(0, 16))} · ${esc(e.name || ('#' + e.tunnel))} · ${esc(tr('', e.kind))}${e.to ? ' ' + esc(e.from) + ' → ' + esc(e.to) : ''}</div>`).join('');
+    return `<div class="lm-row"><div class="lm-head"><div class="lm-name"><b>${esc(ntName(s.id))}</b>
+      <small>${esc(tr('', 'Switched in 24 hours'))}: ${Number(s.switched_day || 0)} · ${esc(tr('', 'Runs without a way through'))}: ${Number(s.failed_day || 0)}</small></div>
+      <div class="u-flex-center-gap8"><span class="badge ${st[0]}">${esc(st[1])}</span>
+      <label class="ap-switch sm" title="${esc(tr('', 'Turn Autopilot on'))}"><input type="checkbox" class="ap-fleet-on" value="${Number(s.id)}" ${s.enabled ? 'checked' : ''} aria-label="${esc(ntName(s.id))}"><i></i></label></div></div>
+      <div class="ap-tuns">${tuns}</div>${ev}
+      <div class="lm-acts"><button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="${open(s)}">${esc(tr('', 'Rules and history'))}</button></div></div>`;
+  }).join('');
+  const errs = (f.errors || []).length ? `<div class="qs-hint">${esc(tr('', 'Not read'))}: ${esc(f.errors.join(' · '))}</div>` : '';
+  body.innerHTML = `<div class="lm-list">${rows || `<div class="qs-hint">${esc(tr('', 'No Iran server with a tunnel yet.'))}</div>`}</div>` + errs;
+}
+async function apFleetSet(body) {
+  _apFleetBusy = true;
+  try {
+    _apFleet = await api('/api/nodes', Object.assign({ action: 'autopilot-set' }, body));
+    if (body.id === 0) autopilotRefresh(true); // this server's own card below
+  } catch (e) { toastErr('Autopilot', e.message); }
+  finally { _apFleetBusy = false; apFleetRender(); }
+}
+if ($('apFleetBody')) $('apFleetBody').onchange = ev => {
+  const all = ev.target.closest('.ap-fleet-on'), one = ev.target.closest('.ap-tun-on');
+  if (all) apFleetSet({ id: +all.value, on: all.checked });
+  else if (one) apFleetSet({ id: +one.dataset.s, tunnel: +one.value, on: one.checked });
+};
+function apRulesBody() {
+  const all = (_apData && _apData.carriers) || [];
+  const cars = all.filter(c => _apCars.has(c));
+  return {down_minutes: +$('apDown').value, cooldown_minutes: +$('apCool').value, max_per_day: +$('apPerDay').value,
+    path_test: $('apPathTest').checked, notify: $('apNotify').checked, quiet_from: _apQ.from, quiet_to: _apQ.to,
+    carriers: cars.length === all.length ? [] : cars};
+}
+async function apPost(body, okMsg) {
+  _apBusy = true;
+  try { _apData = await api('/api/autopilot', body); return true; }
+  catch (e) { toastErr('Autopilot', e.message); return false; }
+  finally { _apBusy = false; if (okMsg) { /* shown by the caller on success */ } }
+}
+$('apRefresh').onclick = () => autopilotRefresh(false);
+$('apEnabled').onchange = async () => {
+  const on = $('apEnabled').checked;
+  if (on && !isProLicensed('autopilot')) { $('apEnabled').checked = false; openBagherLicModal('autopilot'); return; }
+  if (await apPost({enabled: on})) toastOk(tr('', on ? 'Autopilot is on' : 'Autopilot is off'));
+  apRender(false);
+};
+$('apSave').onclick = async () => {
+  if (_apPick >= 0) { _apPick = -1; apRenderHours(); }
+  if (!_apCars.size) { toastErr('Autopilot', tr('', 'Leave at least one carrier on.')); return; }
+  if (await apPost(apRulesBody())) { toastOk(tr('', 'Autopilot rules saved')); apRender(true); }
+};
+['apDown', 'apCool', 'apPerDay'].forEach(id => { $(id).oninput = () => { apRenderOuts(); apSetDirty(true); }; });
+['apPathTest', 'apNotify'].forEach(id => { $(id).onchange = () => apSetDirty(true); });
+$('apHours').onclick = ev => {
+  const b = ev.target.closest('.ap-hr'); if (!b) return;
+  const h = +b.dataset.h;
+  if (_apPick < 0) _apPick = h;
+  else { _apQ = _apPick === h ? {from: 0, to: 0} : {from: _apPick, to: (h + 1) % 24}; _apPick = -1; apSetDirty(true); }
+  apRenderHours();
+};
+$('apQuietClear').onclick = () => { _apQ = {from: 0, to: 0}; _apPick = -1; apRenderHours(); apSetDirty(true); };
+$('apCars').onclick = ev => {
+  const b = ev.target.closest('.ap-cchip'); if (!b) return;
+  const c = b.dataset.c; if (_apCars.has(c)) _apCars.delete(c); else _apCars.add(c);
+  apRenderCars(); apSetDirty(true);
+};
+$('apCarAll').onclick = () => { _apCars = new Set((_apData && _apData.carriers) || []); apRenderCars(); apSetDirty(true); };
+$('apTunnels').onchange = async ev => {
+  const cb = ev.target.closest('.ap-tun-on'); if (!cb || !_apData) return;
+  const skip = new Set((_apData.config || {}).skip || []);
+  const id = +cb.value; if (cb.checked) skip.delete(id); else skip.add(id);
+  await apPost({skip: [...skip]});
+  apRender(false);
+};
 async function metricsRefresh() {
   try { const r = await api('/api/metrics-token'); $('metricsState').firstChild && ($('metricsState').textContent = r.enabled ? 'Enabled. Scrape GET …/metrics with the bearer token (rotate to get a new one; the old one stops working).' : 'Disabled. Generate a token to enable GET …/metrics for your scraper (Authorization: Bearer <token>). The token is shown once.'); } catch(e) {}
 }
@@ -4469,7 +4767,7 @@ async function termFlagRefresh() {
     if (nav) nav.classList.toggle('hidden', !s.enabled);
     if (typeof drawerSync === 'function') drawerSync();
     const dot = $('termFlagDot');
-    if (dot) { dot.className = 'status-indicator ' + (s.enabled ? 'active' : ''); $('termFlagTxt').textContent = s.enabled ? 'enabled' : 'disabled'; }
+    if (dot) { dot.className = 'status-indicator set-pill ' + (s.enabled ? 'active' : ''); $('termFlagTxt').textContent = s.enabled ? 'enabled' : 'disabled'; }
     const tb = $('termToggleBtn'); if (tb) tb.textContent = s.enabled ? 'Disable terminal' : 'Enable terminal';
     const fm = $('termFlagMsg');
     if (fm) fm.textContent = s.enabled ? (s.busy ? 'Terminal tab is visible. A shell is currently active.' : 'Terminal tab is visible. No active shell.') : 'Terminal tab is hidden until enabled.';
@@ -4680,22 +4978,33 @@ function netStackRows(n) {
   return rows;
 }
 
+// A state icon per kernel row: a check, a mark for what to improve, a dash when unknown.
+const NS_ICON = { ok: 'm5 12.5 4.5 4.5L19 7', warn: 'M12 6.5v7M12 17.5h.01', err: 'M12 6.5v7M12 17.5h.01', '': 'M7 12h10' };
+// Hero tile accent: ok, warn, off, or '' for the accent color.
+function perfTile(id, st) { const el = $(id); if (el) { if (st) el.dataset.st = st; else delete el.dataset.st; } }
+
 function renderNetStack(n) {
-  const list = $('netStackList'), badge = $('netStackBadge');
+  const list = $('netStackList'), badge = $('netStackBadge'), meter = $('perfNetMeter');
   if (!n || !n.known) {
     list.innerHTML = '<div class="ns-empty">' + esc(tr('', 'Kernel values cannot be read on this system.')) + '</div>';
     badge.className = 'badge'; badge.textContent = '—';
     perfSetText('perfNetVal', '—'); perfSetText('perfNetSub', '—');
+    perfTile('perfTileNet', 'off');
+    meter.hidden = true;
     return;
   }
   const rows = netStackRows(n);
   list.innerHTML = rows.map(([k, v, lvl, note]) =>
-    `<div class="ns-row" data-lvl="${lvl}"><span class="ns-dot" aria-hidden="true"></span><span class="ns-k">${esc(k)}<span class="ns-sub">${esc(note)}</span></span><span class="ns-v" data-no-i18n><bdi dir="ltr">${esc(v)}</bdi></span></div>`).join('');
+    `<div class="ns-row" data-lvl="${lvl}"><span class="ns-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${NS_ICON[lvl] || NS_ICON['']}"/></svg></span><span class="ns-k">${esc(k)}<span class="ns-sub">${esc(note)}</span></span><span class="ns-v" data-no-i18n><bdi dir="ltr">${esc(v)}</bdi></span></div>`).join('');
   const bad = rows.filter(r => r[2] === 'warn' || r[2] === 'err').length;
+  const known = rows.filter(r => r[2]).length;
   badge.className = 'badge ' + (bad ? 'warn' : 'ok');
   badge.textContent = bad ? docTpl('{0} to improve', [bad]) : tr('', 'Optimized');
   perfSetText('perfNetVal', bad ? tr('', 'Not optimized') : tr('', 'Optimized'));
   perfSetLtr('perfNetSub', (n.cc || '?') + ' + ' + (n.qdisc || '?') + (n.gre_mtu ? ' · MTU ' + n.gre_mtu : ''));
+  perfTile('perfTileNet', bad ? 'warn' : 'ok');
+  meter.hidden = !known;
+  meter.style.setProperty('--pct', (known ? Math.round(100 * (known - bad) / known) : 0) + '%');
   $('perfRestoreBtn').hidden = !n.backup;
 }
 
@@ -4724,11 +5033,11 @@ async function loadPerf() {
   // Sync status
   const ind = $('perfSyncInd');
   if (!isFrp) {
-    ind.className = 'status-indicator offline';
+    ind.className = 'status-indicator upd-pill offline';
     perfSetText('perfSyncTxt', isBh ? 'Backhaul' : tr('', 'No tunnel'));
     ind.title = '';
   } else {
-    ind.className = 'status-indicator ' + (s.in_sync ? 'ok' : 'warn');
+    ind.className = 'status-indicator upd-pill ' + (s.in_sync ? 'ok' : 'warn');
     perfSetText('perfSyncTxt', tr('', s.in_sync ? 'Applied' : 'Not applied yet'));
     ind.title = s.sync_details || '';
   }
@@ -4738,6 +5047,8 @@ async function loadPerf() {
   const speedFirst = !s.proxy_encryption && !s.proxy_compression && !s.tcp_mux;
   perfSetText('perfEngLabel', isBh ? tr('', 'Tunnel engine') : tr('', 'FRP transport'));
   perfSetText('perfPoolLabel', isBh ? tr('', 'Connection pool') : tr('perf_status_pool', 'Work-conn pool (frpc / frps)'));
+  perfTile('perfTileEng', isBh ? '' : isFrp ? (speedFirst ? 'ok' : '') : 'off');
+  perfTile('perfTilePool', isBh || isFrp ? '' : 'off');
   if (isBh) {
     perfSetText('perfCryptoVal', 'Backhaul');
     perfSetText('perfCryptoSub', tr('', s.backhaul_role === 'foreign' ? 'Foreign server (dials)' : 'Iran server (listens)'));
@@ -5503,6 +5814,9 @@ function renderSpoof() {
       <p class="qs-hint${/^icmp/.test(d.recv_transport || '') ? '' : ' hidden'}" id="spIcmpHint">${esc(tr('', 'Receiving over ICMP turns off ping replies on this whole server while the tunnel runs (the spoof core needs the echo packets). Checks that ping this server will see it as down.'))}</p>
       <label class="qs-label">${esc(tr('', 'Spoof source IPs (one per line, from the tester)'))}</label>
       <textarea class="hashem-input u-ltr u-mono sp-ips" id="spIPs" rows="3" placeholder="203.0.113.7">${esc(ips)}</textarea>
+      ${isLocal ? `<label class="qs-label" for="spFwd">${esc(tr('', 'Forwarded ports'))}</label>
+      <input class="hashem-input u-ltr u-mono" id="spFwd" value="${esc((d.forward_ports || []).join(', '))}" placeholder="443, 8080-8090" autocomplete="off">
+      <p class="qs-hint">${esc(tr('', 'Users connect to these ports on this server; their TCP and UDP traffic goes through the tunnel to the same port on the foreign server. The service there must listen on that port. Without ports the tunnel is up but carries nothing.'))} <span class="u-mono" data-no-i18n>→ ${esc(d.wg_peer_ip || '10.20.0.2')}</span></p>` : ''}
       <div class="sp-acts">
         <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" id="spSaveBtn">${esc(tr('', 'Save'))}</button>
         ${d.enabled
@@ -5556,6 +5870,8 @@ function spoofFormReq(action) {
     listen_port: num('spListen'), recv_port: num('spRecv'), spoof_port: num('spSpoofPort'),
     send_transport: ($('spSend') || {}).value, recv_transport: ($('spRecvT') || {}).value,
     spoof_ips: ips,
+    // Only the Iran side has the field; leaving it out keeps the saved list.
+    ...($('spFwd') ? { forward_ports: $('spFwd').value.trim() } : {}),
   };
 }
 
@@ -6493,7 +6809,12 @@ async function loadWatchdog() {
     const s = await api('/api/watchdog');
     wdState = s;
 
-    // Status hero card
+    // Status hero card: one state (off / ok / bad) colours the shield, the
+    // headline and the edge; the toggle and the numbers sit under it.
+    const heroState = !s.enabled ? 'off' : (s.status === 'up' ? 'ok' : 'bad');
+    const hero = $('wdHero');
+    if (hero) hero.dataset.state = heroState;
+    if ($('wdHeroState')) $('wdHeroState').textContent = tr('', { off: 'The Watchdog is off', ok: 'The tunnel is healthy', bad: 'The tunnel is down' }[heroState]);
     const ind = $('wdStatusInd');
     if (ind) {
       ind.className = 'status-indicator ' + (s.enabled ? 'active' : 'offline');
@@ -6507,17 +6828,20 @@ async function loadWatchdog() {
     const hVal = $('wdHealthVal');
     if (hVal) {
       if (!s.enabled) {
-        hVal.innerHTML = '<span class="u-c-dim">○ Disabled</span>';
+        hVal.innerHTML = '<span class="u-c-dim"><span class="dot wd-dot-off"></span>Disabled</span>';
       } else if (s.status === 'up') {
-        hVal.innerHTML = '<span class="u-c-ok">● Online</span>';
+        hVal.innerHTML = '<span class="u-c-ok"><span class="dot up"></span>Online</span>';
       } else {
-        hVal.innerHTML = '<span class="u-c-er">● Offline</span>';
+        hVal.innerHTML = '<span class="u-c-er"><span class="dot down"></span>Offline</span>';
       }
     }
     const hDet = $('wdHealthDetail');
-    if (hDet) hDet.textContent = s.check_result || s.status;
+    if (hDet) hDet.textContent = s.check_result || s.status || tr('', 'Not checked yet');
+    const fails = s.consec_fails || 0, limit = s.fail_threshold || 2;
     const fVal = $('wdFailsVal');
-    if (fVal) fVal.textContent = (s.consec_fails || 0) + ' / ' + (s.fail_threshold || 2);
+    if (fVal) fVal.textContent = fails + ' / ' + limit;
+    const pips = $('wdPips');
+    if (pips) pips.innerHTML = Array.from({ length: limit }, (_, i) => '<i class="' + (i < fails ? (fails >= limit ? 'full' : 'on') : '') + '"></i>').join('');
     const lVal = $('wdLastCheckVal');
     if (lVal) lVal.textContent = s.last_check || 'Never';
 
@@ -6600,6 +6924,7 @@ async function loadWatchdog() {
         }
       }
     }
+    if ($('wdRestartWarn')) $('wdRestartWarn').classList.toggle('hidden', !(rHours > 0));
     if (rSub) {
       rSub.textContent = 'Next restart: ' + (s.next_restart_human || 'Not scheduled') + (s.last_restart_date ? ' · Last run: ' + s.last_restart_date : '');
     }
@@ -6665,7 +6990,7 @@ async function loadWatchdog() {
         eList.innerHTML = '';
         s.recent_events.forEach(ev => {
           const item = document.createElement('div');
-          item.className = 'wd-event-item';
+          item.className = 'wd-event-item ' + (ev.code === 'E-WD-00' ? 'ok' : 'err');
           item.innerHTML = `
             <span class="wd-event-time">${esc(ev.time)}</span>
             <span class="wd-event-detail">${esc(ev.detail || ev.code)}</span>
@@ -6833,7 +7158,7 @@ if ($('wdRestartTunnelNowBtn')) {
   $('wdRestartTunnelNowBtn').onclick = async () => {
     const ok = await entConfirm({
       title: 'Restart Tunnel Services?',
-      body: 'This will perform a graceful soft-restart of GRE interface and FRP/Backhaul relay services. The web panel will stay online.',
+      body: 'This restarts the GRE interfaces, and on a foreign server its engine too. Connections passing through them drop for a few seconds. The web panel stays online.',
       yesText: 'Restart Tunnel',
       noText: 'Cancel'
     });
@@ -6896,7 +7221,7 @@ async function tlsRefresh() {
     const s = await api('/api/tls');
     const dot = $('tlsDot');
     if (dot) {
-      dot.className = 'status-indicator ' + (!s.enabled ? '' : (s.days_left != null && s.days_left < 15 ? 'offline' : 'active'));
+      dot.className = 'status-indicator set-pill ' + (!s.enabled ? '' : (s.days_left != null && s.days_left < 15 ? 'offline' : 'active'));
       $('tlsDotTxt').textContent = s.enabled ? (s.days_left != null ? s.days_left + ' days left' : 'enabled') : 'no certificate';
     }
     const info = $('tlsInfo');
@@ -7087,6 +7412,7 @@ async function loadDoctor(forceRun = false) {
       rep = await api('/api/doctor');
     }
     renderDoctor(rep);
+    loadDoctorExtra();
   } catch(e) {
     toastErr('Diagnostics failed', e.message);
   }
@@ -7275,6 +7601,8 @@ function renderDoctor(rep) {
 
   // Reverse-path card: per-peer two-direction diagnosis + fix buttons.
   renderRevPath(rep.revpath || []);
+  renderReach(rep, unset);
+  renderClock(rep, unset);
 }
 
 // Tunnels card: one row per tunnel (service, session, data) plus Bagher.
@@ -7323,6 +7651,9 @@ function doctorReportText(rep) {
   L.push(f.length ? 'Findings:' : 'Findings: none');
   f.forEach(x => L.push('- [' + x.severity + '] ' + x.title + (x.fix ? ' → ' + x.fix : '')));
   (rep.notes || []).forEach(n => L.push('Note: ' + n));
+  const rc = rep.reach || {}, ck = rep.clock || {};
+  if (rc.tested) L.push('Reach: ' + (rc.verdict || 'not judged') + ' — ' + (rc.probes || []).map(p => p.label + ' ' + p.host + ':' + p.port + ' ' + p.state + (p.tls ? ' tls ' + p.tls : '')).join(', '));
+  if (ck.tested) L.push('Clock: NTP ' + (ck.ntp || 'unknown') + (ck.peer_known ? ', other server ' + (ck.peer_skew_ms / 1000).toFixed(1) + ' s ± ' + (ck.peer_err_ms / 1000).toFixed(1) + ' s' : ''));
   if (rep.last_error) L.push('Last tunnel error: ' + rep.last_error.code + ' ' + rep.last_error.time + ' ' + (rep.last_error.detail || ''));
   return L.join('\n');
 }
@@ -7639,6 +7970,369 @@ async function limitAction(action, ip) {
   }
 }
 
+// ---- Diagnostics, second half (doctor_more.go): reach, clocks, route, stability, ports, history ----
+let docExtra = null, docPortResults = {}, docJobTimer = null, docStabSecs = 60;
+const REACH_STATE = { open: ['Answers', 'ok'], refused: ['Refused', 'info'], timeout: ['No answer', 'err'], reset: ['Connection reset', 'err'], unreachable: ['Unreachable', 'err'], error: ['Error', 'err'] };
+const REACH_LABEL = { tunnel: 'Tunnel port', panel: 'Panel port', https: 'HTTPS', ssh: 'SSH' };
+const REACH_VERDICT = {
+  open: ['The other server answers on TCP', 'ok', 'Open'],
+  port_blocked: ['The port that should answer is filtered while other ports answer', 'err', 'Port filtered'],
+  port_closed: ['The server answers, but nothing listens on that port', 'warn', 'Port closed'],
+  tcp_blocked: ['Ping passes but no TCP port answers: TCP to this IP is filtered', 'err', 'TCP filtered'],
+  down: ['Neither ping nor TCP gets an answer', 'err', 'No answer'],
+  tls_cut: ['TCP connects, but the TLS handshake is cut', 'err', 'TLS cut'],
+};
+// Latin digits, as the rest of Diagnostics shows its measurements
+const docNum = (v, d) => new Intl.NumberFormat('en', { maximumFractionDigits: d == null ? 1 : d }).format(v);
+const docBadgeHTML = (text, cls) => '<span class="badge ' + cls + '">' + esc(tr('', text)) + '</span>';
+
+function renderReach(rep, unset) {
+  const r = (rep && rep.reach) || {}, probes = r.probes || [];
+  const val = $('docReachVal'), box = $('docReachBox');
+  if (!val || !box) return;
+  if (unset || !r.tested || !probes.length) {
+    val.className = 'doc-reach-verdict';
+    val.textContent = tr('', 'Not measured');
+    docSet('docReachSub', tr('', unset ? 'Measured once a tunnel is set up' : 'No other server is known to this server'));
+    docBadge($('docReachBadge'), 'Not tested', 'dim');
+    box.innerHTML = '';
+    return;
+  }
+  const v = REACH_VERDICT[r.verdict];
+  // the main tunnel works anyway: worth knowing, not a fault
+  const cls = v && v[1] !== 'ok' && r.tunnel_ok ? 'warn' : (v ? v[1] : '');
+  val.className = 'doc-reach-verdict ' + cls;
+  val.textContent = v ? tr('', v[0]) : tr('', 'Measured; no port here is known to answer, so nothing is judged');
+  docSet('docReachSub', docTpl('TCP from this server to {0}', [probes[0].host]) +
+    (v && v[1] !== 'ok' && r.tunnel_ok ? '. ' + tr('', 'The tunnel works, so this does not affect it.') : ''));
+  if (v) docBadge($('docReachBadge'), v[2], cls); else docBadge($('docReachBadge'), 'Info', 'dim');
+  box.innerHTML = probes.map(p => {
+    const st = REACH_STATE[p.state] || REACH_STATE.error;
+    const ms = p.ms > 0 ? ' <span class="mono">' + esc(docNum(p.ms)) + ' ms</span>' : '';
+    const tls = p.tls ? ' ' + docBadgeHTML(p.tls === 'ok' ? 'TLS passes' : p.tls === 'cut' ? 'TLS cut' : 'Not TLS', p.tls === 'cut' ? 'err' : 'dim') : '';
+    return '<div class="trow"><span class="k">' + esc(tr('', REACH_LABEL[p.label] || p.label)) + ' <bdi class="mono">' + esc(p.port) + '</bdi>' +
+      (p.anchor ? ' <span class="qs-hint">· ' + esc(tr('', 'should answer')) + '</span>' : '') + '</span><span class="v">' +
+      docBadgeHTML(st[0], st[1]) + ms + tls + '</span></div>';
+  }).join('');
+}
+
+function renderClock(rep, unset) {
+  const c = (rep && rep.clock) || {};
+  const val = $('docClockVal');
+  if (!val) return;
+  const off = c.peer_known ? Math.abs(c.peer_skew_ms) - c.peer_err_ms : 0;
+  if (unset || !c.peer_known) {
+    val.textContent = tr('', 'Not measured');
+    val.classList.add('is-muted');
+    docSet('docClockSub', tr('', unset ? 'Measured once a tunnel is set up' : 'Needs the panel link to the other server'));
+  } else {
+    val.classList.remove('is-muted');
+    const sec = c.peer_skew_ms / 1000;
+    val.textContent = Math.abs(c.peer_skew_ms) < 1000 ? tr('', 'In sync') : (sec > 0 ? '+' : '−') + docNum(Math.abs(sec)) + ' s';
+    docSet('docClockSub', Math.abs(c.peer_skew_ms) < 1000 ? tr('', 'Both clocks show the same second') :
+      docTpl(sec > 0 ? 'The other server is {0} seconds ahead' : 'The other server is {0} seconds behind', [docNum(Math.abs(sec))]));
+  }
+  const ntp = $('docNtpVal');
+  if (ntp) ntp.innerHTML = c.ntp === 'yes' ? docBadgeHTML('On', 'ok') : c.ntp === 'no' ? docBadgeHTML('Off', 'warn') : docBadgeHTML('Unknown', 'dim');
+  docSet('docClockErrVal', c.peer_known ? '± ' + docNum(c.peer_err_ms, 0) + ' ms' : '—');
+  const b = $('docClockBadge');
+  if (unset) docBadge(b, 'Not tested', 'dim');
+  else if (c.peer_known && off > 60000) docBadge(b, 'Far apart', 'err');
+  else if (c.peer_known && off > 5000) docBadge(b, 'Drifting', 'warn');
+  else if (c.ntp === 'no') docBadge(b, 'Not synced', 'warn');
+  else if (c.peer_known) docBadge(b, 'In sync', 'ok');
+  else docBadge(b, 'Not tested', 'dim');
+}
+
+async function loadDoctorExtra() {
+  if (!isProLicensed('diagnostics')) return;
+  try {
+    docExtra = await api('/api/doctor/extra');
+    renderDoctorExtra();
+  } catch (e) { reportErr('doctor-extra', e); }
+}
+
+function renderDoctorExtra() {
+  const x = docExtra;
+  if (!x) return;
+  const fill = (id, list) => {
+    const sel = $(id);
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = list.map(t => '<option value="' + esc(t.id) + '">' + esc(tr('', t.label)) + ' — ' + esc(t.host) + '</option>').join('') ||
+      '<option value="">' + esc(tr('', 'No other server yet')) + '</option>';
+    if (list.some(t => t.id === keep)) sel.value = keep;
+  };
+  fill('docTraceTarget', (x.targets || []).filter(t => !t.inner));
+  fill('docStabTarget', x.targets || []);
+  docTraceModeSync();
+  renderTraceJob(x.trace);
+  renderStabJob(x.stability);
+  renderDocPorts();
+  renderDocHist(x.history || {});
+  const running = (x.trace && x.trace.running) || (x.stability && x.stability.running);
+  clearTimeout(docJobTimer);
+  if (running) docJobTimer = setTimeout(docJobPoll, 1500);
+}
+
+async function docJobPoll() {
+  const tab = $('tab-doctor');
+  if (document.hidden || !tab || tab.hidden) { docJobTimer = setTimeout(docJobPoll, 3000); return; }
+  await loadDoctorExtra();
+}
+
+function docTraceModeSync() {
+  const sel = $('docTraceTarget'), mode = $('docTraceMode');
+  if (!sel || !mode || !docExtra) return;
+  const t = (docExtra.targets || []).find(t => t.id === sel.value);
+  const tcp = mode.querySelector('option[value="tcp"]');
+  if (tcp) tcp.disabled = !(t && t.port);
+  if (mode.value === 'tcp' && !(t && t.port)) mode.value = 'icmp';
+  const btn = $('docTraceBtn'), lbl = btn && btn.querySelector('span');
+  if (lbl && !(docExtra.trace && docExtra.trace.running)) lbl.textContent = tr('', docExtra.trace_tool ? 'Trace Route' : 'Install mtr and Trace');
+  if (btn) btn.disabled = !t || !!(docExtra.trace && docExtra.trace.running);
+}
+
+function docProgressHTML(job, text) {
+  const pct = Math.round((job.progress || 0) * 100);
+  return '<div class="qs-hint">' + text + '</div><div class="doc-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i data-p="' + pct + '"></i></div>';
+}
+// width from data-p: no inline style attributes (budget), set as a custom property
+function docProgressPaint(box) { if (box) box.querySelectorAll('.doc-progress i').forEach(i => i.style.setProperty('--p', i.dataset.p + '%')); }
+
+function renderTraceJob(job) {
+  const box = $('docTraceBox');
+  if (!box) return;
+  docSet('docTraceMeta', job && job.finished ? docTpl('Traced {0}', [docAgo(job.finished)]) : tr('', 'Where on the way packets are lost'));
+  if (!job) {
+    box.innerHTML = docExtra && !docExtra.trace_tool ? '<div class="qs-hint">' + esc(tr('', 'mtr is not installed on this server. The button installs it (apt), then traces.')) + '</div>' : '';
+    return;
+  }
+  if (job.running) {
+    box.innerHTML = docProgressHTML(job, docTplHTML('Tracing the route to {0}: 10 probes to every hop…', [job.target]));
+    docProgressPaint(box);
+    return;
+  }
+  if (job.error && !job.result) {
+    box.innerHTML = '<div class="doc-verdict err">' + docBadgeHTML('Failed', 'err') + '<span data-no-i18n>' + esc(job.error) + '</span></div>';
+    return;
+  }
+  const r = job.result || {}, hops = r.hops || [];
+  let v;
+  if (r.verdict === 'clean') v = ['ok', 'No loss', tr('', 'No loss to the destination. Loss at a middle hop that does not last to the end is a router that answers slowly, not lost traffic.')];
+  else if (r.verdict === 'loss') {
+    const hop = hops.find(h => h.n === r.loss_from) || {};
+    let where = '';
+    if (r.border_hop) where = ' ' + tr('', r.loss_from < r.border_hop ? 'That is before the long link (the jump in latency): the loss is near this server, in its datacenter or provider.' : 'That is at or after the long link (the jump in latency): the loss is on the long-distance path or near the other server.');
+    v = ['err', 'Loss', docTpl('Loss starts at hop {0} ({1}) and lasts to the destination.', [String(r.loss_from), hop.host || '?']) + where];
+  } else {
+    v = ['warn', 'No reply', docTpl('The destination does not answer. The last answer came from hop {0}.', [String(Math.max(1, (r.loss_from || 1) - 1))]) +
+      (r.mode === 'icmp' ? ' ' + tr('', 'Many servers drop ping: try TCP.') : '')];
+  }
+  const rows = hops.map(h => {
+    const silent = !h.host, lossy = r.verdict === 'loss' && h.n >= r.loss_from && h.loss > 0;
+    const lc = h.loss >= 20 ? 'bad' : h.loss > 0 ? 'some' : '';
+    return '<tr class="' + (silent ? 'silent' : lossy ? 'lossy' : '') + '"><td>' + h.n + '</td><td class="addr">' +
+      (silent ? '<span class="doc-noans">' + esc(tr('', 'no answer')) + '</span>' : esc(h.host)) + (h.n === r.border_hop ? ' <span class="badge info tag">' + esc(tr('', 'long link')) + '</span>' : '') +
+      '</td><td><span class="doc-loss ' + lc + '"><b>' + (silent ? '—' : esc(docNum(h.loss)) + '%') + '</b></span></td><td>' +
+      (silent ? '—' : esc(docNum(h.avg)) + ' ms') + '</td><td>' + (silent ? '—' : esc(docNum(h.worst)) + ' ms') + '</td></tr>';
+  }).join('');
+  box.innerHTML = '<div class="doc-verdict ' + v[0] + '">' + docBadgeHTML(v[1], v[0]) + '<span>' + esc(v[2]) + '</span></div>' +
+    '<div class="doc-hops-wrap"><table class="doc-hops"><thead><tr><th>#</th><th>' + esc(tr('', 'Address')) + '</th><th>' + esc(tr('', 'Loss')) +
+    '</th><th>' + esc(tr('', 'Average')) + '</th><th>' + esc(tr('', 'Worst')) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="qs-hint" data-no-i18n>' + esc((r.tool || '') + ' · ' + (r.mode === 'tcp' ? 'TCP ' + r.port : 'ICMP') + (r.installed ? ' · ' + tr('', 'mtr was installed for this run') : '')) + '</div>';
+}
+
+async function docTraceRun() {
+  if (!isProLicensed('diagnostics')) { openBagherLicModal('diagnostics'); return; }
+  const target = ($('docTraceTarget') || {}).value, mode = ($('docTraceMode') || {}).value || 'icmp';
+  try {
+    await api('/api/doctor', { action: 'trace', target, mode, install: !(docExtra && docExtra.trace_tool) });
+    await loadDoctorExtra();
+  } catch (e) { toastErr(tr('', 'Route trace failed'), e.message); }
+}
+
+function docStabChart(r) {
+  const s = r.samples || [];
+  if (!s.length) return '';
+  const ok = s.filter(v => v >= 0);
+  const top = Math.max(10, Math.min(r.max || 10, Math.max((r.p95 || 0) * 1.6, (r.p50 || 0) + 40)));
+  const W = Math.max(s.length, 2), H = 100;
+  let d = '', pen = false, lost = '';
+  s.forEach((v, i) => {
+    if (v < 0) { pen = false; lost += '<rect class="lost" x="' + i + '" y="0" width="1" height="' + H + '"></rect>'; return; }
+    const y = (H - Math.min(v, top) / top * (H - 6) - 3).toFixed(1);
+    d += (pen ? 'L' : 'M') + (i + 0.5) + ' ' + y + ' ';
+    pen = true;
+  });
+  const total = Math.round(s.length * (r.interval || 1));
+  return '<svg class="doc-chart" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' +
+    esc(docTpl('Latency over {0} seconds; red marks lost packets', [String(total)])) + '">' +
+    '<line class="grid" x1="0" x2="' + W + '" y1="' + (H / 2) + '" y2="' + (H / 2) + '"></line>' + lost +
+    (ok.length ? '<path class="ln" d="' + d + '"></path>' : '') + '</svg>' +
+    '<div class="doc-chart-axis"><span>0 s</span><span>' + esc(docTpl('top of the chart: {0} ms', [docNum(top, 0)])) + '</span><span>' + total + ' s</span></div>';
+}
+
+function renderStabJob(job) {
+  const box = $('docStabBox'), btn = $('docStabBtn');
+  if (!box) return;
+  const lbl = btn && btn.querySelector('span');
+  if (lbl) lbl.textContent = tr('', job && job.running ? 'Stop Test' : 'Start Test');
+  if (btn) btn.classList.toggle('hashem-btn-primary', !(job && job.running));
+  if (btn) btn.classList.toggle('hashem-btn-secondary', !!(job && job.running));
+  if (!job) { box.innerHTML = ''; return; }
+  if (job.error && !job.result) {
+    box.innerHTML = '<div class="doc-verdict err">' + docBadgeHTML('Failed', 'err') + '<span data-no-i18n>' + esc(job.error) + '</span></div>';
+    return;
+  }
+  const r = job.result || {};
+  let head = '';
+  if (job.running) head = docProgressHTML(job, docTplHTML(r.mode === 'tcp' ? 'Connecting to {0} every second (it does not answer ping)…' : 'Pinging {0} twice a second…', [job.target]));
+  else if (r.verdict) {
+    const V = {
+      stable: ['ok', 'Stable', tr('', 'No drops and no unusual spikes.')],
+      spiky: ['warn', 'Spikes', docTpl('Latency jumps now and then ({0} spikes). Calls and games will stutter.', [String(r.spikes)])],
+      lossy: ['warn', 'Some loss', docTpl('{0}% of packets were lost, without long drops.', [docNum(r.loss_pct)])],
+      drops: ['err', 'Drops', docTpl('The link drops: {0} times, the longest for {1} seconds.', [String(r.drops), docNum(r.longest_gap)])],
+    }[r.verdict];
+    if (V) head = '<div class="doc-verdict ' + V[0] + '">' + docBadgeHTML(V[1], V[0]) + '<span>' + esc(V[2]) + '</span></div>';
+  }
+  const stat = (k, v, cls) => '<div class="doc-stat ' + (cls || '') + '"><span>' + esc(tr('', k)) + '</span><b>' + esc(v) + '</b></div>';
+  const stats = r.sent ? '<div class="doc-stats">' +
+    stat('Loss', docNum(r.loss_pct) + '%', r.loss_pct >= 5 ? 'bad' : r.loss_pct >= 1 ? 'warn' : '') +
+    stat('Average', docNum(r.avg) + ' ms') + stat('95% under', docNum(r.p95) + ' ms') + stat('Jitter', docNum(r.jitter) + ' ms', r.jitter > 25 ? 'warn' : '') +
+    stat('Longest drop', docNum(r.longest_gap) + ' s', r.longest_gap >= 3 ? 'bad' : r.longest_gap > 0 ? 'warn' : '') +
+    stat('Spikes', docNum(r.spikes, 0), r.spikes > r.sent * 0.05 ? 'warn' : '') + '</div>' : '';
+  box.innerHTML = head + stats + docStabChart(r) +
+    (!job.running && r.sent ? '<div class="qs-hint" data-no-i18n>' + esc((r.mode === 'tcp' ? 'TCP ' + r.port : 'ICMP') + ' · ' + r.target + ' · ' + docAgo(job.finished)) + '</div>' : '');
+  docProgressPaint(box);
+}
+
+async function docStabClick() {
+  if (!isProLicensed('diagnostics')) { openBagherLicModal('diagnostics'); return; }
+  const running = docExtra && docExtra.stability && docExtra.stability.running;
+  try {
+    if (running) await api('/api/doctor', { action: 'stability-stop' });
+    else await api('/api/doctor', { action: 'stability', target: ($('docStabTarget') || {}).value, seconds: docStabSecs });
+    await loadDoctorExtra();
+  } catch (e) { toastErr(tr('', 'Stability test failed'), e.message); }
+}
+
+const DOC_PORT_DETAIL = ['server sent a banner', 'payload answered', 'payload accepted, connection held open', 'payload accepted, remote closed afterwards'];
+function renderDocPorts() {
+  const card = $('docPortsCard'), box = $('docPortsBox');
+  if (!card || !box) return;
+  const list = (docExtra && docExtra.ports) || [];
+  card.classList.toggle('hidden', !list.length);
+  const groups = [];
+  list.forEach(p => {
+    let g = groups.find(x => x.name === p.group && x.kind === p.kind);
+    if (!g) groups.push(g = { name: p.group, kind: p.kind, engine: p.engine, ports: [] });
+    g.ports.push(p);
+  });
+  const eng = e => DOC_ENGINE[e] || LS_ENGINE[e] || (e === "xray" ? "Xray" : e || "");
+  box.innerHTML = groups.map(g => '<div class="doc-pgroup"><div class="doc-pgroup-head"><span data-no-i18n>' + esc(g.kind === 'tunnel' && g.name === 'Tunnel' ? tr('', 'Main tunnel') : g.name) + '</span><small>' +
+    esc(tr('', g.kind === 'customer' ? 'Customer' : 'Tunnel')) + (g.engine ? ' · ' + esc(eng(g.engine)) : '') + '</small></div>' +
+    g.ports.map(p => {
+      const r = docPortResults[p.key];
+      const badge = !r ? docBadgeHTML('Not tested', 'dim') : r.testing ? docBadgeHTML('Testing…', 'info') : r.state === 'ok' ? docBadgeHTML('Works', 'ok') : docBadgeHTML('Fails', 'err');
+      const det = r && r.detail ? (DOC_PORT_DETAIL.includes(r.detail) ? esc(tr('', r.detail)) : '<span data-no-i18n>' + esc(r.detail) + '</span>') :
+        (p.udp ? esc(tr('', 'UDP is forwarded too; only TCP is tested')) : '');
+      return '<div class="doc-prow"><span class="pn">' + esc(p.port) + '</span>' + badge + '<span class="pd">' + det + '</span>' +
+        '<span class="pm">' + (r && r.state === 'ok' && r.ms ? esc(docNum(r.ms)) + ' ms ' : '') +
+        '<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="docTestPorts([' + jsArg(p.key) + '])">' + esc(tr('', 'Test')) + '</button></span></div>';
+    }).join('') + '</div>').join('');
+}
+
+async function docTestPorts(keys) {
+  if (!isProLicensed('diagnostics')) { openBagherLicModal('diagnostics'); return; }
+  const list = (docExtra && docExtra.ports) || [];
+  const want = keys && keys.length ? keys : list.map(p => p.key);
+  want.forEach(k => { docPortResults[k] = { testing: true }; });
+  renderDocPorts();
+  const btn = $('docPortsBtn');
+  if (btn && !keys) btn.disabled = true;
+  try {
+    const r = await api('/api/doctor', { action: 'ports', keys: keys || [] });
+    (r.ports || []).forEach(p => { docPortResults[p.key] = p; });
+    const bad = (r.ports || []).filter(p => p.state !== 'ok').length;
+    if (!keys) {
+      if (bad) toastErr(tr('', 'Some ports do not answer'), docTpl('{0} of {1} ports fail', [String(bad), String((r.ports || []).length)]));
+      else toastOk(tr('', 'Every port answers'), docTpl('{0} ports tested', [String((r.ports || []).length)]));
+    }
+  } catch (e) {
+    toastErr(tr('', 'Port test failed'), e.message);
+  } finally {
+    want.forEach(k => { if (docPortResults[k] && docPortResults[k].testing) delete docPortResults[k]; });
+    if (btn) btn.disabled = false;
+    renderDocPorts();
+  }
+}
+
+function renderDocHist(h) {
+  const box = $('docHistBox');
+  if (!box) return;
+  const es = h.entries || [], sch = h.schedule || {};
+  const sel = $('docSchedSel'), al = $('docSchedAlert');
+  if (sel && document.activeElement !== sel) sel.value = String(sch.every_hours || 0);
+  if (al) { al.checked = !!sch.alert; al.disabled = !sch.every_hours; }
+  const a = (docExtra && docExtra.alerts) || {};
+  docSet('docSchedHint', tr('', 'Scheduled runs skip iPerf3. Alerts go to the Telegram bot and webhook set in Settings, Alerts.') +
+    (sch.alert && !a.enabled ? ' ' + tr('', 'Alerts are off in Settings, so nothing is sent until you turn them on there.') :
+     sch.alert && !a.degraded ? ' ' + tr('', 'Only changes to and from Critical are sent; for the rest, turn on "Also alert on degraded ⇄ healthy" in Settings.') : ''));
+  docSet('docHistMeta', es.length ? docTpl(es.length === 1 ? '1 run' : '{0} runs', [String(es.length)]) + ' · ' + tr('', 'last') + ' ' + docAgo(new Date(es[es.length - 1].t * 1000).toISOString()) : '');
+  if (!es.length) {
+    box.innerHTML = '<div class="qs-hint">' + esc(tr('', 'No runs yet. Every run of Diagnostics is kept here (the last 60).')) + '</div>';
+    return;
+  }
+  const n = es.length, W = Math.max(n, 24) * 6;
+  const dt = t => new Date(t * 1000).toLocaleString(currentLang === 'fa' ? 'fa-IR' : undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const bars = es.map((e, i) => {
+    const hgt = Math.max(3, e.score), x = W - (n - i) * 6;
+    return '<rect class="r-' + esc(e.rating) + '" x="' + (x + 1) + '" y="' + (100 - hgt) + '" width="4" height="' + hgt + '" rx="1"><title>' +
+      esc(dt(e.t) + ' — ' + e.score + '/100') + '</title></rect>';
+  }).join('');
+  const rows = es.slice(-8).reverse().map(e => {
+    const top = e.top_tpl ? docTplHTML(e.top_tpl, e.top_args) : esc(tr('', 'No problems found'));
+    const m = [];
+    if (e.rtt >= 0) m.push(docNum(e.rtt) + ' ms');
+    if (e.loss >= 0) m.push(docNum(e.loss, 0) + '%');
+    if (e.mbps) m.push(docNum(e.mbps) + ' Mbps');
+    if (e.auto) m.push(tr('', 'scheduled'));
+    return '<div class="doc-hrow"><span>' + esc(dt(e.t)) + '</span><span class="hs ' + esc(e.rating) + '">' + e.score + '</span><span class="ht" data-no-i18n>' + top +
+      '</span><span class="hm" data-no-i18n>' + esc(m.join(' · ')) + '</span></div>';
+  }).join('');
+  box.innerHTML = '<svg class="doc-hist-chart" viewBox="0 0 ' + W + ' 100" preserveAspectRatio="none" role="img" aria-label="' +
+    esc(tr('', 'Health score of each run, oldest to newest')) + '">' + bars + '</svg><div class="doc-hist-list">' + rows + '</div>';
+}
+
+async function docSchedSave() {
+  if (!isProLicensed('diagnostics')) { openBagherLicModal('diagnostics'); return; }
+  const every = parseInt(($('docSchedSel') || {}).value, 10) || 0;
+  const alert = !!($('docSchedAlert') || {}).checked;
+  try {
+    const r = await api('/api/doctor', { action: 'schedule', every_hours: every, alert: every > 0 && alert });
+    if (docExtra) docExtra.history = Object.assign({}, docExtra.history, { schedule: r.schedule });
+    renderDocHist((docExtra && docExtra.history) || { schedule: r.schedule });
+    toastOk(tr('', 'Schedule saved'), every ? $('docSchedSel').selectedOptions[0].textContent : tr('', 'Off'));
+  } catch (e) { toastErr(tr('', 'Failed'), e.message); loadDoctorExtra(); }
+}
+
+(function initDoctorExtra() {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on('docTraceBtn', 'click', docTraceRun);
+  on('docTraceTarget', 'change', docTraceModeSync);
+  on('docStabBtn', 'click', docStabClick);
+  on('docPortsBtn', 'click', () => docTestPorts(null));
+  on('docSchedSel', 'change', docSchedSave);
+  on('docSchedAlert', 'change', docSchedSave);
+  const seg = $('docStabLen');
+  if (seg) seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    docStabSecs = +b.dataset.s;
+    seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+})();
+
 async function runDoctor() {
   if (doctorRunning) return;
   if (!isProLicensed('diagnostics')) { openBagherLicModal('diagnostics'); return; }
@@ -7651,6 +8345,7 @@ async function runDoctor() {
   if (btn) { btn.disabled = true; btn.classList.add('doc-pulse'); tick(); timer = setInterval(tick, 1000); }
   try {
     renderDoctor(await api('/api/doctor', { action: 'run' }));
+    loadDoctorExtra(); // the run joined the history
     toastOk(tr('x018', "Diagnostics complete"), `${tr('x019', "Health score")}: ${doctorData && doctorData.rating !== 'unset' ? doctorData.score + '/100' : '—'}`);
   } catch(e) {
     toastErr(tr('x020', "Diagnostics failed"), e.message);
@@ -7734,9 +8429,15 @@ if ($('docCopyBtn')) $('docCopyBtn').onclick = () => { if (doctorData) copyTextS
 (async () => {
   if (NV) { // a node's view: the central's own login, HTTPS, 2FA and terminal are not this page's
     try {
-      await api('/api/status'); showApp(); refresh(); loadSetupDefaults(); loadVersion(); alertsRefresh(); histRefresh(); advisorRefresh();
-      const tb = new URLSearchParams(location.search).get('tab'); // opened from the central on a page (its customers list)
-      if (tb === 'customers') goTab(tb); // the one page the central opens a node on
+      await api('/api/status'); showApp(); const ready = refresh(); loadSetupDefaults(); loadVersion(); alertsRefresh(); histRefresh(); advisorRefresh();
+      // opened from the central on a page (its customers, a tunnel's own pages) or on one tunnel's dialog
+      const qs = new URLSearchParams(location.search), tb = qs.get('tab');
+      if (['customers', 'tunnel', 'autopilot', 'benchmark'].includes(tb)) goTab(tb);
+      const m = /^(swap|edit):(\d{1,6})$/.exec(qs.get('do') || '');
+      if (m) {
+        try { await ready; } catch (_) { /* the dialog says what it cannot read */ }
+        if (m[1] === 'swap') openSwap(+m[2]); else openEditPeer(+m[2]);
+      }
     }
     catch(e) { showApp(); toastErr(tr('', 'Failed'), e.message); }
     return;
@@ -8656,7 +9357,7 @@ async function loadBenchmark(forceRun = false) {
   if (!isProLicensed('benchmark')) return;
   let benchErr = null;
   const _tb = $('benchTableBody');
-  if (_tb && !(benchData && benchData.metrics && benchData.metrics.length)) _tb.innerHTML = '<tr><td colspan="10">' + skel(3) + '</td></tr>';
+  if (_tb && !(benchData && benchData.metrics && benchData.metrics.length)) _tb.innerHTML = '<div class="bench-empty">' + skel(3) + '</div>';
   try {
     if (forceRun) {
       const targetHost = ($('benchTargetHost') ? $('benchTargetHost').value.trim() : '');
@@ -8708,7 +9409,7 @@ async function loadBenchmark(forceRun = false) {
 
   renderBenchmark(benchData, peerData);
   if (benchErr && !(benchData && benchData.metrics && benchData.metrics.length) && _tb) {
-    _tb.innerHTML = '<tr><td colspan="10" class="u-text-center">' + stateError(benchErr.message, 'benchmark', true) + '</td></tr>';
+    _tb.innerHTML = '<div class="bench-empty">' + stateError(benchErr.message, 'benchmark', true) + '</div>';
   }
 }
 
@@ -8726,15 +9427,6 @@ function renderBenchmark(bench, peer) {
     if ($('peerInternalVal')) $('peerInternalVal').textContent = peer.internal_ip || '—';
     if ($('peerLatencyVal')) $('peerLatencyVal').textContent = (peer.latency_ms > 0 ? peer.latency_ms.toFixed(1) + ' ms' : '—');
     if ($('peerLastSyncVal')) $('peerLastSyncVal').textContent = peer.last_sync || 'Never';
-
-    // Automatic Failover Policy
-    if ($('autoPilotToggle')) $('autoPilotToggle').checked = !!peer.autopilot;
-    if ($('autoPilotThresholdInput')) $('autoPilotThresholdInput').value = peer.threshold || 20;
-    if ($('autoPilotBadge')) {
-      const b = $('autoPilotBadge');
-      b.className = 'badge ' + (peer.autopilot ? 'warn' : 'dim');
-      b.textContent = peer.autopilot ? '[ ON ] Auto Switch' : '[ OFF ] Manual';
-    }
   }
 
   if (bench && bench.metrics && bench.metrics.length > 0) {
@@ -8752,19 +9444,22 @@ function renderBenchmark(bench, peer) {
     const runB = $('benchRunBtn');
     if (runB) { runB.classList.toggle('hashem-btn-primary', !usable); runB.classList.toggle('hashem-btn-secondary', usable); }
     if ($('benchRecBadge')) $('benchRecBadge').classList.toggle('hidden', !usable);
-    if (winnerBanner) { winnerBanner.classList.toggle('u-bd-ok', usable); winnerBanner.classList.toggle('u-bd-ln', !usable); }
-    if ($('benchWinnerScore')) { $('benchWinnerScore').classList.toggle('u-c-ok', usable); $('benchWinnerScore').classList.toggle('u-c-mu', !usable); }
+    if (winnerBanner) {
+      winnerBanner.dataset.st = !usable ? 'off' : (winner.score >= 70 ? 'ok' : winner.score >= 40 ? 'warn' : 'err');
+      winnerBanner.style.setProperty('--pc', !usable ? 'var(--mu)' : (winner.score >= 70 ? 'var(--ok)' : winner.score >= 40 ? 'var(--wr)' : 'var(--er)'));
+    }
+    if ($('benchWinnerRing')) $('benchWinnerRing').style.setProperty('--v', usable ? Math.max(0, Math.min(100, winner.score)) : 0);
     if ($('benchApplyWinnerBtn')) $('benchApplyWinnerBtn').classList.toggle('hidden', !usable);
     if (winner && !usable && winnerBanner) {
       winnerBanner.classList.remove('hidden');
       $('benchWinnerTitle').textContent = tr('bench_none_t', 'No Carrier Answered');
-      $('benchWinnerScore').textContent = '— / 100';
+      $('benchWinnerScore').textContent = '—';
       $('benchWinnerBadge').className = 'badge dim'; $('benchWinnerBadge').textContent = tr('bench_none_b', 'No Result');
       $('benchWinnerDesc').textContent = tr('bench_none_d', 'Every probe was lost. Check the destination address and that the other server is online, then run the benchmark again.');
     } else if (winner && winnerBanner) {
       winnerBanner.classList.remove('hidden');
       if ($('benchWinnerTitle')) $('benchWinnerTitle').textContent = winner.name || winner.id;
-      if ($('benchWinnerScore')) $('benchWinnerScore').textContent = `${winner.score} / 100`;
+      if ($('benchWinnerScore')) $('benchWinnerScore').textContent = String(winner.score);
       if ($('benchWinnerBadge')) {
         const wb = $('benchWinnerBadge');
         wb.className = 'badge ' + (winner.status === 'healthy' ? 'ok' : (winner.status === 'good' ? 'info' : 'warn'));
@@ -8790,6 +9485,10 @@ function renderBenchmark(bench, peer) {
     if ($('benchStatMinRttSub')) $('benchStatMinRttSub').textContent = 'Minimum Round Trip Time';
     if ($('benchStatLoss')) $('benchStatLoss').textContent = winner ? `${winner.packet_loss}%` : '0%';
     if ($('benchStatLossSub')) $('benchStatLossSub').textContent = (winner && winner.packet_loss === 0) ? 'No Packet Loss' : 'Best Carrier Packet Loss';
+    const tileSt = (id, st) => { const t = $(id); if (t) { if (st) t.dataset.st = st; else delete t.dataset.st; } };
+    tileSt('benchTileWinner', usable ? 'ok' : 'off');
+    tileSt('benchTileRtt', minRtt > 0 ? '' : 'off');
+    tileSt('benchTileLoss', !winner ? 'off' : winner.packet_loss === 0 ? 'ok' : winner.packet_loss <= 15 ? 'warn' : 'err');
 
     if ($('benchMetaSub')) {
       const tgt = bench.target_host ? `to ${bench.target_host}` : '';
@@ -8797,17 +9496,12 @@ function renderBenchmark(bench, peer) {
     }
   }
 
-  if (bench && bench.auto_pilot) {
-    if ($('autoPilotLastVal')) $('autoPilotLastVal').textContent = bench.auto_pilot.last_triggered || 'None';
-    if ($('autoPilotCountVal')) $('autoPilotCountVal').textContent = bench.auto_pilot.trigger_count || 0;
-  }
-
   // Render Table
   const tbody = $('benchTableBody');
   if (!tbody) return;
 
   if (!bench || !bench.metrics || bench.metrics.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="u-text-center">${stateEmpty({ title: 'No benchmark run yet', msg: 'Enter foreign server address and click Run Smart Benchmark.', actionKey: 'runbench', actionLabel: 'Run Smart Benchmark', compact: true })}</td></tr>`;
+    tbody.innerHTML = `<div class="bench-empty">${stateEmpty({ title: 'No benchmark run yet', msg: 'Enter foreign server address and click Run Smart Benchmark.', actionKey: 'runbench', actionLabel: 'Run Smart Benchmark', compact: true })}</div>`;
     return;
   }
 
@@ -8835,17 +9529,13 @@ function renderBenchmark(bench, peer) {
       statusLabel = 'Not measured';
     }
 
-    let lossClass = 'ok';
-    if (m.packet_loss > 0 && m.packet_loss <= 15) lossClass = 'warn';
-    else if (m.packet_loss > 15) lossClass = 'err';
+    const down = m.packet_loss >= 100 || (m.score <= 0 && !(m.avg_rtt_ms > 0));
+    const lossClass = m.packet_loss <= 0 ? 'ok' : m.packet_loss <= 15 ? 'warn' : 'err';
 
     const rank = idx + 1;
-    const rankBadge = `<span class="bench-rank-num ${rank === 1 ? 'bench-rank-1' : ''}">${rank}</span>`;
-
     const cleanName = (m.name || m.id).replace(/\s*\(.*?\)/, '');
     const cleanSub = m.name && m.name.includes('(') ? m.name.match(/\((.*?)\)/)[1] : '';
-
-    const portStr = m.port > 0 ? m.port : 'Raw 47';
+    const portStr = m.port > 0 ? String(m.port) : 'Raw 47';
 
     // Protocol pill: one neutral style, the label carries the meaning (status colors stay for status).
     const tLower = (m.type || '').toLowerCase();
@@ -8854,41 +9544,38 @@ function renderBenchmark(bench, peer) {
       : (tLower === 'frp_ws' || tLower === 'websocket') ? 'WEBSOCKET' : (tLower === 'frp_wss' || tLower === 'wss') ? 'WSS'
       : tLower.includes('backhaul') ? 'BACKHAUL' : (tLower.includes('ssh') || tLower.includes('bagher')) ? 'BAGHER SSH'
       : (m.type || '').toUpperCase();
-    const protoPill = `<span class="bench-proto-pill">${esc(protoLabel)}</span>`;
 
-    const rowBg = isActive
-      ? 'background:color-mix(in srgb, var(--info) 6%, transparent);'
-      : (isWinner ? 'background:color-mix(in srgb, var(--ok) 4%, transparent);' : '');
+    const score = Math.max(0, Math.min(100, Number(m.score) || 0));
+    const barColor = score >= 70 ? 'var(--ok)' : score >= 40 ? 'var(--wr)' : 'var(--er)';
+    const num = (v, unit) => v > 0 ? `<span class="bench-m-v">${esc(String(v))}<small>${unit}</small></span>` : '<span class="bench-m-v dim">—</span>';
 
-    html += `<tr class="${isActive ? 'row-active' : ''}" style="${rowBg}">
-      <td class="u-text-center u-w-44">${rankBadge}</td>
-      <td>
-        <div class="u-flex-center-gap8">
-          <strong class="u-c-tx u-fs-14">${esc(cleanName)}</strong>
+    html += `<div class="bench-row" role="row" data-st="${statusClass}"${isWinner ? ' data-win' : ''}${isActive ? ' data-active' : ''}>
+      <span class="bench-rank${rank === 1 && !down ? ' top' : ''}" role="cell">${rank}</span>
+      <div class="bench-name" role="cell">
+        <div class="bench-name-t">
+          <b>${esc(cleanName)}</b>
           ${isActive ? `<span class="badge ok">Active</span>` : ''}
           ${isWinner ? `<span class="badge info">Recommended</span>` : ''}
         </div>
-        ${cleanSub ? `<div class="u-fs-12 u-c-mu u-mt-2">${esc(cleanSub)}</div>` : ''}
-      </td>
-      <td>${protoPill}</td>
-      <td><code class="mono u-fs-12 u-bg-sunk u-p-4x8 u-r-4 u-bd-ln">${portStr}</code></td>
-      <td><span class="u-fw-700 u-mono u-fs-13 u-c-tx">${m.avg_rtt_ms > 0 ? m.avg_rtt_ms + ' ms' : '—'}</span></td>
-      <td><span class="badge ${lossClass} u-fs-12 u-fw-700">${m.packet_loss}%</span></td>
-      <td><span class="u-c-mu u-fs-12 u-mono">${m.jitter_ms > 0 ? m.jitter_ms + ' ms' : '—'}</span></td>
-      <td>
-        <div class="bench-score-bar-wrap">
-          <div class="bench-score-track">
-            <div class="bench-score-fill" style="width:${Math.max(4, m.score)}%;background:${m.score >= 70 ? 'linear-gradient(90deg, #10b981, #34d399)' : (m.score >= 40 ? 'linear-gradient(90deg, #f59e0b, #fbbf24)' : 'linear-gradient(90deg, #ef4444, #f87171)')};box-shadow:0 0 8px ${m.score >= 70 ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.35)'};"></div>
-          </div>
-          <strong class="u-fs-12 u-mono u-minw-26 u-c-tx">${m.score}</strong>
+        <div class="bench-name-s">
+          ${protoLabel ? `<span class="bench-proto-pill" data-no-i18n>${esc(protoLabel)}</span>` : ''}
+          ${cleanSub.includes(portStr.replace('Raw ', '')) ? '' : `<span class="bench-port">${esc(portStr)}</span>`}
+          ${cleanSub ? `<span>${esc(cleanSub)}</span>` : ''}
         </div>
-      </td>
-      <td><span class="badge ${statusClass} u-fs-12">${esc(statusLabel)}</span></td>
-      <td>
-        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs u-btn-30 u-o-65" disabled>Current Carrier</button>` :
+      </div>
+      <div class="bench-m bench-rtt" role="cell"><span class="bench-m-k">Latency</span>${num(m.avg_rtt_ms, 'ms')}</div>
+      <div class="bench-m bench-loss" role="cell"><span class="bench-m-k">Packet Loss</span><span class="bench-m-v ${lossClass}">${esc(String(m.packet_loss))}%</span></div>
+      <div class="bench-m bench-jit" role="cell"><span class="bench-m-k">Jitter</span>${num(m.jitter_ms, 'ms')}</div>
+      <div class="bench-score" role="cell" title="Quality Score">
+        <span class="bench-bar"><i style="--w:${score}%;--bc:${barColor}"></i></span>
+        <b>${score}</b>
+      </div>
+      <span class="badge ${statusClass} bench-st" role="cell">${esc(statusLabel)}</span>
+      <div class="bench-act" role="cell">
+        ${isActive ? `<button class="hashem-btn hashem-btn-ghost u-btn-xs u-btn-30" disabled>Current Carrier</button>` :
           `<button class="hashem-btn ${isWinner ? 'hashem-btn-primary' : 'hashem-btn-secondary'} u-btn-xs u-btn-30" onclick="smartApplyOrSetupCarrier(${jsArg(m.id)}, ${jsArg(m.name || m.id)})">${isWinner ? 'Top Pick' : 'Switch'}</button>`}
-      </td>
-    </tr>`;
+      </div>
+    </div>`;
   });
 
   tbody.innerHTML = html;
@@ -9019,23 +9706,6 @@ async function testPeerLinkClick() {
   }
 }
 
-async function saveAutoPilotClick() {
-  const btn = $('autoPilotSaveBtn');
-  const enabled = $('autoPilotToggle') ? $('autoPilotToggle').checked : false;
-  const thresh = $('autoPilotThresholdInput') ? parseFloat($('autoPilotThresholdInput').value) || 20 : 20;
-
-  setBtnLoading(btn, true, 'Saving…');
-  try {
-    await api('/api/benchmark/autopilot', { enabled: enabled, threshold: thresh });
-    toastOk('Failover Policy Saved', enabled ? `Auto failover enabled (Threshold: ${thresh}%)` : 'Auto failover disabled (Manual mode)');
-    await loadBenchmark();
-  } catch (err) {
-    toastErr('Failed to save failover policy', err.message || err);
-  } finally {
-    setBtnLoading(btn, false);
-  }
-}
-
 function openPeerConfig() {
   const card = $('peerConfigCard');
   if (!card) return;
@@ -9078,7 +9748,6 @@ async function savePeerConfigClick() {
   on('peerConfigBtn', 'click', openPeerConfig);
   on('peerConfigCloseBtn', 'click', closePeerConfig);
   on('cfgPeerSaveBtn', 'click', savePeerConfigClick);
-  on('autoPilotSaveBtn', 'click', saveAutoPilotClick);
 
   // Role buttons
   const iranBtn = $('benchRoleIranBtn');
@@ -9112,13 +9781,10 @@ async function savePeerConfigClick() {
   // Advanced options accordion
   const advToggle = $('benchAdvToggle');
   const advWrap = $('benchAdvWrap');
-  const advChevron = $('benchAdvChevron');
   if (advToggle && advWrap) {
     advToggle.addEventListener('click', () => {
       advWrap.classList.toggle('hidden');
-      if (advChevron) {
-        advChevron.textContent = advWrap.classList.contains('hidden') ? '▼ Expand' : '▲ Collapse';
-      }
+      advToggle.setAttribute('aria-expanded', advWrap.classList.contains('hidden') ? 'false' : 'true');
     });
   }
 })();
@@ -9264,7 +9930,6 @@ window.runBenchmarkClick = runBenchmarkClick;
 window.applyCarrierClick = applyCarrierClick;
 window.smartApplyOrSetupCarrier = smartApplyOrSetupCarrier;
 window.testPeerLinkClick = testPeerLinkClick;
-window.saveAutoPilotClick = saveAutoPilotClick;
 window.openPeerConfig = openPeerConfig;
 window.closePeerConfig = closePeerConfig;
 window.savePeerConfigClick = savePeerConfigClick;
@@ -9614,11 +10279,11 @@ async function loadLicense() {
   }
 }
 
-// Premium tier: the tag under the name and a gold hairline on the logo tile.
+// Premium tier: the tag under the name and a gold ring on the logo, in the
+// sidebar and the phone drawer.
 function setBrandTier(on) {
   document.querySelectorAll('[data-brand-tier]').forEach(el => el.classList.toggle('hidden', !on));
-  const b = document.querySelector('.sidebar-brand');
-  if (b) b.classList.toggle('is-premium', on);
+  document.querySelectorAll('[data-brand]').forEach(b => b.classList.toggle('is-premium', on));
 }
 
 function renderLicense(d) {
@@ -9633,8 +10298,7 @@ function renderLicense(d) {
     setBrandTier(true);
     if (badge) {
       badge.textContent = 'PREMIUM (Active)';
-      badge.style.background = 'var(--ok-fill)';
-      badge.style.color = '#fff';
+      badge.className = 'badge ok';
     }
     if (details) details.classList.remove('hidden');
     if (deactBtn) deactBtn.classList.remove('hidden');
@@ -9653,8 +10317,7 @@ function renderLicense(d) {
     setBrandTier(false);
     if (badge) {
       badge.textContent = 'FREE EDITION';
-      badge.style.background = 'rgba(255,255,255,0.1)';
-      badge.style.color = '';
+      badge.className = 'badge dim';
     }
     if (details) details.classList.add('hidden');
     if (deactBtn) deactBtn.classList.add('hidden');
@@ -11016,11 +11679,13 @@ let _sentinelData = null;
 
 // The browser already reached this server by window.location.hostname, which is
 // more reliable than the IP the backend detects (often a private/NAT address).
+// With the panel's certificate, Sentinel serves HTTPS and only the name on the
+// certificate passes the browser's check, so that name is used.
 function sentinelDisplayUrl(d) {
   if (!d || !d.port) return '';
-  const host = window.location.hostname || '127.0.0.1';
+  const host = (d.https && d.host) || window.location.hostname || '127.0.0.1';
   const h = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-  return `http://${h}:${d.port}${d.path || '/'}`;
+  return `${d.https ? 'https' : 'http'}://${h}:${d.port}${d.path || '/'}`;
 }
 
 async function loadSentinelState() {
@@ -11889,14 +12554,14 @@ const nodeAgo = sec => {
 };
 const nodePct = v => (typeof v === 'number' && v >= 0) ? v.toFixed(0) + '%' : '—';
 function nodeRow(n) {
-  const i = n.info || {}, lic = i.license || {};
+  const i = n.info || {}, lic = i.license || {}, core = i.kind === 'core';
   const side = i.side === 'iran' ? tr('', 'Iran') : i.side === 'foreign' ? tr('', 'Foreign') : tr('', 'Not set up');
   const state = n.online ? ['ok', tr('', 'Online')] : ['err', tr('', 'Offline')];
   const licTxt = lic.active ? ('Pro' + (lic.expires ? ' · ' + tr('', 'until') + ' ' + custDate(lic.expires) : '')) : tr('', 'No license');
   const kv = (k, v) => `<div class="lm-box"><div class="lm-k"><span>${esc(k)}</span><b class="lm-num">${esc(v)}</b></div></div>`;
   return `<div class="lm-row${n.online ? '' : ' cut'}" id="node-${n.id}">
     <div class="lm-head"><div class="lm-name"><b>${esc(n.name)}</b><small class="lm-num">${esc([i.public_ip || n.addr || '', i.hostname || ''].filter(Boolean).join(' · '))}</small></div>
-      <span class="badge ${state[0]}">${esc(state[1])}</span></div>
+      <span class="u-flex-center-gap8"><span class="badge info" title="${esc(core ? tr('', 'Node core: no web panel on this server; this panel manages it') : tr('', 'This server has its own web panel too'))}">${esc(core ? tr('', 'Core only') : tr('', 'With panel'))}</span><span class="badge ${state[0]}">${esc(state[1])}</span></span></div>
     <div class="lm-grid">
       ${kv(tr('', 'Side'), side)}${kv(tr('', 'Tunnels'), String(i.tunnels ?? '—'))}${kv(tr('', 'Version'), i.version || n.link_version || '—')}
       ${kv('CPU · RAM · ' + tr('', 'Disk'), [nodePct(i.cpu_pct), nodePct(i.mem_pct), nodePct(i.disk_pct)].join(' · '))}
@@ -11908,6 +12573,7 @@ function nodeRow(n) {
       ${n.held ? `<button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="nodeApprove(${Number(n.id)})">${esc(tr('', 'Approve'))}</button>` : ''}
       ${n.online && !n.held ? `<button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openNodeHere(${Number(n.id)})">${esc(tr('', 'Open'))}</button>` : ''}
       <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="openNodeRename(${n.id})">${esc(tr('', 'Rename'))}</button>
+      ${n.online && !n.held ? `<button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="nodeKind(${Number(n.id)}, ${core ? "'panel'" : "'core'"})">${esc(core ? tr('', 'Install its panel') : tr('', 'Make it a core'))}</button>` : ''}
       <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 u-c-er" onclick="nodeRemove(${n.id})">${esc(tr('', 'Remove'))}</button>
     </div></div>`;
 }
@@ -11917,8 +12583,28 @@ function nodeJobRow(j) {
   return `<details class="lm-row" data-job="${j.id}"${open ? ' open' : ''} ontoggle="_nodeJobOpen[${j.id}] = this.open"><summary class="lm-head"><div class="lm-name"><b>${esc(j.name || j.host)}</b><small class="lm-num">SSH ${esc(j.host)}</small></div>
     <span class="badge ${st[0]}">${esc(st[1])}</span></summary><pre class="cs-code">${esc(j.log || '')}</pre></details>`;
 }
+// The Setup page's first suggestion: add the other server as a node, then
+// make the tunnel between the two from here (node_tunnel.go).
+function setupNodeRender(d) {
+  const card = $('setupNodeCard'), body = $('setupNodeBody'), note = $('setupManualNote');
+  if (!card || !body) return;
+  card.hidden = NV || d.role === 'node';
+  if (note) note.hidden = card.hidden;
+  if (card.hidden) return;
+  const nodes = d.nodes || [], on = nodes.filter(n => n.online && !n.held).length;
+  const step = (n, title, sub, btns) => `<div class="qs-step"><span class="qs-num">${n}</span><div class="qs-body"><label class="qs-label">${esc(title)}</label>
+    <div class="qs-hint">${esc(sub)}</div><div class="lm-acts u-mt-8">${btns}</div></div></div>`;
+  body.innerHTML = step(1, tr('', 'Add your other server'), nodes.length ? tr('', 'Servers added') + ': ' + nodes.length + ' · ' + tr('', 'Online') + ': ' + on : tr('', 'Run one line on it, or let this panel log in with SSH and do it.'),
+    `<button type="button" class="hashem-btn hashem-btn-primary u-btn-30" onclick="openNodeInvite()">${esc(tr('', 'Add a server'))}</button>
+     <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="openNodeSSH()">${esc(tr('', 'Add with SSH'))}</button>`) +
+    step(2, tr('', 'Make the tunnel between them'), on ? tr('', 'Pick the Iran server, the foreign server, the engine and the ports.') : tr('', 'Add a server first: it shows up here when it joins.'),
+    `<button type="button" class="hashem-btn hashem-btn-primary u-btn-30" ${on ? '' : 'disabled'} onclick="openNodeTunnel()">${esc(tr('', 'New tunnel'))}</button>
+     <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="goTab('nodes')">${esc(tr('', 'Open the Nodes page'))}</button>`);
+}
 function renderNodes(d) {
   _nodes = d;
+  setupNodeRender(d);
+  nodeMapRender();
   renderNodeTunnels(d);
   const acts = $('nodeActs'), body = $('nodeBody'), err = $('nodeErr');
   if (err) { err.textContent = d.error || ''; err.classList.toggle('hidden', !d.error); }
@@ -11961,9 +12647,14 @@ async function loadNodes() {
   } catch (e) { reportErr('nodes', e); }
 }
 (function initNodes() {
+  let ticks = 0;
   if (!nodesTimer) nodesTimer = setInterval(() => {
     const t = $('tab-nodes');
-    if (t && !t.hidden && !document.hidden && !($('custModal') && !$('custModal').hidden)) loadNodes();
+    if (!(t && !t.hidden && !document.hidden && !($('custModal') && !$('custModal').hidden))) return;
+    loadNodes();
+    // every 30 s the servers' health and traffic and the tunnels' state again,
+    // for the map, All servers and Tunnels between servers
+    if (++ticks % 6 === 0 && _nodes && _nodes.role === 'central') { nodeFleetLoad(); loadNodeTunnels(); }
   }, 5000);
 })();
 const nodeFind = id => ((_nodes && _nodes.nodes) || []).find(n => n.id === id);
@@ -11972,10 +12663,29 @@ function nodeAddrField() {
     <input class="hashem-input lm-num" id="ndUrl" dir="ltr" maxlength="200" placeholder="http://IP:PORT" value="${esc((_nodes && _nodes.default_url) || '')}">
     <div class="qs-hint">${esc(tr('', 'This panel\'s public IP and port. Use another address (a domain, or the GRE address) if nodes reach this server another way.'))}</div></div>`;
 }
+// a new server gets the node core; the web panel only when asked for
+function nodePanelField() {
+  return `<div class="xr-field"><label class="xr-check"><input type="checkbox" id="ndPanel"> ${esc(tr('', 'Install the web panel on it too'))}</label>
+    <div class="qs-hint">${esc(tr('', 'Off: the server gets only the node core, with no web panel of its own, and this panel manages all of it. A server that already has the panel keeps it.'))}</div></div>`;
+}
+async function nodeKind(id, kind) {
+  const n = nodeFind(id);
+  if (!n) return;
+  const core = kind === 'core';
+  if (!await entConfirm(core ? tr('', 'Make this node a core?') : tr('', 'Install the web panel on this node?'),
+    core ? tr('', 'Its own web panel is removed: no page, login or terminal on that server, and this panel manages all of it. Its tunnels are not touched. It restarts and is back in a few seconds.')
+      : tr('', 'The server gets its own web panel next to the core. Its tunnels are not touched. Run hashem on it to see the address and set the password.'),
+    core ? tr('', 'Make it a core') : tr('', 'Install its panel'))) return;
+  try {
+    const r = await api('/api/nodes', { action: 'kind', id, kind });
+    toastOk(n.name, r.detail || '');
+    setTimeout(loadNodes, 4000);
+  } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
 function openNodeInvite() {
-  const html = `<div class="xr-field"><label class="qs-label" for="ndName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="ndName" maxlength="40" placeholder="${esc(tr('', 'e.g. Germany 1'))}"></div>${nodeAddrField()}`;
+  const html = `<div class="xr-field"><label class="qs-label" for="ndName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="ndName" maxlength="40" placeholder="${esc(tr('', 'e.g. Germany 1'))}"></div>${nodeAddrField()}${nodePanelField()}`;
   custModal(tr('', 'Add a server'), html, tr('', 'Make the line'), async () => {
-    const r = await api('/api/nodes', { action: 'invite', name: $('ndName').value, url: $('ndUrl').value });
+    const r = await api('/api/nodes', { action: 'invite', name: $('ndName').value, url: $('ndUrl').value, panel: $('ndPanel').checked });
     const box = (id, label, v) => `<div class="cs-srv"><div class="cs-srv-h"><b>${esc(label)}</b>
       <button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="copyTextSafe($('${id}').textContent, ${jsArg(tr('', 'Copied'))}, ${jsArg(label)})">${esc(tr('', 'Copy'))}</button></div>
       <pre class="cs-code" id="${id}">${esc(v)}</pre></div>`;
@@ -11994,10 +12704,10 @@ function openNodeSSH() {
     <div class="xr-field"><label class="qs-label" for="nsPass">${esc(tr('', 'Password'))}</label><input class="hashem-input" id="nsPass" type="password" autocomplete="off" dir="ltr"></div>
     <div class="xr-field"><label class="qs-label" for="nsKey">${esc(tr('', 'Or a private key'))}</label><textarea class="hashem-input lm-num" id="nsKey" rows="3" dir="ltr" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea></div>
     <div class="xr-field"><label class="qs-label" for="ndName">${esc(tr('', 'Name'))}</label><input class="hashem-input" id="ndName" maxlength="40"></div>
-    ${nodeAddrField()}
+    ${nodeAddrField()}${nodePanelField()}
     <div class="qs-hint">${esc(tr('', 'This panel logs in once, installs or updates Hashem there and joins it. The password or key is not saved.'))}</div>`;
   const req = () => ({ action: 'ssh', host: $('nsHost').value, port: parseInt($('nsPort').value, 10) || 22, user: $('nsUser').value,
-    password: $('nsPass').value, ssh_key: $('nsKey').value, name: $('ndName').value, url: $('ndUrl').value });
+    password: $('nsPass').value, ssh_key: $('nsKey').value, name: $('ndName').value, url: $('ndUrl').value, panel: $('ndPanel').checked });
   custModal(tr('', 'Add with SSH'), html, tr('', 'Connect'), async () => {
     const body = req();
     if (!body.password && !body.ssh_key) throw new Error(tr('', 'Give the SSH password or a private key.'));
@@ -12031,7 +12741,11 @@ function openNodeRename(id) {
 }
 async function nodeRemove(id) {
   const n = nodeFind(id);
-  if (!n || !await entConfirm(tr('', 'Remove this node?'), tr('', 'The central forgets it and it becomes a standalone panel again. Its tunnels keep running.'), tr('', 'Remove'))) return;
+  if (!n) return;
+  const body = (n.info || {}).kind === 'core'
+    ? tr('', 'The central forgets it. It is a node core with no web panel: after this, only SSH reaches it (hashem panel install gives it a panel). Its tunnels keep running.')
+    : tr('', 'The central forgets it and it becomes a standalone panel again. Its tunnels keep running.');
+  if (!await entConfirm(tr('', 'Remove this node?'), body, tr('', 'Remove'))) return;
   try { renderNodes(await api('/api/nodes', { action: 'remove', id })); toastOk(tr('', 'Node removed'), n.name); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
 }
 async function nodeLeave() {
@@ -12102,8 +12816,13 @@ async function nodeFleetLoad() {
   const card = $('nodeFleetCard');
   if (!card || !_nodes || _nodes.role !== 'central') { if (card) card.hidden = true; return; }
   card.hidden = false;
-  try { _nodeFleet = await api('/api/nodes', { action: 'fleet' }); } catch (e) { _nodeFleet = { servers: [], totals: {}, errors: [e.message] }; }
+  // a GET: refreshed every 30 s, and reads write no audit line
+  try { _nodeFleet = await api('/api/nodes?view=fleet'); } catch (e) {
+    // keep what was read last: the map keeps its places, the error is shown
+    _nodeFleet = Object.assign({ servers: [], totals: {} }, _nodeFleet || {}, { errors: [e.message] });
+  }
   nodeFleetRender();
+  nodeMapRender();
 }
 function nodeFleetRender() {
   const body = $('nodeFleetBody'), f = _nodeFleet;
@@ -12182,6 +12901,224 @@ async function nodeFleetCustomersOpen() {
 function custModalClose() { const ov = $('custModal'); if (ov) modalHide(ov); }
 const displayVer = v => String(v || '').replace(/^v?/, 'v');
 
+// ---- the Nodes map: every server in its column (Iran | foreign), the tunnels
+// between them drawn as lines. It reads what the page already loads (_nodes
+// every 5 s, _nodeFleet and _ntLinks on demand) and is rebuilt only when what
+// it draws changes; the bars and rates are updated in place.
+let _nmSel = null, _nmSig = '', _nmRO = null, _nmRaf = 0;
+const NM_ICON_SERVER = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>';
+const NM_ICON_CENTRAL = '<svg viewBox="0 0 24 24"><rect x="9" y="2.5" width="6" height="5" rx="1"/><rect x="2.5" y="16.5" width="6" height="5" rx="1"/><rect x="15.5" y="16.5" width="6" height="5" rx="1"/><path d="M12 7.5v4.5M5.5 16.5V12h13v4.5"/></svg>';
+function nmServers() {
+  const d = _nodes;
+  if (!d || d.role !== 'central') return [];
+  const fleet = {};
+  ((_nodeFleet && _nodeFleet.servers) || []).forEach(s => { fleet[Number(s.id)] = s; });
+  const links = _ntLinks || [];
+  // a server's side: what it reports, else the end it holds in a tunnel
+  const sideOf = (id, given) => (given === 'iran' || given === 'foreign') ? given
+    : links.some(l => Number(l.server) === id) ? 'iran' : links.some(l => Number(l.client) === id) ? 'foreign' : '';
+  const c = fleet[0] || {};
+  const out = [{ id: 0, central: true, name: tr('', 'This server'), ip: c.public || '', side: sideOf(0, c.role), online: true, held: false, core: false, f: fleet[0] || null, i: {} }];
+  (d.nodes || []).forEach(n => {
+    const id = Number(n.id), i = n.info || {};
+    out.push({ id, central: false, name: n.name, ip: i.public_ip || n.addr || '', side: sideOf(id, i.side), online: !!n.online,
+      held: !!n.held, core: i.kind === 'core', f: fleet[id] || null, i, lastSeen: n.last_seen });
+  });
+  return out;
+}
+function nmState(s) {
+  if (!s.online) return ['err', tr('', 'Offline')];
+  if (s.held) return ['warn', tr('', 'not approved')];
+  if (s.f && s.f.error) return ['err', tr('', 'Not read')];
+  const h = s.f && s.f.health;
+  if (h === 'down') return ['err', tr('', 'Down')];
+  if (h === 'degraded') return ['warn', tr('', 'Degraded')];
+  return ['ok', h === 'healthy' ? tr('', 'Healthy') : tr('', 'Online')];
+}
+function nmLinkState(l) {
+  if (l.working) return ['busy', tr('', 'Autopilot is working')];
+  if (l.state === 'healthy') return ['ok', tr('', 'Healthy')];
+  if (l.state === 'degraded') return ['warn', tr('', 'Degraded')];
+  if (l.state === 'down') return ['err', tr('', 'Down')];
+  return ['', tr('', 'Not read')];
+}
+function nmCard(s, rel) {
+  const st = nmState(s);
+  const tag = s.central ? `<span class="nm-tag">${esc(tr('', 'Central'))}</span>`
+    : s.held ? `<span class="nm-tag warn">${esc(tr('', 'not approved'))}</span>`
+    : s.core ? `<span class="nm-tag mu" title="${esc(tr('', 'Node core: no web panel on this server; this panel manages it'))}">${esc(tr('', 'Core'))}</span>` : '';
+  const btn = (label, fn, cls) => `<button type="button" class="hashem-btn ${cls || 'hashem-btn-ghost'} u-btn-30" onclick="${fn}">${esc(label)}</button>`;
+  // a tunnel from this server to another one, set up on both ends from here
+  const mk = s.online && !s.held ? btn(tr('', 'New tunnel'), `openNodeTunnel(${s.id})`, 'hashem-btn-secondary') + btn(tr('', 'Test'), `openNodeProbe(${s.id})`) : '';
+  const acts = mk + (s.central ? btn(tr('', 'Dashboard'), "goTab('dashboard')")
+    : (s.online && !s.held ? btn(tr('', 'Open'), `openNodeHere(${s.id})`) : '') + btn(tr('', 'Details'), `nodeMapDetails(${s.id})`));
+  return `<div class="nm-node${s.central ? ' central' : ''}${s.online ? '' : ' off'}${_nmSel === s.id ? ' sel' : ''}${rel ? ' rel' : ''}" data-nm="${s.id}">
+    <button type="button" class="nm-hit" onclick="nodeMapPick(${s.id})" aria-pressed="${_nmSel === s.id}" aria-label="${esc(s.name + ' · ' + st[1])}" title="${esc(st[1])}"></button>
+    <div class="nm-top"><span class="nm-ic" aria-hidden="true">${s.central ? NM_ICON_CENTRAL : NM_ICON_SERVER}<i class="nm-dot ${st[0]}"></i></span>
+      <span class="nm-name"><b data-no-i18n>${esc(s.name)}</b><small data-no-i18n>${esc(s.ip || '—')}</small></span>${tag}</div>
+    <div class="nm-bars" data-no-i18n>${['CPU', 'RAM', tr('', 'Disk')].map(k => `<span class="nm-bar"><span>${esc(k)}<b>—</b></span><i></i></span>`).join('')}</div>
+    <div class="nm-rate" data-no-i18n></div>
+    <div class="nm-acts">${acts}</div></div>`;
+}
+// the parts that change every refresh, written into the cards in place
+function nmUpdateLive(servers) {
+  const map = $('nodeMapGrid');
+  if (!map) return;
+  servers.forEach(s => {
+    const el = map.querySelector(`.nm-node[data-nm="${s.id}"]`);
+    if (!el) return;
+    const f = s.f || {}, i = s.i || {};
+    const pick = (a, b) => (typeof a === 'number' && a >= 0) ? a : (typeof b === 'number' && b >= 0) ? b : -1;
+    const vals = [pick(i.cpu_pct, f.cpu_pct), pick(i.mem_pct, f.mem_pct), pick(i.disk_pct, f.disk_pct)];
+    el.querySelectorAll('.nm-bar').forEach((b, k) => {
+      const v = s.online ? vals[k] : -1;
+      b.querySelector('b').textContent = v >= 0 ? v.toFixed(0) + '%' : '—';
+      b.querySelector('i').style.setProperty('--nm-v', String(v >= 0 ? Math.min(v, 100) / 100 : 0));
+      b.classList.toggle('hi', v >= 75 && v < 90);
+      b.classList.toggle('crit', v >= 90);
+    });
+    const t = f.traffic || {}, n = typeof f.tunnels === 'number' ? f.tunnels : i.tunnels;
+    const parts = [];
+    if (typeof n === 'number') parts.push(`<span>${esc(tr('', 'Tunnels'))} <b>${Number(n)}</b></span>`);
+    if (s.online && f.traffic) parts.push(`<bdi>↓ ${esc(fmtRate(Number(t.speed_down) || 0))}</bdi><bdi>↑ ${esc(fmtRate(Number(t.speed_up) || 0))}</bdi>`);
+    if (!s.online && !s.central) parts.push(`<span>${esc(tr('', 'Last seen'))} ${esc(nodeAgo(s.lastSeen))}</span>`);
+    const html = parts.join('');
+    const r = el.querySelector('.nm-rate');
+    if (r.innerHTML !== html) r.innerHTML = html;
+  });
+}
+function nodeMapRender() {
+  const wrap = $('nodeMap');
+  if (!wrap) return;
+  const servers = nmServers();
+  if (servers.length < 2) { // not a central, or no node yet: the list says so
+    wrap.hidden = true; wrap.innerHTML = ''; _nmSig = '';
+    return;
+  }
+  wrap.hidden = false;
+  if (_ntLinks === null && _nodeFleet === null) { // the sides are on their way: keep the place
+    if (!wrap.querySelector('.nm-map')) { wrap.innerHTML = '<div class="ent-skel u-h-14"></div>'; _nmSig = ''; }
+    return;
+  }
+  const ids = new Set(servers.map(s => s.id));
+  const links = (_ntLinks || []).filter(l => ids.has(Number(l.server)) && ids.has(Number(l.client)) && Number(l.server) !== Number(l.client));
+  if (_nmSel !== null && !ids.has(_nmSel)) _nmSel = null;
+  const sig = JSON.stringify([currentLang, _nmSel, servers.map(s => [s.id, s.name, s.ip, s.side, s.online, s.held, s.core, nmState(s)[0]]),
+    links.map(l => [l.server, l.client, l.peer_id, l.state, l.working, l.carrier || l.engine || ''])]);
+  if (sig !== _nmSig) {
+    _nmSig = sig;
+    const rel = new Set();
+    if (_nmSel !== null) links.forEach(l => { const a = Number(l.server), b = Number(l.client); if (a === _nmSel) rel.add(b); if (b === _nmSel) rel.add(a); });
+    const col = (side, label, empty) => {
+      const list = servers.filter(s => s.side === side);
+      return `<div class="nm-col"><div class="nm-col-h">${esc(label)} <b>${list.length}</b></div>
+        ${list.length ? list.map(s => nmCard(s, rel.has(s.id))).join('') : `<div class="nm-empty">${esc(empty)}</div>`}</div>`;
+    };
+    const rest = servers.filter(s => s.side !== 'iran' && s.side !== 'foreign');
+    const lg = (cls, label) => `<span><i class="${cls}"></i>${esc(label)}</span>`;
+    // many servers: the cards keep their name and state; the selected one shows the rest
+    wrap.innerHTML = `<div class="nm-map${_nmSel !== null ? ' has-sel' : ''}${servers.length > 8 ? ' compact' : ''}" id="nodeMapGrid">
+        <svg class="nm-svg" aria-hidden="true"></svg>
+        ${col('iran', tr('', 'Iran servers'), tr('', 'No Iran server yet'))}<div></div>${col('foreign', tr('', 'Foreign servers'), tr('', 'No foreign server yet'))}
+        ${rest.length ? `<div class="nm-rest"><div class="nm-col-h">${esc(tr('', 'No tunnel yet'))} <b>${rest.length}</b></div>${rest.map(s => nmCard(s, rel.has(s.id))).join('')}</div>` : ''}
+      </div>
+      <div class="nm-legend">${lg('ok', tr('', 'Healthy'))}${lg('warn', tr('', 'Degraded'))}${lg('err', tr('', 'Down'))}${lg('busy', tr('', 'Autopilot is working'))}
+        <span class="nm-hint">${esc(links.length ? tr('', 'Select a server to see its tunnels or make a new one.') : tr('', 'No tunnel between these servers yet: select one to make it.'))}</span></div>`;
+    nmObserve();
+  }
+  nmUpdateLive(servers);
+  nmDrawSoon();
+}
+function nmObserve() {
+  if (typeof ResizeObserver === 'undefined') return;
+  if (!_nmRO) _nmRO = new ResizeObserver(nmDrawSoon);
+  _nmRO.disconnect();
+  const map = $('nodeMapGrid');
+  if (!map) return;
+  _nmRO.observe(map);
+  map.querySelectorAll('.nm-node').forEach(el => _nmRO.observe(el));
+}
+function nmDrawSoon() {
+  if (_nmRaf) return;
+  _nmRaf = requestAnimationFrame(() => { _nmRaf = 0; nmDraw(); });
+}
+// nmDraw draws the tunnels from where the cards really are, so the lines
+// follow the layout in either direction (RTL flips the columns) and at any width.
+function nmDraw() {
+  const map = $('nodeMapGrid');
+  if (!map) return;
+  const svg = map.querySelector('.nm-svg'), mb = map.getBoundingClientRect();
+  // the SVG fills the padding box: measure from inside the border
+  const box = { left: mb.left + map.clientLeft, top: mb.top + map.clientTop, width: map.clientWidth, height: map.clientHeight };
+  if (!svg || !box.width) return;
+  const pos = id => {
+    const el = map.querySelector(`.nm-node[data-nm="${Number(id)}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { l: r.left - box.left, r: r.right - box.left, cx: (r.left + r.right) / 2 - box.left, cy: (r.top + r.bottom) / 2 - box.top };
+  };
+  const ids = new Set([...map.querySelectorAll('.nm-node')].map(el => Number(el.dataset.nm)));
+  const links = (_ntLinks || []).filter(l => ids.has(Number(l.server)) && ids.has(Number(l.client)) && Number(l.server) !== Number(l.client));
+  const pairs = {};
+  links.forEach(l => { const k = Number(l.server) + '-' + Number(l.client); (pairs[k] = pairs[k] || []).push(l); });
+  const wide = box.width >= 560, labels = links.length <= 6 || _nmSel !== null;
+  const placed = []; // label boxes already drawn: a label that would cover one is left out
+  const bez = (t, p0, p1, p2, p3) => { const u = 1 - t; return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3; };
+  let out = '';
+  Object.values(pairs).forEach(group => group.forEach((l, k) => {
+    const a = pos(l.server), b = pos(l.client);
+    if (!a || !b) return;
+    const spread = (k - (group.length - 1) / 2) * 10;
+    const y1 = a.cy + spread, y2 = b.cy + spread;
+    let x1, x2, c1, c2;
+    if (Math.abs(a.cx - b.cx) > 24) { // across the map: from the facing edges
+      const right = a.cx < b.cx;
+      x1 = right ? a.r : a.l; x2 = right ? b.l : b.r;
+      const dx = (x2 - x1) / 2;
+      c1 = [x1 + dx, y1]; c2 = [x2 - dx, y2];
+    } else { // both in one column: a loop out into the middle of the map
+      const right = a.cx < box.width / 2;
+      x1 = right ? a.r : a.l; x2 = right ? b.r : b.l;
+      const off = (right ? 1 : -1) * Math.max(36, Math.min(90, Math.abs(y2 - y1) / 2));
+      c1 = [x1 + off, y1]; c2 = [x2 + off, y2];
+    }
+    const d = `M${x1.toFixed(1)} ${y1.toFixed(1)} C${c1[0].toFixed(1)} ${c1[1].toFixed(1)} ${c2[0].toFixed(1)} ${c2[1].toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+    const st = nmLinkState(l), s = Number(l.server), c = Number(l.client);
+    const isRel = _nmSel !== null && (s === _nmSel || c === _nmSel);
+    const carrier = String(l.carrier || l.engine || 'frp');
+    const title = `${ntName(s)} → ${ntName(c)} · ${carrier} · ${st[1]}${l.name ? ' · ' + l.name : ''}`;
+    // the carrier's label: on the curve where it covers no other label
+    let lbl = null;
+    if (wide && labels && (_nmSel === null || isRel)) {
+      const w = carrier.length * 7.5 + 10, h = 16;
+      for (const t of [0.5, 0.35, 0.65, 0.25, 0.75]) {
+        const x = bez(t, x1, c1[0], c2[0], x2), y = bez(t, y1, c1[1], c2[1], y2) - 8;
+        const r = { l: x - w / 2, r: x + w / 2, t: y - h + 4, b: y + 4 };
+        if (!placed.some(q => r.l < q.r && r.r > q.l && r.t < q.b && r.b > q.t)) { placed.push(r); lbl = [x, y]; break; }
+      }
+    }
+    out += `<g class="${isRel ? 'rel' : ''}"><title>${esc(title)}</title><path class="nm-lk-bg ${st[0]}" d="${d}"/><path class="nm-lk ${st[0]}" d="${d}"/>
+      <circle class="nm-end ${st[0]}" cx="${x1.toFixed(1)}" cy="${y1.toFixed(1)}" r="3.5"/><circle class="nm-end ${st[0]}" cx="${x2.toFixed(1)}" cy="${y2.toFixed(1)}" r="3.5"/>
+      ${lbl ? `<text class="nm-lbl" x="${lbl[0].toFixed(1)}" y="${lbl[1].toFixed(1)}" text-anchor="middle">${esc(carrier)}</text>` : ''}</g>`;
+  }));
+  svg.setAttribute('viewBox', `0 0 ${box.width.toFixed(1)} ${box.height.toFixed(1)}`);
+  if (svg.innerHTML !== out) svg.innerHTML = out;
+}
+function nodeMapPick(id) {
+  _nmSel = _nmSel === Number(id) ? null : Number(id);
+  nodeMapRender();
+  const b = document.querySelector(`#nodeMapGrid .nm-node[data-nm="${Number(id)}"] .nm-hit`);
+  if (b) b.focus();
+}
+function nodeMapDetails(id) {
+  const row = $('node-' + Number(id));
+  if (!row) return;
+  row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  row.classList.add('nm-flash');
+  setTimeout(() => row.classList.remove('nm-flash'), 1600);
+}
+window.addEventListener('resize', () => { if ($('nodeMapGrid')) nmDrawSoon(); });
+
 // ---- tunnels between servers (node_tunnel.go): made and removed from here ----
 let _ntLinks = null, _ntLinkErrs = [], _ntOpen = {}, _ntJobsRunning = false;
 const ntName = id => id === 0 ? tr('', 'This server (the central)') : ((nodeFind(id) || {}).name || ('#' + id));
@@ -12192,15 +13129,28 @@ function ntServerOpts(sel) {
 function ntJobRow(j) {
   const st = j.state === 'done' ? ['ok', tr('', 'Done')] : j.state === 'failed' ? ['err', tr('', 'Failed')] : ['info', tr('', 'Working…')];
   const open = j.id in _ntOpen ? _ntOpen[j.id] : j.state !== 'done';
-  const what = j.kind === 'remove' ? tr('', 'Removing a tunnel') : j.kind === 'update' ? tr('', 'Updating nodes') : tr('', 'Making a tunnel');
+  const what = j.kind === 'remove' ? tr('', 'Removing a tunnel') : j.kind === 'restart' ? tr('', 'Restarting a tunnel') : j.kind === 'update' ? tr('', 'Updating nodes') : tr('', 'Making a tunnel');
   return `<details class="lm-row"${open ? ' open' : ''} ontoggle="_ntOpen[${Number(j.id)}] = this.open"><summary class="lm-head"><div class="lm-name"><b>${esc(what)}</b>
     <small>${esc(ntName(j.server))} → ${esc(ntName(j.client))}</small></div><span class="badge ${st[0]}">${esc(st[1])}</span></summary>
     <pre class="cs-code">${esc(j.log || '')}</pre></details>`;
 }
+// ntOpen opens a tunnel's own page or dialog on its Iran server (server 0:
+// this page itself).
+function ntOpen(server, tab, act) {
+  if (server) { openNodeHere(server, tab, act); return; }
+  goTab(tab);
+  const m = /^(swap|edit):(\d+)$/.exec(act || '');
+  if (m && m[1] === 'swap') openSwap(+m[2]); else if (m) openEditPeer(+m[2]);
+}
 function ntLinkRow(l) {
-  return `<div class="lm-row"><div class="lm-head"><div class="lm-name"><b>${esc(ntName(l.server))} → ${esc(ntName(l.client))}</b>
-    <small class="lm-num">${esc([l.server_ip + ' → ' + l.client_ip, l.engine || 'frp', l.name || ''].filter(Boolean).join(' · '))}</small></div>
-    <button type="button" class="hashem-btn hashem-btn-ghost u-btn-30 u-c-er" onclick="ntRemove(${Number(l.server)}, ${Number(l.client)}, ${Number(l.peer_id)}, ${Number(l.hub)})">${esc(tr('', 'Remove both ends'))}</button></div></div>`;
+  const st = l.working ? ['warn', tr('', 'Autopilot is working')] : l.state === 'healthy' ? ['ok', tr('', 'Healthy')] : l.state === 'degraded' ? ['warn', tr('', 'Degraded')]
+    : l.state === 'down' ? ['err', tr('', 'Down')] : null;
+  const s = Number(l.server), c = Number(l.client), p = Number(l.peer_id), h = Number(l.hub);
+  const btn = (label, fn, cls) => `<button type="button" class="hashem-btn ${cls || 'hashem-btn-ghost'} u-btn-30" onclick="${fn}">${esc(label)}</button>`;
+  return `<div class="lm-row${l.state === 'down' ? ' cut' : ''}"><div class="lm-head"><div class="lm-name"><b>${esc(ntName(l.server))} → ${esc(ntName(l.client))}</b>
+    <small class="lm-num">${esc([l.server_ip + ' → ' + l.client_ip, l.carrier || l.engine || 'frp', l.name || ''].filter(Boolean).join(' · '))}${l.auto ? ' · ' + esc(tr('', 'Autopilot')) + ' ' + esc(l.auto === 'on' ? tr('', 'On') : tr('', 'Off')) : ''}</small></div>
+    ${st ? `<span class="badge ${st[0]}">${esc(st[1])}</span>` : ''}</div>
+    <div class="lm-acts">${btn(tr('', 'Swap carrier'), `ntOpen(${s}, 'tunnel', 'swap:${p}')`, 'hashem-btn-secondary')}${btn(tr('', 'Ports and settings'), `ntOpen(${s}, 'tunnel', 'edit:${p}')`)}${btn(tr('', 'Test'), `openNodeProbe(${s}, ${c}, 'bench', ${p})`)}${btn(tr('', 'Restart both ends'), `ntRestart(${s}, ${c}, ${p}, ${h})`)}${btn(tr('', 'Remove both ends'), `ntRemove(${s}, ${c}, ${p}, ${h})`, 'hashem-btn-ghost u-c-er')}</div></div>`;
 }
 function ntLeftRow(l) {
   return `<div class="lm-row cut"><div class="lm-head"><div class="lm-name"><b>${esc(tr('', 'Left over'))}: ${esc(ntName(l.server))}</b>
@@ -12229,57 +13179,310 @@ function renderNodeTunnels(d) {
 async function loadNodeTunnels() {
   if (!_nodes || _nodes.role !== 'central') return;
   try {
-    const r = await api('/api/nodes', { action: 'tunnel-list' });
+    const r = await api('/api/nodes?view=tunnels');
     _ntLinks = r.links || [];
     _ntLinkErrs = r.errors || [];
-  } catch (e) { _ntLinks = []; _ntLinkErrs = [e.message]; }
+  } catch (e) { _ntLinks = _ntLinks || []; _ntLinkErrs = [e.message]; }
   renderNodeTunnels(_nodes);
+  nodeMapRender();
 }
-function openNodeTunnel() {
-  const nodes = ((_nodes && _nodes.nodes) || []).filter(n => n.online);
-  const iran = nodes.find(n => n.info && n.info.side === 'iran'), out = nodes.find(n => !(n.info && n.info.side === 'iran'));
-  const html = `<div class="xr-fields">
-      <div class="xr-field"><label class="qs-label" for="ntS">${esc(tr('', 'Iran server (users connect to it)'))}</label><select class="hashem-input" id="ntS">${ntServerOpts(iran ? iran.id : 0)}</select></div>
-      <div class="xr-field"><label class="qs-label" for="ntC">${esc(tr('', 'Foreign server'))}</label><select class="hashem-input" id="ntC">${ntServerOpts(out ? out.id : -1)}</select></div>
+// openNodeTunnel opens New tunnel; pick (a server's id, from its card on the
+// map) fills that server in on its side, and the other end with a server of
+// the other side.
+// ntPairFor: the Iran and the foreign server a dialog starts with; pick
+// (a server's id) goes on its own side, the other end on the other side.
+function ntPairFor(pick) {
+  const ids = [0].concat(((_nodes && _nodes.nodes) || []).filter(n => n.online && !n.held).map(n => Number(n.id)));
+  const sides = {};
+  nmServers().forEach(x => { sides[x.id] = x.side; });
+  ((_nodes && _nodes.nodes) || []).forEach(n => { if (!sides[n.id]) sides[n.id] = (n.info || {}).side || ''; });
+  let sv = null, cl = null;
+  if (typeof pick === 'number' && ids.includes(pick)) { if (sides[pick] === 'foreign') cl = pick; else sv = pick; }
+  if (sv === null) sv = ids.find(id => id !== cl && sides[id] === 'iran') ?? ids.find(id => id !== cl && sides[id] !== 'foreign') ?? ids.find(id => id !== cl) ?? 0;
+  if (cl === null) cl = ids.find(id => id !== sv && sides[id] === 'foreign') ?? ids.find(id => id !== sv && sides[id] !== 'iran') ?? ids.find(id => id !== sv) ?? -1;
+  return [sv, cl];
+}
+// The New tunnel dialog: two servers, then an engine, a transport and the
+// ports, each picked from cards; the central checks the plan before it makes
+// anything. Sent as '' (the engine's own default) when the default is picked.
+const NT_ENG = [
+  ['frp', 'FRP', 'FRP over a GRE link. The default: the most transports, and free.', false],
+  ['backhaul', 'Backhaul', 'Backhaul on its own, with no GRE. For when GRE is blocked between the two.', true],
+  ['gre-backhaul', 'Backhaul + GRE', 'Backhaul carried over a GRE link.', true]];
+const NT_TR = {
+  frp: [['tcp', 'TCP', 'Plain TCP. The safe default.'], ['kcp', 'KCP', 'Over UDP. Better on a link that drops packets.'],
+    ['quic', 'QUIC', 'Over UDP, encrypted, quick to connect.'], ['websocket', 'WebSocket', 'Looks like an ordinary web connection.'],
+    ['wss', 'WSS', 'WebSocket inside TLS. For strict networks.']],
+  backhaul: [['tcp', 'TCP', 'One connection for each user.'], ['tcpmux', 'TCP Mux', 'Many users on one connection. The default.'],
+    ['udp', 'UDP', 'For UDP traffic.'], ['ws', 'WS', 'WebSocket, without TLS.'], ['wss', 'WSS', 'WebSocket inside TLS.'],
+    ['wsmux', 'WS Mux', 'WebSocket, many users on one connection.'], ['wssmux', 'WSS Mux', 'WSS, many users on one connection.']]
+};
+NT_TR['gre-backhaul'] = NT_TR.backhaul;
+const ntDefTransport = e => e === 'frp' ? 'tcp' : 'tcpmux';
+const NT_PORTS = [443, 2083, 8443, 2053, 80];
+let _ntf = { engine: 'frp', transport: 'tcp', checked: false };
+function ntDirty() {
+  _ntf.checked = false;
+  const y = $('custModalYes'); if (y) y.textContent = tr('', 'Check');
+  const p = $('ntPlan'); if (p) p.innerHTML = '';
+}
+function ntRenderEngines() {
+  $('ntEng').innerHTML = NT_ENG.map(([id, name, desc, pro]) => `<button type="button" class="nt-card" role="radio" aria-checked="${id === _ntf.engine}" onclick="ntPickEngine('${id}')">
+    <span class="nt-card-h"><b>${esc(name)}</b>${pro ? `<span class="badge info">Pro</span>` : ''}</span><small>${esc(tr('', desc))}</small></button>`).join('');
+}
+function ntRenderTransports() {
+  const list = NT_TR[_ntf.engine], def = ntDefTransport(_ntf.engine);
+  $('ntTr').innerHTML = list.map(([id, name, desc]) => `<button type="button" class="nt-card nt-card-s" role="radio" aria-checked="${id === _ntf.transport}" onclick="ntPickTransport('${id}')">
+    <span class="nt-card-h"><b data-no-i18n>${esc(name)}</b>${id === def ? `<span class="badge">${esc(tr('', 'Default'))}</span>` : ''}</span><small>${esc(tr('', desc))}</small></button>`).join('');
+}
+function ntPickEngine(id) {
+  if (id === _ntf.engine) return;
+  _ntf.engine = id;
+  _ntf.transport = ntDefTransport(id);
+  ntRenderEngines(); ntRenderTransports();
+  $('ntUdpWrap').classList.toggle('hidden', id === 'frp');
+  $('ntPortsHint').textContent = id === 'frp' ? tr('', 'Single port numbers, separated by commas.') : tr('', 'Port numbers, ranges (8000-8010) and mappings (8080=80), separated by commas.');
+  ntDirty();
+}
+function ntPickTransport(id) { _ntf.transport = id; ntRenderTransports(); ntDirty(); }
+function ntPortChip(p) {
+  const f = $('ntP');
+  const have = f.value.split(/[\s,]+/).filter(Boolean);
+  f.value = (have.includes(String(p)) ? have.filter(x => x !== String(p)) : have.concat(String(p))).join(', ');
+  ntDirty();
+}
+function ntSwapEnds() {
+  const s = $('ntS'), c = $('ntC'), v = s.value;
+  if (![...c.options].some(o => o.value === v) || ![...s.options].some(o => o.value === c.value)) return;
+  s.value = c.value; c.value = v;
+  ntDirty();
+}
+function ntPlanHTML(q, d) {
+  const row = (k, v) => `<div class="nt-prow"><span>${esc(k)}</span><b class="lm-num">${esc(v)}</b></div>`;
+  const probs = (d.problems || []);
+  return `<div class="nt-plan${probs.length ? ' bad' : ' good'}"><div class="nt-plan-h">${esc(probs.length ? tr('', 'This tunnel cannot be made yet') : tr('', 'Ready to make'))}</div>
+    ${probs.length ? `<ul class="nt-probs">${probs.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${row(tr('', 'Iran server'), ntName(q.server) + ' · ' + (d.server_role === 'iran' ? tr('', 'its first tunnel') : tr('', 'one more tunnel')))}
+    ${row(tr('', 'Foreign server'), ntName(q.client) + ' · ' + (d.client_mode === 'join-hub' ? tr('', 'joins as one more Iran hub (Cluster, Pro)') : tr('', 'its first tunnel')))}
+    ${row(tr('', 'Control port'), String(d.frp_port || '—'))}${d.local_gre ? row('GRE', d.local_gre + ' ↔ ' + d.peer_gre) : ''}</div>`;
+}
+function openNodeTunnel(pick) {
+  const [sv, cl] = ntPairFor(pick);
+  _ntf = { engine: 'frp', transport: 'tcp', checked: false };
+  const portChips = NT_PORTS.map(p => `<button type="button" onclick="ntPortChip(${p})">${p}</button>`).join('');
+  const html = `<div class="nt-form">
+    <div class="nt-ends">
+      <div class="xr-field"><label class="qs-label" for="ntS">${esc(tr('', 'Iran server (users connect to it)'))}</label><select class="hashem-input" id="ntS" onchange="ntDirty()">${ntServerOpts(sv)}</select></div>
+      <button type="button" class="nt-sw" onclick="ntSwapEnds()" aria-label="${esc(tr('', 'Swap the two servers'))}" title="${esc(tr('', 'Swap the two servers'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4 3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7"/></svg></button>
+      <div class="xr-field"><label class="qs-label" for="ntC">${esc(tr('', 'Foreign server'))}</label><select class="hashem-input" id="ntC" onchange="ntDirty()">${ntServerOpts(cl)}</select></div>
     </div>
-    <div class="xr-fields">
-      <div class="xr-field"><label class="qs-label" for="ntE">${esc(tr('', 'Engine'))}</label><select class="hashem-input" id="ntE">
-        <option value="frp">FRP</option><option value="backhaul">Backhaul</option><option value="gre-backhaul">Backhaul + GRE</option></select></div>
-      <div class="xr-field"><label class="qs-label" for="ntT">${esc(tr('', 'Transport'))}</label><input class="hashem-input lm-num" id="ntT" dir="ltr" maxlength="12" placeholder="${esc(tr('', 'default'))}"></div>
-      <div class="xr-field"><label class="qs-label" for="ntF">${esc(tr('', 'Control port'))}</label><input class="hashem-input lm-num" id="ntF" type="number" min="1" max="65535" placeholder="${esc(tr('', 'automatic'))}"></div>
-    </div>
-    <div class="xr-field"><label class="qs-label" for="ntP">${esc(tr('', 'Ports users connect to'))}</label><input class="hashem-input lm-num" id="ntP" dir="ltr" maxlength="300" placeholder="443, 2083"></div>
-    <label class="qs-hint hidden" id="ntUdpWrap"><input type="checkbox" id="ntU"> ${esc(tr('', 'Also forward UDP (Backhaul)'))}</label>
+    <section class="nt-sec"><h4 id="ntEngL">${esc(tr('', 'Engine'))}</h4><div class="nt-cards" id="ntEng" role="radiogroup" aria-labelledby="ntEngL"></div></section>
+    <section class="nt-sec"><h4 id="ntTrL">${esc(tr('', 'Transport'))}</h4><div class="nt-cards" id="ntTr" role="radiogroup" aria-labelledby="ntTrL"></div></section>
+    <section class="nt-sec"><h4>${esc(tr('', 'Ports users connect to'))}</h4>
+      <input class="hashem-input lm-num" id="ntP" dir="ltr" maxlength="300" placeholder="443, 2083" aria-label="${esc(tr('', 'Ports users connect to'))}" oninput="ntDirty()">
+      <div class="lm-chips nt-chips">${portChips}</div><div class="qs-hint" id="ntPortsHint">${esc(tr('', 'Single port numbers, separated by commas.'))}</div></section>
+    <details class="nt-adv"><summary>${esc(tr('', 'More options'))}</summary>
+      <div class="xr-fields"><div class="xr-field"><label class="qs-label" for="ntF">${esc(tr('', 'Control port'))}</label><input class="hashem-input lm-num" id="ntF" type="number" min="1" max="65535" placeholder="${esc(tr('', 'automatic'))}" oninput="ntDirty()"></div></div>
+      <label class="qs-hint hidden" id="ntUdpWrap"><input type="checkbox" id="ntU" onchange="ntDirty()"> ${esc(tr('', 'Also forward UDP (Backhaul)'))}</label></details>
     <div class="qs-hint">${esc(tr('', 'The Iran server\'s end is made first, then the foreign server\'s with its bundle. If the second fails, the first is removed again. Tunnels already running are not touched.'))}</div>
-    <div id="ntPlan"></div>`;
-  let checked = false;
-  const req = () => ({ server: parseInt($('ntS').value, 10), client: parseInt($('ntC').value, 10), engine: $('ntE').value,
-    transport: $('ntT').value.trim(), ports: $('ntP').value.trim(), frp_port: parseInt($('ntF').value, 10) || 0,
-    accept_udp: $('ntE').value !== 'frp' && $('ntU').checked });
+    <div id="ntPlan" aria-live="polite"></div></div>`;
+  const req = () => ({ server: parseInt($('ntS').value, 10), client: parseInt($('ntC').value, 10), engine: _ntf.engine,
+    transport: _ntf.transport === ntDefTransport(_ntf.engine) ? '' : _ntf.transport, ports: $('ntP').value.trim(), frp_port: parseInt($('ntF').value, 10) || 0,
+    accept_udp: _ntf.engine !== 'frp' && $('ntU').checked });
   custModal(tr('', 'New tunnel between servers'), html, tr('', 'Check'), async () => {
     const q = req();
-    if (!checked) {
+    if (q.server === q.client || !(q.client >= 0)) throw new Error(tr('', 'Pick two different servers.'));
+    if (!q.ports) throw new Error(tr('', 'Enter at least one port users connect to.'));
+    if (!_ntf.checked) {
       const d = await api('/api/nodes', Object.assign({ action: 'tunnel-plan' }, q));
-      const li = (k, v) => `<li>${esc(k)}: <b class="lm-num">${esc(v)}</b></li>`;
-      $('ntPlan').innerHTML = `<ul class="qs-hint">${li(tr('', 'Iran server'), ntName(q.server) + ' · ' + (d.server_role === 'iran' ? tr('', 'its first tunnel') : tr('', 'one more tunnel')))}
-        ${li(tr('', 'Foreign server'), ntName(q.client) + ' · ' + (d.client_mode === 'join-hub' ? tr('', 'joins as one more Iran hub (Cluster, Pro)') : tr('', 'its first tunnel')))}
-        ${li(tr('', 'Control port'), String(d.frp_port))}${d.local_gre ? li('GRE', d.local_gre + ' ↔ ' + d.peer_gre) : ''}</ul>`;
-      if ((d.problems || []).length) throw new Error(d.problems.join('\n'));
-      checked = true;
-      $('custModalYes').textContent = tr('', 'Make the tunnel');
-      ['ntS', 'ntC', 'ntE', 'ntT', 'ntF', 'ntP', 'ntU'].forEach(id => { $(id).oninput = $(id).onchange = () => { checked = false; $('custModalYes').textContent = tr('', 'Check'); $('ntPlan').innerHTML = ''; }; });
+      $('ntPlan').innerHTML = ntPlanHTML(q, d);
+      if (!(d.problems || []).length) { _ntf.checked = true; $('custModalYes').textContent = tr('', 'Make the tunnel'); }
       return false;
     }
     await api('/api/nodes', Object.assign({ action: 'tunnel-create' }, q));
     toastOk(tr('', 'Making the tunnel'), ntName(q.server) + ' → ' + ntName(q.client));
     loadNodes();
-  });  const udp = () => { $('ntUdpWrap').classList.toggle('hidden', $('ntE').value === 'frp'); };
-  $('ntE').addEventListener('change', udp);
-  udp();
+  });
+  ntRenderEngines(); ntRenderTransports();
 }
+// ---- testing the way between two servers from here (node_probe.go) ----
+// The path test needs no tunnel: the central starts it on the Iran server and
+// joins the foreign server itself, with no code to copy. The benchmark
+// measures the carriers of a tunnel between the two, on its Iran server.
+let _np = null; // {server, client, mode, peer, run, view, rep, timer}
+function npLink(s, c) { return (_ntLinks || []).find(l => Number(l.server) === s && Number(l.client) === c) || null; }
+function openNodeProbe(a, b, mode, peer) {
+  let sv = a, cl = b;
+  if (typeof b !== 'number') [sv, cl] = ntPairFor(typeof a === 'number' ? a : undefined);
+  if (_np && _np.timer) clearTimeout(_np.timer);
+  _np = { server: sv, client: cl, mode: mode || (npLink(sv, cl) ? 'bench' : 'path'), peer: Number(peer) || 0, run: false, view: null, rep: null, timer: 0, fails: 0, err: '' };
+  const seg = (m, label) => `<button type="button" class="np-seg-b" data-np-mode="${m}" aria-pressed="false" onclick="npMode('${m}')">${esc(label)}</button>`;
+  const html = `<div class="xr-fields">
+      <div class="xr-field"><label class="qs-label" for="npS">${esc(tr('', 'Iran server'))}</label><select class="hashem-input" id="npS" onchange="npPick()">${ntServerOpts(sv)}</select></div>
+      <div class="xr-field"><label class="qs-label" for="npC">${esc(tr('', 'Foreign server'))}</label><select class="hashem-input" id="npC" onchange="npPick()">${ntServerOpts(cl)}</select></div>
+    </div>
+    <div class="np-seg" role="group" aria-label="${esc(tr('', 'Test'))}">${seg('path', tr('', 'Test the paths'))}${seg('bench', tr('', 'Benchmark the tunnel'))}</div>
+    <div class="qs-hint" id="npHint"></div>
+    <div id="npOut" class="np-out"></div>`;
+  custModal(tr('', 'Test between servers'), html, tr('', 'Run the test'), npRun);
+  $('custModalNo').textContent = tr('', 'Close'); // the dialog stays open on its results
+  npMode(_np.mode);
+  npPoll();
+}
+function npPick() {
+  if (!_np) return;
+  // the selects are locked while a test runs; a finished one stays on its servers until it expires
+  if (_np.view && _np.view.active) api('/api/nodes', { action: 'pathtest-stop', server: _np.server, client: _np.client }).catch(() => {});
+  _np.server = parseInt($('npS').value, 10); _np.client = parseInt($('npC').value, 10); _np.peer = 0;
+  _np.view = null; _np.rep = null; _np.err = '';
+  npMode(_np.mode);
+}
+function npMode(m) {
+  if (!_np) return;
+  _np.mode = m;
+  document.querySelectorAll('.np-seg-b').forEach(b => { const on = b.dataset.npMode === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+  const link = npLink(_np.server, _np.client);
+  const hint = m === 'path'
+    ? tr('', 'Which transports get through between these two servers, measured with the real cores. No tunnel is needed and nothing stays installed; it takes about a minute.')
+    : link ? tr('', 'Measures each carrier of the tunnel between these servers (latency, loss, jitter) on its Iran server and names the best one. Its users are not cut.')
+      : tr('', 'There is no tunnel from this Iran server to this foreign server. Test the paths instead: it needs none.');
+  $('npHint').textContent = hint;
+  const y = $('custModalYes');
+  if (y) { y.textContent = m === 'path' ? tr('', 'Test the paths') : tr('', 'Run the benchmark'); y.disabled = m === 'bench' && !link; }
+  npRender();
+}
+async function npRun() {
+  const n = _np;
+  if (!n || n.run || (n.view && n.view.active)) return false; // one test at a time
+  if (n.server === n.client || n.client < 0) throw new Error(tr('', 'Pick two different servers.'));
+  n.run = true;
+  n.err = ''; n.fails = 0;
+  npRender();
+  try {
+    if (n.mode === 'path') {
+      const sv = n.server, cl = n.client;
+      const v = await api('/api/nodes', { action: 'pathtest-start', server: sv, client: cl });
+      if (_np !== n) { // the dialog was closed while it started: stop it again
+        api('/api/nodes', { action: 'pathtest-stop', server: sv, client: cl }).catch(() => {});
+        return false;
+      }
+      n.view = v;
+      n.run = false;
+      npPoll();
+    } else {
+      const l = npLink(n.server, n.client);
+      n.rep = await api('/api/nodes', { action: 'benchmark-run', server: n.server, client: n.client, peer_id: n.peer || (l ? Number(l.peer_id) : 0) });
+      n.run = false;
+    }
+  } catch (e) { n.run = false; npRender(); throw e; }
+  npRender();
+  return false; // the dialog stays open on its results
+}
+async function npStop() {
+  const n = _np;
+  if (!n) return;
+  try { await api('/api/nodes', { action: 'pathtest-stop', server: n.server, client: n.client }); } catch (_) { /* gone already */ }
+  if (n.view) n.view.active = false;
+  npRender();
+}
+// npPoll reads the Iran server's path test every 2 s while it runs and the
+// dialog is open; closing the dialog stops a running test on both servers.
+async function npPoll() {
+  const n = _np;
+  if (!n) return;
+  clearTimeout(n.timer);
+  const open = $('npOut') && !$('custModal').hidden;
+  if (!open) {
+    if (n.view && n.view.active) api('/api/nodes', { action: 'pathtest-stop', server: n.server, client: n.client }).catch(() => {});
+    _np = null;
+    return;
+  }
+  if (n.mode === 'path' && n.view && n.view.active && !document.hidden) {
+    try { n.view = await api('/api/nodes?view=pathtest&server=' + n.server); n.fails = 0; } catch (e) {
+      // the Iran server stopped answering: say so after a few tries, and stop asking
+      if (++n.fails >= 3) { n.err = e.message; n.view.active = false; }
+    }
+    if (_np !== n) return;
+    npRender();
+  }
+  n.timer = setTimeout(npPoll, n.view && n.view.active ? 2000 : 1000);
+}
+function npRender() {
+  npRenderHTML();
+  const out = $('npOut');
+  if (out) out.querySelectorAll('.np-bar i[data-v]').forEach(i => i.style.setProperty('--np-v', i.dataset.v));
+}
+function npRenderHTML() {
+  const out = $('npOut'), n = _np;
+  if (!out || !n) return;
+  const locked = n.run || !!(n.view && n.view.active);
+  ['npS', 'npC'].forEach(id => { if ($(id)) $(id).disabled = locked; });
+  document.querySelectorAll('.np-seg-b').forEach(b => { b.disabled = locked; });
+  const y = $('custModalYes');
+  if (y) y.disabled = locked || (n.mode === 'bench' && !npLink(n.server, n.client));
+  const errBox = n.err ? `<div class="xr-err">${esc(n.err)}</div>` : '';
+  const busy = label => `<div class="np-busy"><span class="ent-spinner" aria-hidden="true"></span>${esc(label)}</div>`;
+  if (n.mode === 'path') {
+    const v = n.view;
+    if (n.run) { out.innerHTML = busy(tr('', 'Starting the test on both servers…')); return; }
+    if (!v) { out.innerHTML = ''; return; }
+    const remote = v.remote && v.remote.checks && v.remote.checks.length ? v.remote : null;
+    const rows = (remote ? remote.checks : v.checks) || [];
+    const settled = remote ? remote.settled : v.settled;
+    const ok = rows.filter(c => c.status === 'ok');
+    const max = Math.max(1, ...rows.map(c => Number(c.mbps) || 0));
+    const order = { ok: 0, fail: 1, waiting: 2, skip: 3 };
+    const sorted = settled ? rows.slice().sort((a, b) => (order[a.status] - order[b.status]) || ((b.mbps || 0) - (a.mbps || 0))) : rows;
+    const fast = ok.filter(c => c.mbps > 0).sort((a, b) => b.mbps - a.mbps)[0];
+    const state = v.active ? (v.phase === 'cores' ? tr('pt_cores', 'Downloading cores') : !v.joined ? tr('', 'Waiting for the foreign server…') : settled ? tr('pt_done', 'Finished') : tr('pt_running', 'Running'))
+      : tr('pt_done', 'Finished');
+    out.innerHTML = errBox + `<div class="np-sum">
+        <div><b class="lm-num">${ok.length} / ${rows.length || '—'}</b><span>${esc(tr('', 'Transports that work'))}</span></div>
+        <div><b data-no-i18n>${fast ? esc(ptRowName(fast).join(' ')) : '—'}</b><span>${esc(tr('', 'Fastest'))}${fast ? ' · <bdi>' + esc(fast.mbps + ' Mbit/s') + '</bdi>' : ''}</span></div>
+        <div><b>${esc(state)}</b><span>${v.active && v.expires_in ? esc(ptLeft(v.expires_in)) : esc(tr('', 'State'))}</span></div>
+      </div>
+      <div class="np-rows">${sorted.map(c => {
+        const st = PT_STATUS[c.status] || PT_STATUS.waiting, [eng, name] = ptRowName(c);
+        const w = c.mbps ? Math.max(3, Math.round(c.mbps / max * 100)) : 0;
+        return `<div class="np-row ${st[0]}"><span class="np-dot" aria-hidden="true"></span>
+          <span class="np-name"><b data-no-i18n>${esc(eng)}</b><small data-no-i18n>${esc(name)}${c.port ? ' · ' + esc(c.port + '/' + c.proto) : ''}</small></span>
+          <span class="np-bar" title="${esc(c.mbps ? c.mbps + ' Mbit/s' : '')}"><i data-v="${(w / 100).toFixed(2)}"></i></span>
+          <span class="np-val lm-num">${c.mbps ? esc(c.mbps + ' Mbit/s') : esc(tr(st[1], st[2]))}</span>
+          <span class="np-val np-v2 lm-num">${c.rtt_ms ? esc(c.rtt_ms + ' ms') : '—'}</span>
+          ${c.note ? `<span class="np-note" dir="ltr" data-no-i18n>${esc(c.note)}</span>` : ''}</div>`;
+      }).join('')}</div>
+      ${(v.notes || []).length ? `<ul class="qs-hint">${v.notes.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      ${v.active ? `<div class="lm-acts"><button type="button" class="hashem-btn hashem-btn-ghost u-btn-30" onclick="npStop()">${esc(tr('', 'Stop the test'))}</button></div>` : ''}`;
+    return;
+  }
+  if (n.run) { out.innerHTML = busy(tr('', 'Measuring every carrier… this can take a few minutes.')); return; }
+  const r = n.rep;
+  if (!r) { out.innerHTML = ''; return; }
+  const ms = (r.metrics || []).slice().sort((a, b) => (b.score || 0) - (a.score || 0));
+  const best = ms.find(m => m.is_recommended) || ms[0];
+  const usable = best && best.score > 0 && best.packet_loss < 100;
+  const cls = m => m.status === 'healthy' || m.status === 'good' ? 'ok' : m.status === 'warning' ? 'warn' : m.status === 'down' || m.status === 'critical' ? 'err' : 'dim';
+  out.innerHTML = `<div class="np-sum">
+      <div><b data-no-i18n>${usable ? esc((best.name || best.id).replace(/\s*\(.*?\)/, '')) : '—'}</b><span>${esc(usable ? tr('', 'Best carrier') : tr('', 'No carrier answered'))}</span></div>
+      <div><b class="lm-num">${usable ? esc(best.score + ' / 100') : '—'}</b><span>${esc(tr('', 'Score'))}</span></div>
+      <div><b data-no-i18n>${esc(r.active_carrier || '—')}</b><span>${esc(tr('', 'In use now'))}</span></div>
+    </div>
+    <div class="np-rows">${ms.map(m => `<div class="np-row ${cls(m)}${m === best && usable ? ' best' : ''}"><span class="np-dot" aria-hidden="true"></span>
+        <span class="np-name"><b data-no-i18n>${esc((m.name || m.id).replace(/\s*\(.*?\)/, ''))}</b><small data-no-i18n>${esc(m.id)}${m.is_active ? ' · ' + esc(tr('', 'in use')) : ''}</small></span>
+        <span class="np-bar" title="${esc(String(m.score || 0))}"><i data-v="${(Math.min(100, m.score || 0) / 100).toFixed(2)}"></i></span>
+        <span class="np-val lm-num">${m.avg_rtt_ms > 0 ? esc(m.avg_rtt_ms.toFixed(0) + ' ms') : '—'}</span>
+        <span class="np-val np-v2 lm-num">${esc(tr('', 'loss'))} ${esc(String(m.packet_loss ?? '—'))}%</span>
+        ${m.error_detail ? `<span class="np-note" dir="ltr" data-no-i18n>${esc(m.error_detail)}</span>` : ''}</div>`).join('')}</div>
+    ${usable && !best.is_active ? `<div class="lm-acts"><button type="button" class="hashem-btn hashem-btn-secondary u-btn-30" onclick="custModalClose(); ntOpen(${Number(n.server)}, 'tunnel', 'swap:${Number(n.peer || (npLink(n.server, n.client) || {}).peer_id || 0)}')">${esc(tr('', 'Swap the carrier'))}</button></div>` : ''}`;
+}
+
 async function ntRemove(server, client, peer, hub) {
   if (!await entConfirm(tr('', 'Remove this tunnel?'), tr('', 'The foreign server\'s end is removed first, then the Iran server\'s. Users of this tunnel are cut.'), tr('', 'Remove'))) return;
   try { await api('/api/nodes', { action: 'tunnel-remove', server, client, peer_id: peer, hub }); loadNodes(); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
+}
+async function ntRestart(server, client, peer, hub) {
+  if (!await entConfirm(tr('', 'Restart this tunnel?'), tr('', 'Its engine is restarted on the Iran server, then on the foreign one. Users of this tunnel are cut for a few seconds.'), tr('', 'Restart'))) return;
+  try { await api('/api/nodes', { action: 'tunnel-restart', server, client, peer_id: peer, hub }); loadNodes(); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
 }
 async function ntRemoveLeft(id) {
   try { await api('/api/nodes', { action: 'tunnel-remove', left: id }); loadNodes(); } catch (e) { toastErr(tr('', 'Failed'), e.message); }
@@ -12298,6 +13501,8 @@ function nodePickRender() {
     if (!sel) continue;
     const show = _nodePickList.length > 0 && !NV;
     sel.classList.toggle('hidden', !show);
+    const wrap = sel.closest('.tb-pick'); // the header's picker sits in a wrapper with its icon
+    if (wrap) wrap.hidden = !show;
     if (!show) continue;
     const opts = [`<option value="">${esc(tr('', 'This server'))}</option>`].concat(_nodePickList.map(n =>
       `<option value="${Number(n.id)}"${n.online && !n.held ? '' : ' disabled'}>${esc(n.name)}${!n.online ? ' — ' + esc(tr('', 'Offline')) : n.held ? ' — ' + esc(tr('', 'not approved')) : ''}</option>`));
@@ -12345,7 +13550,7 @@ async function nodeViewOpen() {
     try {
       const d = await api('/api/nodes', { action: 'view', id });
       _nodeViewTok = { id, token: d.token };
-    } catch (e) { _nodeViewTab = ''; toastErr(tr('', 'Failed'), e.message); nodePickSet(null); return; }
+    } catch (e) { _nodeViewTab = _nodeViewDo = ''; toastErr(tr('', 'Failed'), e.message); nodePickSet(null); return; }
   }
   if (NODE !== id || $('nodeFrame')) return; // changed meanwhile
   const f = document.createElement('iframe');
@@ -12357,6 +13562,7 @@ async function nodeViewOpen() {
   const q = new URLSearchParams({ nv: String(id), lang: currentLang || 'en', t: document.documentElement.dataset.t || 'dark' });
   if (document.documentElement.dataset.acc) q.set('acc', document.documentElement.dataset.acc);
   if (_nodeViewTab) { q.set('tab', _nodeViewTab); _nodeViewTab = ''; }
+  if (_nodeViewDo) { q.set('do', _nodeViewDo); _nodeViewDo = ''; }
   f.src = BASE + '/?' + q.toString();
   box.appendChild(f);
 }
@@ -12400,8 +13606,10 @@ async function nodeViewEnded() {
   try { sessionStorage.setItem('hashemNodeEnded', String(Date.now())); } catch (_) { /* private mode: no cap across the reload */ }
   setTimeout(() => location.reload(), r ? 0 : 3000); // not answering: give a restart a moment
 }
-let _nodeViewTab = '';
-function openNodeHere(id, tab) { _nodeViewTab = tab || ''; nodePickSet(id); }
+let _nodeViewTab = '', _nodeViewDo = '';
+// openNodeHere shows a node's pages: on tab, and with act ("swap:3",
+// "edit:3") on that tunnel's dialog.
+function openNodeHere(id, tab, act) { _nodeViewTab = tab || ''; _nodeViewDo = act || ''; nodePickSet(id); }
 (function initNodePick() {
   if (NV) {
     // what this page cannot do for a node: the central's login, access,

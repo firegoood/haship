@@ -19,7 +19,7 @@ func withRescueTestConfig(t *testing.T, secret, peers string, st rescueState) {
 		configDir, cfg.Port = oldDir, oldPort
 		snapPtr.Store(oldSnap)
 	})
-	if err := savePeerConfig(PeerConfig{Role: "master", PeerSecret: secret, AutoPilotExplicit: true}); err != nil {
+	if err := savePeerConfig(PeerConfig{Role: "master", PeerSecret: secret}); err != nil {
 		t.Fatal(err)
 	}
 	if peers != "" {
