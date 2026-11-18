@@ -25,19 +25,19 @@ The cluster keeps your users connected when a server dies. It joins several serv
 
 ### The cluster map
 
-The Cluster tab opens on a map of the cluster. Every part of it can be clicked, and an inspector next to it (under it on narrow screens) shows that part and lets you change everything about it:
+The Cluster tab opens on a map of the cluster: users and DNS failover on top, the Iran hubs stacked under the domain (this one first), and the foreign servers on the right, with a line from each Iran hub to every foreign server it reaches. Every part of it can be clicked, and an inspector next to it (under it on narrow screens) shows that part and lets you change everything about it:
 
 | Click | You see and can change |
 |---|---|
-| **This Iran hub** (middle) | hub name and public IP, the health check (interval, Fall, Rise), hub forwarding; New Pool, Show Join Code, Link a Hub, the kernel rules |
+| **This Iran hub** (first in the hub column) | hub name and public IP, the health check (interval, Fall, Rise), hub forwarding; New Pool, Show Join Code, Link a Hub, the kernel rules |
 | **A pool** (port inside the hub) | its state and members with share and connections; mode (one click), port, protocol, name, service check and interval, manual failback; Fail Back Now, Enable/Disable, Delete, add a foreign server |
 | **A line** from a pool to a foreign server | that server's settings in that pool: weight (slider), priority, port, connection limit, standby, drain; Remove From Pool |
 | **A foreign server** (right) | its health and why, latency, session, ports, private address; the pools it is in (click one to edit it), Add to a pool |
-| **A linked Iran hub** (left) | its state, latency, version and pools; Unlink |
-| **DNS Failover** (left) | provider (Cloudflare or webhook), record, TTL, token or secret, on/off; Test, Save |
+| **A linked Iran hub** (under this hub), or its line to a foreign server | its state, latency, version and pools; Unlink |
+| **DNS Failover** (top), or its stem to a hub | the domain, the Cloudflare key, each hub's share of users, on/off; Test, Save |
 | **+ New Pool / + Link a Hub / + Add a foreign server** | the matching dialog (a foreign server is added in Setup) |
 
-Line thickness is the share of new connections the server gets; moving dashes show traffic. Green carries traffic, grey is healthy but idle (for example the backup in failover mode), blue dashes are standby members, DNS and linked hubs, red dots are down, grey dots are drained or not serving. The map refreshes every 3 seconds without touching what you are typing in the inspector. **List** shows the same data as tables. On a foreign server, the map shows the Iran hubs it serves; click one to leave it, or **+ Join Another Iran Hub**.
+The stem from DNS failover branches to every Iran hub, as thick as its share of users (the percentage on the hub). A foreign server only another hub reaches shows "via" that hub; ×2 means two hubs reach it. A tunnel's line appears as soon as it is up and is as thick as the traffic it carries, written on the line; a pool's line is as thick as the share of new connections the server gets; moving dashes show traffic. Green carries traffic, grey is healthy but idle (for example the backup in failover mode), blue dashes are standby members, DNS and linked hubs, red dots are down, grey dots are drained or not serving. The map refreshes every 3 seconds without touching what you are typing in the inspector. **List** shows the same data as tables. On a foreign server, the map shows the Iran hubs it serves; click one to leave it, or **+ Join Another Iran Hub**.
 
 ---
 
@@ -78,7 +78,7 @@ What a pool gives you:
 
 - **License:** Hashem Pro on every server that runs a pool, links hubs or joins extra hubs. Pools that already run keep running if a license expires, but nothing can be changed until it is renewed.
 - **Same version** of Hashem on every server of the cluster.
-- **Foreign servers added on the hub** in Setup (or with `hashem add-peer` / `hashem add-backhaul-peer`), with the port the pool will serve (for example 443) in their port list. **Order matters:** add the first foreign server, make the pool on its port, then add the others with the same port. A port without a pool belongs to one tunnel, so a second tunnel on it is refused until the pool exists.
+- **Foreign servers added on the hub** in Setup (or with `hashem add-peer` / `hashem add-backhaul-peer`), with the port the pool will serve (for example 443) in their port list. **Order no longer matters:** when you add a second foreign server on a port one tunnel already serves, keep **put both servers in one failover pool** ticked in Setup (the default): the panel makes the pool first and the new server joins it. Without it (or without the Cluster license) a port without a pool belongs to one tunnel and a second tunnel on it is refused, so make the pool first.
 - **For linked hubs:** each hub's panel port (the plain HTTP one, also when HTTPS is on: the heartbeat is signed, not secret) must be reachable from the other hub, and both clocks must be right (within 90 seconds). Enable NTP: `timedatectl set-ntp true`. A panel reachable only through a reverse proxy cannot be linked.
 - **For DNS failover:** a Cloudflare API token with *Zone → DNS → Edit*, and a DNS-only (grey cloud) record; or your own webhook.
 - **For the service check:** a TCP service behind the tunnel (xray, sing-box, SSH, a web server…).
@@ -203,7 +203,11 @@ hashem hubs                 # lists the Iran hubs this server serves
 hashem leave-hub --id 2     # stop serving one
 ```
 
-The foreign server runs a second client (`frpc-h2` or `backhaul-client-h2`) with its own GRE interface `gre-h2`. If the bundle's GRE addresses are already used on this server, it dials the hub's public IP instead. Options:
+**The short way: let the hubs sync their tunnels.** Link the hubs first (4.11), then on either hub tick **Make both hubs serve the same foreign servers** in **Link a Hub**, or open the linked hub and press **Sync Tunnels With This Hub**; it does not matter which hub you press it on. What the other hub has and this one lacks is made here, and what this hub has and the other lacks is made there (this hub asks it to and shows its progress under **Made on …**). If both already serve the same foreign servers, it says so and changes nothing. If only one hub has tunnels, the empty one gets them. For every foreign server of the first hub, Mashhad makes its own tunnel with the same ports and engine, and the foreign server joins it by itself: nothing to add in Setup and nothing to paste on the foreign servers. Foreign servers Mashhad already has a tunnel to are skipped. If a foreign server cannot join (offline, an older panel, no Cluster license), the tunnel Mashhad made for it is removed again and the result says why. Pools of the first hub on ports Mashhad now serves are made on Mashhad too, so the hubs can forward to each other. Both panels and the foreign servers' panels need this version (`hashem update`); the foreign server must have a Cluster (Pro) license, as for any `join-hub`.
+
+How it works: Mashhad asks Tehran for its tunnels over the signed hub channel (addresses, ports and engine, no token), makes each tunnel like Setup does, then sends the bundle to Tehran, which hands it to the foreign server over their Peer Link (`/api/peer/join-hub`, accepted only with that tunnel's secret) so that it runs `join-hub`. The bundle holds the tunnel's token, so it is sealed with the cluster secret (AES-GCM) on the hub channel, which is plain HTTP. Tehran only passes on a bundle that names the hub that asked, uses the engine of its own tunnel to that server and forwards exactly the ports of that tunnel: a linked hub cannot use this to publish other ports of the foreign server. A foreign server that already serves a hub at the new hub's address from an earlier join is reported as failed (remove the old join with `hashem leave-hub` first).
+
+The manual way above and this one end the same: the foreign server runs a second client (`frpc-h2` or `backhaul-client-h2`) with its own GRE interface `gre-h2`. If the bundle's GRE addresses are already used on this server, it dials the hub's public IP instead. Options:
 
 - `--dial auto|gre|public` chooses how it dials the hub.
 - `--relay-ip` sets the local service address, 127.0.0.1 by default.
@@ -230,9 +234,16 @@ The forwarded traffic leaves Tehran with Tehran's own address (MASQUERADE). User
 Users connect to `vpn.example.com` instead of an IP. The domain always holds the public IPs of the Iran hubs that work.
 
 1. Link the hubs (4.11).
-2. On each hub, go to **Cluster → DNS Failover**:
-   - **Cloudflare:** set the record name `vpn.example.com`, an API token (*Zone → DNS → Edit*) and TTL `60`. Press **Test**, tick **Keep the record pointed at the working hubs**, then **Save**. The record must be **DNS only** (grey cloud); a proxied record is refused because Cloudflare's proxy does not carry tunnels.
-   - **Webhook:** use this for any other DNS provider (ArvanCloud, your own API…). See [9.2](#92-webhook).
+2. On **one** hub (the one you want in charge, say Iran 1) open **Cluster → DNS Failover**. The card draws it: users, then your domain, then every Iran hub, each with its state and share of users.
+3. Write **Your domain** (`vpn.example.com`) and paste the **Cloudflare key** (*How do I get the key?* under the field: Cloudflare → My Profile → API Tokens → Create Token → template *Edit zone DNS* → your domain's zone). Press **Turn on for all N servers**. The key is checked first (the answer stays under the button: the zone it found, where the name points now); only then is it turned on.
+4. That hub now **controls** the domain: it sends the domain, the key, the TTL and every hub's share to all linked hubs (sealed with the cluster secret, over the signed hub channel), and they **follow** it. A hub linked later, or one that was down, gets the settings as soon as it answers. On a following hub the card is read-only and says which hub controls it; **Control from this server** moves the control there (the others, the old controller included, follow the new one).
+5. While the controller answers, it writes the record: A records for every hub that works, so users are shared between all of them. When it stops answering for 30 s, the following hub with the lowest id writes in its place, with the same shares. A hub that stops working is taken out of the domain within about 30 s and put back when it works again; records that point anywhere else are never touched, and the last record is never removed.
+6. **Change shares** sets each hub's share with a slider. Shares are approximate: equal shares keep every working hub in the record (DNS round robin); different shares make the record point to one hub at a time, in turns of about the TTL. **Settings** changes the domain, the key, the TTL, the provider and how this server reaches Cloudflare (each hub keeps its own route: its tunnels are its own). **Turn off** turns it off on every hub; the domain keeps the addresses it has.
+7. The card warns, on each hub, when a hub needs a panel update, cannot reach Cloudflare (it could not take over), or does not serve a port this hub serves (users sent there on that port would fail: press **Sync Tunnels**).
+
+- The record must be **DNS only** (grey cloud); a proxied record is refused because Cloudflare's proxy does not carry tunnels.
+- **Webhook:** for any other DNS provider (ArvanCloud, your own API…) pick it under **More options**. See [9.2](#92-webhook).
+- Two hubs that cannot reach each other at all (the link between them is cut, both still work) both write the record, each without the other: nothing on two hubs alone can tell that from a dead hub. Short breaks do not change the record (the 30 s wait).
 
 ### 4.13 Full mesh
 

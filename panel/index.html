@@ -623,6 +623,8 @@
   .det-v.mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size:12.5px; background:var(--s2); border:1px solid var(--ln);
     padding:3px 9px; border-radius:8px; letter-spacing:-.01em; white-space:nowrap; }
+  /* a long IPv6 address wraps inside a tunnel card instead of overflowing it */
+  .peer-card .det-v.mono { white-space:normal; overflow-wrap:anywhere; min-width:0; }
   /* peer cards: bottom action row + inline remove confirm */
   .peer-card .peer-acts .armed {
     border-color:var(--er)!important; color:#fff!important;
@@ -996,10 +998,77 @@
   .wd-seg label:hover span { color:var(--tx2); }
   .wd-seg input:checked + span { background:var(--ac-soft); color:var(--ac); box-shadow:inset 0 0 0 1px var(--ac-b30); }
   .wd-seg input:focus-visible + span { outline:2px solid var(--ac); outline-offset:2px; }
-  #clDnsCard .wd-sub { display:grid; gap:12px; }
-  #clDnsCard .wd-sub-h { margin-bottom:0; }
-  #clDnsCard .wd-seg { justify-self:start; }
-  #clDnsMembers { max-width:440px; }
+  #clDnsCard { display:grid; gap:16px; }
+
+  .dnsw { container-type:inline-size; display:grid; gap:16px; }
+  .dnsw-live, .dnsw-body { display:grid; gap:14px; }
+  .dnsw .dnsw-dot { width:9px; height:9px; border-radius:50%; background:currentColor; flex:none; }
+  .dnsw-head { display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:var(--r-md); border:1px solid var(--ln); background:var(--s2); color:var(--mu); font-size:var(--fs-h4); }
+  .dnsw-head b { color:var(--tx); font-weight:600; }
+  .dnsw-head.is-ok { color:var(--ok); background:var(--ok-soft); border-color:color-mix(in srgb, var(--ok) 35%, transparent); }
+  .dnsw-head.is-warn, .dnsw-head.is-wait { color:var(--wr); background:var(--wr-soft); border-color:color-mix(in srgb, var(--wr) 35%, transparent); }
+  .dnsw-head.is-err { color:var(--er); background:var(--er-soft); border-color:color-mix(in srgb, var(--er) 35%, transparent); }
+  .dnsw-flow { display:grid; grid-template-columns:auto 40px auto 40px minmax(0, 1fr); align-items:center; gap:6px; }
+  .dnsw-node { display:flex; flex-direction:column; align-items:center; gap:6px; padding:14px 12px; min-width:96px; max-width:180px; border:1px solid var(--ln); border-radius:var(--r-lg); background:var(--s2); color:var(--tx2); text-align:center; font-size:var(--fs-small); font-weight:600; }
+  .dnsw-node svg, .dnsw-hub-top svg { width:30px; height:30px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+  .dnsw-domain { color:var(--ac); border-color:var(--ac-b30); background:var(--ac-soft); }
+  .dnsw-domain bdi { color:var(--tx); font-family:var(--font-mono, ui-monospace, monospace); overflow-wrap:anywhere; }
+  .dnsw-domain.is-off { color:var(--mu); background:transparent; border-style:dashed; }
+  .dnsw-arrow { display:grid; place-items:center; color:var(--mu); }
+  .dnsw-arrow svg { width:40px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  [dir="rtl"] .dnsw-arrow svg { transform:scaleX(-1); }
+  .dnsw-hubs { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:8px; min-width:0; }
+  .dnsw-hub { display:grid; gap:5px; align-content:start; padding:10px 12px; border:1px solid var(--ln); border-inline-start:4px solid var(--mu); border-radius:var(--r-md); background:var(--s2); min-width:0; color:var(--mu); }
+  .dnsw-hub.is-ok { border-inline-start-color:var(--ok); color:var(--ok); }
+  .dnsw-hub.is-wait { border-inline-start-color:var(--wr); color:var(--wr); }
+  .dnsw-hub.is-bad { border-inline-start-color:var(--er); color:var(--er); }
+  .dnsw-hub.is-idle { border-inline-start-color:var(--ac); color:var(--ac); }
+  .dnsw-hub-top { display:flex; align-items:center; gap:8px; min-width:0; color:var(--tx); }
+  .dnsw-hub-top svg { width:20px; height:20px; color:var(--tx2); }
+  .dnsw-hub-top b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dnsw-hub-top .badge { flex:none; }
+  .dnsw-hub-ip { font-size:var(--fs-small); color:var(--tx2); }
+  .dnsw-hub-state { display:flex; align-items:center; gap:6px; font-size:var(--fs-small); font-weight:600; }
+  .dnsw-share { height:8px; border-radius:4px; background:var(--ln); overflow:hidden; }
+  .dnsw-share span { display:block; height:100%; border-radius:4px; background:var(--ok); transition:width .3s ease; }
+  .dnsw-pct { font-size:var(--fs-small); color:var(--tx2); }
+  .dnsw-pct b { color:var(--tx); font-variant-numeric:tabular-nums; }
+  .dnsw-note { font-size:var(--fs-small); color:var(--tx2); overflow-wrap:anywhere; }
+  .dnsw-note.is-ok { color:var(--ok); } .dnsw-note.is-warn, .dnsw-note.is-wait { color:var(--wr); } .dnsw-note.is-err { color:var(--er); } .dnsw-note.is-ctl { color:var(--ac); font-weight:600; }
+  .dnsw-link { background:none; border:0; padding:0; color:var(--ac); font:inherit; font-weight:600; text-decoration:underline; cursor:pointer; }
+  .dnsw-fields, .dnsw-setup, .dnsw-panel { display:grid; gap:12px; }
+  .dnsw .fg { margin:0; }
+  .dnsw .fg .ent-help { margin-top:6px; }
+  .dnsw-how summary, .dnsw-more > summary { cursor:pointer; color:var(--ac); font-size:var(--fs-small); font-weight:600; }
+  .dnsw-how ol { margin:8px 0 0; padding-inline-start:20px; display:grid; gap:4px; font-size:var(--fs-small); color:var(--tx2); }
+  .dnsw-more { display:grid; gap:12px; }
+  .dnsw-more[open] { padding:12px; border:1px solid var(--ln); border-radius:var(--r-md); }
+  .dnsw-more[open] > summary { margin-bottom:12px; }
+  .dnsw-go { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; }
+  .dnsw-big { padding:12px 22px; font-size:var(--fs-h4); }
+  .dnsw-actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .dnsw-panel { padding:12px; border:1px solid var(--ln); border-radius:var(--r-md); background:var(--s2); }
+  .dnsw-sliders { display:grid; gap:10px; }
+  .dnsw-sl { display:grid; grid-template-columns:minmax(0, 1fr) minmax(90px, 1.4fr) 44px; align-items:center; gap:10px; font-size:var(--fs-small); }
+  .dnsw-sl label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tx); }
+  .dnsw-sl input { width:100%; accent-color:var(--ac); }
+  .dnsw-sl b { text-align:end; font-variant-numeric:tabular-nums; color:var(--tx); }
+  .dnsw .cl-alert { margin-top:0; }
+  .dnsw-follow { display:grid; gap:4px; white-space:normal; }
+  .dnsw-follow .u-mono { overflow-wrap:anywhere; text-align:start; }
+  .dnsw bdi { unicode-bidi:isolate; }
+  .dns-test { padding:10px 12px; border-radius:var(--r-md); border:1px solid var(--ln); background:var(--s2); font-size:var(--fs-small); display:grid; gap:4px; }
+  .dns-test.ok { border-color:color-mix(in srgb, var(--ok) 40%, transparent); background:var(--ok-soft); }
+  .dns-test.err { border-color:color-mix(in srgb, var(--er) 40%, transparent); background:var(--er-soft); }
+  .dns-test bdi, .dnsw-note bdi, .cl-alert bdi { margin-inline:.25em; }
+  @container (max-width: 620px) {
+    .dnsw-flow { grid-template-columns:1fr; justify-items:center; }
+    .dnsw-node { flex-direction:row; max-width:none; min-width:0; }
+    .dnsw-arrow svg, [dir="rtl"] .dnsw-arrow svg { transform:rotate(90deg); }
+    .dnsw-hubs { width:100%; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); }
+    .dnsw-sl { grid-template-columns:minmax(0, 1fr) 44px; }
+    .dnsw-sl input { grid-column:1 / -1; grid-row:2; }
+  }
   .rt-pick { display:grid; gap:6px; max-width:520px; }
   .rt-opt { position:relative; display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--ln); border-radius:var(--r-md); background:var(--s2); cursor:pointer; transition:border-color .18s ease, background .18s ease; }
   .rt-opt input { position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
@@ -2212,6 +2281,7 @@
           </div>
           <div class="cl-kpis" id="clKpis"></div>
           <div id="clApplyErr" class="hidden cl-alert"></div>
+          <div id="clSyncBox" class="ent-help u-mt-8" role="status" aria-live="polite" hidden></div>
         </div>
 
         <!-- The map: every part can be clicked and changed in the inspector -->
@@ -2219,7 +2289,7 @@
           <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-8">
             <div class="u-flex-1 cl-head-txt">
               <p class="tc-title u-m-0">Cluster Map</p>
-              <div class="ent-help u-m-0">Click any part of the map to see and change it. Line thickness is the share of new connections; color is health.</div>
+              <div class="ent-help u-m-0">Click any part of the map to see and change it. A line is as thick as the traffic it carries (a pool's line: its share of new connections); color is health.</div>
             </div>
             <div class="cl-seg" role="group" aria-label="View">
               <button type="button" id="clViewMap" onclick="clSetView('map')">Map</button>
@@ -2231,7 +2301,7 @@
               <div class="cl-map-col">
                 <div class="cl-map-scroll"><svg id="clMap" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" role="group" aria-label="Cluster map"></svg></div>
                 <div class="cl-legend">
-                  <span><i class="ok"></i>Carries traffic</span>
+                  <span><i class="ok"></i>Up; thicker carries more</span>
                   <span><i class="idle"></i>Healthy, idle</span>
                   <span><i class="standby"></i>Standby, DNS or linked hub</span>
                   <span><i class="err"></i>Down</span>
@@ -2286,57 +2356,11 @@
             <div class="tc-header u-flex u-jc-sb u-ai-c u-wrap u-gap-8">
               <div class="u-flex-1 cl-head-txt">
                 <p class="tc-title u-m-0">DNS Failover</p>
-                <div class="ent-help u-m-0">One domain that always points to the Iran hubs that work, so users who connect by name move to a working hub when one dies.</div>
+                <div class="ent-help u-m-0">One domain for all Iran servers: when one stops, its users go to the others by themselves.</div>
               </div>
               <span class="badge dim" id="clDnsBadge">Off</span>
             </div>
-            <div class="cl-kpis cl-dns-kpis hidden" id="clDnsKpis"></div>
-            <div class="cl-alert hidden" id="clDnsErr" role="alert"></div>
-            <label class="u-check-row"><input type="checkbox" id="clDnsEnabled"> Keep the record pointed at the working hubs</label>
-
-            <div class="wd-sub">
-              <div class="wd-sub-h">Record</div>
-              <div class="ent-grid-2">
-                <div class="fg"><label for="clDnsName">Record name</label><input class="hashem-input u-mono" id="clDnsName" placeholder="vpn.example.com" autocomplete="off"></div>
-                <div class="fg"><label for="clDnsTTL">TTL (seconds)</label><input class="hashem-input" id="clDnsTTL" type="number" min="60" max="3600" value="60"></div>
-                <div class="fg"><label for="clDnsProvider">Provider</label>
-                  <select class="hashem-input" id="clDnsProvider" onchange="clDnsProviderChanged()">
-                    <option value="cloudflare">Cloudflare (DNS only, grey cloud)</option>
-                    <option value="webhook">Webhook (any DNS provider or script)</option>
-                  </select></div>
-                <div class="fg"><label for="clDnsToken" id="clDnsTokenLabel">Cloudflare API token (Zone, DNS, Edit)</label><input class="hashem-input u-mono" id="clDnsToken" type="password" autocomplete="off" placeholder="Saved; paste a new one to replace it"></div>
-              </div>
-              <div class="fg hidden" id="clDnsURLRow"><label for="clDnsURL">Webhook URL</label><input class="hashem-input u-mono" id="clDnsURL" autocomplete="off" placeholder="https://example.com/hashem-dns"></div>
-            </div>
-
-            <div class="wd-sub" id="clDnsRouteSub">
-              <div class="wd-sub-h" id="clDnsRouteLbl">Reach Cloudflare through</div>
-              <div class="rt-pick" id="clDnsRoutePick" role="radiogroup" aria-labelledby="clDnsRouteLbl"></div>
-              <div class="u-flex-center-wrap8 hidden" id="clDnsProbeRow">
-                <button type="button" class="hashem-btn hashem-btn-secondary u-btn-xs" onclick="clDnsProbe()">Check connection</button>
-                <span class="ent-help u-m-0" id="clDnsProbeOut" aria-live="polite"></span>
-              </div>
-              <div class="ent-help" id="clDnsRouteHelp">Pick a tunnel when this Iran server cannot reach Cloudflare. The call goes out from the foreign server of that tunnel; nothing to set up there.</div>
-            </div>
-
-            <div class="wd-sub">
-              <div class="wd-sub-h">Share of users</div>
-              <div id="clDnsShareViz" class="hidden"></div>
-              <label class="u-check-row"><input type="checkbox" id="clDnsMaster" onchange="clDnsMasterChanged()"> This hub is the master: it writes the record and sets every hub's share</label>
-              <div class="fg hidden" id="clDnsMembersRow"><div id="clDnsMembers" role="group" aria-label="Share of users for each hub (1-100)"></div></div>
-              <div class="fg" id="clDnsWeightRow"><label for="clDnsWeight">Share of users for this hub (1-100)</label><input class="hashem-input cl-num" id="clDnsWeight" type="number" min="1" max="100" value="1"></div>
-              <div class="ent-help" id="clDnsCfWeightHelp">Equal shares keep every working hub in the record. With different shares the record points to one hub at a time, in turns of about the TTL, so each hub gets its share of users over time (approximate).</div>
-            </div>
-
-            <details class="hidden" id="clDnsHookHelp">
-              <summary class="u-cursor-pointer ent-help">What the webhook receives</summary>
-              <div class="ent-help u-mt-8">The hub that writes the record POSTs JSON {"name", "ips", "ips6", "weights", "ttl", "hub", "at"} whenever the working hubs or their shares change, and every 30 seconds. Your script sets the record to exactly "ips" (A) and "ips6" (AAAA), and can split users by "weights" (the share of each address). Any 2xx answer counts as done.</div>
-            </details>
-
-            <div class="u-flex u-gap-8 u-wrap">
-              <button class="hashem-btn hashem-btn-secondary" onclick="clDnsSave(true)">Test Connection</button>
-              <button class="hashem-btn hashem-btn-primary" onclick="clDnsSave(false)">Save</button>
-            </div>
+            <div class="dnsw" id="clDnsW"></div>
           </div>
 
           <details class="tunnel-card">
@@ -2623,8 +2647,9 @@
                   <div class="fg"><label for="pFrpPort">Control port (unique per peer)</label><input class="hashem-input" id="pFrpPort" inputmode="numeric" placeholder="e.g. 7001"></div>
                   <div class="fg"><label for="pPorts">Reverse ports (ranges &amp; mappings allowed)</label><input class="hashem-input" id="pPorts" placeholder="443, 10000-10050, 2083=8443"></div>
                   <div class="fg u-col-span-2 hidden" id="wrapPeerUdp"><label class="u-check-row"><input type="checkbox" id="pAcceptUdp"><span data-i18n="setup_bh_udp">Also forward UDP on these ports</span></label></div>
+                  <div class="fg u-col-span-2"><label class="u-check-row"><input type="checkbox" id="pPoolOnClash" checked><span>If another tunnel already serves one of these ports, put both servers in one failover pool</span></label><div class="ent-help u-m-0">A Hashem Pro feature (Cluster). The tunnel that has the port restarts once, for a few seconds. Without it, a port another tunnel serves is rejected.</div></div>
                 </div>
-                <div class="qs-hint">Each peer gets its own token. Ports already used by another tunnel are rejected — pick a different one.</div>
+                <div class="qs-hint">Each peer gets its own token. A port another tunnel already serves is rejected unless you keep the pool option above.</div>
                 <div id="peerWarn" class="warnbox hidden"></div>
                 <div id="peerToken" class="tokenbox hidden"></div>
                 <div class="qs-actions">
@@ -4303,6 +4328,12 @@
         </div>
       </div>
 
+      <div class="fg" id="editPeerLocalWrap" hidden>
+        <label class="u-label-up" for="editPeerLocal">Iran IP (this server)</label>
+        <input class="hashem-input u-mt-8 u-mono" id="editPeerLocal" type="text" placeholder="e.g. 203.0.113.10">
+        <div class="qs-hint u-mt-2">For a server with more than one IP: the address this tunnel uses. Set the same address as the Iran IP on the foreign server.</div>
+      </div>
+
       <div class="ep-carrier">
         <div class="ep-carrier-txt">
           <span class="u-label-up">Carrier</span>
@@ -4702,6 +4733,8 @@
     <div class="ent-modal-b">
       <div class="ent-help">On the other Iran server open Cluster, Show Join Code, and paste it here. Both panels need the same version, the panel port open between them, and correct clocks.</div>
       <div class="fg"><label for="clHubCode">Join code</label><textarea class="hashem-input u-mono u-resize-none" id="clHubCode" rows="3" placeholder="hc1_…"></textarea></div>
+      <label class="u-check-row"><input type="checkbox" id="clHubSync" checked> Make both hubs serve the same foreign servers</label>
+      <div class="ent-help u-m-0">Each hub gets its own tunnel to every foreign server the other one has, with the same ports, and the foreign server joins it by itself. Nothing to paste on the foreign servers. Both hubs and the foreign servers must run this version. Tunnels you already have are left as they are.</div>
     </div>
     <div class="ent-modal-f">
       <button type="button" class="hashem-btn hashem-btn-ghost" onclick="clHubAddClose()">Cancel</button>

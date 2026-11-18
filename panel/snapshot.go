@@ -319,7 +319,18 @@ func mainTunnelFrom(st tunnelStatus, v *hostView) *peerLive {
 	l := &peerLive{peerRecord: rec, GreUp: st.Gre.Exists, FrpUp: st.FrpUp, GreInner: st.Gre.Inner}
 	sig := LinkSignals{ServiceActive: st.FrpUp, GreIfUp: st.Gre.Exists}
 	if st.FrpUp {
-		r := controlSessionIn(v.sessions, ctrlQuery{ID: mainTunnelID, Port: st.BindPort}, v.owners)
+		// name the foreign end, as a peer's query does: with no address the
+		// match fell back to "the only tunnel on this port", and a peer one
+		// port pair up (main 7001, peer 7003: controlPorts overlap) made the
+		// main tunnel's live session invisible
+		q := ctrlQuery{ID: mainTunnelID, Port: st.BindPort, RemotePub: st.RemotePub}
+		if st.Gre.Inner != "" {
+			q.PeerGre = grePeerInner(st.Gre.Inner)
+		}
+		if st.GrePeer != "" {
+			q.Extra = []string{st.GrePeer}
+		}
+		r := controlSessionIn(v.sessions, q, v.owners)
 		l.Linked, sig.Session, sig.TCPRTTms = r.Linked, r.Linked, r.RTTms
 		if !r.Linked && v.connect != nil {
 			if c := v.connect(mainTunnelID); c.OK {
@@ -334,7 +345,10 @@ func mainTunnelFrom(st tunnelStatus, v *hostView) *peerLive {
 	// The base tunnel's bytes: its GRE interface, or its Backhaul unit's port
 	// counters. It had none, so the hub's main tunnel never showed a speed.
 	if st.Gre.Exists {
-		l.Rx, l.Tx = v.traffic("gre-tunnel")
+		// plus FRP's port when it runs over the public route instead
+		gr, gt := v.traffic("gre-tunnel")
+		cr, ct := v.carrierTraffic(st.FrpSvc)
+		l.Rx, l.Tx = sumCounters(gr, gt, cr, ct)
 	} else {
 		l.Rx, l.Tx = v.carrierTraffic(st.FrpSvc)
 	}

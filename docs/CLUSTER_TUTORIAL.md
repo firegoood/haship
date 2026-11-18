@@ -107,7 +107,7 @@ hashem peer-list      # on the Iran server: the tunnels, with their ids (0 = mai
 
 ### Lesson 2: Your first pool, and a second server on the same port
 
-1. Open **Cluster**. The map shows this Iran hub in the middle and A on the right.
+1. Open **Cluster**. The map shows this Iran hub under the DNS failover box and A on the right.
 2. Click **+ New Pool**: port `443`, protocol **TCP** (or TCP and UDP), mode **Failover**. A is already ticked because it carries port 443. Click **Save Pool**. Wait a few seconds while A's relay restarts once to move behind the pool.
 3. Now add foreign server B in **Setup**, also with port `443`, and paste its bundle on B. Before the pool existed, port 443 belonged to A alone and B would have been refused. Now the pool covers it, so B is accepted and joins the pool by itself.
 4. Click the line from pool 443 to B, set **Priority** to `1`, and **Save**. The map now shows a thick green line to A (100% of new connections) and a thin grey line to B (healthy, idle).
@@ -210,7 +210,7 @@ hashem hubs
    - **API token:** the token from step 1;
    - **TTL:** `60`.
 
-   Press **Test**, tick **Keep the record pointed at the working hubs**, and **Save**.
+   Do this on Iran 1 only: write the domain, paste the key and press **Turn on for all 2 servers**. Iran 1 controls the domain and Iran 2 follows it by itself (its card says so).
 3. Give your users `vpn.example.com` instead of an IP. The record now lists both hubs. Stop Iran 2's panel, and within about a minute, `dig +short vpn.example.com` shows only Iran 1.
 
 Another DNS provider? Choose **Webhook** and let your own script set the record. See the [Cluster guide](CLUSTER.md#92-webhook).

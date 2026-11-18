@@ -88,7 +88,7 @@ var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
 	// go build -ldflags "-X main.panelVersion=v3.0.1"
-	panelVersion = "v3.1.5"
+	panelVersion = "v3.2.0"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -778,6 +778,8 @@ func main() {
 	mux.HandleFunc("POST "+base+"/api/cluster/dns", requireAuth(requireCSRF(handleClusterDNS)))
 	mux.HandleFunc("POST "+base+"/api/proxy/probe", requireAuth(requireCSRF(handleProxyProbe)))
 	mux.HandleFunc("POST "+base+"/api/cluster/join-hub", requireAuth(requireCSRF(handleClusterJoinHub)))
+	mux.HandleFunc("POST "+base+"/api/cluster/hubs/sync", requireAuth(requireCSRF(handleClusterHubSync)))
+	mux.HandleFunc("GET "+base+"/api/cluster/hubs/sync", requireAuth(handleClusterHubSyncStatus))
 	mux.HandleFunc("POST "+base+"/api/cluster/leave-hub", requireAuth(requireCSRF(handleClusterLeaveHub)))
 	mountMeshRoutes(mux)
 	// Nodes: the central's list and join codes; the channel nodes dial
@@ -825,6 +827,7 @@ func main() {
 	go startRescueMonitor()
 	go startClusterMonitor()
 	go startMeshLoop()
+	go startDNSLoop() // cluster_dns_ctl.go: also on a hub with no linked hub
 	go startNodeLoop()
 	go startNodeMigrateWatch()
 	go startNodeBackups()
