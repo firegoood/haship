@@ -88,7 +88,7 @@ var (
 	cfg panelConfig
 	// panelVersion is set at release build time:
 	// go build -ldflags "-X main.panelVersion=v3.0.1"
-	panelVersion = "v3.2.0"
+	panelVersion = "v3.2.3"
 	// panelMux is shared between the HTTP listener and the HTTPS listener.
 	panelMux *http.ServeMux
 )
@@ -525,6 +525,7 @@ func validateConfigDirs() {
 }
 
 func main() {
+	applyDisplayZone() // times in Tehran's zone; the server's zone is left alone
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-v", "version":
@@ -867,6 +868,7 @@ func main() {
 	go pathMTUKeeper()
 	go migrateLegacyBackhaul()
 	go upgradeOldFrp()
+	go upgradeSentinelIfStale()
 	go repairHubFrpc()
 	// systemd stop sends SIGTERM: flush history, then stop serving.
 	sigc := make(chan os.Signal, 1)
